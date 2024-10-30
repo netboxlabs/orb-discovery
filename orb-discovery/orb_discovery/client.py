@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # Copyright 2024 NetBox Labs Inc
-"""Diode SDK Client for NAPALM."""
+"""Diode SDK Client for Orb Discovery."""
 
 import logging
 import threading

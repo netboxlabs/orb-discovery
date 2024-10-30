@@ -1,13 +1,15 @@
 #!/usr/bin/env python
 # Copyright 2024 NetBox Labs Inc
-"""Parse Diode Agent Config file."""
+"""Parse Orb Discovery Config file."""
 
 import os
 from pathlib import Path
-from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
+from typing import Any
+from enum import Enum
+from pydantic import BaseModel, Field
 
 
 class ParseException(Exception):
@@ -15,21 +17,55 @@ class ParseException(Exception):
 
     pass
 
+class Status(Enum):
+    NEW = "new"
+    RUNNING = "running"
+    FINISHED = "finished"
+    FAILED = "failed"
+
+
+class Napalm(BaseModel):
+    """Model for NAPALM configuration."""
+
+    driver: str | None = Field(default=None, description="Driver name, optional")
+    hostname: str
+    username: str
+    password: str
+    timeout: int = 60
+    optional_args: dict[str, Any] | None = Field(
+        default=None, description="Optional arguments"
+    )
+
+
+class Config(BaseModel):
+    """Model for discovery configuration."""
+    rerun_interval: int | None = Field(default=None, description="Rerun interval in seconds, optional")
+    netbox: dict[str, str]
+
+
+class Policy(BaseModel):
+    """Model for a policy configuration."""
+
+    config: Config
+    data: list[Napalm]
+    
 class DiscoveryConfig(BaseModel):
     """Model for Diode configuration."""
     host: str = "0.0.0.0"
     port: int = 8072
+    workers: int = 2
     target: str
     api_key: str
 
 
 class Discovery(BaseModel):
-    """Model for Diode containing configuration and policies."""
+    """Model for Discovery containing configuration and policies."""
 
-    Discovery: DiscoveryConfig
+    config: DiscoveryConfig
+    policies: dict[str, Policy]
 
 
-class Config(BaseModel):
+class Base(BaseModel):
     """Top-level model for the entire configuration."""
 
     discovery: Discovery
@@ -58,7 +94,7 @@ def resolve_env_vars(config):
     return config
 
 
-def parse_config(config_data: str):
+def parse_config(config_data: str) -> Base:
     """
     Parse the YAML configuration data into a Config object.
 
@@ -81,7 +117,7 @@ def parse_config(config_data: str):
         # Resolve environment variables
         resolved_config = resolve_env_vars(config_dict)
         # Parse the data into the Config model
-        config = Config(**resolved_config)
+        config = Base(**resolved_config)
         return config
     except yaml.YAMLError as e:
         raise ParseException(f"YAML ERROR: {e}")

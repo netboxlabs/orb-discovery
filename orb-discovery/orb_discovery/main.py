@@ -1,14 +1,17 @@
+#!/usr/bin/env python
+# Copyright 2024 NetBox Labs Inc
+"""Orb Discovery entry point."""
+
 import argparse
 import sys
 
 import uvicorn
 from importlib.metadata import version
-from dotenv import load_dotenv
 import netboxlabs.diode.sdk.version as SdkVersion
 
 from orb_discovery.client import Client
 from orb_discovery.parser import parse_config_file
-from orb_discovery.server import app
+from orb_discovery.server import app, manager
 from orb_discovery.version import version_semver
 
 def main():
@@ -24,7 +27,7 @@ def main():
         action="version",
         version=f"Discovery version: {version_semver()}, NAPALM version: {version('napalm')}, "
         f"Diode SDK version: {SdkVersion.version_semver()}",
-        help="Display Diode Agent, NAPALM and Diode SDK versions",
+        help="Display Discovery, NAPALM and Diode SDK versions",
     )
     parser.add_argument(
         "-c",
@@ -34,39 +37,17 @@ def main():
         type=str,
         required=True,
     )
-    parser.add_argument(
-        "-e",
-        "--env",
-        metavar=".env",
-        help="File containing environment variables",
-        type=str,
-    )
-    parser.add_argument(
-        "-w",
-        "--workers",
-        metavar="N",
-        help="Number of workers to be used",
-        type=int,
-        default=2,
-    )
     args = parser.parse_args()
 
-    if hasattr(args, "env") and args.env is not None:
-        if not load_dotenv(args.env, override=True):
-            sys.exit(
-                f"ERROR: Unable to load environment variables from file {args.env}"
-            )
-
-    
-    cfg = parse_config_file(args.config)
-      
     try:
+        cfg = parse_config_file(args.config)
         client = Client()
         client.init_client(target=cfg.config.target, api_key=cfg.config.api_key)
+        manager.update_workers(cfg.config.workers)
         uvicorn.run(
         app,
-        host="0.0.0.0",
-        port=8096,
+        host=cfg.config.host,
+        port=cfg.config.port,
     )
     except (KeyboardInterrupt, RuntimeError):
         pass

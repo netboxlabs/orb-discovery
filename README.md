@@ -82,27 +82,6 @@ docker build orb-
 
 #### Policies Management
 
-<details>
- <summary><code>GET</code> <code><b>/api/v1/policies</b></code> <code>(gets all existing policies)</code></summary>
-
-##### Parameters
-
-> None
-
-##### Responses
-
-> | http code     | content-type                      | response                                                            |
-> |---------------|-----------------------------------|---------------------------------------------------------------------|
-> | `200`         | `application/json; charset=utf-8` | JSON array containing all applied policy names                      |
-
-##### Example cURL
-
-> ```javascript
->  curl -X GET -H "Content-Type: application/json" http://localhost:8072/api/v1/policies
-> ```
-
-</details>
-
 
 <details>
  <summary><code>POST</code> <code><b>/api/v1/policies</b></code> <code>(Creates a new policy)</code></summary>
@@ -130,30 +109,6 @@ docker build orb-
 
 > ```javascript
 >  curl -X POST -H "Content-Type: application/x-yaml" --data @post.yaml http://localhost:8072/api/v1/policies
-> ```
-
-</details>
-
-<details>
- <summary><code>GET</code> <code><b>/api/v1/policies/{policy_name}</b></code> <code>(gets information of a specific policy)</code></summary>
-
-##### Parameters
-
-> | name              |  type     | data type      | description                         |
-> |-------------------|-----------|----------------|-------------------------------------|
-> |   `policy_name`   |  required | string         | The unique policy name              |
-
-##### Responses
-
-> | http code     | content-type                        | response                                                            |
-> |---------------|-------------------------------------|---------------------------------------------------------------------|
-> | `200`         | `application/x-yaml; charset=UTF-8` | YAML object                                                         |
-> | `404`         | `application/json; charset=UTF-8`   | `{ "message": "policy not found" }`                                 |
-
-##### Example cURL
-
-> ```javascript
->  curl -X GET http://localhost:8072/api/v1/policies/my_policy
 > ```
 
 </details>

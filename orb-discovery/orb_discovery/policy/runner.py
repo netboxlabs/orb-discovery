@@ -1,14 +1,15 @@
 #!/usr/bin/env python
 # Copyright 2024 NetBox Labs Inc
-"""Diode NAPALM Agent CLI."""
+"""Orb Discovery Policy Runner."""
 
 import logging
 from napalm import get_network_driver
 from orb_discovery.client import Client
 from orb_discovery.discovery import discover_device_driver, supported_drivers
 from orb_discovery.parser import (
-    DiscoveryConfig,
+    Config,
     Napalm,
+    Status
 )
 
 # Set up logging
@@ -18,14 +19,38 @@ logger = logging.getLogger(__name__)
 
 
 class PolicyRunner:
-    def __init__(self, info: Napalm, config: DiscoveryConfig):
+    def __init__(self, info: Napalm, config: Config):
+        """
+        Initialize the PolicyRunner.
+
+        Args:
+        ----
+            info (Napalm): Information data for the device.
+            config (Config): Configuration data containing site information.
+        """
         self.info = info
         self.config = config
+        self.current_status = Status.NEW
         
-    def status(self):
-        pass
-  
-  
+    def status(self) -> Status:
+        """
+        Get the current status of the policy runner.
+
+        Returns:
+        -------
+            Status: The current status of the policy runner.
+        """
+        return self.current_status
+    
+    def get_config(self) -> Config:
+        """
+        Get the current configuration data.
+
+        Returns:
+        -------
+            Config: The current configuration data.
+        """
+        return self.config
   
     def start(self):
         """
@@ -65,3 +90,9 @@ class PolicyRunner:
             "interface_ip": device.get_interfaces_ip(),
         }
             Client().ingest(self.info.hostname, data)
+    
+    def stop():
+        """
+        Stop the policy runner.
+        """
+        pass
