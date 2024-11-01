@@ -9,7 +9,7 @@ from unittest.mock import mock_open, patch
 import pytest
 
 from orb_discovery.parser import (
-    Config,
+    Base,
     ParseException,
     parse_config,
     parse_config_file,
@@ -21,21 +21,10 @@ from orb_discovery.parser import (
 def valid_yaml():
     """Valid Yaml Generator."""
     return """
-    diode:
+    discovery:
       config:
         target: "target_value"
         api_key: "api_key_value"
-        tls_verify: true
-      policies:
-        policy1:
-          config:
-            netbox:
-              site: "New York"
-          data:
-            - driver: "ios"
-              hostname: "router1"
-              username: "admin"
-              password: "password"
     """
 
 
@@ -43,30 +32,19 @@ def valid_yaml():
 def invalid_yaml():
     """Invalid Yaml Generator."""
     return """
-    diode:
+    discovery:
       config:
-        target: "target_value"
         api_key: "api_key_value"
-        tls_verify: true
-      policies:
-        policy1:
-          config:
-            netbox:
-              site: "New York"
-          data:
-            - driver: "ios"
-              hostname: "router1"
-              username: "admin"
-              # Missing password field
+        host: "host_value"
     """
 
 
 def test_parse_valid_config(valid_yaml):
     """Ensure we can parse a valid configuration."""
     config = parse_config(valid_yaml)
-    assert isinstance(config, Config)
-    assert config.diode.config.target == "target_value"
-    assert config.diode.policies["policy1"].data[0].hostname == "router1"
+    assert isinstance(config, Base)
+    assert config.discovery.config.target == "target_value"
+    assert config.discovery.config.host == "0.0.0.0"
 
 
 def test_parse_invalid_config(invalid_yaml):

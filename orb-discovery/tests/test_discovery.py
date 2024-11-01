@@ -91,7 +91,7 @@ def test_discover_device_driver_no_serial_number(mock_get_network_driver):
     )
 
     driver = discover_device_driver(info)
-    assert driver == "", "Expected no driver to be found"
+    assert driver == None, "Expected no driver to be found"
 
 
 def test_discover_device_driver_exception(mock_get_network_driver):
@@ -114,7 +114,7 @@ def test_discover_device_driver_exception(mock_get_network_driver):
     )
 
     driver = discover_device_driver(info)
-    assert driver == "", "Expected no driver to be found due to exception"
+    assert driver == None, "Expected no driver to be found due to exception"
 
 
 def test_discover_device_driver_mixed_results(mock_get_network_driver):

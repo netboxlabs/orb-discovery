@@ -3,82 +3,89 @@
 """Orb Discovery Policy Manager."""
 
 import logging
-import yaml
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from orb_discovery.parser import resolve_env_vars, ParseException, Policy
-from orb_discovery.policy.runner import PolicyRunner
+import yaml
 
+from orb_discovery.parser import resolve_env_vars
+from orb_discovery.policy.models import Policy, PolicyRequest
+from orb_discovery.policy.runner import PolicyRunner
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class PolicyManager:
+    """Policy Manager class."""
+
     def __init__(self):
-        self.max_workers = 2
-        self.runners = []
-    
-    
-    def update_workers(self, max_workers: int):
-        """
-        Update the maximum number of workers in the pool.
-        """
-        self.max_workers = max_workers   
+        """Initialize the PolicyManager instance with an empty list of policies."""
+        self.runners = dict[str, PolicyRunner]()
 
-
-    def start_policy(self, cfg: str):
+    def start_policy(self, name: str, policy: Policy):
         """
         Start the policy for the given configuration.
 
         Args:
         ----
             name: Policy name
-            cfg: Configuration data for the policy.
-            max_workers: Maximum number of threads in the pool.
+            policy: Policy configuration
+
         """
-        pass        
-        # with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-        #     futures = [executor.submit(run_driver, info, cfg.config) for info in cfg.data]
+        if name in self.runners:
+            raise ValueError(f"Policy '{name}' already exists")
 
-        # for future in as_completed(futures):
-        #     try:
-        #         future.result()
-        #     except Exception as e:
-        #         logger.error(f"Error while processing policy {name}: {e}")
+        runner = PolicyRunner()
+        runner.setup(name, policy.config, policy.data)
+        self.runners[name] = runner
 
-        
-    def parse_policy(config_data: str) -> Policy:
+    def parse_policy(self, config_data: bytes) -> PolicyRequest:
         """
         Parse the YAML configuration data into a Policy object.
-    
+
         Args:
         ----
             config_data (str): The YAML configuration data as a string.
-        
+
         Returns:
         -------
             Config: The configuration object.
-        
+
         """
-        try:
-            config = yaml.safe_load(config_data)
-            config = resolve_env_vars(config)
-            return Policy(**config)
-        except Exception as e:
-            raise ParseException(f"Error parsing configuration: {e}")
-        
+        config = yaml.safe_load(config_data)
+        config = resolve_env_vars(config)
+        return PolicyRequest(**config)
+
+    def policy_exists(self, name: str) -> bool:
+        """
+        Check if the policy exists.
+
+        Args:
+        ----
+            name: Policy name
+
+        Returns:
+        -------
+            bool: True if the policy exists, False otherwise
+
+        """
+        return name in self.runners
+
     def delete_policy(self, name: str):
-            """
-            Delete the policy by name.
-    
-            Args:
-            ----
-                name: Policy name.
-    
-            """
-            for policy in self.policies:
-                if policy.name == name:
-                    self.policies.remove(policy)
-                    return
-            raise Exception(f"Policy {name} not found")
+        """
+        Delete the policy by name.
+
+        Args:
+        ----
+            name: Policy name.
+
+        """
+        self.runners[name].stop()
+        del self.runners[name]
+
+    def stop(self):
+        """Stop all running policies."""
+        for runner in self.runners:
+            runner.stop()
+        self.runners = []

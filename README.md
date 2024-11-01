@@ -13,7 +13,7 @@ discovery:
 ```yaml
 discovery_1:
     config:
-        rerun_interval: 10s
+        schedule: "* * * 2 * *" #Cron expression
         netbox:
             site: New York NY
     data:
@@ -98,11 +98,11 @@ docker build orb-
 > | http code     | content-type                       | response                                                            |
 > |---------------|------------------------------------|---------------------------------------------------------------------|
 > | `201`         | `application/x-yaml; charset=UTF-8`| YAML object                                                         |
-> | `400`         | `application/json; charset=UTF-8`  | `{ "message": "invalid Content-Type. Only 'application/x-yaml' is supported" }`|
+> | `400`         | `application/json; charset=UTF-8`  | `{ "detail": "invalid Content-Type. Only 'application/x-yaml' is supported" }`|
 > | `400`         | `application/json; charset=UTF-8`  | Any policy error                                                    |
-> | `400`         | `application/json; charset=UTF-8`  | `{ "message": "only single policy allowed per request" }`           |
-> | `403`         | `application/json; charset=UTF-8`  | `{ "message": "config field is required" }`                         |
-> | `409`         | `application/json; charset=UTF-8`  | `{ "message": "policy already exists" }`                            |
+> | `400`         | `application/json; charset=UTF-8`  | `{ "detail": "only single policy allowed per request" }`           |
+> | `403`         | `application/json; charset=UTF-8`  | `{ "detail": "config field is required" }`                         |
+> | `409`         | `application/json; charset=UTF-8`  | `{ "detail": "policy already exists" }`                            |
  
 
 ##### Example cURL
@@ -126,8 +126,9 @@ docker build orb-
 
 > | http code     | content-type                      | response                                                            |
 > |---------------|-----------------------------------|---------------------------------------------------------------------|
-> | `200`         | `application/json; charset=UTF-8` | `{ "message": "my_policy was deleted" }`                            |
-> | `404`         | `application/json; charset=UTF-8` | `{ "message": "policy not found" }`                                 |
+> | `200`         | `application/json; charset=UTF-8` | `{ "detail": "policy 'policy_name' was deleted" }`                  |
+> | `400`         | `application/json; charset=UTF-8` | Any policy deletion error                                           |
+> | `404`         | `application/json; charset=UTF-8` | `{ "detail": "policy 'policy_name' not found" }`                    |
 
 ##### Example cURL
 

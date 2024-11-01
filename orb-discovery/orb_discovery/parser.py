@@ -7,9 +7,6 @@ from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, ValidationError
-from typing import Any
-from enum import Enum
-from pydantic import BaseModel, Field
 
 
 class ParseException(Exception):
@@ -17,43 +14,11 @@ class ParseException(Exception):
 
     pass
 
-class Status(Enum):
-    NEW = "new"
-    RUNNING = "running"
-    FINISHED = "finished"
-    FAILED = "failed"
-
-
-class Napalm(BaseModel):
-    """Model for NAPALM configuration."""
-
-    driver: str | None = Field(default=None, description="Driver name, optional")
-    hostname: str
-    username: str
-    password: str
-    timeout: int = 60
-    optional_args: dict[str, Any] | None = Field(
-        default=None, description="Optional arguments"
-    )
-
-
-class Config(BaseModel):
-    """Model for discovery configuration."""
-    rerun_interval: int | None = Field(default=None, description="Rerun interval in seconds, optional")
-    netbox: dict[str, str]
-
-
-class Policy(BaseModel):
-    """Model for a policy configuration."""
-
-    config: Config
-    data: list[Napalm]
-    
 class DiscoveryConfig(BaseModel):
     """Model for Diode configuration."""
+
     host: str = "0.0.0.0"
     port: int = 8072
-    workers: int = 2
     target: str
     api_key: str
 
@@ -62,7 +27,6 @@ class Discovery(BaseModel):
     """Model for Discovery containing configuration and policies."""
 
     config: DiscoveryConfig
-    policies: dict[str, Policy]
 
 
 class Base(BaseModel):

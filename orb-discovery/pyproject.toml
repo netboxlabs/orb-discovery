@@ -4,7 +4,7 @@ version = "0.0.1"  # Overwritten during the build process
 description = "NetBox Labs, Orb Discovery"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { "" }
+license = { text = "Apache" }
 authors = [
     {name = "NetBox Labs", email = "support@netboxlabs.com" }
 ]
@@ -31,7 +31,9 @@ dependencies = [
     "pydantic~=2.9",
     "python-dotenv~=1.0",
     "fastapi~=0.115",
-    "uvicorn~=0.32.0",
+    "uvicorn~=0.32",
+    "APScheduler~=3.10",
+    "croniter~=5.0",
 ]
 
 [project.optional-dependencies]

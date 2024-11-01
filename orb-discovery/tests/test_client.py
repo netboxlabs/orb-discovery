@@ -60,7 +60,7 @@ def test_init_client(mock_diode_client_class, mock_version_semver):
 
     mock_diode_client_class.assert_called_once_with(
         target="https://example.com",
-        app_name="diode-napalm-agent",
+        app_name="orb-discovery",
         app_version=mock_version_semver(),
         api_key="dummy_api_key",
     )

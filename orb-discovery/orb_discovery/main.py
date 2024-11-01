@@ -4,15 +4,16 @@
 
 import argparse
 import sys
-
-import uvicorn
 from importlib.metadata import version
+
 import netboxlabs.diode.sdk.version as SdkVersion
+import uvicorn
 
 from orb_discovery.client import Client
 from orb_discovery.parser import parse_config_file
-from orb_discovery.server import app, manager
+from orb_discovery.server import app
 from orb_discovery.version import version_semver
+
 
 def main():
     """
@@ -33,7 +34,7 @@ def main():
         "-c",
         "--config",
         metavar="config.yaml",
-        help="Agent yaml configuration file",
+        help="Yaml configuration file",
         type=str,
         required=True,
     )
@@ -43,16 +44,16 @@ def main():
         cfg = parse_config_file(args.config)
         client = Client()
         client.init_client(target=cfg.config.target, api_key=cfg.config.api_key)
-        manager.update_workers(cfg.config.workers)
         uvicorn.run(
-        app,
-        host=cfg.config.host,
-        port=cfg.config.port,
-    )
+            app,
+            host=cfg.config.host,
+            port=cfg.config.port,
+        )
     except (KeyboardInterrupt, RuntimeError):
         pass
     except Exception as e:
         sys.exit(f"ERROR: Unable to start discovery backend: {e}")
-        
+
+
 if __name__ == "__main__":
-  main()
+    main()

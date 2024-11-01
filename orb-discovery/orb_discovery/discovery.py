@@ -60,7 +60,7 @@ def set_napalm_logs_level(level: int):
     logging.getLogger("pyeapi").setLevel(level)
 
 
-def discover_device_driver(info: dict) -> str:
+def discover_device_driver(info: dict) -> str | None:
     """
     Discover the correct NAPALM driver for the given device information.
 
@@ -101,4 +101,4 @@ def discover_device_driver(info: dict) -> str:
                 f"Hostname {info.hostname}: '{driver}' driver did not work. Exception: {str(e)}"
             )
     set_napalm_logs_level(logging.INFO)
-    return ""
+    return None
