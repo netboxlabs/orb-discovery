@@ -78,7 +78,7 @@ def test_parse_policy(policy_manager):
         assert "policy1" in policy_request.discovery.policies
 
 
-def test_policy_exists(policy_manager, sample_policy):
+def test_policy_exists(policy_manager):
     """Test checking if a policy exists."""
     policy_manager.runners["policy1"] = MagicMock()
     assert policy_manager.policy_exists("policy1") is True
