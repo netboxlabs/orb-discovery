@@ -3,7 +3,6 @@
 """Orb Discovery Policy Manager."""
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import yaml
 
@@ -86,6 +85,7 @@ class PolicyManager:
 
     def stop(self):
         """Stop all running policies."""
-        for runner in self.runners:
+        for name, runner in self.runners.items():
+            logger.info(f"Stopping policy '{name}'")
             runner.stop()
         self.runners = []

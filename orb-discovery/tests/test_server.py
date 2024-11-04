@@ -1,9 +1,12 @@
+#!/usr/bin/env python
+# Copyright 2024 NetBox Labs Inc
+"""NetBox Labs - Server Unit Tests."""
+
 from unittest.mock import patch
 
-import yaml
 import pytest
+import yaml
 from fastapi.testclient import TestClient
-
 
 from orb_discovery.policy.models import PolicyRequest
 from orb_discovery.server import app, manager
@@ -68,14 +71,16 @@ def multiple_policies_yaml():
 
 
 @pytest.fixture
-def mock_valid_policy_request(valid_policy_yaml):
+def mock_valid_policy_request(valid_policy_yaml) -> PolicyRequest:
     """
     Fixture to mock a PolicyRequest object from YAML.
 
     Parses the valid YAML content and converts it to a PolicyRequest.
     """
     yaml_dict = yaml.safe_load(valid_policy_yaml)
-    return PolicyRequest.model_validate(yaml_dict)
+    policy_request = PolicyRequest.model_validate(yaml_dict)
+    print(f"Created PolicyRequest: {policy_request}")  # Debug: check contents
+    return policy_request
 
 
 @pytest.fixture
@@ -154,12 +159,11 @@ def test_read_capabilities(mock_supported_drivers):
 
     """
     response = client.get("/api/v1/capabilities")
-    mock_supported_drivers.assert_called_once()
     assert response.status_code == 200
-    assert response.json() == {"supported_drivers": ["driver1", "driver2"]}
+    assert response.json() == {"supported_drivers": mock_supported_drivers}
 
 
-def test_write_policy_valid_yaml(mock_manager, mock_valid_policy_request):
+def test_write_policy_valid_yaml(mock_valid_policy_request, valid_policy_yaml):
     """
     Test posting a valid YAML policy.
 
@@ -167,16 +171,18 @@ def test_write_policy_valid_yaml(mock_manager, mock_valid_policy_request):
 
     Args:
     ----
-        mock_manager: Mocked PolicyManager instance.
+        mock_valid_policy_request: Mocked PolicyRequest object.
+        valid_policy_yaml: Valid PolicyRequest YAML string.
 
     """
     with patch(
-        "orb_discovery.server.parse_yaml_body", return_value=mock_valid_policy_request
+        "orb_discovery.server.manager.parse_policy",
+        return_value=mock_valid_policy_request,
     ):
         response = client.post(
             "/api/v1/policies",
             headers={"Content-Type": "application/x-yaml"},
-            json={"discovery": {"policies": {"policy1": {}}}},
+            data=valid_policy_yaml,
         )
         assert response.status_code == 201
         assert response.json() == {"details": "policy 'policy1' is running"}
@@ -202,7 +208,7 @@ def test_write_policy_invalid_content_type():
 
 
 def test_write_policy_multiple_policies_error(
-    mock_manager, mock_multiple_policies_request
+    mock_multiple_policies_request, multiple_policies_yaml
 ):
     """
     Test posting multiple policies.
@@ -211,37 +217,39 @@ def test_write_policy_multiple_policies_error(
 
     Args:
     ----
-        mock_manager: Mocked PolicyManager instance.
-    """
+        mock_multiple_policies_request: Mocked PolicyRequest object.
+        multiple_policies_yaml: Multiple policies YAML string.
 
+    """
     with patch(
-        "orb_discovery.server.parse_yaml_body",
+        "orb_discovery.server.manager.parse_policy",
         return_value=mock_multiple_policies_request,
     ):
         response = client.post(
             "/api/v1/policies",
-            json={"discovery": {"policies": {"policy1": {}, "policy2": {}}}},
+            headers={"Content-Type": "application/x-yaml"},
+            data=multiple_policies_yaml,
         )
         assert response.status_code == 400
         assert response.json()["detail"] == "only one policy allowed per request"
 
 
-def test_write_policy_no_policy_error(mock_manager):
+def test_write_policy_no_policy_error():
     """
     Test posting a request with no policies.
 
     Ensures a 400 error is returned, indicating no policy was found.
-
-    Args:
-    ----
-        mock_manager: Mocked PolicyManager instance.
 
     """
     with patch(
         "orb_discovery.server.parse_yaml_body",
         return_value=PolicyRequest(discovery={"policies": {}}),
     ):
-        response = client.post("/api/v1/policies", json={"discovery": {"policies": {}}})
+        response = client.post(
+            "/api/v1/policies",
+            headers={"Content-Type": "application/x-yaml"},
+            json={"discovery": {"policies": {}}},
+        )
         assert response.status_code == 400
         assert response.json()["detail"] == "no policy found in request"
 

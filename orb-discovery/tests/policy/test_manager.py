@@ -1,33 +1,67 @@
 #!/usr/bin/env python
 # Copyright 2024 NetBox Labs Inc
 """NetBox Labs - Policy Manager Unit Tests."""
-import os
-from pathlib import Path
-from unittest.mock import mock_open, patch
+
+from unittest.mock import patch, MagicMock
 
 import pytest
 
-from orb_discovery.parser import (
-    Config,
-    ParseException,
-    parse_config,
-    parse_config_file,
-    resolve_env_vars,
-)
+from orb_discovery.policy.models import Policy, PolicyRequest
+from orb_discovery.policy.manager import PolicyManager
 
 
 @pytest.fixture
-def valid_yaml():
-    """Valid Yaml Generator."""
-    return """
-    diode:
-      config:
-        target: "target_value"
-        api_key: "api_key_value"
-        tls_verify: true
+def policy_manager():
+    """Fixture to create a PolicyManager instance."""
+    return PolicyManager()
+
+
+@pytest.fixture
+def sample_policy():
+    """Fixture for a sample Policy object."""
+    return Policy(
+        config={"schedule": "0 * * * *", "netbox": {"site": "New York"}},
+        data=[
+            {
+                "driver": "ios",
+                "hostname": "router1",
+                "username": "admin",
+                "password": "password",
+            }
+        ],
+    )
+
+
+def test_start_policy(policy_manager, sample_policy):
+    """Test starting a policy."""
+    with patch("orb_discovery.policy.manager.PolicyRunner") as MockPolicyRunner:
+        mock_runner = MockPolicyRunner.return_value
+        policy_manager.start_policy("policy1", sample_policy)
+
+        # Check that PolicyRunner.setup was called with correct arguments
+        mock_runner.setup.assert_called_once_with(
+            "policy1", sample_policy.config, sample_policy.data
+        )
+
+        # Ensure the policy runner was added to the manager's runners
+        assert "policy1" in policy_manager.runners
+
+
+def test_start_existing_policy_raises_error(policy_manager, sample_policy):
+    """Test that starting an already existing policy raises an error."""
+    policy_manager.runners["policy1"] = MagicMock()
+    with pytest.raises(ValueError, match="Policy 'policy1' already exists"):
+        policy_manager.start_policy("policy1", sample_policy)
+
+
+def test_parse_policy(policy_manager):
+    """Test parsing YAML configuration into a PolicyRequest object."""
+    config_data = b"""
+    discovery:
       policies:
         policy1:
           config:
+            schedule: "0 * * * *"
             netbox:
               site: "New York"
           data:
@@ -36,113 +70,49 @@ def valid_yaml():
               username: "admin"
               password: "password"
     """
+    with patch("orb_discovery.parser.resolve_env_vars", side_effect=lambda x: x):
+        policy_request = policy_manager.parse_policy(config_data)
+
+        # Verify structure of the parsed PolicyRequest
+        assert isinstance(policy_request, PolicyRequest)
+        assert "policy1" in policy_request.discovery.policies
 
 
-@pytest.fixture
-def invalid_yaml():
-    """Invalid Yaml Generator."""
-    return """
-    diode:
-      config:
-        target: "target_value"
-        api_key: "api_key_value"
-        tls_verify: true
-      policies:
-        policy1:
-          config:
-            netbox:
-              site: "New York"
-          data:
-            - driver: "ios"
-              hostname: "router1"
-              username: "admin"
-              # Missing password field
-    """
+def test_policy_exists(policy_manager, sample_policy):
+    """Test checking if a policy exists."""
+    policy_manager.runners["policy1"] = MagicMock()
+    assert policy_manager.policy_exists("policy1") is True
+    assert policy_manager.policy_exists("nonexistent_policy") is False
 
 
-@pytest.fixture
-def mock_start_policy():
-    """
-    Fixture to mock the start_policy function.
+def test_delete_policy(policy_manager):
+    """Test deleting a policy."""
+    mock_runner = MagicMock()
+    policy_manager.runners["policy1"] = mock_runner
+    policy_manager.delete_policy("policy1")
 
-    Mocks the start_policy method to control its behavior during tests.
-    """
-    with patch("orb_discovery.cli.cli.start_policy") as mock:
-        yield mock
-
-
-
-def test_start_policy(mock_thread_pool_executor, mock_as_completed):
-    """
-    Test start_policy function with different configurations.
-
-    Args:
-    ----
-        mock_thread_pool_executor: Mocked ThreadPoolExecutor class.
-        mock_as_completed: Mocked as_completed funtion.
-
-    """
-    cfg = Policy(
-        config=DiscoveryConfig(netbox={"site": "test_site"}),
-        data=[
-            Napalm(
-                driver="driver",
-                hostname="host",
-                username="user",
-                password="pass",
-                timeout=10,
-                optional_args={},
-            )
-        ],
-    )
-    max_workers = 2
-
-    mock_future = MagicMock()
-    mock_future.result.return_value = None
-    mock_executor = MagicMock()
-    mock_executor.submit.return_value = mock_future
-    mock_thread_pool_executor.return_value = mock_executor
-    mock_as_completed.return_value = [mock_future]
-
-    start_policy("policy", cfg, max_workers)
-
-    mock_thread_pool_executor.assert_called_once_with(max_workers=2)
-    mock_future.result.assert_called_once()
+    # Verify stop was called on the runner
+    mock_runner.stop.assert_called_once()
+    assert "policy1" not in policy_manager.runners
 
 
-def test_start_policy_exception(mock_thread_pool_executor, mock_as_completed):
-    """
-    Test start_policy function with different configurations.
+def test_delete_nonexistent_policy_raises_error(policy_manager):
+    """Test deleting a nonexistent policy raises an error."""
+    with pytest.raises(KeyError):
+        policy_manager.delete_policy("nonexistent_policy")
 
-    Args:
-    ----
-        mock_thread_pool_executor: Mocked ThreadPoolExecutor class.
-        mock_as_completed: Mocked as_completed funtion.
 
-    """
-    cfg = Policy(
-        config=DiscoveryConfig(netbox={"site": "test_site"}),
-        data=[
-            Napalm(
-                driver="driver",
-                hostname="host",
-                username="user",
-                password="pass",
-                timeout=10,
-                optional_args={},
-            )
-        ],
-    )
-    max_workers = 2
+def test_stop_all_policies(policy_manager):
+    """Test stopping all policies."""
+    mock_runner1 = MagicMock()
+    mock_runner2 = MagicMock()
+    policy_manager.runners = {"policy1": mock_runner1, "policy2": mock_runner2}
 
-    mock_future = MagicMock()
-    mock_future.result.side_effect = Exception("Test exception")
-    mock_executor = MagicMock()
-    mock_executor.submit.return_value = mock_future
-    mock_thread_pool_executor.return_value = mock_executor
-    mock_as_completed.return_value = [mock_future]
+    policy_manager.stop()
 
-    start_policy("policy", cfg, max_workers)
+    # Verify stop was called on each runner
+    mock_runner1.stop.assert_called_once()
+    mock_runner2.stop.assert_called_once()
 
-    mock_thread_pool_executor.assert_called_once_with(max_workers=2)
-    mock_future.result.assert_called_once()
+    # Ensure runners dictionary is emptied
+    assert policy_manager.runners == []

@@ -1,167 +1,132 @@
 #!/usr/bin/env python
 # Copyright 2024 NetBox Labs Inc
-"""NetBox Labs - Policy Runner Unit Tests."""
+"""NetBox Labs - Policy Manager Unit Tests."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch, MagicMock
 
 import pytest
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 
-from orb_discovery.main import main
-from orb_discovery.parser import DiscoveryConfig
-
-
-@pytest.fixture
-def mock_get_network_driver():
-    """
-    Fixture to mock the get_network_driver function.
-
-    Mocks the get_network_driver function to control its behavior during tests.
-    """
-    with patch("orb_discovery.cli.cli.get_network_driver") as mock:
-        yield mock
+from orb_discovery.policy.runner import PolicyRunner
+from orb_discovery.policy.models import Config, Napalm, Status
 
 
 @pytest.fixture
-def mock_discover_device_driver():
-    """
-    Fixture to mock the discover_device_driver function.
-
-    Mocks the discover_device_driver function to control its behavior during tests.
-    """
-    with patch("orb_discovery.cli.cli.discover_device_driver") as mock:
-        yield mock
+def policy_runner():
+    """Fixture to create a PolicyRunner instance."""
+    return PolicyRunner()
 
 
-def test_run_driver_no_driver(
-    mock_client, mock_get_network_driver, mock_discover_device_driver
-):
-    """
-    Test run_driver function when driver is not provided.
-
-    Args:
-    ----
-        mock_client: Mocked Client class.
-        mock_get_network_driver: Mocked get_network_driver function.
-        mock_discover_device_driver: Mocked discover_device_driver function.
-
-    """
-    info = Napalm(
-        driver=None,
-        hostname="test_host",
-        username="user",
-        password="pass",
-        timeout=10,
-        optional_args={},
-    )
-    config = DiscoveryConfig(netbox={"site": "test_site"})
-
-    mock_discover_device_driver.return_value = "test_driver"
-    mock_np_driver = MagicMock()
-    mock_get_network_driver.return_value = mock_np_driver
-
-    run_driver(info, config)
-
-    mock_discover_device_driver.assert_called_once_with(info)
-    mock_get_network_driver.assert_called_once_with("test_driver")
-    mock_np_driver.assert_called_once_with("test_host", "user", "pass", 10, {})
-    mock_client().ingest.assert_called_once()
+@pytest.fixture
+def sample_config():
+    """Fixture for a sample Config object."""
+    return Config(schedule="0 * * * *", netbox={"site": "New York"})
 
 
-def test_run_driver_with_driver(
-    mock_client, mock_get_network_driver, mock_discover_device_driver
-):
-    """
-    Test run_driver function when driver is already provided.
-
-    Args:
-    ----
-        mock_client: Mocked Client class.
-        mock_get_network_driver: Mocked get_network_driver function.
-        mock_discover_device_driver: Mocked discover_device_driver function.
-
-    """
-    info = Napalm(
-        driver="ios",
-        hostname="test_host",
-        username="user",
-        password="pass",
-        timeout=10,
-        optional_args={},
-    )
-    config = DiscoveryConfig(netbox={"site": "test_site"})
-
-    mock_np_driver = MagicMock()
-    mock_get_network_driver.return_value = mock_np_driver
-
-    run_driver(info, config)
-
-    mock_discover_device_driver.assert_not_called()
-    mock_get_network_driver.assert_called_once_with("ios")
-    mock_np_driver.assert_called_once_with("test_host", "user", "pass", 10, {})
-    mock_client().ingest.assert_called_once()
+@pytest.fixture
+def sample_infos():
+    """Fixture for a sample list of Napalm objects."""
+    return [
+        Napalm(driver="ios", hostname="router1", username="admin", password="password")
+    ]
 
 
+def test_initial_status(policy_runner):
+    """Test initial status of PolicyRunner."""
+    assert policy_runner.status() == Status.NEW
 
-def test_run_driver_with_not_intalled_driver(
-    mock_get_network_driver, mock_discover_device_driver
-):
-    """
-    Test run_driver function when driver is provided but not installed.
 
-    Args:
-    ----
-        mock_get_network_driver: Mocked get_network_driver function.
-        mock_discover_device_driver: Mocked discover_device_driver function.
+def test_setup_policy_runner_with_cron(policy_runner, sample_config, sample_infos):
+    """Test setting up the PolicyRunner with a cron schedule."""
+    with patch.object(policy_runner.scheduler, "start") as mock_start, patch.object(
+        policy_runner.scheduler, "add_job"
+    ) as mock_add_job:
 
-    """
-    info = Napalm(
-        driver="not_installed",
-        hostname="test_host",
-        username="user",
-        password="pass",
-        timeout=10,
-        optional_args={},
-    )
-    config = DiscoveryConfig(netbox={"site": "test_site"})
+        policy_runner.setup("policy1", sample_config, sample_infos)
 
-    mock_np_driver = MagicMock()
-    mock_get_network_driver.return_value = mock_np_driver
+        # Ensure scheduler starts and job is added
+        mock_start.assert_called_once()
+        mock_add_job.assert_called_once()
+        assert policy_runner.status() == Status.RUNNING
 
-    with pytest.raises(Exception) as excinfo:
-        run_driver(info, config)
 
-    mock_discover_device_driver.assert_not_called()
-    mock_get_network_driver.assert_not_called()
+def test_setup_policy_runner_with_one_time_run(policy_runner, sample_infos):
+    """Test setting up the PolicyRunner with a one-time schedule."""
+    one_time_config = Config()
+    with patch.object(policy_runner.scheduler, "start") as mock_start, patch.object(
+        policy_runner.scheduler, "add_job"
+    ) as mock_add_job:
 
-    assert str(excinfo.value).startswith(
-        f"Hostname {info.hostname}: specified driver '{info.driver}' was not found in the current installed drivers list:"
-    )
+        policy_runner.setup("policy1", one_time_config, sample_infos)
 
-def test_run_driver_exception(mock_discover_device_driver):
-    """
-    Test run_driver function when the device driver is not discovered.
+        # Verify that DateTrigger is used for one-time scheduling
+        trigger = mock_add_job.call_args[1]["trigger"]
+        assert isinstance(trigger, DateTrigger)
+        assert mock_start.called
+        assert policy_runner.status() == Status.RUNNING
 
-    Args:
-    ----
-        mock_discover_device_driver: Mocked discover_device_driver function.
 
-    """
-    info = Napalm(
-        driver=None,
-        hostname="test_host",
-        username="user",
-        password="pass",
-        timeout=10,
-        optional_args={},
-    )
-    config = DiscoveryConfig(netbox={"site": "test_site"})
+def test_setup_with_unsupported_driver_raises_error(policy_runner, sample_infos):
+    """Test setup raises error if driver is unsupported."""
+    sample_infos[0].driver = "unsupported_driver"
+    with patch("orb_discovery.policy.runner.supported_drivers", ["ios"]), pytest.raises(
+        Exception, match="specified driver 'unsupported_driver' was not found"
+    ):
+        policy_runner.setup("policy1", Config(), sample_infos)
+    assert policy_runner.status() == Status.NEW
 
-    mock_discover_device_driver.return_value = None
 
-    with pytest.raises(Exception) as excinfo:
-        run_driver(info, config)
+def test_run_device_with_discovered_driver(policy_runner, sample_infos, sample_config):
+    """Test running a device where the driver needs discovery."""
+    sample_infos[0].driver = None  # Force driver discovery
+    with patch(
+        "orb_discovery.policy.runner.discover_device_driver", return_value="ios"
+    ) as mock_discover, patch(
+        "orb_discovery.policy.runner.get_network_driver"
+    ) as mock_get_driver, patch(
+        "orb_discovery.client.Client.ingest"
+    ) as mock_ingest:
 
-    assert (
-        str(excinfo.value)
-        == f"Hostname {info.hostname}: Not able to discover device driver"
-    )
+        # Mock the network driver instance
+        mock_driver_instance = MagicMock()
+        mock_get_driver.return_value.return_value.__enter__.return_value = (
+            mock_driver_instance
+        )
+        mock_driver_instance.get_facts.return_value = {"model": "SampleModel"}
+        mock_driver_instance.get_interfaces.return_value = {"eth0": "up"}
+        mock_driver_instance.get_interfaces_ip.return_value = {"eth0": "192.168.1.1"}
+
+        # Run the device with the setup runner
+        policy_runner.run("test_id", sample_infos[0], sample_config)
+
+        # Verify driver discovery and ingestion
+        mock_discover.assert_called_once_with(sample_infos[0])
+        mock_ingest.assert_called_once()
+        data = mock_ingest.call_args[0][1]
+        assert data["driver"] == "ios"
+        assert data["device"] == {"model": "SampleModel"}
+        assert data["interface"] == {"eth0": "up"}
+        assert data["interface_ip"] == {"eth0": "192.168.1.1"}
+
+
+def test_run_device_with_error_in_job(policy_runner, sample_infos, sample_config):
+    """Test run handles an error during device interaction gracefully."""
+    with patch(
+        "orb_discovery.policy.runner.get_network_driver",
+        side_effect=Exception("Connection error"),
+    ), patch("orb_discovery.policy.runner.logger.error") as mock_logger_error:
+
+        # Run the device with an error to check error handling
+        policy_runner.run("test_id", sample_infos[0], sample_config)
+        mock_logger_error.assert_called_once()
+
+
+def test_stop_policy_runner(policy_runner):
+    """Test stopping the PolicyRunner."""
+    with patch.object(policy_runner.scheduler, "shutdown") as mock_shutdown:
+        policy_runner.stop()
+
+        # Ensure scheduler shutdown is called and status is updated
+        mock_shutdown.assert_called_once()
+        assert policy_runner.status() == Status.FINISHED

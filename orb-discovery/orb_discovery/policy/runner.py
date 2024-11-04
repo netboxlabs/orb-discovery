@@ -116,11 +116,12 @@ class PolicyRunner:
         logger.info(
             f"Policy {self.name}, Hostname {info.hostname}: Get driver '{info.driver}'"
         )
-        np_driver = get_network_driver(info.driver)
-        logger.info(
-            f"Policy {self.name}, Hostname {info.hostname}: Getting information"
-        )
+
         try:
+            np_driver = get_network_driver(info.driver)
+            logger.info(
+                f"Policy {self.name}, Hostname {info.hostname}: Getting information"
+            )
             with np_driver(
                 info.hostname,
                 info.username,
@@ -137,9 +138,7 @@ class PolicyRunner:
                 }
                 Client().ingest(info.hostname, data)
         except Exception as e:
-            logger.error(
-                f"Policy {self.name}, Hostname {info.hostname}: {e}"
-            )
+            logger.error(f"Policy {self.name}, Hostname {info.hostname}: {e}")
 
     def stop(self):
         """Stop the policy runner."""
