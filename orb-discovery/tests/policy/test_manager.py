@@ -5,6 +5,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from orb_discovery.policy.manager import PolicyManager
 from orb_discovery.policy.models import Policy, PolicyRequest
@@ -76,6 +77,31 @@ def test_parse_policy(policy_manager):
         # Verify structure of the parsed PolicyRequest
         assert isinstance(policy_request, PolicyRequest)
         assert "policy1" in policy_request.discovery.policies
+
+
+def test_parse_policy_invalid_cron(policy_manager):
+    """Test parsing YAML configuration with an invalid cron string."""
+    # Invalid cron string in schedule
+    config_data = b"""
+    discovery:
+      policies:
+        policy1:
+          config:
+            schedule: "invalid cron string"
+            netbox:
+              site: "New York"
+          data:
+            - driver: "ios"
+              hostname: "router1"
+              username: "admin"
+              password: "password"
+    """
+    with patch("orb_discovery.parser.resolve_env_vars", side_effect=lambda x: x):
+        with pytest.raises(ValidationError) as exc_info:
+            policy_manager.parse_policy(config_data)
+
+        # Validate that the error is related to the invalid cron string
+        assert exc_info.match("Invalid cron schedule format.")
 
 
 def test_policy_exists(policy_manager):
