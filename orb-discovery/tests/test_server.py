@@ -7,9 +7,10 @@ from unittest.mock import patch
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from orb_discovery.policy.models import PolicyRequest
-from orb_discovery.server import app, manager
+from orb_discovery.server import app
 
 client = TestClient(app)
 
@@ -185,7 +186,69 @@ def test_write_policy_valid_yaml(mock_valid_policy_request, valid_policy_yaml):
             data=valid_policy_yaml,
         )
         assert response.status_code == 201
-        assert response.json() == {"details": "policy 'policy1' is running"}
+        assert response.json() == {"detail": "policy 'policy1' is running"}
+
+
+def test_write_policy_invalid_yaml():
+    """Test posting a invalid YAML policy."""
+    with patch(
+        "orb_discovery.server.manager.parse_policy",
+        side_effect=yaml.YAMLError("invalid"),
+    ):
+        response = client.post(
+            "/api/v1/policies",
+            headers={"Content-Type": "application/x-yaml"},
+            json={"discovery": {"policies": {"policy1": {}}}},
+        )
+        assert response.status_code == 400
+        assert response.json() == {"detail": "Invalid YAML format"}
+
+
+def test_write_policy_validation_error():
+    """Test posting a valid YAML policy but with invalid field."""
+    with patch(
+        "orb_discovery.server.manager.parse_policy",
+        side_effect=ValidationError.from_exception_data(
+            "Invalid data",
+            line_errors=[
+                {
+                    "loc": ("discovery", "policies", "policy1", "config", "schedule"),
+                    "msg": "field required",
+                    "type": "missing",
+                },
+            ],
+        ),
+    ):
+        response = client.post(
+            "/api/v1/policies",
+            headers={"Content-Type": "application/x-yaml"},
+            json={"discovery": {"policies": {"policy1": {}}}},
+        )
+        assert response.status_code == 400
+        assert response.json() == {
+            "detail": [
+                {
+                    "field": "discovery.policies.policy1.config.schedule",
+                    "type": "missing",
+                    "error": "Field required",
+                }
+            ]
+        }
+
+
+def test_write_policy_unexpected_parser_error():
+    """Test posting a invalid YAML policy."""
+    with patch(
+        "orb_discovery.server.manager.parse_policy",
+        side_effect=Exception("unexpected error"),
+    ):
+        response = client.post(
+            "/api/v1/policies",
+            headers={"Content-Type": "application/x-yaml"},
+            json={"discovery": {"policies": {"policy1": {}}}},
+        )
+        assert response.status_code == 400
+        assert response.json() == {"detail": "unexpected error"}
 
 
 def test_write_policy_invalid_content_type():
@@ -254,6 +317,32 @@ def test_write_policy_no_policy_error():
         assert response.json()["detail"] == "no policy found in request"
 
 
+def test_policy_start_error(mock_valid_policy_request, valid_policy_yaml):
+    """
+    Test starting a policy that already exists.
+
+    Args:
+    ----
+        mock_valid_policy_request: Mocked PolicyRequest object.
+        valid_policy_yaml: Valid PolicyRequest YAML string.
+
+    """
+    with patch(
+        "orb_discovery.server.manager.parse_policy",
+        return_value=mock_valid_policy_request,
+    ), patch(
+        "orb_discovery.server.manager.start_policy",
+        side_effect=Exception("Policy exists"),
+    ):
+        response = client.post(
+            "/api/v1/policies",
+            headers={"Content-Type": "application/x-yaml"},
+            data=valid_policy_yaml,
+        )
+        assert response.status_code == 400
+        assert response.json() == {"detail": "Policy exists"}
+
+
 def test_delete_policy(mock_manager):
     """
     Test deleting a valid policy.
@@ -286,3 +375,21 @@ def test_delete_policy_not_found(mock_manager):
     response = client.delete("/api/v1/policies/policy1")
     assert response.status_code == 404
     assert response.json()["detail"] == "policy 'policy1' not found"
+
+
+def test_delete_policy_error(mock_manager):
+    """
+    Test deleting a policy that raises an exception.
+
+    Ensures a 400 error is returned if an exception is raised.
+
+    Args:
+    ----
+        mock_manager: Mocked PolicyManager instance.
+
+    """
+    mock_manager.policy_exists.return_value = True
+    mock_manager.delete_policy.side_effect = Exception("unexpected error")
+    response = client.delete("/api/v1/policies/policy1")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "unexpected error"

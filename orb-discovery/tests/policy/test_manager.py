@@ -2,12 +2,12 @@
 # Copyright 2024 NetBox Labs Inc
 """NetBox Labs - Policy Manager Unit Tests."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from orb_discovery.policy.models import Policy, PolicyRequest
 from orb_discovery.policy.manager import PolicyManager
+from orb_discovery.policy.models import Policy, PolicyRequest
 
 
 @pytest.fixture

@@ -130,7 +130,7 @@ async def write_policy(request: PolicyRequest = Depends(parse_yaml_body)):
             manager.start_policy(name, policy)
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
-        return {"details": f"policy '{name}' is running"}
+        return {"detail": f"policy '{name}' is running"}
     raise HTTPException(status_code=400, detail="no policy found in request")
 
 

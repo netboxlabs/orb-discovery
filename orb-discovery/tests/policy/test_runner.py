@@ -2,14 +2,13 @@
 # Copyright 2024 NetBox Labs Inc
 """NetBox Labs - Policy Manager Unit Tests."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
-from orb_discovery.policy.runner import PolicyRunner
 from orb_discovery.policy.models import Config, Napalm, Status
+from orb_discovery.policy.runner import PolicyRunner
 
 
 @pytest.fixture
@@ -108,6 +107,23 @@ def test_run_device_with_discovered_driver(policy_runner, sample_infos, sample_c
         assert data["device"] == {"model": "SampleModel"}
         assert data["interface"] == {"eth0": "up"}
         assert data["interface_ip"] == {"eth0": "192.168.1.1"}
+
+
+def test_run_discovered_driver_error(policy_runner, sample_infos, sample_config):
+    """Test running a device where the driver discovery fails."""
+    sample_infos[0].driver = None  # Force driver discovery
+    with patch(
+        "orb_discovery.policy.runner.discover_device_driver", return_value=None
+    ) as mock_discover, patch(
+        "orb_discovery.policy.runner.logger.error"
+    ) as mock_logger_error:
+
+        # Run the device with an error to check error handling
+        policy_runner.run("test_id", sample_infos[0], sample_config)
+
+        mock_discover.assert_called_once()
+        assert mock_logger_error.call_count == 2
+        assert policy_runner.status() == Status.FAILED
 
 
 def test_run_device_with_error_in_job(policy_runner, sample_infos, sample_config):
