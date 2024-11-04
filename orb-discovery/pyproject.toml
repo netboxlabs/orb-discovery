@@ -44,12 +44,11 @@ test = ["coverage", "pytest", "pytest-cov"]
 "Homepage" = "https://netboxlabs.com/"
 
 [project.scripts]
-diode-napalm-agent = "orb_discovery.cli.cli:main"
+diode-napalm-agent = "orb_discovery.main:main"
 
 [tool.setuptools]
 packages = [
     "orb_discovery",
-    "orb_discovery.cli",
 ]
 
 [build-system]
