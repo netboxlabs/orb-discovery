@@ -124,7 +124,6 @@ async def write_policy(request: PolicyRequest = Depends(parse_yaml_body)):
         raise HTTPException(
             status_code=400, detail="only one policy allowed per request"
         )
-    print(f"Parsed policies: {policies}")
     for name, policy in policies.items():
         try:
             manager.start_policy(name, policy)

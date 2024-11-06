@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class Client:
     """
-    Singleton class for managing the Diode client for NAPALM.
+    Singleton class for managing the Diode client for orb-discovery.
 
     This class ensures only one instance of the Diode client is created and provides methods
     to initialize the client and ingest data.

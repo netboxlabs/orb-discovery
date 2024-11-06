@@ -29,7 +29,7 @@ discovery_1:
 ```
 
 ## REST API
-The default `discovery` address is `localhost:8072`. to change that you can specify host and port when starting `discovery`:
+The default `discovery` address is `localhost:8072`.  To change that you can specify host and port when starting `discovery`:
 ```sh
 docker build orb-
 ```
