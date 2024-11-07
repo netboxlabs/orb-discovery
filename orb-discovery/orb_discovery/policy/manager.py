@@ -32,8 +32,8 @@ class PolicyManager:
             policy: Policy configuration
 
         """
-        if name in self.runners:
-            raise ValueError(f"Policy '{name}' already exists")
+        if self.policy_exists(name):
+            raise ValueError(f"policy '{name}' already exists")
 
         runner = PolicyRunner()
         runner.setup(name, policy.config, policy.scope)
@@ -80,7 +80,7 @@ class PolicyManager:
             name: Policy name.
 
         """
-        if name not in self.runners:
+        if not self.policy_exists(name):
             raise ValueError(f"policy '{name}' not found")
         self.runners[name].stop()
         del self.runners[name]
