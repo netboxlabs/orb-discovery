@@ -133,10 +133,10 @@ async def write_policy(request: PolicyRequest = Depends(parse_yaml_body)):
 
     if not started_policies:
         raise HTTPException(status_code=400, detail="no policies found in request")
-    elif len(started_policies) == 1:
+
+    if len(started_policies) == 1:
         return {"detail": f"policy '{started_policies[0]}' was started"}
-    else:
-        return {"detail": f"policies {started_policies} were started"}
+    return {"detail": f"policies {started_policies} were started"}
 
 
 @app.delete("/api/v1/policies/{policy_name}", status_code=200)

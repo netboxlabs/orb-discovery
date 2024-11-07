@@ -229,7 +229,6 @@ def test_write_policy_invalid_yaml():
 
 def test_write_policy_validation_error(invalid_policy_yaml):
     """Test posting a valid YAML policy but with invalid field."""
-
     response = client.post(
         "/api/v1/policies",
         headers={"Content-Type": "application/x-yaml"},
