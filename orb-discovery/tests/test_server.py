@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from orb_discovery.policy.models import PolicyRequest
-from orb_discovery.server import app
+from orb_discovery.server import app, manager
 
 client = TestClient(app)
 
@@ -65,6 +65,28 @@ def multiple_policies_yaml():
               site: "New York"
           scope:
             - driver: "ios"
+              hostname: "router1"
+              username: "admin"
+              password: "password"
+    """
+
+
+@pytest.fixture
+def invalid_policy_yaml():
+    """
+    Invalid PolicyRequest YAML string.
+
+    Returns a YAML string that represents a valid PolicyRequest object.
+    """
+    return """
+    discovery:
+      policies:
+        policy1:
+          config:
+            schedule: "0 * * * *"
+            defaults:
+              site: "New York"
+          scope:
               hostname: "router1"
               username: "admin"
               password: "password"
@@ -176,6 +198,7 @@ def test_write_policy_valid_yaml(mock_valid_policy_request, valid_policy_yaml):
         valid_policy_yaml: Valid PolicyRequest YAML string.
 
     """
+    manager.runners = {}
     with patch(
         "orb_discovery.server.manager.parse_policy",
         return_value=mock_valid_policy_request,
@@ -204,36 +227,24 @@ def test_write_policy_invalid_yaml():
         assert response.json() == {"detail": "Invalid YAML format"}
 
 
-def test_write_policy_validation_error():
+def test_write_policy_validation_error(invalid_policy_yaml):
     """Test posting a valid YAML policy but with invalid field."""
-    with patch(
-        "orb_discovery.server.manager.parse_policy",
-        side_effect=ValidationError.from_exception_data(
-            "Invalid data",
-            line_errors=[
-                {
-                    "loc": ("discovery", "policies", "policy1", "config", "schedule"),
-                    "msg": "field required",
-                    "type": "missing",
-                },
-            ],
-        ),
-    ):
-        response = client.post(
-            "/api/v1/policies",
-            headers={"Content-Type": "application/x-yaml"},
-            json={"discovery": {"policies": {"policy1": {}}}},
-        )
-        assert response.status_code == 400
-        assert response.json() == {
-            "detail": [
-                {
-                    "field": "discovery.policies.policy1.config.schedule",
-                    "type": "missing",
-                    "error": "Field required",
-                }
-            ]
-        }
+
+    response = client.post(
+        "/api/v1/policies",
+        headers={"Content-Type": "application/x-yaml"},
+        data=invalid_policy_yaml,
+    )
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": [
+            {
+                "field": "discovery.policies.policy1.scope",
+                "type": "list_type",
+                "error": "Input should be a valid list",
+            }
+        ]
+    }
 
 
 def test_write_policy_unexpected_parser_error():
@@ -282,6 +293,7 @@ def test_write_policy_multiple_policies(
         multiple_policies_yaml: Multiple policies YAML string.
 
     """
+    manager.runners = {}
     with patch(
         "orb_discovery.server.manager.parse_policy",
         return_value=mock_multiple_policies_request,
@@ -291,10 +303,10 @@ def test_write_policy_multiple_policies(
             headers={"Content-Type": "application/x-yaml"},
             data=multiple_policies_yaml,
         )
-        assert response.status_code == 201
         assert (
             response.json()["detail"] == "policies ['policy1', 'policy2'] were started"
         )
+        assert response.status_code == 201
 
 
 def test_write_policy_no_policy_error():

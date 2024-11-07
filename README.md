@@ -13,28 +13,43 @@ discovery:
 
 ### Policy RFC
 ```yaml
-discovery_1:
-    config:
-        schedule: "* * * 2 * *" #Cron expression
-        defaults:
-            site: New York NY
-    scope:
-    - hostname: 192.168.0.32
-      username: ${USER}
-      password: admin
-    - driver: eos
-      hostname: 127.0.0.1
-      username: admin
-      password: ${ARISTA_PASSWORD}
-      optional_args:
-        enable_password: ${ARISTA_PASSWORD}
+discovery:
+  policies:
+    discovery_1:
+        config:
+            schedule: "* * * * *" #Cron expression
+            defaults:
+                site: New York NY
+        scope:
+        - hostname: 192.168.0.32
+          username: ${USER}
+          password: admin
+        - driver: eos
+          hostname: 127.0.0.1
+          username: admin
+          password: ${ARISTA_PASSWORD}
+          optional_args:
+            enable_password: ${ARISTA_PASSWORD}
+```
+## Run orb-discovery
+Orb-discovery can be run by installing it with pip
+```sh
+git clone https://github.com/netboxlabs/orb-discovery.git
+cd orb-discovery/
+pip install --no-cache-dir ./orb-discovery/
+```
+
+## Docker Image
+Orb-discovery can be built and run using docker:
+```sh
+docker build --no-cache -t orb-discovery:develop -f orb-discovery/docker/Dockerfile .
+docker run -v /local/orb:/usr/local/orb/ orb-discovery:develop -c /usr/local/orb/agent.yaml
 ```
 
 ## REST API
-The default `discovery` address is `localhost:8072`.  To change that you can specify host and port when starting `discovery`:
+The default `discovery` address is `0.0.0.0:8072`.  To change that you can specify host and port on config file when starting `discovery`:
 ```sh
-docker build --no-cache -t orb-discovery:develop -f orb-discovery/docker/Dockerfile .
-docker -v / run orb-discovery:develop -c
+docker run -v /local/orb:/usr/local/orb/ orb-discovery:develop -c /usr/local/orb/agent.yaml
 ```
 
 ### Routes (v1)
@@ -52,7 +67,7 @@ docker -v / run orb-discovery:develop -c
 
 > | http code     | content-type                      | response                                                            |
 > |---------------|-----------------------------------|---------------------------------------------------------------------|
-> | `200`         | `application/json; charset=utf-8` | JSON data                                                           |
+> | `200`         | `application/json; charset=utf-8` |  `{"version": "0.1.0","up_time_seconds": 3678 }`                    |
 
 ##### Example cURL
 
@@ -73,7 +88,7 @@ docker -v / run orb-discovery:develop -c
 
 > | http code     | content-type                      | response                                                            |
 > |---------------|-----------------------------------|---------------------------------------------------------------------|
-> | `200`         | `application/json; charset=utf-8` | JSON data                                                           |
+> | `200`         | `application/json; charset=utf-8` | `{"supported_drivers":["ios","eos","junos","nxos","cumulus"]}`      |
 
 ##### Example cURL
 
@@ -93,19 +108,18 @@ docker -v / run orb-discovery:develop -c
 
 > | name      |  type     | data type               | description                                                           |
 > |-----------|-----------|-------------------------|-----------------------------------------------------------------------|
-> | None      |  required | YAML object             | yaml format specified in [Policy RFC](#policy-rfc-v1)                 |
+> | None      |  required | YAML object             | yaml format specified in [Policy RFC](#policy-rfc)                    |
  
 
 ##### Responses
 
 > | http code     | content-type                       | response                                                            |
 > |---------------|------------------------------------|---------------------------------------------------------------------|
-> | `201`         | `application/x-yaml; charset=UTF-8`| YAML object                                                         |
+> | `201`         | `application/json; charset=UTF-8`  | `{"detail":"policy 'policy_name' was started"}`                     |
 > | `400`         | `application/json; charset=UTF-8`  | `{ "detail": "invalid Content-Type. Only 'application/x-yaml' is supported" }`|
-> | `400`         | `application/json; charset=UTF-8`  | Any policy error                                                    |
-> | `400`         | `application/json; charset=UTF-8`  | `{ "detail": "only single policy allowed per request" }`           |
-> | `403`         | `application/json; charset=UTF-8`  | `{ "detail": "config field is required" }`                         |
-> | `409`         | `application/json; charset=UTF-8`  | `{ "detail": "policy already exists" }`                            |
+> | `400`         | `application/json; charset=UTF-8`  | Any other policy error                                              |
+> | `403`         | `application/json; charset=UTF-8`  | `{ "detail": "config field is required" }`                          |
+> | `409`         | `application/json; charset=UTF-8`  | `{ "detail": "policy 'policy_name' already exists" }`               |
  
 
 ##### Example cURL
@@ -130,13 +144,13 @@ docker -v / run orb-discovery:develop -c
 > | http code     | content-type                      | response                                                            |
 > |---------------|-----------------------------------|---------------------------------------------------------------------|
 > | `200`         | `application/json; charset=UTF-8` | `{ "detail": "policy 'policy_name' was deleted" }`                  |
-> | `400`         | `application/json; charset=UTF-8` | Any policy deletion error                                           |
+> | `400`         | `application/json; charset=UTF-8` | Any other policy deletion error                                     |
 > | `404`         | `application/json; charset=UTF-8` | `{ "detail": "policy 'policy_name' not found" }`                    |
 
 ##### Example cURL
 
 > ```javascript
->  curl -X DELETE http://localhost:8072/api/v1/policies/my_policy
+>  curl -X DELETE http://localhost:8072/api/v1/policies/policy_name
 > ```
 
 </details>

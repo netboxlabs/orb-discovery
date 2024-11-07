@@ -61,11 +61,10 @@ class PolicyRunner:
 
             if self.config.schedule is not None:
                 logger.info(
-                    f"Policy {self.name}, Hostname {scope.hostname}: Schedule run with '{self.config.schedule}'"
+                    f"Policy {self.name}, Hostname {scope.hostname}: Scheduled to run with '{self.config.schedule}'"
                 )
                 trigger = CronTrigger.from_crontab(self.config.schedule)
             else:
-                # Schedule a one-time job to run after 1 second
                 logger.info(
                     f"Policy {self.name}, Hostname {scope.hostname}: One-time run"
                 )
