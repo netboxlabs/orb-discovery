@@ -36,7 +36,7 @@ class PolicyManager:
             raise ValueError(f"Policy '{name}' already exists")
 
         runner = PolicyRunner()
-        runner.setup(name, policy.config, policy.data)
+        runner.setup(name, policy.config, policy.scope)
         self.runners[name] = runner
 
     def parse_policy(self, config_data: bytes) -> PolicyRequest:

@@ -45,11 +45,12 @@ test = ["coverage", "pytest", "pytest-cov"]
 "Homepage" = "https://netboxlabs.com/"
 
 [project.scripts]
-diode-napalm-agent = "orb_discovery.main:main"
+orb-discovery = "orb_discovery.main:main"
 
 [tool.setuptools]
 packages = [
     "orb_discovery",
+    "orb_discovery.policy",
 ]
 
 [build-system]

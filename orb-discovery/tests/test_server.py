@@ -28,9 +28,9 @@ def valid_policy_yaml():
         policy1:
           config:
             schedule: "0 * * * *"
-            netbox:
+            defaults:
               site: "New York"
-          data:
+          scope:
             - driver: "ios"
               hostname: "router1"
               username: "admin"
@@ -51,9 +51,9 @@ def multiple_policies_yaml():
         policy1:
           config:
             schedule: "0 * * * *"
-            netbox:
+            defaults:
               site: "New York"
-          data:
+          scope:
             - driver: "ios"
               hostname: "router1"
               username: "admin"
@@ -61,9 +61,9 @@ def multiple_policies_yaml():
         policy2:
           config:
             schedule: "0 * * * *"
-            netbox:
+            defaults:
               site: "New York"
-          data:
+          scope:
             - driver: "ios"
               hostname: "router1"
               username: "admin"

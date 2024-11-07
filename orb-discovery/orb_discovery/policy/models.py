@@ -35,7 +35,7 @@ class Config(BaseModel):
     """Model for discovery configuration."""
 
     schedule: str | None = Field(default=None, description="cron interval, optional")
-    netbox: dict[str, str] | None = Field(
+    defaults: dict[str, str] | None = Field(
         default=None, description="NetBox configuration"
     )
 
@@ -65,7 +65,7 @@ class Policy(BaseModel):
     """Model for a policy configuration."""
 
     config: Config | None = Field(default=None, description="Configuration data")
-    data: list[Napalm]
+    scope: list[Napalm]
 
 
 class Discovery(BaseModel):

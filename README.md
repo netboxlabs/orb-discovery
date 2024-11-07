@@ -7,6 +7,8 @@ discovery:
   config:
     target: grpc://localhost:8080/diode
     api_key: ${DIODE_API_KEY}
+    host: 0.0.0.0
+    port: 8072
 ```
 
 ### Policy RFC
@@ -14,9 +16,9 @@ discovery:
 discovery_1:
     config:
         schedule: "* * * 2 * *" #Cron expression
-        netbox:
+        defaults:
             site: New York NY
-    data:
+    scope:
     - hostname: 192.168.0.32
       username: ${USER}
       password: admin
@@ -31,7 +33,8 @@ discovery_1:
 ## REST API
 The default `discovery` address is `localhost:8072`.  To change that you can specify host and port when starting `discovery`:
 ```sh
-docker build orb-
+docker build --no-cache -t orb-discovery:develop -f orb-discovery/docker/Dockerfile .
+docker -v / run orb-discovery:develop -c
 ```
 
 ### Routes (v1)

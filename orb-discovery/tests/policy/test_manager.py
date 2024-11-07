@@ -21,8 +21,8 @@ def policy_manager():
 def sample_policy():
     """Fixture for a sample Policy object."""
     return Policy(
-        config={"schedule": "0 * * * *", "netbox": {"site": "New York"}},
-        data=[
+        config={"schedule": "0 * * * *", "defaults": {"site": "New York"}},
+        scope=[
             {
                 "driver": "ios",
                 "hostname": "router1",
@@ -41,7 +41,7 @@ def test_start_policy(policy_manager, sample_policy):
 
         # Check that PolicyRunner.setup was called with correct arguments
         mock_runner.setup.assert_called_once_with(
-            "policy1", sample_policy.config, sample_policy.data
+            "policy1", sample_policy.config, sample_policy.scope
         )
 
         # Ensure the policy runner was added to the manager's runners
@@ -63,9 +63,9 @@ def test_parse_policy(policy_manager):
         policy1:
           config:
             schedule: "0 * * * *"
-            netbox:
+            defaults:
               site: "New York"
-          data:
+          scope:
             - driver: "ios"
               hostname: "router1"
               username: "admin"
@@ -88,9 +88,9 @@ def test_parse_policy_invalid_cron(policy_manager):
         policy1:
           config:
             schedule: "invalid cron string"
-            netbox:
+            defaults:
               site: "New York"
-          data:
+          scope:
             - driver: "ios"
               hostname: "router1"
               username: "admin"

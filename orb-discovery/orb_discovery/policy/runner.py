@@ -26,23 +26,12 @@ class PolicyRunner:
     def __init__(self):
         """Initialize the PolicyRunner."""
         self.name = ""
-        self.infos = dict[str, Napalm]()
+        self.scopes = dict[str, Napalm]()
         self.config = None
-        self.current_status = Status.NEW
+        self.status = Status.NEW
         self.scheduler = BackgroundScheduler()
 
-    def status(self) -> Status:
-        """
-        Get the current status of the policy runner.
-
-        Returns
-        -------
-            Status: The current status of the policy runner.
-
-        """
-        return self.current_status
-
-    def setup(self, name: str, config: Config, infos: list[Napalm]):
+    def setup(self, name: str, config: Config, scopes: list[Napalm]):
         """
         Set up the policy runner.
 
@@ -50,97 +39,103 @@ class PolicyRunner:
         ----
             name: Policy name.
             config: Configuration data containing site information.
-            infos: Information data for the devices.
+            scopes: scope data for the devices.
 
         """
         self.name = name
         self.config = config
 
         if self.config is None:
-            self.config = Config(netbox={})
-        elif self.config.netbox is None:
-            self.config.netbox = {}
+            self.config = Config(defaults={})
+        elif self.config.defaults is None:
+            self.config.defaults = {}
 
         self.scheduler.start()
-        for info in infos:
-            if info.driver and info.driver not in supported_drivers:
+        for scope in scopes:
+            if scope.driver and scope.driver not in supported_drivers:
                 self.scheduler.shutdown()
                 raise Exception(
-                    f"Hostname {info.hostname}: specified driver '{info.driver}' was not found in the "
-                    f"current installed drivers list: {supported_drivers}."
+                    f"Policy {self.name}, Hostname {scope.hostname}: specified driver '{scope.driver}' "
+                    f"was not found in the current installed drivers list: {supported_drivers}."
                 )
 
             if self.config.schedule is not None:
+                logger.info(
+                    f"Policy {self.name}, Hostname {scope.hostname}: Schedule run with '{self.config.schedule}'"
+                )
                 trigger = CronTrigger.from_crontab(self.config.schedule)
             else:
                 # Schedule a one-time job to run after 1 second
+                logger.info(
+                    f"Policy {self.name}, Hostname {scope.hostname}: One-time run"
+                )
                 trigger = DateTrigger(run_date=datetime.now() + timedelta(seconds=1))
 
             id = str(uuid.uuid4())
-            self.infos[id] = info
+            self.scopes[id] = scope
             self.scheduler.add_job(
-                self.run, id=id, trigger=trigger, args=[id, info, self.config]
+                self.run, id=id, trigger=trigger, args=[id, scope, self.config]
             )
 
-            self.current_status = Status.RUNNING
+            self.status = Status.RUNNING
 
-    def run(self, id: str, info: Napalm, config: Config):
+    def run(self, id: str, scope: Napalm, config: Config):
         """
-        Run the device driver code for a single info item.
+        Run the device driver code for a single scope item.
 
         Args:
         ----
             id: Job ID.
-            info: Information data for the device.
+            scope: scope data for the device.
             config: Configuration data containing site information.
 
         """
-        if info.driver is None:
+        if scope.driver is None:
             logger.info(
-                f"Policy {self.name}, Hostname {info.hostname}: Driver not informed, discovering it"
+                f"Policy {self.name}, Hostname {scope.hostname}: Driver not informed, discovering it"
             )
-            info.driver = discover_device_driver(info)
-            if info.driver is None:
-                self.current_status = Status.FAILED
+            scope.driver = discover_device_driver(scope)
+            if scope.driver is None:
+                self.status = Status.FAILED
                 logger.error(
-                    f"Policy {self.name}, Hostname {info.hostname}: Not able to discover device driver"
+                    f"Policy {self.name}, Hostname {scope.hostname}: Not able to discover device driver"
                 )
                 try:
                     self.scheduler.remove_job(id)
                 except Exception as e:
                     logger.error(
-                        f"Policy {self.name}, Hostname {info.hostname}: Error removing job: {e}"
+                        f"Policy {self.name}, Hostname {scope.hostname}: Error removing job: {e}"
                     )
                 return
 
         logger.info(
-            f"Policy {self.name}, Hostname {info.hostname}: Get driver '{info.driver}'"
+            f"Policy {self.name}, Hostname {scope.hostname}: Get driver '{scope.driver}'"
         )
 
         try:
-            np_driver = get_network_driver(info.driver)
+            np_driver = get_network_driver(scope.driver)
             logger.info(
-                f"Policy {self.name}, Hostname {info.hostname}: Getting information"
+                f"Policy {self.name}, Hostname {scope.hostname}: Getting information"
             )
             with np_driver(
-                info.hostname,
-                info.username,
-                info.password,
-                info.timeout,
-                info.optional_args,
+                scope.hostname,
+                scope.username,
+                scope.password,
+                scope.timeout,
+                scope.optional_args,
             ) as device:
                 data = {
-                    "driver": info.driver,
-                    "site": config.netbox.get("site", None),
+                    "driver": scope.driver,
+                    "site": config.defaults.get("site", None),
                     "device": device.get_facts(),
                     "interface": device.get_interfaces(),
                     "interface_ip": device.get_interfaces_ip(),
                 }
-                Client().ingest(info.hostname, data)
+                Client().ingest(scope.hostname, data)
         except Exception as e:
-            logger.error(f"Policy {self.name}, Hostname {info.hostname}: {e}")
+            logger.error(f"Policy {self.name}, Hostname {scope.hostname}: {e}")
 
     def stop(self):
         """Stop the policy runner."""
         self.scheduler.shutdown()
-        self.current_status = Status.FINISHED
+        self.status = Status.FINISHED

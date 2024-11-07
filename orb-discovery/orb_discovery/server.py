@@ -8,7 +8,6 @@ from datetime import datetime
 
 import yaml
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import Response
 from pydantic import ValidationError
 
 from orb_discovery.discovery import supported_drivers
