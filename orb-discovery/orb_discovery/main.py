@@ -21,7 +21,7 @@ def main():
 
     Parses command-line arguments and starts the backend.
     """
-    parser = argparse.ArgumentParser(description="Diode Agent for NAPALM")
+    parser = argparse.ArgumentParser(description="Orb Discovery Backend")
     parser.add_argument(
         "-V",
         "--version",

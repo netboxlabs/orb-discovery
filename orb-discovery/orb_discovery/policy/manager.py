@@ -80,6 +80,8 @@ class PolicyManager:
             name: Policy name.
 
         """
+        if name not in self.runners:
+            raise ValueError(f"policy '{name}' not found")
         self.runners[name].stop()
         del self.runners[name]
 

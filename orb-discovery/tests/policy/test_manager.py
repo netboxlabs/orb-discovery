@@ -124,7 +124,7 @@ def test_delete_policy(policy_manager):
 
 def test_delete_nonexistent_policy_raises_error(policy_manager):
     """Test deleting a nonexistent policy raises an error."""
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match="policy 'nonexistent_policy' not found"):
         policy_manager.delete_policy("nonexistent_policy")
 
 
