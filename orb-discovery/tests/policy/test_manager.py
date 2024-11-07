@@ -51,7 +51,7 @@ def test_start_policy(policy_manager, sample_policy):
 def test_start_existing_policy_raises_error(policy_manager, sample_policy):
     """Test that starting an already existing policy raises an error."""
     policy_manager.runners["policy1"] = MagicMock()
-    with pytest.raises(ValueError, match="Policy 'policy1' already exists"):
+    with pytest.raises(ValueError, match="policy 'policy1' already exists"):
         policy_manager.start_policy("policy1", sample_policy)
 
 
