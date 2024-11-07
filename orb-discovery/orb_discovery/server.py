@@ -69,7 +69,7 @@ async def parse_yaml_body(request: Request) -> PolicyRequest:
             errors.append(
                 {"field": field_path, "type": error["type"], "error": message}
             )
-        raise HTTPException(status_code=400, detail=errors) from e
+        raise HTTPException(status_code=403, detail=errors) from e
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -124,6 +124,8 @@ async def write_policy(request: PolicyRequest = Depends(parse_yaml_body)):
         try:
             manager.start_policy(name, policy)
             started_policies.append(name)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
         except Exception as e:
             for policy_name in started_policies:
                 manager.delete_policy(policy_name)

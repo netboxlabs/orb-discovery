@@ -235,7 +235,7 @@ def test_write_policy_validation_error(invalid_policy_yaml):
         headers={"Content-Type": "application/x-yaml"},
         data=invalid_policy_yaml,
     )
-    assert response.status_code == 400
+    assert response.status_code == 403
     assert response.json() == {
         "detail": [
             {

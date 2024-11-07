@@ -30,6 +30,11 @@ discovery:
           password: ${ARISTA_PASSWORD}
           optional_args:
             enable_password: ${ARISTA_PASSWORD}
+    discover_once: # will run only once
+        scope:
+        - hostname: 192.168.0.34
+          username: ${USER}
+          password: ${PASSWORD}
 ```
 ## Run orb-discovery
 Orb-discovery can be run by installing it with pip
@@ -78,7 +83,7 @@ docker run -v /local/orb:/usr/local/orb/ orb-discovery:develop -c /usr/local/orb
 </details>
 
 <details>
- <summary><code>GET</code> <code><b>/api/v1/capabilities</b></code> <code>(gets otelcol-contrib capabilities)</code></summary>
+ <summary><code>GET</code> <code><b>/api/v1/capabilities</b></code> <code>(gets orb-discovery capabilities)</code></summary>
 
 ##### Parameters
 
