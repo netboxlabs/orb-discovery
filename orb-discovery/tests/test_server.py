@@ -186,7 +186,7 @@ def test_write_policy_valid_yaml(mock_valid_policy_request, valid_policy_yaml):
             data=valid_policy_yaml,
         )
         assert response.status_code == 201
-        assert response.json() == {"detail": "policy 'policy1' is running"}
+        assert response.json() == {"detail": "policy 'policy1' was started"}
 
 
 def test_write_policy_invalid_yaml():
@@ -270,13 +270,11 @@ def test_write_policy_invalid_content_type():
     )
 
 
-def test_write_policy_multiple_policies_error(
+def test_write_policy_multiple_policies(
     mock_multiple_policies_request, multiple_policies_yaml
 ):
     """
-    Test posting multiple policies.
-
-    Ensures a 400 error is returned, as only one policy is allowed.
+    Test posting multiple policies in a single request.
 
     Args:
     ----
@@ -293,8 +291,10 @@ def test_write_policy_multiple_policies_error(
             headers={"Content-Type": "application/x-yaml"},
             data=multiple_policies_yaml,
         )
-        assert response.status_code == 400
-        assert response.json()["detail"] == "only one policy allowed per request"
+        assert response.status_code == 201
+        assert (
+            response.json()["detail"] == "policies ['policy1', 'policy2'] were started"
+        )
 
 
 def test_write_policy_no_policy_error():
@@ -314,7 +314,7 @@ def test_write_policy_no_policy_error():
             json={"discovery": {"policies": {}}},
         )
         assert response.status_code == 400
-        assert response.json()["detail"] == "no policy found in request"
+        assert response.json()["detail"] == "no policies found in request"
 
 
 def test_policy_start_error(mock_valid_policy_request, valid_policy_yaml):
@@ -371,7 +371,7 @@ def test_delete_policy_not_found(mock_manager):
         mock_manager: Mocked PolicyManager instance.
 
     """
-    mock_manager.policy_exists.return_value = False
+    mock_manager.delete_policy.side_effect = ValueError("policy 'policy1' not found")
     response = client.delete("/api/v1/policies/policy1")
     assert response.status_code == 404
     assert response.json()["detail"] == "policy 'policy1' not found"
@@ -388,7 +388,6 @@ def test_delete_policy_error(mock_manager):
         mock_manager: Mocked PolicyManager instance.
 
     """
-    mock_manager.policy_exists.return_value = True
     mock_manager.delete_policy.side_effect = Exception("unexpected error")
     response = client.delete("/api/v1/policies/policy1")
     assert response.status_code == 400

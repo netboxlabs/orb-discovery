@@ -118,18 +118,23 @@ async def write_policy(request: PolicyRequest = Depends(parse_yaml_body)):
         dict: The result of the policy write.
 
     """
+    started_policies = []
     policies = request.discovery.policies
-    if len(policies) > 1:
-        raise HTTPException(
-            status_code=400, detail="only one policy allowed per request"
-        )
     for name, policy in policies.items():
         try:
             manager.start_policy(name, policy)
+            started_policies.append(name)
         except Exception as e:
+            for policy_name in started_policies:
+                manager.delete_policy(policy_name)
             raise HTTPException(status_code=400, detail=str(e)) from e
-        return {"detail": f"policy '{name}' is running"}
-    raise HTTPException(status_code=400, detail="no policy found in request")
+
+    if not started_policies:
+        raise HTTPException(status_code=400, detail="no policies found in request")
+    elif len(started_policies) == 1:
+        return {"detail": f"policy '{started_policies[0]}' was started"}
+    else:
+        return {"detail": f"policies {started_policies} were started"}
 
 
 @app.delete("/api/v1/policies/{policy_name}", status_code=200)
@@ -146,10 +151,10 @@ def delete_policy(policy_name: str):
         dict: The result of the deletion
 
     """
-    if not manager.policy_exists(policy_name):
-        raise HTTPException(status_code=404, detail=f"policy '{policy_name}' not found")
     try:
         manager.delete_policy(policy_name)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"detail": f"policy '{policy_name}' was deleted"}
