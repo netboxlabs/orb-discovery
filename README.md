@@ -16,11 +16,11 @@ discovery:
 discovery:
   policies:
     discovery_1:
-        config:
-            schedule: "* * * * *" #Cron expression
-            defaults:
-                site: New York NY
-        scope:
+      config:
+        schedule: "* * * * *" #Cron expression
+        defaults:
+          site: New York NY
+      scope:
         - hostname: 192.168.0.32
           username: ${USER}
           password: admin
@@ -31,7 +31,7 @@ discovery:
           optional_args:
             enable_password: ${ARISTA_PASSWORD}
     discover_once: # will run only once
-        scope:
+      scope:
         - hostname: 192.168.0.34
           username: ${USER}
           password: ${PASSWORD}
@@ -42,19 +42,14 @@ Orb-discovery can be run by installing it with pip
 git clone https://github.com/netboxlabs/orb-discovery.git
 cd orb-discovery/
 pip install --no-cache-dir ./orb-discovery/
+orb-discovery -c config.yaml
 ```
 
 ## Docker Image
 Orb-discovery can be built and run using docker:
 ```sh
 docker build --no-cache -t orb-discovery:develop -f orb-discovery/docker/Dockerfile .
-docker run -v /local/orb:/usr/local/orb/ orb-discovery:develop -c /usr/local/orb/agent.yaml
-```
-
-## REST API
-The default `discovery` address is `0.0.0.0:8072`.  To change that you can specify host and port on config file when starting `discovery`:
-```sh
-docker run -v /local/orb:/usr/local/orb/ orb-discovery:develop -c /usr/local/orb/agent.yaml
+docker run -v /local/orb:/usr/local/orb/ -p 8072:8072 orb-discovery:develop orb-discovery -c /usr/local/orb/config.yaml
 ```
 
 ### Routes (v1)
@@ -130,7 +125,7 @@ docker run -v /local/orb:/usr/local/orb/ orb-discovery:develop -c /usr/local/orb
 ##### Example cURL
 
 > ```javascript
->  curl -X POST -H "Content-Type: application/x-yaml" --data @post.yaml http://localhost:8072/api/v1/policies
+>  curl -X POST -H "Content-Type: application/x-yaml" --data-binary @policy.yaml http://localhost:8072/api/v1/policies
 > ```
 
 </details>
