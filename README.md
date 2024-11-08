@@ -46,7 +46,7 @@ orb-discovery -c config.yaml
 ```
 
 ## Docker Image
-Orb-discovery can be built and run using docker:
+Orb-discovery can be build and run using docker:
 ```sh
 docker build --no-cache -t orb-discovery:develop -f orb-discovery/docker/Dockerfile .
 docker run -v /local/orb:/usr/local/orb/ -p 8072:8072 orb-discovery:develop orb-discovery -c /usr/local/orb/config.yaml
@@ -71,7 +71,7 @@ docker run -v /local/orb:/usr/local/orb/ -p 8072:8072 orb-discovery:develop orb-
 
 ##### Example cURL
 
-> ```javascript
+> ```sh
 >  curl -X GET -H "Content-Type: application/json" http://localhost:8072/api/v1/status
 > ```
 
@@ -92,7 +92,7 @@ docker run -v /local/orb:/usr/local/orb/ -p 8072:8072 orb-discovery:develop orb-
 
 ##### Example cURL
 
-> ```javascript
+> ```sh
 >  curl -X GET -H "Content-Type: application/json" http://localhost:8072/api/v1/capabilities
 > ```
 
@@ -124,7 +124,7 @@ docker run -v /local/orb:/usr/local/orb/ -p 8072:8072 orb-discovery:develop orb-
 
 ##### Example cURL
 
-> ```javascript
+> ```sh
 >  curl -X POST -H "Content-Type: application/x-yaml" --data-binary @policy.yaml http://localhost:8072/api/v1/policies
 > ```
 
@@ -149,7 +149,7 @@ docker run -v /local/orb:/usr/local/orb/ -p 8072:8072 orb-discovery:develop orb-
 
 ##### Example cURL
 
-> ```javascript
+> ```sh
 >  curl -X DELETE http://localhost:8072/api/v1/policies/policy_name
 > ```
 
