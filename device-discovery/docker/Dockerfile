@@ -1,4 +1,4 @@
-FROM python:3.12-bullseye as builder
+FROM python:3.12-slim-bullseye AS builder
 
 WORKDIR /usr/src/app
 
@@ -9,7 +9,7 @@ RUN python -m venv /opt/venv && \
     pip install --no-cache-dir ./device-discovery && \
     deactivate
 
-FROM python:3.12-bullseye
+FROM python:3.12-slim-bullseye
 
 RUN addgroup --system netdev && useradd -m --shell /bin/bash -G netdev appuser && echo "appuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
