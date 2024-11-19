@@ -4,7 +4,7 @@ version = "0.0.1"  # Overwritten during the build process
 description = "NetBox Labs, Device Discovery backend for Orb Agent, part of Orb Discovery"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "PolyForm Shield License 1.0.0" }
+license = { file = "LICENSE.txt" }
 authors = [
     {name = "NetBox Labs", email = "support@netboxlabs.com" }
 ]
@@ -54,7 +54,6 @@ packages = [
 ]
 package-data = {"device_discovery" = ["**/*", "policy/**"]}
 exclude-package-data = {device_discovery = ["tests/*"]}
-license-files = ["LICENSE.md"]
 
 [build-system]
 requires = ["setuptools>=43.0.0", "wheel"]
