@@ -62,7 +62,7 @@ jobs:
           write-mode: overwrite
           contents: |
             {
-              "branches": "release",
+              "branches": "refs/pull/4/merge",
               "repositoryUrl": "https://github.com/netboxlabs/orb-discovery",
               "debug": "true",
               "tagFormat": "${{ env.APP_NAME }}/v${version}",
@@ -101,7 +101,7 @@ jobs:
       - name: release dry-run
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_SEMANTIC_RELEASE_WEBHOOK }}
-        run: npx semantic-release --debug --dry-run --no-ci --branches "release"
+        run: npx semantic-release --debug --dry-run --no-ci --branches "refs/pull/4/merge"
         id: get-next-version
       - name: Set short sha output
         id: short-sha
@@ -204,7 +204,7 @@ jobs:
           write-mode: overwrite
           contents: |
             {
-              "branches": "release",
+              "branches": "refs/pull/4/merge",
               "repositoryUrl": "https://github.com/netboxlabs/orb-discovery",
               "debug": "true",
               "tagFormat": "${{ env.APP_NAME }}/v${version}",
@@ -243,4 +243,4 @@ jobs:
       - name: Release
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_OBSERVABILITY_RELEASE_WEBHOOK }}
-        run: npx semantic-release --debug --no-ci --branches "release"
+        run: npx semantic-release --debug --no-ci --branches "refs/pull/4/merge"
