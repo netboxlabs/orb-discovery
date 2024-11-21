@@ -1,7 +1,6 @@
 name: Device Discovery Release
 on:
   workflow_dispatch:
-  pull_request:
   push:
     branches:
         - "release"
@@ -62,7 +61,7 @@ jobs:
           write-mode: overwrite
           contents: |
             {
-              "branches": ["release", "feat/OBS-563-device-discovery-release-pipeline"],
+              "branches": "release",
               "repositoryUrl": "https://github.com/netboxlabs/orb-discovery",
               "debug": "true",
               "tagFormat": "${{ env.APP_NAME }}/v${version}",
@@ -101,7 +100,7 @@ jobs:
       - name: release dry-run
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_SEMANTIC_RELEASE_WEBHOOK }}
-        run: npx semantic-release --debug --dry-run --no-ci --branches "refs/pull/4/merge"
+        run: npx semantic-release --debug --dry-run
         id: get-next-version
       - name: Set short sha output
         id: short-sha
@@ -204,7 +203,7 @@ jobs:
           write-mode: overwrite
           contents: |
             {
-              "branches": ["release", "feat/OBS-563-device-discovery-release-pipeline"],
+              "branches": "release",
               "repositoryUrl": "https://github.com/netboxlabs/orb-discovery",
               "debug": "true",
               "tagFormat": "${{ env.APP_NAME }}/v${version}",
@@ -243,4 +242,4 @@ jobs:
       - name: Release
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_OBSERVABILITY_RELEASE_WEBHOOK }}
-        run: npx semantic-release --debug --no-ci --branches "refs/pull/4/merge"
+        run: npx semantic-release --debug
