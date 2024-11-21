@@ -1,4 +1,4 @@
-name: Device Discovery Release
+name: Device Discovery - release
 on:
   workflow_dispatch:
   push:
