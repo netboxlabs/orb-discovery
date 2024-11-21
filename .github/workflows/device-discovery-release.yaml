@@ -62,7 +62,7 @@ jobs:
           write-mode: overwrite
           contents: |
             {
-              "branches": "refs/pull/4/merge",
+              "branches": ["release", "feat/OBS-563-device-discovery-release-pipeline"],
               "repositoryUrl": "https://github.com/netboxlabs/orb-discovery",
               "debug": "true",
               "tagFormat": "${{ env.APP_NAME }}/v${version}",
@@ -204,7 +204,7 @@ jobs:
           write-mode: overwrite
           contents: |
             {
-              "branches": "refs/pull/4/merge",
+              "branches": ["release", "feat/OBS-563-device-discovery-release-pipeline"],
               "repositoryUrl": "https://github.com/netboxlabs/orb-discovery",
               "debug": "true",
               "tagFormat": "${{ env.APP_NAME }}/v${version}",
