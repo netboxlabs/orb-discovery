@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +14,9 @@ import (
 	"github.com/netboxlabs/orb-discovery/network-discovery/config"
 	"github.com/netboxlabs/orb-discovery/network-discovery/policy"
 )
+
+// set via ldflags -X option at build time
+var version = "unknown"
 
 type ReturnValue struct {
 	Detail string `json:"detail"`
@@ -27,6 +31,7 @@ type Server struct {
 }
 
 func (s *Server) Configure(logger *slog.Logger, manager *policy.Manager, config config.StartupConfig) {
+	s.stat.Version = version
 	s.stat.StartTime = time.Now()
 	s.manager = manager
 	s.logger = logger
@@ -58,7 +63,7 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) getStatus(c *gin.Context) {
-	s.stat.UpTime = time.Since(s.stat.StartTime)
+	s.stat.UpTimeSeconds = int64(math.Round(time.Since(s.stat.StartTime).Seconds()))
 	c.IndentedJSON(http.StatusOK, s.stat)
 }
 

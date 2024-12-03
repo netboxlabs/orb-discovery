@@ -3,9 +3,9 @@ package config
 import "time"
 
 type Status struct {
-	StartTime time.Time     `json:"start_time"`
-	UpTime    time.Duration `json:"up_time"`
-	Version   string        `json:"version"`
+	StartTime     time.Time `json:"start_time"`
+	UpTimeSeconds int64     `json:"up_time_seconds"`
+	Version       string    `json:"version"`
 }
 
 type Scope struct {
