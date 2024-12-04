@@ -11,8 +11,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const DefaultAppName = "network-discovery"
-
 type Manager struct {
 	policies map[string]*Runner
 	client   diode.Client
@@ -20,19 +18,10 @@ type Manager struct {
 	ctx      context.Context
 }
 
-func (m *Manager) Configure(ctx context.Context, logger *slog.Logger, config config.StartupConfig) error {
-	c, err := diode.NewClient(
-		config.Target,
-		DefaultAppName,
-		"0.1.0",
-		diode.WithAPIKey(config.ApiKey),
-	)
-	if err != nil {
-		return err
-	}
+func (m *Manager) Configure(ctx context.Context, logger *slog.Logger, client diode.Client) error {
 	m.ctx = ctx
 	m.logger = logger
-	m.client = c
+	m.client = client
 	m.policies = make(map[string]*Runner)
 	return nil
 }

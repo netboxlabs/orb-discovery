@@ -10,11 +10,17 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/network-discovery/config"
 	"github.com/netboxlabs/orb-discovery/network-discovery/policy"
 	"github.com/netboxlabs/orb-discovery/network-discovery/server"
 	"gopkg.in/yaml.v3"
 )
+
+const DefaultAppName = "network-discovery"
+
+// set via ldflags -X option at build time
+var version = "unknown"
 
 func newLogger(logLevel string, logFormat string) *slog.Logger {
 	var l slog.Level
@@ -81,18 +87,29 @@ func main() {
 		os.Exit(1)
 	}
 
+	client, err := diode.NewClient(
+		config.Network.Config.Target,
+		DefaultAppName,
+		version,
+		diode.WithAPIKey(config.Network.Config.ApiKey),
+	)
+	if err != nil {
+		fmt.Printf("error creating diode client: %v\n", err)
+		os.Exit(1)
+	}
+
 	ctx := context.Background()
 	logger := newLogger(config.Network.Config.LogLevel, config.Network.Config.LogFormat)
 
 	policyManager := policy.Manager{}
-	err = policyManager.Configure(ctx, logger, config.Network.Config)
+	err = policyManager.Configure(ctx, logger, client)
 	if err != nil {
 		logger.Error("policy manager configuration error", slog.Any("error", err))
 		os.Exit(1)
 	}
 
 	server := server.Server{}
-	server.Configure(logger, &policyManager, config.Network.Config)
+	server.Configure(logger, &policyManager, version, config.Network.Config)
 
 	// handle signals
 	done := make(chan bool, 1)

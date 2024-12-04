@@ -9,6 +9,8 @@ network:
     api_key: ${DIODE_API_KEY}
     host: 0.0.0.0
     port: 8072
+    log_level: info
+    log_format: json
 ```
 
 ### Policy RFC

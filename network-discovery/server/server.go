@@ -15,9 +15,6 @@ import (
 	"github.com/netboxlabs/orb-discovery/network-discovery/policy"
 )
 
-// set via ldflags -X option at build time
-var version = "unknown"
-
 type ReturnValue struct {
 	Detail string `json:"detail"`
 }
@@ -30,7 +27,7 @@ type Server struct {
 	config  config.StartupConfig
 }
 
-func (s *Server) Configure(logger *slog.Logger, manager *policy.Manager, config config.StartupConfig) {
+func (s *Server) Configure(logger *slog.Logger, manager *policy.Manager, version string, config config.StartupConfig) {
 	s.stat.Version = version
 	s.stat.StartTime = time.Now()
 	s.manager = manager
