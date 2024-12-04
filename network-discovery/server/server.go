@@ -68,9 +68,10 @@ func (s *Server) getStatus(c *gin.Context) {
 }
 
 func (s *Server) getCapabilities(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"capabilities": "ok",
-	})
+	type Capabilities struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	c.IndentedJSON(http.StatusOK, Capabilities{Capabilities: s.manager.GetCapabilities()})
 }
 
 func (s *Server) createPolicy(c *gin.Context) {
@@ -135,5 +136,5 @@ func (s *Server) deletePolicy(c *gin.Context) {
 }
 
 func (s *Server) Stop() {
-	// stop the server
+	s.manager.Stop()
 }

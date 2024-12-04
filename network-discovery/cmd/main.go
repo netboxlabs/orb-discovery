@@ -69,8 +69,10 @@ func main() {
 	config := config.Config{
 		Network: config.Network{
 			Config: config.StartupConfig{
-				Host: "localhost",
-				Port: 8073,
+				Host:      "0.0.0.0",
+				Port:      8073,
+				LogLevel:  "INFO",
+				LogFormat: "TEXT",
 			}},
 	}
 
@@ -80,7 +82,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	logger := newLogger("INFO", "TEXT")
+	logger := newLogger(config.Network.Config.LogLevel, config.Network.Config.LogFormat)
 
 	policyManager := policy.Manager{}
 	err = policyManager.Configure(ctx, logger, config.Network.Config)
@@ -103,6 +105,7 @@ func main() {
 			select {
 			case <-sigs:
 				logger.Warn("stop signal received, stopping network-discovery")
+				server.Stop()
 				cancelFunc()
 			case <-rootCtx.Done():
 				logger.Warn("main context cancelled")

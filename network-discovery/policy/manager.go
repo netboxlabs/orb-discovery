@@ -90,3 +90,7 @@ func (m *Manager) Stop() error {
 	}
 	return nil
 }
+
+func (m *Manager) GetCapabilities() []string {
+	return []string{"targets, ports"}
+}

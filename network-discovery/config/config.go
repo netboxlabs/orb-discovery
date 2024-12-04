@@ -23,10 +23,12 @@ type Policy struct {
 }
 
 type StartupConfig struct {
-	Target string `yaml:"target"`
-	ApiKey string `yaml:"api_key"`
-	Host   string `yaml:"host"`
-	Port   int32  `yaml:"port"`
+	Target    string `yaml:"target"`
+	ApiKey    string `yaml:"api_key"`
+	Host      string `yaml:"host"`
+	Port      int32  `yaml:"port"`
+	LogLevel  string `yaml:"log_level"`
+	LogFormat string `yaml:"log_format"`
 }
 
 type Network struct {

@@ -3,7 +3,7 @@ Orb network discovery backend
 
 ### Config RFC
 ```yaml
-discovery:
+network:
   config:
     target: grpc://localhost:8080/diode
     api_key: ${DIODE_API_KEY}
@@ -13,43 +13,35 @@ discovery:
 
 ### Policy RFC
 ```yaml
-discovery:
+network:
   policies:
-    discovery_1:
+    network_1:
       config:
         schedule: "* * * * *" #Cron expression
         defaults:
           site: New York NY
       scope:
-        - hostname: 192.168.0.32
-          username: ${USER}
-          password: admin
-        - driver: eos
-          hostname: 127.0.0.1
-          username: admin
-          password: ${ARISTA_PASSWORD}
-          optional_args:
-            enable_password: ${ARISTA_PASSWORD}
+        targets: [192.168.1.0/24]
     discover_once: # will run only once
       scope:
-        - hostname: 192.168.0.34
-          username: ${USER}
-          password: ${PASSWORD}
+         targets: 
+          - 92.168.0.34/24
+          - google.com
 ```
 ## Run device-discovery
 device-discovery can be run by installing it with pip
 ```sh
 git clone https://github.com/netboxlabs/orb-discovery.git
-cd orb-discovery/
-pip install --no-cache-dir ./device-discovery/
-device-discovery -c config.yaml
+cd network-discovery/
+make bin
+build/network-discovery -c config.yaml
 ```
 
 ## Docker Image
 device-discovery can be build and run using docker:
 ```sh
-docker build --no-cache -t device-discovery:develop -f device-discovery/docker/Dockerfile .
-docker run -v /local/orb:/usr/local/orb/ -p 8072:8072 device-discovery:develop device-discovery -c /usr/local/orb/config.yaml
+docker build --no-cache -t network-discovery:develop -f network-discovery/docker/Dockerfile .
+docker run -v /local/orb:/usr/local/orb/ -p 8073:8073 device-discovery:develop network-discovery -c /usr/local/orb/config.yaml
 ```
 
 ### Routes (v1)
@@ -57,7 +49,7 @@ docker run -v /local/orb:/usr/local/orb/ -p 8072:8072 device-discovery:develop d
 #### Get runtime and capabilities information
 
 <details>
- <summary><code>GET</code> <code><b>/api/v1/status</b></code> <code>(gets discovery runtime data)</code></summary>
+ <summary><code>GET</code> <code><b>/api/v1/status</b></code> <code>(gets network runtime data)</code></summary>
 
 ##### Parameters
 
@@ -67,18 +59,18 @@ docker run -v /local/orb:/usr/local/orb/ -p 8072:8072 device-discovery:develop d
 
 > | http code     | content-type                      | response                                                            |
 > |---------------|-----------------------------------|---------------------------------------------------------------------|
-> | `200`         | `application/json; charset=utf-8` |  `{"version": "0.1.0","up_time_seconds": 3678 }`                    |
+> | `200`         | `application/json; charset=utf-8` |  `{"start_time": "2024-12-03T17:56:53.682805366-03:00", "up_time_seconds": 3678, "version": "0.1.0" }`                    |
 
 ##### Example cURL
 
 > ```sh
->  curl -X GET -H "Content-Type: application/json" http://localhost:8072/api/v1/status
+>  curl -X GET -H "Content-Type: application/json" http://localhost:8073/api/v1/status
 > ```
 
 </details>
 
 <details>
- <summary><code>GET</code> <code><b>/api/v1/capabilities</b></code> <code>(gets device-discovery capabilities)</code></summary>
+ <summary><code>GET</code> <code><b>/api/v1/capabilities</b></code> <code>(gets network-discovery capabilities)</code></summary>
 
 ##### Parameters
 
@@ -88,12 +80,12 @@ docker run -v /local/orb:/usr/local/orb/ -p 8072:8072 device-discovery:develop d
 
 > | http code     | content-type                      | response                                                            |
 > |---------------|-----------------------------------|---------------------------------------------------------------------|
-> | `200`         | `application/json; charset=utf-8` | `{"supported_drivers":["ios","eos","junos","nxos","cumulus"]}`      |
+> | `200`         | `application/json; charset=utf-8` | `{"supported_args":["targets, ports"]}`      |
 
 ##### Example cURL
 
 > ```sh
->  curl -X GET -H "Content-Type: application/json" http://localhost:8072/api/v1/capabilities
+>  curl -X GET -H "Content-Type: application/json" http://localhost:8073/api/v1/capabilities
 > ```
 
 </details>
@@ -125,7 +117,7 @@ docker run -v /local/orb:/usr/local/orb/ -p 8072:8072 device-discovery:develop d
 ##### Example cURL
 
 > ```sh
->  curl -X POST -H "Content-Type: application/x-yaml" --data-binary @policy.yaml http://localhost:8072/api/v1/policies
+>  curl -X POST -H "Content-Type: application/x-yaml" --data-binary @policy.yaml http://localhost:8073/api/v1/policies
 > ```
 
 </details>
@@ -150,7 +142,7 @@ docker run -v /local/orb:/usr/local/orb/ -p 8072:8072 device-discovery:develop d
 ##### Example cURL
 
 > ```sh
->  curl -X DELETE http://localhost:8072/api/v1/policies/policy_name
+>  curl -X DELETE http://localhost:8073/api/v1/policies/policy_name
 > ```
 
 </details>
