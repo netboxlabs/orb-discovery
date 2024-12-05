@@ -15,10 +15,12 @@ import (
 	"github.com/netboxlabs/orb-discovery/network-discovery/policy"
 )
 
+// ReturnValue represents the return value
 type ReturnValue struct {
 	Detail string `json:"detail"`
 }
 
+// Server represents the network-discovery server
 type Server struct {
 	router  *gin.Engine
 	manager *policy.Manager
@@ -27,6 +29,7 @@ type Server struct {
 	config  config.StartupConfig
 }
 
+// Configure configures the network-discovery server
 func (s *Server) Configure(logger *slog.Logger, manager *policy.Manager, version string, config config.StartupConfig) {
 	s.stat.Version = version
 	s.stat.StartTime = time.Now()
@@ -46,6 +49,7 @@ func (s *Server) Configure(logger *slog.Logger, manager *policy.Manager, version
 	}
 }
 
+// Start starts the network-discovery server
 func (s *Server) Start() error {
 
 	go func() {
@@ -92,7 +96,10 @@ func (s *Server) createPolicy(c *gin.Context) {
 	for name, policy := range policies {
 		if s.manager.HasPolicy(name) {
 			for _, p := range rPolicies {
-				s.manager.StopPolicy(p)
+				if err = s.manager.StopPolicy(p); err != nil {
+					c.IndentedJSON(http.StatusInternalServerError, ReturnValue{err.Error()})
+					return
+				}
 			}
 			c.IndentedJSON(http.StatusConflict, ReturnValue{"policy '" + name + "' already exists"})
 			return
@@ -132,6 +139,9 @@ func (s *Server) deletePolicy(c *gin.Context) {
 	}
 }
 
+// Stop stops the network-discovery server
 func (s *Server) Stop() {
-	s.manager.Stop()
+	if err := s.manager.Stop(); err != nil {
+		s.logger.Error("stopping policy manager", "error", err)
+	}
 }

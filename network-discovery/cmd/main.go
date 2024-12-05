@@ -11,12 +11,14 @@ import (
 	"syscall"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
+	"gopkg.in/yaml.v3"
+
 	"github.com/netboxlabs/orb-discovery/network-discovery/config"
 	"github.com/netboxlabs/orb-discovery/network-discovery/policy"
 	"github.com/netboxlabs/orb-discovery/network-discovery/server"
-	"gopkg.in/yaml.v3"
 )
 
+// DefaultAppName is the default application name
 const DefaultAppName = "network-discovery"
 
 // set via ldflags -X option at build time
@@ -91,7 +93,7 @@ func main() {
 		config.Network.Config.Target,
 		DefaultAppName,
 		version,
-		diode.WithAPIKey(config.Network.Config.ApiKey),
+		diode.WithAPIKey(config.Network.Config.APIKey),
 	)
 	if err != nil {
 		fmt.Printf("error creating diode client: %v\n", err)
@@ -117,7 +119,7 @@ func main() {
 
 	go func() {
 		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 		for {
 			select {
 			case <-sigs:

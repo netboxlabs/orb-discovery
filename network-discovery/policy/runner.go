@@ -8,11 +8,18 @@ import (
 
 	"github.com/Ullaakut/nmap/v3"
 	"github.com/go-co-op/gocron/v2"
-
 	"github.com/netboxlabs/diode-sdk-go/diode"
+
 	"github.com/netboxlabs/orb-discovery/network-discovery/config"
 )
 
+// Define a custom type for the context key
+type contextKey string
+
+// Define the policy key
+const policyKey contextKey = "policy"
+
+// Runner represents the policy runner
 type Runner struct {
 	scanner   *nmap.Scanner
 	scheduler gocron.Scheduler
@@ -21,6 +28,7 @@ type Runner struct {
 	logger    *slog.Logger
 }
 
+// Configure configures the policy runner
 func (r *Runner) Configure(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client *diode.Client) error {
 	s, err := gocron.NewScheduler()
 	if err != nil {
@@ -38,7 +46,7 @@ func (r *Runner) Configure(ctx context.Context, logger *slog.Logger, name string
 	if err != nil {
 		return err
 	}
-	r.ctx = context.WithValue(ctx, "policy", name)
+	r.ctx = context.WithValue(ctx, policyKey, name)
 	n, err := nmap.NewScanner(
 		r.ctx,
 		nmap.WithTargets(policy.Scope.Targets...),
@@ -54,6 +62,7 @@ func (r *Runner) Configure(ctx context.Context, logger *slog.Logger, name string
 	return nil
 }
 
+// run runs the policy
 func (r *Runner) run() error {
 	result, warnings, err := r.scanner.Run()
 	if len(*warnings) > 0 {
@@ -85,10 +94,12 @@ func (r *Runner) run() error {
 	return nil
 }
 
+// Start starts the policy runner
 func (r *Runner) Start() {
 	r.scheduler.Start()
 }
 
+// Stop stops the policy runner
 func (r *Runner) Stop() error {
 	err := r.scheduler.Shutdown()
 	if err != nil {
