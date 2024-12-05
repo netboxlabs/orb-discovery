@@ -43,7 +43,7 @@ build/network-discovery -c config.yaml
 device-discovery can be build and run using docker:
 ```sh
 docker build --no-cache -t network-discovery:develop -f network-discovery/docker/Dockerfile .
-docker run -v /local/orb:/usr/local/orb/ -p 8073:8073 device-discovery:develop network-discovery -c /usr/local/orb/config.yaml
+docker run -v /local/orb:/usr/local/orb/ --net=host device-discovery:develop network-discovery -c /usr/local/orb/config.yaml
 ```
 
 ### Routes (v1)

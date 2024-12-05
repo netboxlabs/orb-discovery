@@ -83,12 +83,11 @@ func (r *Runner) run() error {
 
 	resp, err := (*r.client).Ingest(r.ctx, entities)
 	if err != nil {
-		r.logger.Error("error ingesting entities", slog.Any("error", err), slog.Any("policy", r.ctx.Value("policy")))
-	}
-	if resp != nil && resp.Errors != nil {
-		r.logger.Error("error ingesting entities", slog.Any("error", resp.Errors), slog.Any("policy", r.ctx.Value("policy")))
+		r.logger.Error("error ingesting entities", slog.Any("error", err), slog.Any("policy", r.ctx.Value(policyKey)))
+	} else if resp != nil && resp.Errors != nil {
+		r.logger.Error("error ingesting entities", slog.Any("error", resp.Errors), slog.Any("policy", r.ctx.Value(policyKey)))
 	} else {
-		r.logger.Info("entities ingested successfully", slog.Any("policy", r.ctx.Value("policy")))
+		r.logger.Info("entities ingested successfully", slog.Any("policy", r.ctx.Value(policyKey)))
 	}
 
 	return nil

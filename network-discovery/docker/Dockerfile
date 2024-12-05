@@ -13,9 +13,9 @@ RUN apk update && apk add --no-cache build-base make git
 
 RUN make bin
 
-FROM gcr.io/distroless/base:latest
+FROM alpine:3.20
 
-USER nonroot
+RUN apk update && apk add --no-cache nmap
 
 COPY --from=builder /src/network-discovery/build/network-discovery /usr/local/bin/network-discovery
 
