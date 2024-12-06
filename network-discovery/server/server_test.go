@@ -34,7 +34,7 @@ func (m *MockClient) Close() error {
 	return args.Error(0)
 }
 
-func TestServerConfigureAndStatus(t *testing.T) {
+func TestServerConfigureAndStart(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	client := new(MockClient)
@@ -52,6 +52,10 @@ func TestServerConfigureAndStatus(t *testing.T) {
 	version := "1.0.0"
 
 	srv.Configure(logger, &policyManager, version, config)
+	err = srv.Start()
+
+	// Check if the server started successfully
+	assert.NoError(t, err, "Server.Start should not return an error")
 
 	// Check /status endpoint
 	w := httptest.NewRecorder()
@@ -68,7 +72,7 @@ func TestServerConfigureAndStatus(t *testing.T) {
 	srv.Stop()
 }
 
-func TestServer_GetCapabilities(t *testing.T) {
+func TestServerGetCapabilities(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	client := new(MockClient)
@@ -127,6 +131,18 @@ func TestServerCreateDeletePolicy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `policy 'test-policy' was started`)
 
 	// Try to create the same policy again
+	body = []byte(`
+    network:
+      policies:
+        test-pol:
+          scope:
+            targets: 
+              - 192.168.31.1/24
+        test-policy:
+          scope:
+            targets: 
+              - 192.168.31.1/24
+    `)
 	w = httptest.NewRecorder()
 	request, _ = http.NewRequest(http.MethodPost, "/api/v1/policies", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/x-yaml")
@@ -151,4 +167,83 @@ func TestServerCreateDeletePolicy(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Contains(t, w.Body.String(), `policy not found`)
+}
+
+func TestServerCreateInvalidPolicy(t *testing.T) {
+	tests := []struct {
+		desc          string
+		contentType   string
+		body          []byte
+		returnCode    int
+		returnMessage string
+	}{
+		{
+			desc:          "invalid content type",
+			contentType:   "application/json",
+			body:          []byte(``),
+			returnCode:    http.StatusBadRequest,
+			returnMessage: `invalid Content-Type. Only 'application/x-yaml' is supported`,
+		},
+		{
+			desc:          "invalid YAML",
+			contentType:   "application/x-yaml",
+			body:          []byte(`invalid`),
+			returnCode:    http.StatusBadRequest,
+			returnMessage: `yaml: unmarshal errors:`,
+		},
+		{
+			desc:        "no policies found",
+			contentType: "application/x-yaml",
+			body: []byte(`
+            network:
+              config: {}
+            `),
+			returnCode:    http.StatusBadRequest,
+			returnMessage: `no policies found in the request`,
+		},
+		{
+			desc:        "no targets found",
+			contentType: "application/x-yaml",
+			body: []byte(`
+            network:
+              policies:
+                test-policy:
+                  scope:
+                    targets: 
+                      - 192.168.31.1/24
+                test-policy-invalid:
+                  config:
+                    defaults:
+                      site: New York NY
+                  scope:
+                    ports: [80, 443]
+            `),
+			returnCode:    http.StatusBadRequest,
+			returnMessage: `test-policy-invalid : no targets found in the policy`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			ctx := context.Background()
+			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
+			client := new(MockClient)
+
+			policyManager := policy.Manager{}
+			err := policyManager.Configure(ctx, logger, client)
+			assert.NoError(t, err, "Manager.Configure should not return an error")
+
+			srv := &server.Server{}
+			srv.Configure(logger, &policyManager, "1.0.0", config.StartupConfig{})
+
+			// Create invalid policy request
+			w := httptest.NewRecorder()
+			request, _ := http.NewRequest(http.MethodPost, "/api/v1/policies", bytes.NewReader(tt.body))
+			request.Header.Set("Content-Type", tt.contentType)
+
+			srv.Router().ServeHTTP(w, request)
+
+			assert.Equal(t, tt.returnCode, w.Code)
+			assert.Contains(t, w.Body.String(), tt.returnMessage)
+		})
+	}
 }
