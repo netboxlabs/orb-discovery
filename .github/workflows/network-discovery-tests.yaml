@@ -39,6 +39,7 @@ jobs:
       - name: Install additional dependencies
         run: |
           go install github.com/mfridman/tparse@v0.14.0
+          sudo apt-get -y install nmap
       - name: Run go test
         id: go-test
         run: |
