@@ -2,11 +2,12 @@ package policy_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
-	"github.com/Ullaakut/nmap/v3"
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/diode-sdk-go/diode/v1/diodepb"
 	"github.com/stretchr/testify/assert"
@@ -15,15 +16,6 @@ import (
 	"github.com/netboxlabs/orb-discovery/network-discovery/config"
 	"github.com/netboxlabs/orb-discovery/network-discovery/policy"
 )
-
-type MockScanner struct {
-	mock.Mock
-}
-
-func (m *MockScanner) Run() (*nmap.Run, *[]string, error) {
-	args := m.Called()
-	return args.Get(0).(*nmap.Run), args.Get(1).(*[]string), args.Error(2)
-}
 
 type MockClient struct {
 	mock.Mock
@@ -39,69 +31,91 @@ func (m *MockClient) Close() error {
 	return args.Error(0)
 }
 
-type MockScheduler struct {
-	mock.Mock
-}
-
-func (m *MockScheduler) Start() {
-	m.Called()
-}
-
-func (m *MockScheduler) Shutdown() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
 func TestRunnerConfigure(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	mockClient := new(MockClient)
 	runner := &policy.Runner{}
 
+	cron := "0 0 * * *"
 	policyConfig := config.Policy{
 		Config: config.PolicyConfig{
-			Schedule: nil,
+			Schedule: &cron,
 		},
 		Scope: config.Scope{
-			Targets: []string{"192.168.1.0/24"},
+			Targets: []string{"localhost"},
 		},
 	}
 
 	ctx := context.Background()
+
+	// Configure runner
 	err := runner.Configure(ctx, logger, "test-policy", policyConfig, mockClient)
-	assert.NoError(t, err, "Runner.Configure should not return an error")
-
-	// add scheduler
-	cron := "0 0 * * *"
-	policyConfig.Config.Schedule = &cron
-
-	err = runner.Configure(ctx, logger, "test-policy", policyConfig, mockClient)
 	assert.NoError(t, err, "Runner.Configure should not return an error")
 }
 
-// func TestRunner_Run(t *testing.T) {
-// 	logger := slog.New(nil) // Simplified logger for testing
-// 	mockScanner := new(MockScanner)
-// 	mockClient := new(MockClient)
-// 	runner := &policy.Runner{
-// 		scanner: mockScanner,
-// 		client:  mockClient,
-// 		logger:  logger,
-// 		ctx:     context.WithValue(context.Background(), policyKey, "test-policy"),
-// 	}
+func TestRunnerRun(t *testing.T) {
 
-// 	// Mock scanner behavior
-// 	mockScanner.On("Run").Return(&nmap.Run{
-// 		Hosts: []nmap.Host{
-// 			{Addresses: []nmap.Addr{{Addr: "192.168.1.1"}}},
-// 		},
-// 	}, &[]string{}, nil)
+	tests := []struct {
+		desc         string
+		mockResponse diodepb.IngestResponse
+		mockError    error
+	}{
+		{
+			desc:         "no error",
+			mockResponse: diodepb.IngestResponse{},
+			mockError:    nil,
+		},
+		{
+			desc:         "error",
+			mockResponse: diodepb.IngestResponse{},
+			mockError:    errors.New("ingestion failed"),
+		},
+		{
+			desc:         "no error",
+			mockResponse: diodepb.IngestResponse{Errors: []string{"fail1", "fail2"}},
+			mockError:    nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
 
-// 	// Mock client behavior
-// 	mockClient.On("Ingest", mock.Anything, mock.Anything).Return(nil, nil)
+			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
+			mockClient := new(MockClient)
+			runner := &policy.Runner{}
 
-// 	err := runner.Run()
-// 	assert.NoError(t, err, "Runner.Run should not return an error")
+			policyConfig := config.Policy{
+				Scope: config.Scope{
+					Targets: []string{"localhost"},
+				},
+			}
 
-// 	mockScanner.AssertExpectations(t)
-// 	mockClient.AssertExpectations(t)
-// }
+			ctx := context.Background()
+
+			// Configure runner
+			err := runner.Configure(ctx, logger, "test-policy", policyConfig, mockClient)
+			assert.NoError(t, err, "Runner.Configure should not return an error")
+
+			// Use a channel to signal that Ingest was called
+			ingestCalled := make(chan bool, 1)
+
+			mockClient.On("Ingest", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				ingestCalled <- true
+			}).Return(&tt.mockResponse, tt.mockError)
+
+			// Start the process
+			runner.Start()
+
+			// Wait for Ingest to be called or timeout
+			select {
+			case <-ingestCalled:
+				// Ingest was called, proceed
+			case <-time.After(5 * time.Second):
+				t.Fatal("Timeout: Ingest was not called")
+			}
+
+			// Stop the process
+			err = runner.Stop()
+			assert.NoError(t, err, "Runner.Stop should not return an error")
+		})
+	}
+}
