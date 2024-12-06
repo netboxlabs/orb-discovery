@@ -48,6 +48,9 @@ jobs:
           cat .coverage/test-report.md >> $GITHUB_OUTPUT
           echo 'EOF' >> $GITHUB_OUTPUT
           echo "coverage-total=$(cat .coverage/coverage.txt)" >> $GITHUB_OUTPUT
+      - name: Output Result
+        if: always()
+        run: cat .coverage/test-report.md
       - name: Find comment
         uses: peter-evans/find-comment@v3
         id: existing-comment
