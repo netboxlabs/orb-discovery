@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// NewLogger creates a configured slog
 func NewLogger(logLevel string, logFormat string) *slog.Logger {
 	var l slog.Level
 	switch strings.ToUpper(logLevel) {
@@ -36,6 +37,7 @@ func NewLogger(logLevel string, logFormat string) *slog.Logger {
 	return slog.New(h)
 }
 
+// RequireConfig is used at startup to request config file
 func RequireConfig() ([]byte, error) {
 
 	configPath := flag.String("config", "", "path to the configuration file (required)")
@@ -49,12 +51,12 @@ func RequireConfig() ([]byte, error) {
 
 	}
 	if _, err := os.Stat(*configPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("configuration file '%s' does not exist\n", *configPath)
+		return nil, fmt.Errorf("configuration file '%s' does not exist", *configPath)
 	}
 
 	fileData, err := os.ReadFile(*configPath)
 	if err != nil {
-		return nil, fmt.Errorf("error reading configuration file: %v\n", err)
+		return nil, fmt.Errorf("error reading configuration file: %v", err)
 	}
 
 	return fileData, nil

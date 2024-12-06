@@ -88,7 +88,7 @@ func TestRequireConfig(t *testing.T) {
 
 		data, err := config.RequireConfig()
 		assert.Nil(t, data)
-		assert.EqualError(t, err, "configuration file '/non/existent/path' does not exist\n")
+		assert.EqualError(t, err, "configuration file '/non/existent/path' does not exist")
 	})
 
 	t.Run("Error Reading Config File", func(t *testing.T) {
@@ -96,10 +96,12 @@ func TestRequireConfig(t *testing.T) {
 		tmpFile, err := os.CreateTemp("", "test-config")
 		assert.NoError(t, err)
 		tmpFilePath := tmpFile.Name()
-		tmpFile.Close()
+		err = tmpFile.Close()
+		assert.NoError(t, err)
 
 		// Remove the file to simulate read error
-		os.Remove(tmpFilePath)
+		err = os.Remove(tmpFilePath)
+		assert.NoError(t, err)
 
 		os.Args = []string{"network-discovery", "-config", tmpFilePath}
 		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError) // Reset flags
@@ -113,13 +115,17 @@ func TestRequireConfig(t *testing.T) {
 		// Create a temporary file with valid content
 		tmpFile, err := os.CreateTemp("", "test-config")
 		assert.NoError(t, err)
-		defer os.Remove(tmpFile.Name())
+		defer func() {
+			err = os.Remove(tmpFile.Name())
+			assert.NoError(t, err)
+		}()
 
 		// Write YAML content to the file
 		content := "network:\n  policies:\n    discovery_1:\n      config:\n        schedule: '* * * * *'"
 		_, err = tmpFile.WriteString(content)
 		assert.NoError(t, err)
-		tmpFile.Close()
+		err = tmpFile.Close()
+		assert.NoError(t, err)
 
 		// Pass the file path as a flag
 		os.Args = []string{"network-discovery", "-config", tmpFile.Name()}
