@@ -29,6 +29,10 @@ type Server struct {
 	config  config.StartupConfig
 }
 
+func init() {
+	gin.SetMode(gin.ReleaseMode)
+}
+
 // Configure configures the network-discovery server
 func (s *Server) Configure(logger *slog.Logger, manager *policy.Manager, version string, config config.StartupConfig) {
 	s.stat.Version = version
@@ -37,7 +41,6 @@ func (s *Server) Configure(logger *slog.Logger, manager *policy.Manager, version
 	s.logger = logger
 	s.config = config
 
-	gin.SetMode(gin.ReleaseMode)
 	s.router = gin.New()
 
 	v1 := s.router.Group("/api/v1")
