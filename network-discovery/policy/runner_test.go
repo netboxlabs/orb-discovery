@@ -55,7 +55,7 @@ func TestRunnerConfigure(t *testing.T) {
 
 func TestRunnerRun(t *testing.T) {
 
-	tests := []struct {
+	tests := []*struct {
 		desc         string
 		mockResponse diodepb.IngestResponse
 		mockError    error
@@ -66,12 +66,12 @@ func TestRunnerRun(t *testing.T) {
 			mockError:    nil,
 		},
 		{
-			desc:         "error",
+			desc:         "local error",
 			mockResponse: diodepb.IngestResponse{},
 			mockError:    errors.New("ingestion failed"),
 		},
 		{
-			desc:         "no error",
+			desc:         "server error",
 			mockResponse: diodepb.IngestResponse{Errors: []string{"fail1", "fail2"}},
 			mockError:    nil,
 		},
@@ -98,7 +98,7 @@ func TestRunnerRun(t *testing.T) {
 			// Use a channel to signal that Ingest was called
 			ingestCalled := make(chan bool, 1)
 
-			mockClient.On("Ingest", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			mockClient.On("Ingest", mock.Anything, mock.Anything).Run(func(_ mock.Arguments) {
 				ingestCalled <- true
 			}).Return(&tt.mockResponse, tt.mockError)
 
