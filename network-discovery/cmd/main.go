@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -24,57 +22,15 @@ const DefaultAppName = "network-discovery"
 // set via ldflags -X option at build time
 var version = "unknown"
 
-func newLogger(logLevel string, logFormat string) *slog.Logger {
-	var l slog.Level
-	switch strings.ToUpper(logLevel) {
-	case "DEBUG":
-		l = slog.LevelDebug
-	case "INFO":
-		l = slog.LevelInfo
-	case "WARN":
-		l = slog.LevelWarn
-	case "ERROR":
-		l = slog.LevelError
-	default:
-		l = slog.LevelDebug
-	}
-
-	var h slog.Handler
-	switch strings.ToUpper(logFormat) {
-	case "TEXT":
-		h = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: l, AddSource: false})
-	case "JSON":
-		h = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: l, AddSource: false})
-	default:
-		h = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: l, AddSource: false})
-	}
-
-	return slog.New(h)
-}
-
 func main() {
 
-	configPath := flag.String("config", "", "path to the configuration file (required)")
-
-	flag.Parse()
-
-	if *configPath == "" {
-		fmt.Fprintf(os.Stderr, "Usage of network-discovery:\n")
-		flag.PrintDefaults()
-		os.Exit(1)
-	}
-	if _, err := os.Stat(*configPath); os.IsNotExist(err) {
-		fmt.Printf("configuration file '%s' does not exist\n", *configPath)
-		os.Exit(1)
-	}
-
-	yamlData, err := os.ReadFile(*configPath)
+	fileData, err := config.RequireConfig()
 	if err != nil {
-		fmt.Printf("error reading configuration file: %v\n", err)
+		fmt.Printf("%v\n", err)
 		os.Exit(1)
 	}
 
-	config := config.Config{
+	c := config.Config{
 		Network: config.Network{
 			Config: config.StartupConfig{
 				Host:      "0.0.0.0",
@@ -84,16 +40,16 @@ func main() {
 			}},
 	}
 
-	if err = yaml.Unmarshal(yamlData, &config); err != nil {
+	if err = yaml.Unmarshal(fileData, &c); err != nil {
 		fmt.Printf("error parsing configuration file: %v\n", err)
 		os.Exit(1)
 	}
 
 	client, err := diode.NewClient(
-		config.Network.Config.Target,
+		c.Network.Config.Target,
 		DefaultAppName,
 		version,
-		diode.WithAPIKey(config.Network.Config.APIKey),
+		diode.WithAPIKey(c.Network.Config.APIKey),
 	)
 	if err != nil {
 		fmt.Printf("error creating diode client: %v\n", err)
@@ -101,7 +57,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	logger := newLogger(config.Network.Config.LogLevel, config.Network.Config.LogFormat)
+	logger := config.NewLogger(c.Network.Config.LogLevel, c.Network.Config.LogFormat)
 
 	policyManager := policy.Manager{}
 	err = policyManager.Configure(ctx, logger, client)
@@ -111,7 +67,7 @@ func main() {
 	}
 
 	server := server.Server{}
-	server.Configure(logger, &policyManager, version, config.Network.Config)
+	server.Configure(logger, &policyManager, version, c.Network.Config)
 
 	// handle signals
 	done := make(chan bool, 1)
