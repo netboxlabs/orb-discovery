@@ -57,7 +57,7 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 
 	if !m.HasPolicy(name) {
 		r := Runner{}
-		if err := r.Configure(m.ctx, m.logger, name, policy, &m.client); err != nil {
+		if err := r.Configure(m.ctx, m.logger, name, policy, m.client); err != nil {
 			return err
 		}
 

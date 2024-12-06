@@ -24,12 +24,12 @@ type Runner struct {
 	scanner   *nmap.Scanner
 	scheduler gocron.Scheduler
 	ctx       context.Context
-	client    *diode.Client
+	client    diode.Client
 	logger    *slog.Logger
 }
 
 // Configure configures the policy runner
-func (r *Runner) Configure(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client *diode.Client) error {
+func (r *Runner) Configure(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client) error {
 	s, err := gocron.NewScheduler()
 	if err != nil {
 		return err
@@ -81,7 +81,7 @@ func (r *Runner) run() error {
 		entities = append(entities, ip)
 	}
 
-	resp, err := (*r.client).Ingest(r.ctx, entities)
+	resp, err := r.client.Ingest(r.ctx, entities)
 	if err != nil {
 		r.logger.Error("error ingesting entities", slog.Any("error", err), slog.Any("policy", r.ctx.Value(policyKey)))
 	} else if resp != nil && resp.Errors != nil {

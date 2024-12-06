@@ -49,6 +49,11 @@ func (s *Server) Configure(logger *slog.Logger, manager *policy.Manager, version
 	}
 }
 
+// Router returns the router
+func (s *Server) Router() *gin.Engine {
+	return s.router
+}
+
 // Start starts the network-discovery server
 func (s *Server) Start() error {
 
