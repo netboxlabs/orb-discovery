@@ -70,13 +70,13 @@ func TestNewLogger(t *testing.T) {
 	}
 }
 
-func TestRequireConfig(t *testing.T) {
+func TestReadConfigFile(t *testing.T) {
 	t.Run("No Config Path Provided", func(t *testing.T) {
 		// Simulate no flags passed
 		os.Args = []string{"network-discovery"}
 		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError) // Reset flags
 
-		data, err := config.RequireConfig()
+		data, err := config.ReadConfigFile()
 		assert.Nil(t, data)
 		assert.EqualError(t, err, "")
 	})
@@ -86,7 +86,7 @@ func TestRequireConfig(t *testing.T) {
 		os.Args = []string{"network-discovery", "-config", "/non/existent/path"}
 		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError) // Reset flags
 
-		data, err := config.RequireConfig()
+		data, err := config.ReadConfigFile()
 		assert.Nil(t, data)
 		assert.EqualError(t, err, "configuration file '/non/existent/path' does not exist")
 	})
@@ -106,7 +106,7 @@ func TestRequireConfig(t *testing.T) {
 		os.Args = []string{"network-discovery", "-config", tmpFilePath}
 		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError) // Reset flags
 
-		data, err := config.RequireConfig()
+		data, err := config.ReadConfigFile()
 		assert.Nil(t, data)
 		assert.Contains(t, err.Error(), "does not exist")
 	})
@@ -131,7 +131,7 @@ func TestRequireConfig(t *testing.T) {
 		os.Args = []string{"network-discovery", "-config", tmpFile.Name()}
 		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError) // Reset flags
 
-		data, err := config.RequireConfig()
+		data, err := config.ReadConfigFile()
 		assert.NoError(t, err)
 		assert.Equal(t, content, string(data))
 	})

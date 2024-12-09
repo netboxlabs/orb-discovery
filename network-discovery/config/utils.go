@@ -37,8 +37,8 @@ func NewLogger(logLevel string, logFormat string) *slog.Logger {
 	return slog.New(h)
 }
 
-// RequireConfig is used at startup to request config file
-func RequireConfig() ([]byte, error) {
+// ReadConfigFile reads required config file
+func ReadConfigFile() ([]byte, error) {
 
 	configPath := flag.String("config", "", "path to the configuration file (required)")
 

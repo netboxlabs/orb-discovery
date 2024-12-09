@@ -20,7 +20,7 @@ import (
 const AppName = "network-discovery"
 
 func main() {
-	fileData, err := config.RequireConfig()
+	fileData, err := config.ReadConfigFile()
 	if err != nil {
 		fmt.Printf("%v\n", err)
 		os.Exit(1)
