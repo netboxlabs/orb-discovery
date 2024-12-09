@@ -20,7 +20,7 @@ type Manager struct {
 	ctx      context.Context
 }
 
-// Configure configures the policy manager
+// NewManager returns a new policy manager
 func NewManager(ctx context.Context, logger *slog.Logger, client diode.Client) *Manager {
 	return &Manager{
 		ctx:      ctx,
