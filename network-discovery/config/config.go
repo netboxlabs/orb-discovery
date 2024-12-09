@@ -12,6 +12,7 @@ type Status struct {
 // Scope represents the scope of a policy
 type Scope struct {
 	Targets []string `yaml:"targets"`
+	Timeout int      `yaml:"timeout"`
 }
 
 // PolicyConfig represents the configuration of a policy

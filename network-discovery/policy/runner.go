@@ -24,6 +24,8 @@ type Runner struct {
 	scanner   *nmap.Scanner
 	scheduler gocron.Scheduler
 	ctx       context.Context
+	cancel    context.CancelFunc
+	task      gocron.Task
 	client    diode.Client
 	logger    *slog.Logger
 }
@@ -41,17 +43,22 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 		logger:    logger,
 	}
 
-	task := gocron.NewTask(runner.run)
+	runner.task = gocron.NewTask(runner.run)
 	if policy.Config.Schedule != nil {
-		_, err = runner.scheduler.NewJob(gocron.CronJob(*policy.Config.Schedule, false), task, gocron.WithSingletonMode(gocron.LimitModeReschedule))
+		_, err = runner.scheduler.NewJob(gocron.CronJob(*policy.Config.Schedule, false), runner.task, gocron.WithSingletonMode(gocron.LimitModeReschedule))
 	} else {
 		_, err = runner.scheduler.NewJob(gocron.OneTimeJob(
-			gocron.OneTimeJobStartDateTime(time.Now().Add(1*time.Second))), task, gocron.WithSingletonMode(gocron.LimitModeReschedule))
+			gocron.OneTimeJobStartDateTime(time.Now().Add(1*time.Second))), runner.task, gocron.WithSingletonMode(gocron.LimitModeReschedule))
 	}
 	if err != nil {
 		return nil, err
 	}
+	timeout := time.Duration(policy.Scope.Timeout) * time.Minute
+	if timeout == 0 {
+		timeout = 2 * time.Minute
+	}
 	runner.ctx = context.WithValue(ctx, policyKey, name)
+	runner.ctx, runner.cancel = context.WithTimeout(runner.ctx, timeout)
 	n, err := nmap.NewScanner(
 		runner.ctx,
 		nmap.WithTargets(policy.Scope.Targets...),
@@ -68,6 +75,7 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 
 // run runs the policy
 func (r *Runner) run() error {
+	defer r.cancel()
 	result, warnings, err := r.scanner.Run()
 	if len(*warnings) > 0 {
 		r.logger.Warn("run finished with warnings", slog.String("warnings", fmt.Sprintf("%v", *warnings)))
@@ -104,5 +112,8 @@ func (r *Runner) Start() {
 
 // Stop stops the policy runner
 func (r *Runner) Stop() error {
+	if err := r.scheduler.StopJobs(); err != nil {
+		return err
+	}
 	return r.scheduler.Shutdown()
 }
