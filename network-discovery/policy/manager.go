@@ -57,13 +57,13 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 	}
 
 	if !m.HasPolicy(name) {
-		r := Runner{}
-		if err := r.Configure(m.ctx, m.logger, name, policy, m.client); err != nil {
+		r, err := NewRunner(m.ctx, m.logger, name, policy, m.client)
+		if err != nil {
 			return err
 		}
 
 		r.Start()
-		m.policies[name] = &r
+		m.policies[name] = r
 	}
 	return nil
 }

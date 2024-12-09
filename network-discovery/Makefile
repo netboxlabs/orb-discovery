@@ -3,12 +3,12 @@ BUILD_DIR ?= ./build
 GOARCH ?= $(shell dpkg-architecture -q DEB_BUILD_ARCH)
 GOOS ?= $(shell dpkg-architecture -q DEB_TARGET_ARCH_OS)
 VERSION_DIR ?= ./version
-DIODE_VERSION := $(shell cat $(VERSION_DIR)/BUILD_VERSION.txt)
+VERSION := $(shell cat $(VERSION_DIR)/BUILD_VERSION.txt)
 COMMIT_SHA := $(shell git rev-parse --short HEAD)
 
-.PHONY: buid
+.PHONY: build
 build:
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=$(GOARCH) GOARM=$(GOARM) go build -mod=mod -o build/network-discovery cmd/main.go
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=$(GOARCH) GOARM=$(GOARM) go build -mod=mod -o ${BUILD_DIR}/network-discovery cmd/main.go
 
 .PHONY: lint
 lint:

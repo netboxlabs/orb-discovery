@@ -31,11 +31,9 @@ func (m *MockClient) Close() error {
 	return args.Error(0)
 }
 
-func TestRunnerConfigure(t *testing.T) {
+func TestNewRunner(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	mockClient := new(MockClient)
-	runner := &policy.Runner{}
-
 	cron := "0 0 * * *"
 	policyConfig := config.Policy{
 		Config: config.PolicyConfig{
@@ -45,12 +43,11 @@ func TestRunnerConfigure(t *testing.T) {
 			Targets: []string{"localhost"},
 		},
 	}
-
 	ctx := context.Background()
 
-	// Configure runner
-	err := runner.Configure(ctx, logger, "test-policy", policyConfig, mockClient)
-	assert.NoError(t, err, "Runner.Configure should not return an error")
+	// Create new runner
+	_, err := policy.NewRunner(ctx, logger, "test-policy", policyConfig, mockClient)
+	assert.NoError(t, err, "policy.NewRunner should not return an error")
 }
 
 func TestRunnerRun(t *testing.T) {
@@ -81,19 +78,16 @@ func TestRunnerRun(t *testing.T) {
 
 			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 			mockClient := new(MockClient)
-			runner := &policy.Runner{}
-
 			policyConfig := config.Policy{
 				Scope: config.Scope{
 					Targets: []string{"localhost"},
 				},
 			}
-
 			ctx := context.Background()
 
-			// Configure runner
-			err := runner.Configure(ctx, logger, "test-policy", policyConfig, mockClient)
-			assert.NoError(t, err, "Runner.Configure should not return an error")
+			// Create runner
+			runner, err := policy.NewRunner(ctx, logger, "test-policy", policyConfig, mockClient)
+			assert.NoError(t, err, "policy.NewRunner should not return an error")
 
 			// Use a channel to signal that Ingest was called
 			ingestCalled := make(chan bool, 1)

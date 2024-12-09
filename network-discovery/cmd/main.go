@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -20,9 +21,25 @@ import (
 const AppName = "network-discovery"
 
 func main() {
-	fileData, err := config.ReadConfigFile()
+
+	configPath := flag.String("config", "", "path to the configuration file (required)")
+
+	flag.Parse()
+
+	if *configPath == "" {
+		fmt.Fprintf(os.Stderr, "Usage of network-discovery:\n")
+		flag.PrintDefaults()
+		os.Exit(1)
+
+	}
+	if _, err := os.Stat(*configPath); os.IsNotExist(err) {
+		fmt.Printf("configuration file '%s' does not exist", *configPath)
+		os.Exit(1)
+	}
+
+	fileData, err := os.ReadFile(*configPath)
 	if err != nil {
-		fmt.Printf("%v\n", err)
+		fmt.Printf("error reading configuration file: %v", err)
 		os.Exit(1)
 	}
 

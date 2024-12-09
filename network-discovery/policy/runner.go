@@ -28,38 +28,42 @@ type Runner struct {
 	logger    *slog.Logger
 }
 
-// Configure configures the policy runner
-func (r *Runner) Configure(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client) error {
+// NewRunner returns a new policy runner
+func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client) (*Runner, error) {
 	s, err := gocron.NewScheduler()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	r.scheduler = s
 
-	task := gocron.NewTask(r.run)
+	runner := &Runner{
+		scheduler: s,
+		client:    client,
+		logger:    logger,
+	}
+
+	task := gocron.NewTask(runner.run)
 	if policy.Config.Schedule != nil {
-		_, err = r.scheduler.NewJob(gocron.CronJob(*policy.Config.Schedule, false), task, gocron.WithSingletonMode(gocron.LimitModeReschedule))
+		_, err = runner.scheduler.NewJob(gocron.CronJob(*policy.Config.Schedule, false), task, gocron.WithSingletonMode(gocron.LimitModeReschedule))
 	} else {
-		_, err = r.scheduler.NewJob(gocron.OneTimeJob(
+		_, err = runner.scheduler.NewJob(gocron.OneTimeJob(
 			gocron.OneTimeJobStartDateTime(time.Now().Add(1*time.Second))), task, gocron.WithSingletonMode(gocron.LimitModeReschedule))
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	r.ctx = context.WithValue(ctx, policyKey, name)
+	runner.ctx = context.WithValue(ctx, policyKey, name)
 	n, err := nmap.NewScanner(
-		r.ctx,
+		runner.ctx,
 		nmap.WithTargets(policy.Scope.Targets...),
 		nmap.WithPingScan(),
 		nmap.WithNonInteractive(),
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	r.scanner = n
-	r.client = client
-	r.logger = logger
-	return nil
+	runner.scanner = n
+
+	return runner, nil
 }
 
 // run runs the policy
