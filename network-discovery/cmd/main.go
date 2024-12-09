@@ -95,10 +95,7 @@ func main() {
 		}
 	}()
 
-	if err = server.Start(); err != nil {
-		logger.Error("network-discovery startup error")
-		os.Exit(1)
-	}
+	server.Start()
 
 	<-done
 }

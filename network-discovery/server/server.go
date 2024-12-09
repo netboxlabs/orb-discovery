@@ -63,7 +63,7 @@ func (s *Server) Router() *gin.Engine {
 }
 
 // Start starts the network-discovery server
-func (s *Server) Start() error {
+func (s *Server) Start() {
 	go func() {
 		serv := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
 		s.logger.Info("starting network-discovery server at: " + serv)
@@ -71,8 +71,6 @@ func (s *Server) Start() error {
 			s.logger.Error("shutting down the server", "error", err)
 		}
 	}()
-
-	return nil
 }
 
 func (s *Server) getStatus(c *gin.Context) {

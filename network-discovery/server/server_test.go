@@ -49,10 +49,7 @@ func TestServerConfigureAndStart(t *testing.T) {
 	version := "1.0.0"
 
 	srv.Configure(logger, policyManager, version, config)
-	err := srv.Start()
-
-	// Check if the server started successfully
-	assert.NoError(t, err, "Server.Start should not return an error")
+	srv.Start()
 
 	// Check /status endpoint
 	w := httptest.NewRecorder()
