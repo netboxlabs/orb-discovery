@@ -1,7 +1,7 @@
 CGO_ENABLED ?= 0
 BUILD_DIR ?= ./build
-GOARCH ?= $(shell dpkg-architecture -q DEB_BUILD_ARCH)
-GOOS ?= $(shell dpkg-architecture -q DEB_TARGET_ARCH_OS)
+GOARCH ?= $(shell go env GOARCH)
+GOOS ?= $(shell go env GOOS)
 VERSION_DIR ?= ./version
 VERSION := $(shell cat $(VERSION_DIR)/BUILD_VERSION.txt)
 COMMIT_SHA := $(shell git rev-parse --short HEAD)
