@@ -15,9 +15,14 @@ import (
 	"github.com/netboxlabs/orb-discovery/network-discovery/policy"
 )
 
-// ReturnValue represents the return value
-type ReturnValue struct {
+// Response represents the server response
+type Response struct {
 	Detail string `json:"detail"`
+}
+
+// Capabilities represents the response for server capabilities
+type Capabilities struct {
+	Capabilities []string `json:"capabilities"`
 }
 
 // Server represents the network-discovery server
@@ -59,7 +64,6 @@ func (s *Server) Router() *gin.Engine {
 
 // Start starts the network-discovery server
 func (s *Server) Start() error {
-
 	go func() {
 		serv := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
 		s.logger.Info("starting network-discovery server at: " + serv)
@@ -77,26 +81,23 @@ func (s *Server) getStatus(c *gin.Context) {
 }
 
 func (s *Server) getCapabilities(c *gin.Context) {
-	type Capabilities struct {
-		Capabilities []string `json:"capabilities"`
-	}
 	c.IndentedJSON(http.StatusOK, Capabilities{Capabilities: s.manager.GetCapabilities()})
 }
 
 func (s *Server) createPolicy(c *gin.Context) {
 	if t := c.Request.Header.Get("Content-type"); t != "application/x-yaml" {
-		c.IndentedJSON(http.StatusBadRequest, ReturnValue{"invalid Content-Type. Only 'application/x-yaml' is supported"})
+		c.IndentedJSON(http.StatusBadRequest, Response{"invalid Content-Type. Only 'application/x-yaml' is supported"})
 		return
 	}
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.IndentedJSON(http.StatusBadRequest, ReturnValue{err.Error()})
+		c.IndentedJSON(http.StatusBadRequest, Response{err.Error()})
 		return
 	}
 
 	policies, err := s.manager.ParsePolicies(body)
 	if err != nil {
-		c.IndentedJSON(http.StatusBadRequest, ReturnValue{err.Error()})
+		c.IndentedJSON(http.StatusBadRequest, Response{err.Error()})
 		return
 	}
 
@@ -105,11 +106,11 @@ func (s *Server) createPolicy(c *gin.Context) {
 		if s.manager.HasPolicy(name) {
 			for _, p := range rPolicies {
 				if err = s.manager.StopPolicy(p); err != nil {
-					c.IndentedJSON(http.StatusInternalServerError, ReturnValue{err.Error()})
+					c.IndentedJSON(http.StatusInternalServerError, Response{err.Error()})
 					return
 				}
 			}
-			c.IndentedJSON(http.StatusConflict, ReturnValue{"policy '" + name + "' already exists"})
+			c.IndentedJSON(http.StatusConflict, Response{"policy '" + name + "' already exists"})
 			return
 		}
 
@@ -119,31 +120,26 @@ func (s *Server) createPolicy(c *gin.Context) {
 					err = fmt.Errorf("%v: %v", err, sErr)
 				}
 			}
-			c.IndentedJSON(http.StatusBadRequest, ReturnValue{err.Error()})
+			c.IndentedJSON(http.StatusBadRequest, Response{err.Error()})
 			return
 		}
 		rPolicies = append(rPolicies, name)
 	}
 
-	if len(rPolicies) == 1 {
-		c.IndentedJSON(http.StatusCreated, ReturnValue{"policy '" + rPolicies[0] + "' was started"})
-	} else {
-		c.IndentedJSON(http.StatusCreated, ReturnValue{"policies [" + strings.Join(rPolicies, ",") + "] were started"})
-	}
-
+	c.IndentedJSON(http.StatusCreated, Response{fmt.Sprintf("policies [%s] were started", strings.Join(rPolicies, ","))})
 }
 
 func (s *Server) deletePolicy(c *gin.Context) {
 	policy := c.Param("policy")
 	if !s.manager.HasPolicy(policy) {
-		c.IndentedJSON(http.StatusNotFound, ReturnValue{"policy not found"})
+		c.IndentedJSON(http.StatusNotFound, Response{"policy not found"})
 		return
 	}
 
 	if err := s.manager.StopPolicy(policy); err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, ReturnValue{err.Error()})
+		c.IndentedJSON(http.StatusInternalServerError, Response{err.Error()})
 	} else {
-		c.IndentedJSON(http.StatusOK, ReturnValue{"policy '" + policy + "' was deleted"})
+		c.IndentedJSON(http.StatusOK, Response{"policy '" + policy + "' was deleted"})
 	}
 }
 

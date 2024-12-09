@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,23 +13,20 @@ import (
 	"github.com/netboxlabs/orb-discovery/network-discovery/config"
 	"github.com/netboxlabs/orb-discovery/network-discovery/policy"
 	"github.com/netboxlabs/orb-discovery/network-discovery/server"
+	"github.com/netboxlabs/orb-discovery/network-discovery/version"
 )
 
-// DefaultAppName is the default application name
-const DefaultAppName = "network-discovery"
-
-// set via ldflags -X option at build time
-var version = "unknown"
+// AppName is the application name
+const AppName = "network-discovery"
 
 func main() {
-
 	fileData, err := config.RequireConfig()
 	if err != nil {
 		fmt.Printf("%v\n", err)
 		os.Exit(1)
 	}
 
-	c := config.Config{
+	cfg := config.Config{
 		Network: config.Network{
 			Config: config.StartupConfig{
 				Host:      "0.0.0.0",
@@ -40,16 +36,16 @@ func main() {
 			}},
 	}
 
-	if err = yaml.Unmarshal(fileData, &c); err != nil {
+	if err = yaml.Unmarshal(fileData, &cfg); err != nil {
 		fmt.Printf("error parsing configuration file: %v\n", err)
 		os.Exit(1)
 	}
 
 	client, err := diode.NewClient(
-		c.Network.Config.Target,
-		DefaultAppName,
-		version,
-		diode.WithAPIKey(c.Network.Config.APIKey),
+		cfg.Network.Config.Target,
+		AppName,
+		version.GetBuildVersion(),
+		diode.WithAPIKey(cfg.Network.Config.APIKey),
 	)
 	if err != nil {
 		fmt.Printf("error creating diode client: %v\n", err)
@@ -57,17 +53,11 @@ func main() {
 	}
 
 	ctx := context.Background()
-	logger := config.NewLogger(c.Network.Config.LogLevel, c.Network.Config.LogFormat)
+	logger := config.NewLogger(cfg.Network.Config.LogLevel, cfg.Network.Config.LogFormat)
 
-	policyManager := policy.Manager{}
-	err = policyManager.Configure(ctx, logger, client)
-	if err != nil {
-		logger.Error("policy manager configuration error", slog.Any("error", err))
-		os.Exit(1)
-	}
-
+	policyManager := policy.NewManager(ctx, logger, client)
 	server := server.Server{}
-	server.Configure(logger, &policyManager, version, c.Network.Config)
+	server.Configure(logger, policyManager, version.GetBuildVersion(), cfg.Network.Config)
 
 	// handle signals
 	done := make(chan bool, 1)
@@ -90,8 +80,7 @@ func main() {
 		}
 	}()
 
-	err = server.Start()
-	if err != nil {
+	if err = server.Start(); err != nil {
 		logger.Error("network-discovery startup error")
 		os.Exit(1)
 	}

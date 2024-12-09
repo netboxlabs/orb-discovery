@@ -100,9 +100,5 @@ func (r *Runner) Start() {
 
 // Stop stops the policy runner
 func (r *Runner) Stop() error {
-	err := r.scheduler.Shutdown()
-	if err != nil {
-		return err
-	}
-	return nil
+	return r.scheduler.Shutdown()
 }

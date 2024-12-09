@@ -1,11 +1,13 @@
 CGO_ENABLED ?= 0
+BUILD_DIR ?= ./build
 GOARCH ?= $(shell dpkg-architecture -q DEB_BUILD_ARCH)
 GOOS ?= $(shell dpkg-architecture -q DEB_TARGET_ARCH_OS)
-VERSION = $(shell cat VERSION)
-COMMIT_HASH = $(shell git rev-parse --short HEAD)
+VERSION_DIR = $(ROOT_DIR)/version
+DIODE_VERSION := $(shell cat $(VERSION_DIR)/BUILD_VERSION.txt)
+COMMIT_SHA := $(shell git rev-parse --short HEAD)
 
-.PHONY: bin
-bin:
+.PHONY: buid
+build:
 	CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=$(GOARCH) GOARM=$(GOARM) go build -mod=mod -ldflags "-extldflags '-static' -X 'main.version=$(VERSION)-$(COMMIT_HASH)'" -o build/network-discovery cmd/main.go
 
 .PHONY: lint

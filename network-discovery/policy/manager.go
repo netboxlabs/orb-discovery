@@ -21,12 +21,13 @@ type Manager struct {
 }
 
 // Configure configures the policy manager
-func (m *Manager) Configure(ctx context.Context, logger *slog.Logger, client diode.Client) error {
-	m.ctx = ctx
-	m.logger = logger
-	m.client = client
-	m.policies = make(map[string]*Runner)
-	return nil
+func NewManager(ctx context.Context, logger *slog.Logger, client diode.Client) *Manager {
+	return &Manager{
+		ctx:      ctx,
+		client:   client,
+		logger:   logger,
+		policies: make(map[string]*Runner),
+	}
 }
 
 // ParsePolicies parses the policies from the request

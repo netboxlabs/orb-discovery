@@ -38,10 +38,7 @@ func TestServerConfigureAndStart(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	client := new(MockClient)
-
-	policyManager := policy.Manager{}
-	err := policyManager.Configure(ctx, logger, client)
-	assert.NoError(t, err, "Manager.Configure should not return an error")
+	policyManager := policy.NewManager(ctx, logger, client)
 
 	srv := &server.Server{}
 
@@ -51,8 +48,8 @@ func TestServerConfigureAndStart(t *testing.T) {
 	}
 	version := "1.0.0"
 
-	srv.Configure(logger, &policyManager, version, config)
-	err = srv.Start()
+	srv.Configure(logger, policyManager, version, config)
+	err := srv.Start()
 
 	// Check if the server started successfully
 	assert.NoError(t, err, "Server.Start should not return an error")
@@ -76,13 +73,10 @@ func TestServerGetCapabilities(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	client := new(MockClient)
-
-	policyManager := policy.Manager{}
-	err := policyManager.Configure(ctx, logger, client)
-	assert.NoError(t, err, "Manager.Configure should not return an error")
+	policyManager := policy.NewManager(ctx, logger, client)
 
 	srv := &server.Server{}
-	srv.Configure(logger, &policyManager, "1.0.0", config.StartupConfig{})
+	srv.Configure(logger, policyManager, "1.0.0", config.StartupConfig{})
 
 	// Check /capabilities endpoint
 	w := httptest.NewRecorder()
@@ -100,13 +94,10 @@ func TestServerCreateDeletePolicy(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	client := new(MockClient)
-
-	policyManager := policy.Manager{}
-	err := policyManager.Configure(ctx, logger, client)
-	assert.NoError(t, err, "Manager.Configure should not return an error")
+	policyManager := policy.NewManager(ctx, logger, client)
 
 	srv := &server.Server{}
-	srv.Configure(logger, &policyManager, "1.0.0", config.StartupConfig{})
+	srv.Configure(logger, policyManager, "1.0.0", config.StartupConfig{})
 
 	body := []byte(`
     network:
@@ -128,7 +119,7 @@ func TestServerCreateDeletePolicy(t *testing.T) {
 	srv.Router().ServeHTTP(w, request)
 
 	assert.Equal(t, http.StatusCreated, w.Code)
-	assert.Contains(t, w.Body.String(), `policy 'test-policy' was started`)
+	assert.Contains(t, w.Body.String(), `policies [test-policy] were started`)
 
 	// Try to create the same policy again
 	body = []byte(`
@@ -227,13 +218,10 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			ctx := context.Background()
 			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 			client := new(MockClient)
-
-			policyManager := policy.Manager{}
-			err := policyManager.Configure(ctx, logger, client)
-			assert.NoError(t, err, "Manager.Configure should not return an error")
+			policyManager := policy.NewManager(ctx, logger, client)
 
 			srv := &server.Server{}
-			srv.Configure(logger, &policyManager, "1.0.0", config.StartupConfig{})
+			srv.Configure(logger, policyManager, "1.0.0", config.StartupConfig{})
 
 			// Create invalid policy request
 			w := httptest.NewRecorder()
