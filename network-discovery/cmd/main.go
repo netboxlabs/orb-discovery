@@ -21,7 +21,6 @@ import (
 const AppName = "network-discovery"
 
 func main() {
-
 	configPath := flag.String("config", "", "path to the configuration file (required)")
 
 	flag.Parse()
@@ -36,7 +35,6 @@ func main() {
 		fmt.Printf("configuration file '%s' does not exist", *configPath)
 		os.Exit(1)
 	}
-
 	fileData, err := os.ReadFile(*configPath)
 	if err != nil {
 		fmt.Printf("error reading configuration file: %v", err)
