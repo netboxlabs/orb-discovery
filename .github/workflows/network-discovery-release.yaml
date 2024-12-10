@@ -148,9 +148,9 @@ jobs:
       - name: Build image and push
         uses: docker/build-push-action@v6
         with:
-          context: network-discovery
+          context: .
           file: network-discovery/docker/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
