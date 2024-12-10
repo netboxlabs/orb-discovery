@@ -31,21 +31,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-         node-version: "lts/*"
+          node-version: "lts/*"
       - name: Write package.json
         uses: DamianReeves/write-file-action@master
         with:
-         path: ./package.json
-         write-mode: overwrite
-         contents: |
-           {
-                      "ae:"  {{ env.APP_NAME }}",
-                      "eso"   "1.0.0",
-                      "eDpn  encies": {
-                        "eatc  release-export-data": "^1.0.1",
-               "@semantic-release/changelog": "^6.0.3"
-             }
-           }
+          path: ./package.json
+          write-mode: overwrite
+          contents: |
+            {
+              "name": "${{ env.APP_NAME }}",
+              "version": "1.0.0",
+              "devDependencies": {
+                "semantic-release-export-data": "^1.0.1",
+                "@semantic-release/changelog": "^6.0.3"
+              }
+            }
       - name: Write .releaserc.json
         uses: DamianReeves/write-file-action@master
         with:
@@ -53,14 +53,14 @@ jobs:
           write-mode: overwrite
           contents: |
             {
-                       "rnhs  : "release",
-                       "eoio  yUrl": "https://github.com/netboxlabs/orb-discovery",
-                       "eu"   true",
-                       "aFra  ": "${{ env.APP_NAME }}/v${version}",
-                       "lgn"   [
+              "branches": "release",
+              "repositoryUrl": "https://github.com/netboxlabs/orb-discovery",
+              "debug": "true",
+              "tagFormat": "${{ env.APP_NAME }}/v${version}",
+              "plugins": [
                 ["semantic-release-export-data"],
                 ["@semantic-release/commit-analyzer", {
-                           "eesR  les": [
+                  "releaseRules": [
                     { "message": "*", "release": "patch"},
                     { "message": "fix*", "release": "patch" },
                     { "message": "feat*", "release": "minor" },
@@ -71,16 +71,16 @@ jobs:
                 [
                   "@semantic-release/changelog",
                   {
-                             "hneo  File": "CHANGELOG.md",
-                             "hneo  Title": "# Semantic Versioning Changelog"
+                    "changelogFile": "CHANGELOG.md",
+                    "changelogTitle": "# Semantic Versioning Changelog"
                   }
                 ],
                 [
                   "@semantic-release/github",
                   {
-                             "ses:  [
+                    "assets": [
                       {
-                                 "ah:"  elease/**"
+                        "path": "release/**"
                       }
                     ]
                   }
@@ -107,14 +107,14 @@ jobs:
       short-sha: ${{ steps.short-sha.outputs.short-sha }}
 
   confirm-version:
-   name: Next version ${{ needs.get-next-version.outputs.new-release-version }}
-   runs-on: ubuntu-latest
-   timeout-minutes: 5
-   needs: get-next-version
-   if: needs.get-next-version.outputs.new-release-published == 'true'
-   steps:
-     - uses: actions/checkout@v4
-     - run: echo "The new release version is ${{ needs.get-next-version.outputs.new-release-version }} commit ${{ needs.get-next-version.outputs.short-sha }}"
+    name: Next version ${{ needs.get-next-version.outputs.new-release-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: get-next-version
+    if: needs.get-next-version.outputs.new-release-published == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "The new release version is ${{ needs.get-next-version.outputs.new-release-version }} commit ${{ needs.get-next-version.outputs.short-sha }}"
 
   build:
     name: Build
