@@ -1,8 +1,6 @@
 name: Network Discovery - release
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [ develop ]
   push:
     branches: [ release ]
     paths:
@@ -118,7 +116,7 @@ jobs:
 
   build:
     name: Build
-    needs: [ get-next-version ]
+    needs: get-next-version
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -164,7 +162,7 @@ jobs:
 
   semantic-release:
     name: Semantic release
-    needs: [ build ]
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
