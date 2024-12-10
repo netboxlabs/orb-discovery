@@ -1,6 +1,8 @@
 name: Network Discovery - release
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [ develop ]
   push:
     branches: [ release ]
     paths:
