@@ -1,23 +1,25 @@
 ARG GO_VERSION=1.23
 
-FROM golang:${GO_VERSION}-alpine AS builder
-
-
-WORKDIR /src
-
-COPY . .
-
-WORKDIR /src/network-discovery   
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS builder
 
 RUN apk update && apk add --no-cache build-base make git
 
-RUN make build
+WORKDIR /src/network-discovery
+
+COPY . .
+
+ARG TARGETOS TARGETARCH
+
+RUN --mount=target=. \
+    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /build/network-discovery ./cmd/main.go
 
 FROM alpine:3.20
 
 RUN apk update && apk add --no-cache nmap
 
-COPY --from=builder /src/network-discovery/build/network-discovery /usr/local/bin/network-discovery
+COPY --from=builder /build/network-discovery /usr/local/bin/network-discovery
 
 LABEL maintainer="techops@netboxlabs.com"
 LABEL org.opencontainers.image.title="Orb Network Discovery"
