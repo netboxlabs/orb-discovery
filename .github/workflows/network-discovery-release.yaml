@@ -159,7 +159,7 @@ jobs:
           cache-to: type=gha,mode=max
           tags: |
             netboxlabs/network-discovery:latest
-            netboxlabs/network-discovery:${{ env.BUILD_VERSION }}
+            netboxlabs/network-discovery:dev
           build-args: |
             GO_VERSION=${{ env.GO_VERSION }}
 
