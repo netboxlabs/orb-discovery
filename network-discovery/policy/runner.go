@@ -31,6 +31,7 @@ type Runner struct {
 	logger    *slog.Logger
 	timeout   time.Duration
 	scope     config.Scope
+	config    config.PolicyConfig
 }
 
 // NewRunner returns a new policy runner
@@ -62,6 +63,7 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 	}
 	runner.ctx = context.WithValue(ctx, policyKey, name)
 	runner.scope = policy.Scope
+	runner.config = policy.Config
 	return runner, nil
 }
 
@@ -94,6 +96,12 @@ func (r *Runner) run() {
 	for _, host := range result.Hosts {
 		ip := &diode.IPAddress{
 			Address: diode.String(host.Addresses[0].Addr + "/32"),
+		}
+		if r.config.Defaults["description"] != "" {
+			ip.Description = diode.String(r.config.Defaults["description"])
+		}
+		if r.config.Defaults["comments"] != "" {
+			ip.Comments = diode.String(r.config.Defaults["comments"])
 		}
 		entities = append(entities, ip)
 	}
