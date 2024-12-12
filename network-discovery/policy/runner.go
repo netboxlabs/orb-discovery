@@ -21,13 +21,13 @@ const policyKey contextKey = "policy"
 
 // Runner represents the policy runner
 type Runner struct {
-	scanner   *nmap.Scanner
 	scheduler gocron.Scheduler
 	ctx       context.Context
-	cancel    context.CancelFunc
 	task      gocron.Task
 	client    diode.Client
 	logger    *slog.Logger
+	timeout   time.Duration
+	scope     config.Scope
 }
 
 // NewRunner returns a new policy runner
@@ -53,35 +53,37 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 	if err != nil {
 		return nil, err
 	}
-	timeout := time.Duration(policy.Scope.Timeout) * time.Minute
-	if timeout == 0 {
-		timeout = 2 * time.Minute
+	runner.timeout = time.Duration(policy.Scope.Timeout) * time.Minute
+	if runner.timeout == 0 {
+		runner.timeout = 2 * time.Minute
 	}
 	runner.ctx = context.WithValue(ctx, policyKey, name)
-	runner.ctx, runner.cancel = context.WithTimeout(runner.ctx, timeout)
-	n, err := nmap.NewScanner(
-		runner.ctx,
-		nmap.WithTargets(policy.Scope.Targets...),
-		nmap.WithPingScan(),
-		nmap.WithNonInteractive(),
-	)
-	if err != nil {
-		return nil, err
-	}
-	runner.scanner = n
-
+	runner.scope = policy.Scope
 	return runner, nil
 }
 
 // run runs the policy
-func (r *Runner) run() error {
-	defer r.cancel()
-	result, warnings, err := r.scanner.Run()
+func (r *Runner) run() {
+	ctx, cancel := context.WithTimeout(r.ctx, r.timeout)
+	defer cancel()
+	scanner, err := nmap.NewScanner(
+		ctx,
+		nmap.WithTargets(r.scope.Targets...),
+		nmap.WithPingScan(),
+		nmap.WithNonInteractive(),
+	)
+	if err != nil {
+		r.logger.Error("error creating scanner", slog.Any("error", err), slog.Any("policy", r.ctx.Value(policyKey)))
+		return
+	}
+
+	result, warnings, err := scanner.Run()
 	if len(*warnings) > 0 {
 		r.logger.Warn("run finished with warnings", slog.String("warnings", fmt.Sprintf("%v", *warnings)))
 	}
 	if err != nil {
-		return err
+		r.logger.Error("error running scanner", slog.Any("error", err), slog.Any("policy", r.ctx.Value(policyKey)))
+		return
 	}
 
 	entities := make([]diode.Entity, 0, len(result.Hosts))
@@ -101,8 +103,6 @@ func (r *Runner) run() error {
 	} else {
 		r.logger.Info("entities ingested successfully", slog.Any("policy", r.ctx.Value(policyKey)))
 	}
-
-	return nil
 }
 
 // Start starts the policy runner

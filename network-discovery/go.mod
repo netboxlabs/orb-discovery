@@ -4,6 +4,7 @@ go 1.23.3
 
 require (
 	github.com/Ullaakut/nmap/v3 v3.0.4
+	github.com/a8m/envsubst v1.4.2
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-co-op/gocron/v2 v2.12.4
 	github.com/netboxlabs/diode-sdk-go v0.2.0
@@ -12,7 +13,6 @@ require (
 )
 
 require (
-	github.com/a8m/envsubst v1.4.2
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/cloudwego/base64x v0.1.4 // indirect
