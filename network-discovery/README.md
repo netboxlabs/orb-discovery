@@ -3,10 +3,12 @@ Orb network discovery backend
 
 ### Config RFC
 ```yaml
-network:
+diode:
   config:
     target: grpc://localhost:8080/diode
     api_key: ${DIODE_API_KEY}
+network_discovery:
+  config:
     host: 0.0.0.0
     port: 8072
     log_level: info
@@ -15,7 +17,7 @@ network:
 
 ### Policy RFC
 ```yaml
-network:
+network_discovery:
   policies:
     network_1:
       config:
@@ -28,7 +30,7 @@ network:
     discover_once: # will run only once
       scope:
          targets: 
-          - 92.168.0.34/24
+          - 192.168.0.34/24
           - google.com
 ```
 ## Run device-discovery
