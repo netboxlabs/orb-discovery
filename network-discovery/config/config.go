@@ -12,13 +12,13 @@ type Status struct {
 // Scope represents the scope of a policy
 type Scope struct {
 	Targets []string `yaml:"targets"`
-	Timeout int      `yaml:"timeout"`
 }
 
 // PolicyConfig represents the configuration of a policy
 type PolicyConfig struct {
 	Schedule *string           `yaml:"schedule"`
 	Defaults map[string]string `yaml:"defaults"`
+	Timeout  int               `yaml:"timeout"`
 }
 
 // Policy represents a network-discovery policy

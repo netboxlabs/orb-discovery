@@ -22,11 +22,9 @@ network_discovery:
     network_1:
       config:
         schedule: "* * * * *" #Cron expression
-        defaults:
-          site: New York NY
+        timeout: 5 #default 2 minutes
       scope:
         targets: [192.168.1.0/24]
-        timeout: 5 #default 2 minutes
     discover_once: # will run only once
       scope:
          targets: 
