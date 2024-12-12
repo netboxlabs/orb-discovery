@@ -4,7 +4,6 @@
 
 import os
 from pathlib import Path
-from typing import Tuple
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError
@@ -46,7 +45,7 @@ class DiodeConfig(BaseModel):
 
 
 class Diode(BaseModel):
-    """Model for Diode containing configuration"""
+    """Model for Diode containing configuration."""
 
     config: DiodeConfig
 
@@ -80,7 +79,7 @@ def resolve_env_vars(config):
     return config
 
 
-def parse_config(config_data: str) -> Tuple[DiscoveryBase, DiodeBase]:
+def parse_config(config_data: str) -> tuple[DiscoveryBase, DiodeBase]:
     """
     Parse the YAML configuration data into a Config object.
 
@@ -112,7 +111,7 @@ def parse_config(config_data: str) -> Tuple[DiscoveryBase, DiodeBase]:
         raise ParseException("Validation ERROR:", e)
 
 
-def parse_config_file(file_path: Path) -> Tuple[DiscoveryConfig, DiodeConfig]:
+def parse_config_file(file_path: Path) -> tuple[DiscoveryConfig, DiodeConfig]:
     """
     Parse the Device Discovery configuration file and return the `Discovery` and `Diode` configuration.
 

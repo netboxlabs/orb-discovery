@@ -9,8 +9,8 @@ from unittest.mock import mock_open, patch
 import pytest
 
 from device_discovery.parser import (
-    DiscoveryBase,
     DiodeBase,
+    DiscoveryBase,
     ParseException,
     parse_config,
     parse_config_file,
