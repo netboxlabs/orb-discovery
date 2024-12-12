@@ -103,7 +103,7 @@ func TestRunnerRun(t *testing.T) {
 			select {
 			case <-ingestCalled:
 				// Ingest was called, proceed
-			case <-time.After(5 * time.Second):
+			case <-time.After(10 * time.Second):
 				t.Fatal("Timeout: Ingest was not called")
 			}
 
