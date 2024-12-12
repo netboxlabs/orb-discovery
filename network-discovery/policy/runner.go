@@ -17,7 +17,10 @@ import (
 type contextKey string
 
 // Define the policy key
-const policyKey contextKey = "policy"
+const (
+	policyKey      contextKey = "policy"
+	defaultTimeout            = 2 * time.Minute
+)
 
 // Runner represents the policy runner
 type Runner struct {
@@ -55,7 +58,7 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 	}
 	runner.timeout = time.Duration(policy.Scope.Timeout) * time.Minute
 	if runner.timeout == 0 {
-		runner.timeout = 2 * time.Minute
+		runner.timeout = defaultTimeout
 	}
 	runner.ctx = context.WithValue(ctx, policyKey, name)
 	runner.scope = policy.Scope
