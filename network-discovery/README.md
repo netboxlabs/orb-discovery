@@ -1,35 +1,39 @@
 # network-discovery
 Orb network discovery backend
 
-### Config RFC
-```yaml
-diode:
-  config:
-    target: grpc://localhost:8080/diode
-    api_key: ${DIODE_API_KEY}
-network_discovery:
-  config:
-    host: 0.0.0.0
-    port: 8072
-    log_level: info
-    log_format: json
+### Usage
+```sh
+Usage of network-discovery:
+  -diode-api-key string
+    	diode api key (REQUIRED).Environment variables can be used by wrapping them in ${} (e.g. ${MY_API_KEY})
+  -diode-target string
+    	diode target (REQUIRED)
+  -help
+    	show this help
+  -host string
+    	server host (default "0.0.0.0")
+  -log-format string
+    	log format (default "TEXT")
+  -log-level string
+    	log level (default "INFO")
+  -port int
+    	server port (default 8073)
 ```
 
 ### Policy RFC
 ```yaml
-network_discovery:
-  policies:
-    network_1:
-      config:
-        schedule: "* * * * *" #Cron expression
-        timeout: 5 #default 2 minutes
-      scope:
-        targets: [192.168.1.0/24]
-    discover_once: # will run only once
-      scope:
-         targets: 
-          - 192.168.0.34/24
-          - google.com
+policies:
+  network_1:
+    config:
+      schedule: "* * * * *" #Cron expression
+      timeout: 5 #default 2 minutes
+    scope:
+      targets: [192.168.1.0/24]
+  discover_once: # will run only once
+    scope:
+       targets: 
+        - 192.168.0.34/24
+        - google.com
 ```
 ## Run device-discovery
 device-discovery can be run by installing it with pip
