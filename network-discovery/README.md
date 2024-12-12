@@ -41,7 +41,7 @@ device-discovery can be run by installing it with pip
 git clone https://github.com/netboxlabs/orb-discovery.git
 cd network-discovery/
 make bin
-build/network-discovery -c config.yaml
+build/network-discovery --diode-target grpc://192.168.31.114:8080/diode  --diode-api-key '${DIODE_API_KEY}'
 ```
 
 ## Docker Image
@@ -49,7 +49,10 @@ device-discovery can be build and run using docker:
 ```sh
 cd network-discovery/
 docker build --no-cache -t network-discovery:develop -f docker/Dockerfile .
-docker run -v /local/orb:/usr/local/orb/ --net=host device-discovery:develop network-discovery -c /usr/local/orb/config.yaml
+docker run --net=host -e DIODE_API_KEY={YOUR_API_KEY} \
+ network-discovery:develop network-discovery \
+ --diode-target grpc://192.168.31.114:8080/diode \
+ --diode-api-key '${DIODE_API_KEY}'
 ```
 
 ### Routes (v1)
