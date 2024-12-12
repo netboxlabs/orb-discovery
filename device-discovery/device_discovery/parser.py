@@ -33,7 +33,8 @@ class DiscoveryBase(BaseModel):
     """Top-level model for the entire configuration."""
 
     device_discovery: Discovery | None = Field(
-        default=Discovery(config=DiscoveryConfig()), description="Driver name, optional"
+        default=Discovery(config=DiscoveryConfig()),
+        description="Device discovery config, optional",
     )
 
 
