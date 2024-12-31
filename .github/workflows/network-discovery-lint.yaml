@@ -26,7 +26,7 @@ jobs:
           go-version: '1.23.x'
           check-latest: true
       - name: Lint
-        uses: golangci/golangci-lint-action@2f13b8027d5e60ac6e32b086a0dc4d2ae4cb3f77
+        uses: golangci/golangci-lint-action@971e284b6050e8a5849b72094c50ab08da042db8 #v6.1.1
         with:
           version: v1.62
           working-directory: network-discovery
