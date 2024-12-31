@@ -21,15 +21,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Setup Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.23.x'
           check-latest: true
       - name: Lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@2f13b8027d5e60ac6e32b086a0dc4d2ae4cb3f77
         with:
           version: v1.62
           working-directory: network-discovery
           args: --config ../.github/golangci.yaml
-          skip-pkg-cache: true
-          skip-build-cache: true
