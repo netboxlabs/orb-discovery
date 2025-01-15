@@ -9,7 +9,7 @@ Orb Worker Backend
 
 options:
   -h, --help            show this help message and exit
-  -V, --version         Display Discovery, NAPALM and Diode SDK versions
+  -V, --version         Display Worker and Diode SDK versions
   -s HOST, --host HOST  Server host
   -p PORT, --port PORT  Server port
   -t DIODE_TARGET, --diode-target DIODE_TARGET
@@ -46,7 +46,7 @@ worker can be build and run using docker:
 ```sh
 cd worker
 docker build --no-cache -t worker:develop -f docker/Dockerfile .
-docker run  -e DIODE_API_KEY={YOUR_API_KEY} -p 8072:8072 worker:develop \
+docker run  -e DIODE_API_KEY={YOUR_API_KEY} -p 8071:8071 worker:develop \
  worker -t 'grpc://192.168.0.10:8080/diode' -k '${DIODE_API_KEY}'
 ```
 
@@ -55,7 +55,7 @@ docker run  -e DIODE_API_KEY={YOUR_API_KEY} -p 8072:8072 worker:develop \
 #### Get runtime and capabilities information
 
 <details>
- <summary><code>GET</code> <code><b>/api/v1/status</b></code> <code>(gets discovery runtime data)</code></summary>
+ <summary><code>GET</code> <code><b>/api/v1/status</b></code> <code>(gets worker runtime data)</code></summary>
 
 ##### Parameters
 
@@ -86,7 +86,7 @@ docker run  -e DIODE_API_KEY={YOUR_API_KEY} -p 8072:8072 worker:develop \
 
 > | http code     | content-type                      | response                                                            |
 > |---------------|-----------------------------------|---------------------------------------------------------------------|
-> | `200`         | `application/json; charset=utf-8` | `{"supported_drivers":["ios","eos","junos","nxos","cumulus"]}`      |
+> | `200`         | `application/json; charset=utf-8` | `{"loaded_modules":["custom_nbl","generic_worker"]}`      |
 
 ##### Example cURL
 
