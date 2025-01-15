@@ -32,6 +32,7 @@ dependencies = [
     "netboxlabs-diode-sdk~=0.4",
     "pydantic~=2.9",
     "uvicorn~=0.32",
+    "PyYAML~=6.0",
 ]
 
 [project.optional-dependencies]
