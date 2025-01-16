@@ -5,11 +5,10 @@
 import importlib
 import inspect
 from collections.abc import Iterable
-from typing import Any
 
 from netboxlabs.diode.sdk.ingester import Entity
 
-from worker.models import Config, Metadata
+from worker.models import Metadata, Policy
 
 
 class Backend:
@@ -26,14 +25,14 @@ class Backend:
         """
         raise NotImplementedError("The 'setup' method must be implemented.")
 
-    def run(self, config: Config, scope: Any) -> Iterable[Entity]:
+    def run(self, policy_name: str, policy: Policy) -> Iterable[Entity]:
         """
         Run the backend.
 
         Args:
         ----
-            config (Config): Configuration data.
-            scope (dict): Scope data.
+            policy_name (str): The name of the policy.
+            policy (Policy): The policy to run.
 
         Returns:
         -------

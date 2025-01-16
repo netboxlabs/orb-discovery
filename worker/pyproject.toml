@@ -1,7 +1,7 @@
 [project]
-name = "netboxlabs-worker"
+name = "netboxlabs-orb-worker"
 version = "0.0.1"  # Overwritten during the build process
-description = "NetBox Labs, Worker backend for Orb Agent, part of NetBox Discovery"
+description = "NetBox Labs, Worker backend for Orb Agent"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }

@@ -76,7 +76,7 @@ class PolicyManager:
             raise ValueError(f"policy '{name}' already exists")
 
         runner = PolicyRunner()
-        runner.setup(name, self.config, policy.config, policy.scope)
+        runner.setup(name, self.config, policy)
         self.loaded_modules.add(policy.config.package)
         self.runners[name] = runner
 

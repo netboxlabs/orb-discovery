@@ -37,9 +37,7 @@ def test_start_policy(policy_manager, sample_policy):
         policy_manager.start_policy("policy1", sample_policy)
 
         # Check that PolicyRunner.setup was called with correct arguments
-        mock_runner.setup.assert_called_once_with(
-            "policy1", None, sample_policy.config, sample_policy.scope
-        )
+        mock_runner.setup.assert_called_once_with("policy1", None, sample_policy)
 
         # Ensure the policy runner was added to the manager's runners
         assert "policy1" in policy_manager.runners
@@ -66,7 +64,7 @@ def test_parse_policy(policy_manager):
     """
     policy_request = policy_manager.parse_policy(config_data)
 
-        # Verify structure of the parsed PolicyRequest
+    # Verify structure of the parsed PolicyRequest
     assert isinstance(policy_request, PolicyRequest)
     assert "policy1" in policy_request.policies
 

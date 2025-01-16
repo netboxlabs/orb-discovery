@@ -7,7 +7,7 @@ from typing import Any
 
 from netboxlabs.diode.sdk.ingester import Device, Entity
 from worker.backend import Backend
-from worker.models import Config, Metadata
+from worker.models import Metadata, Policy
 
 
 class MockBackend(Backend):
@@ -17,7 +17,7 @@ class MockBackend(Backend):
         """Mock setup method."""
         return Metadata(name="mock_custom", app_name="mock_app", app_version="1.0.0")
 
-    def run(self, _: Config, __: Any) -> Iterable[Entity]:
+    def run(self, policy_name: str, policy: Policy) -> Iterable[Entity]:
         """Mock run method."""
         entities = []
 
@@ -26,6 +26,8 @@ class MockBackend(Backend):
             device_type="Device Type A",
             platform="Platform A",
             manufacturer="Manufacturer A",
+            description=policy_name,
+            comments=policy.model_dump_json(),
             site="Site ABC",
             role="Role ABC",
             serial="123456",

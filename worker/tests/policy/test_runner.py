@@ -8,7 +8,7 @@ import pytest
 from apscheduler.triggers.date import DateTrigger
 
 from worker.backend import Backend
-from worker.models import Config, DiodeConfig, Status
+from worker.models import Config, DiodeConfig, Policy, Status
 from worker.policy.runner import PolicyRunner
 
 
@@ -19,21 +19,17 @@ def policy_runner():
 
 
 @pytest.fixture
-def sample_policy_config():
-    """Fixture for a sample policy Config object."""
-    return Config(schedule="0 * * * *", package="custom")
+def sample_policy():
+    """Fixture for a sample policy object."""
+    return Policy(
+        config=Config(schedule="0 * * * *", package="custom"), scope={"custom": "value"}
+    )
 
 
 @pytest.fixture
 def sample_diode_config():
     """Fixture for a sample DiodeConfig object."""
     return DiodeConfig(target="http://localhost:8080", prefix="test")
-
-
-@pytest.fixture
-def sample_scopes():
-    """Fixture for a sample list of Napalm objects."""
-    return {"custom": "value"}
 
 
 @pytest.fixture
@@ -76,9 +72,8 @@ def test_initial_status(policy_runner):
 
 def test_setup_policy_runner_with_cron(
     policy_runner,
-    sample_policy_config,
+    sample_policy,
     sample_diode_config,
-    sample_scopes,
     mock_load_class,
     mock_diode_client,
 ):
@@ -87,9 +82,7 @@ def test_setup_policy_runner_with_cron(
         policy_runner.scheduler, "add_job"
     ) as mock_add_job:
 
-        policy_runner.setup(
-            "policy1", sample_diode_config, sample_policy_config, sample_scopes
-        )
+        policy_runner.setup("policy1", sample_diode_config, sample_policy)
 
         # Ensure scheduler starts and job is added
         mock_start.assert_called_once()
@@ -102,7 +95,7 @@ def test_setup_policy_runner_with_cron(
 def test_setup_policy_runner_with_one_time_run(
     policy_runner,
     sample_diode_config,
-    sample_scopes,
+    sample_policy,
     mock_load_class,
     mock_diode_client,
 ):
@@ -111,10 +104,8 @@ def test_setup_policy_runner_with_one_time_run(
     with patch.object(policy_runner.scheduler, "start") as mock_start, patch.object(
         policy_runner.scheduler, "add_job"
     ) as mock_add_job:
-
-        policy_runner.setup(
-            "policy1", sample_diode_config, one_time_config, sample_scopes
-        )
+        sample_policy.config = one_time_config
+        policy_runner.setup("policy1", sample_diode_config, sample_policy)
 
         # Verify that DateTrigger is used for one-time scheduling
         trigger = mock_add_job.call_args[1]["trigger"]
@@ -125,29 +116,23 @@ def test_setup_policy_runner_with_one_time_run(
         assert policy_runner.status == Status.RUNNING
 
 
-def test_run_success(
-    policy_runner, sample_policy_config, sample_scopes, mock_diode_client, mock_backend
-):
+def test_run_success(policy_runner, sample_policy, mock_diode_client, mock_backend):
     """Test the run function for a successful execution."""
     policy_runner.name = "test_policy"
 
     # Call the run method
-    policy_runner.run(
-        mock_diode_client, mock_backend, sample_scopes, sample_policy_config
-    )
+    policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
     # Assertions
-    mock_backend.run.assert_called_once_with(sample_policy_config, sample_scopes)
+    mock_backend.run.assert_called_once_with(policy_runner.name, sample_policy)
     mock_diode_client.ingest.assert_called_once_with(mock_backend.run.return_value)
     mock_diode_client.ingest.return_value.errors = []
     assert mock_diode_client.ingest.return_value.errors == []
-    mock_backend.run.assert_called_once_with(sample_policy_config, sample_scopes)
 
 
 def test_run_ingestion_errors(
     policy_runner,
-    sample_diode_config,
-    sample_scopes,
+    sample_policy,
     mock_diode_client,
     mock_backend,
     caplog,
@@ -160,12 +145,10 @@ def test_run_ingestion_errors(
 
     # Call the run method
     with caplog.at_level("ERROR"):
-        policy_runner.run(
-            mock_diode_client, mock_backend, sample_scopes, sample_diode_config
-        )
+        policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
     # Assertions
-    mock_backend.run.assert_called_once_with(sample_diode_config, sample_scopes)
+    mock_backend.run.assert_called_once_with(policy_runner.name, sample_policy)
     mock_diode_client.ingest.assert_called_once_with(mock_backend.run.return_value)
     assert (
         "ERROR ingestion failed for test_policy : ['error1', 'error2']" in caplog.text
@@ -174,8 +157,7 @@ def test_run_ingestion_errors(
 
 def test_run_backend_exception(
     policy_runner,
-    sample_diode_config,
-    sample_scopes,
+    sample_policy,
     mock_diode_client,
     mock_backend,
     caplog,
@@ -188,12 +170,10 @@ def test_run_backend_exception(
 
     # Call the run method
     with caplog.at_level("ERROR"):
-        policy_runner.run(
-            mock_diode_client, mock_backend, sample_scopes, sample_diode_config
-        )
+        policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
     # Assertions
-    mock_backend.run.assert_called_once_with(sample_diode_config, sample_scopes)
+    mock_backend.run.assert_called_once_with(policy_runner.name, sample_policy)
     mock_diode_client.ingest.assert_not_called()  # Client ingestion should not be called
     assert "Policy test_policy: Backend error" in caplog.text
 

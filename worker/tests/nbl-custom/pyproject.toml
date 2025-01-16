@@ -1,5 +1,5 @@
 [project]
-name = "netboxlabs-custom-worker"
+name = "netboxlabs-custom-orb-worker"
 version = "0.0.1"  # Overwritten during the build process
 description = "NetBox Labs, Worker mock implementation for testing pourposes"
 readme = "README.md"
@@ -26,7 +26,6 @@ classifiers = [
 
 dependencies = [
     "netboxlabs-worker~=0.0.1",
-    "netboxlabs-diode-sdk~=0.4",
 ]
 
 [project.optional-dependencies]

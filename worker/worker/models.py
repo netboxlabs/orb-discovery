@@ -32,6 +32,7 @@ class Metadata(BaseModel):
     name: str
     app_name: str
     app_version: str
+    description: str | None = None
 
 
 class Config(BaseModel):

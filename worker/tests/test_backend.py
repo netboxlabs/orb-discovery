@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from worker.backend import Backend, load_class
-from worker.models import Config, Metadata
+from worker.models import Policy
 
 
 @pytest.fixture
@@ -29,12 +29,11 @@ def test_backend_setup_not_implemented():
 def test_backend_run_not_implemented():
     """Test that Backend.run raises NotImplementedError."""
     backend = Backend()
-    mock_config = MagicMock(spec=Config)
-    mock_scope = MagicMock()
+    mock_policy = MagicMock(spec=Policy)
     with pytest.raises(
         NotImplementedError, match="The 'run' method must be implemented."
     ):
-        list(backend.run(mock_config, mock_scope))
+        list(backend.run("mock", mock_policy))
 
 
 def test_load_class_valid_backend_class(mock_import_module):
