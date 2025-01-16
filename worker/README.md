@@ -70,7 +70,7 @@ docker run  -e DIODE_API_KEY={YOUR_API_KEY} -p 8071:8071 worker:develop \
 ##### Example cURL
 
 > ```sh
->  curl -X GET -H "Content-Type: application/json" http://localhost:8072/api/v1/status
+>  curl -X GET -H "Content-Type: application/json" http://localhost:8071/api/v1/status
 > ```
 
 </details>
@@ -91,7 +91,7 @@ docker run  -e DIODE_API_KEY={YOUR_API_KEY} -p 8071:8071 worker:develop \
 ##### Example cURL
 
 > ```sh
->  curl -X GET -H "Content-Type: application/json" http://localhost:8072/api/v1/capabilities
+>  curl -X GET -H "Content-Type: application/json" http://localhost:8071/api/v1/capabilities
 > ```
 
 </details>
@@ -123,7 +123,7 @@ docker run  -e DIODE_API_KEY={YOUR_API_KEY} -p 8071:8071 worker:develop \
 ##### Example cURL
 
 > ```sh
->  curl -X POST -H "Content-Type: application/x-yaml" --data-binary @policy.yaml http://localhost:8072/api/v1/policies
+>  curl -X POST -H "Content-Type: application/x-yaml" --data-binary @policy.yaml http://localhost:8071/api/v1/policies
 > ```
 
 </details>
@@ -148,7 +148,7 @@ docker run  -e DIODE_API_KEY={YOUR_API_KEY} -p 8071:8071 worker:develop \
 ##### Example cURL
 
 > ```sh
->  curl -X DELETE http://localhost:8072/api/v1/policies/policy_name
+>  curl -X DELETE http://localhost:8071/api/v1/policies/policy_name
 > ```
 
 </details>
