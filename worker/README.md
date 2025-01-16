@@ -1,5 +1,5 @@
 # worker
-Orb custom discovery backend
+Orb worker backend - allow running custom Backend implementations
 
 ### Usage
 ```bash
@@ -9,7 +9,7 @@ Orb Worker Backend
 
 options:
   -h, --help            show this help message and exit
-  -V, --version         Display Worker and Diode SDK versions
+  -V, --version         Display Orb Worker and Diode SDK versions
   -s HOST, --host HOST  Server host
   -p PORT, --port PORT  Server port
   -t DIODE_TARGET, --diode-target DIODE_TARGET
