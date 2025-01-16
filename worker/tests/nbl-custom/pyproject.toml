@@ -1,7 +1,7 @@
 [project]
 name = "netboxlabs-custom-orb-worker"
 version = "0.0.1"  # Overwritten during the build process
-description = "NetBox Labs, Worker mock implementation for testing pourposes"
+description = "NetBox Labs, Worker mock implementation for testing purposes"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
