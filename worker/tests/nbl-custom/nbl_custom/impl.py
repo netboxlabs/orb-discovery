@@ -2,8 +2,8 @@
 # Copyright 2025 NetBox Labs Inc
 """NetBox Labs - Mock Impl."""
 
-from collections.abc import Iterable
 import logging
+from collections.abc import Iterable
 
 from netboxlabs.diode.sdk.ingester import Device, Entity
 from pydantic import BaseModel, Field, ValidationError
