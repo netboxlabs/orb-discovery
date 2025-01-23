@@ -193,6 +193,64 @@ def test_napalm_driver_list(mock_packages_distributions, mock_import_module):
     assert drivers == expected_drivers, f"Expected {expected_drivers}, got {drivers}"
 
 
+def test_napalm_driver_list_error(mock_packages_distributions, mock_import_module):
+    """
+    Test the napalm_driver_list function when an error occurs during driver import.
+
+    Args:
+    ----
+        mock_packages_distributions: Mocked importlib.metadata.packages_distributions function.
+        mock_import_module: Mocked import_module function.
+
+    """
+    mock_distributions = [
+        "napalm_srl",
+    ]
+
+    mock_import_module.side_effect = Exception("Import failed")
+    mock_packages_distributions.return_value = mock_distributions
+    expected_drivers = ["ios", "eos", "junos", "nxos"]
+
+    with patch("device_discovery.discovery.logger") as mock_logger:
+        drivers = napalm_driver_list()
+        mock_logger.error.assert_called_once_with(
+            f"Error importing module {mock_distributions[0]}: Import failed"
+        )
+        assert (
+            drivers == expected_drivers
+        ), f"Expected {expected_drivers}, got {drivers}"
+
+
+def test_napalm_driver_list_nested(mock_packages_distributions, mock_import_module):
+    """
+    Test the napalm_driver_list function when a driver is found in a nested module.
+
+    Args:
+    ----
+        mock_packages_distributions: Mocked importlib.metadata.packages_distributions function.
+        mock_import_module: Mocked import_module function.
+
+    """
+    mock_distributions = [
+        "napalm_srl",
+    ]
+
+    mock_module = MagicMock()
+    mock_import_module.return_value = mock_module
+
+    mock_packages_distributions.return_value = mock_distributions
+
+    expected_drivers = ["ios", "eos", "junos", "nxos", "srl.nested"]
+
+    with patch(
+        "device_discovery.discovery.walk_napalm_packages", return_value=expected_drivers
+    ):
+        drivers = napalm_driver_list()
+        assert (
+            drivers == expected_drivers
+        ), f"Expected {expected_drivers}, got {drivers}"
+
+
 def test_walk_napalm_packages_success(mock_import_module, mock_walk_packages):
     """
     Test walk_napalm_packages function with valid modules.
