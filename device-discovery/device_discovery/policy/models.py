@@ -40,8 +40,8 @@ class ObjectParameters(BaseModel):
 class Defaults(BaseModel):
     """Model for default configuration."""
 
-    site: str | None = Field(default=None, description="Site name, optional")
-    role: str | None = Field(default=None, description="Device Role name, optional")
+    site: str | None = Field(default="undefined", description="Site name, optional")
+    role: str | None = Field(default="undefined", description="Device Role name, optional")
     tags: list[str] | None = Field(default=None, description="Tags, optional")
     device: ObjectParameters | None = Field(default=None, description="Device parameters, optional")
     interface: ObjectParameters | None = Field(default=None, description="Interface parameters, optional")

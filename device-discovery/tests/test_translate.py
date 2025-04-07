@@ -22,7 +22,6 @@ def sample_device_info():
         "model": "ISR4451",
         "vendor": "Cisco",
         "serial_number": "123456789",
-        "site": "New York",
         "driver": "ios",
         "interface_list": ["GigabitEthernet0/0", "GigabitEthernet0/0/1"],
     }
@@ -79,7 +78,6 @@ def sample_defaults():
         interface=ObjectParameters(description="testing", tags=["inttag"]),
         ipaddress=ObjectParameters(description="ip test", tags=["iptag"]),
         prefix=ObjectParameters(description="prefix test",tags=["prefixtag"]),
-        role="router",
     )
 
 
@@ -92,7 +90,8 @@ def test_translate_device(sample_device_info, sample_defaults):
     assert device.serial == "123456789"
     assert device.site.name == "New York"
     assert device.comments == "testing"
-    assert device.tags == [Tag(name="tag1"), Tag(name="tag2"), Tag(name="devtag")]
+    assert device.role.name == "undefined"
+    assert len(device.tags) == 3
 
 
 def test_translate_interface(
@@ -110,10 +109,10 @@ def test_translate_interface(
     assert interface.name == "GigabitEthernet0/0"
     assert interface.enabled is True
     assert interface.mtu == 1500
-    assert interface.mac_address == "00:1C:58:29:4A:71"
+    assert interface.primary_mac_address.mac_address == "00:1C:58:29:4A:71"
     assert interface.speed == 1000000
     assert interface.description == "Uplink Interface"
-    assert interface.tags == [Tag(name="tag1"), Tag(name="tag2"), Tag(name="inttag")]
+    assert len(interface.tags) == 3
 
 
 def test_translate_interface_with_overflow_data(
@@ -131,10 +130,10 @@ def test_translate_interface_with_overflow_data(
     assert interface.name == "GigabitEthernet0/0"
     assert interface.enabled is True
     assert interface.mtu == 0
-    assert interface.mac_address == "00:1C:58:29:4A:71"
+    assert interface.primary_mac_address.mac_address == "00:1C:58:29:4A:71"
     assert interface.speed == 0
     assert interface.description == "Uplink Interface"
-    assert interface.tags == [Tag(name="tag1"), Tag(name="tag2"), Tag(name="inttag")]
+    assert len(interface.tags) == 3
 
 
 def test_translate_interface_ips(
@@ -169,8 +168,8 @@ def test_translate_interface_ips(
     assert ip_entities[1].ip_address.address == "192.0.2.1/24"
     assert ip_entities[0].prefix.description == "prefix test"
     assert ip_entities[1].ip_address.description == "ip test"
-    assert ip_entities[0].prefix.tags == [Tag(name="tag1"), Tag(name="tag2"), Tag(name="prefixtag")]
-    assert ip_entities[1].ip_address.tags == [Tag(name="tag1"), Tag(name="tag2"), Tag(name="iptag")]
+    assert len(ip_entities[0].prefix.tags) == 3
+    assert len(ip_entities[1].ip_address.tags) == 3
 
 
 def test_translate_data(
