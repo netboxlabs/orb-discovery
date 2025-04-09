@@ -37,6 +37,13 @@ class ObjectParameters(BaseModel):
     description: str | None = Field(default=None, description="Description, optional")
     tags: list[str] | None = Field(default=None, description="Tags, optional")
 
+class VlanParameters(ObjectParameters):
+    """Model for VLAN parameters."""
+
+    group: str | None = Field(default=None, description="VLAN group, optional")
+    tenant: str | None = Field(default=None, description="VLAN tenant, optional")
+    role: str | None = Field(default=None, description="VLAN role, optional")
+
 class Defaults(BaseModel):
     """Model for default configuration."""
 
@@ -47,6 +54,7 @@ class Defaults(BaseModel):
     interface: ObjectParameters | None = Field(default=None, description="Interface parameters, optional")
     ipaddress: ObjectParameters | None = Field(default=None, description="IP Address parameters, optional")
     prefix: ObjectParameters | None = Field(default=None, description="Prefix parameters, optional")
+    vlan: VlanParameters | None = Field(default=None, description="VLAN parameters, optional")
 
 class Config(BaseModel):
     """Model for discovery configuration."""

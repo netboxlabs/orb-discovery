@@ -5,12 +5,13 @@
 import pytest
 from netboxlabs.diode.sdk.ingester import Tag
 
-from device_discovery.policy.models import Defaults, ObjectParameters
+from device_discovery.policy.models import Defaults, ObjectParameters, VlanParameters
 from device_discovery.translate import (
     translate_data,
     translate_device,
     translate_interface,
     translate_interface_ips,
+    translate_vlan,
 )
 
 
@@ -44,7 +45,7 @@ def sample_interface_info():
             "mac_address": "00:1C:58:29:4A:72",
             "speed": 10000,
             "description": "Uplink Interface",
-        }
+        },
     }
 
 
@@ -77,7 +78,8 @@ def sample_defaults():
         device=ObjectParameters(comments="testing", tags=["devtag"]),
         interface=ObjectParameters(description="testing", tags=["inttag"]),
         ipaddress=ObjectParameters(description="ip test", tags=["iptag"]),
-        prefix=ObjectParameters(description="prefix test",tags=["prefixtag"]),
+        prefix=ObjectParameters(description="prefix test", tags=["prefixtag"]),
+        vlan=VlanParameters(tags=["vlantag"]),
     )
 
 
@@ -189,3 +191,39 @@ def test_translate_data(
     assert entities[2].interface.name == "GigabitEthernet0/0/1"
     assert entities[3].prefix.prefix == "192.0.2.0/24"
     assert entities[4].ip_address.address == "192.0.2.1/24"
+
+
+def test_translate_vlan(sample_defaults):
+    """Ensure VLAN translation is correct."""
+    vid = 1
+    vlan_name = "Test VLAN"
+    vlan = translate_vlan(vid, vlan_name, sample_defaults)
+
+    assert vlan.vid == 1
+    assert vlan.name == "Test VLAN"
+    assert len(vlan.tags) == 3
+    assert vlan.comments == ""
+
+
+def test_translate_vlan_with_defaults(sample_defaults):
+    """Ensure VLAN translation includes default values."""
+    sample_defaults.vlan = VlanParameters(
+        tags=["vlantag"],
+        comments="Default VLAN comment",
+        description="Default VLAN description",
+        group="Default Group",
+        tenant="Default Tenant",
+        role="Default Role",
+    )
+    vid = 200
+    vlan_name = "Default VLAN"
+    vlan = translate_vlan(vid, vlan_name, sample_defaults)
+
+    assert vlan.vid == 200
+    assert vlan.name == "Default VLAN"
+    assert vlan.comments == "Default VLAN comment"
+    assert vlan.description == "Default VLAN description"
+    assert vlan.group.name == "Default Group"
+    assert vlan.tenant.name == "Default Tenant"
+    assert vlan.role.name == "Default Role"
+    assert len(vlan.tags) == 3

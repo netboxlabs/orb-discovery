@@ -6,6 +6,7 @@ import ipaddress
 from collections.abc import Iterable
 
 from netboxlabs.diode.sdk.ingester import (
+    VLAN,
     Device,
     DeviceType,
     Entity,
@@ -197,6 +198,46 @@ def translate_interface_ips(
     return ip_entities
 
 
+def translate_vlan(vid: int, vlan_name: str, defaults: Defaults) -> VLAN:
+    """
+    Translate VLAN information for a given VLAN ID.
+
+    Args:
+    ----
+        vid (int): VLAN ID.
+        vlan_name (str): VLAN name.
+        defaults (Defaults): Default configuration.
+
+    """
+    tags = defaults.tags if defaults.tags else []
+    comments = None
+    description = None
+    group = None
+    tenant = None
+    role = None
+
+    if defaults.vlan:
+        tags.extend(defaults.vlan.tags)
+        comments = defaults.vlan.comments
+        description = defaults.vlan.description
+        group = defaults.vlan.group
+        tenant = defaults.vlan.tenant
+        role = defaults.vlan.role
+
+    vlan = VLAN(
+        vid=vid,
+        name=vlan_name,
+        group=group,
+        tenant=tenant,
+        role=role,
+        tags=tags,
+        comments=comments,
+        description=description,
+    )
+
+    return vlan
+
+
 def translate_data(data: dict) -> Iterable[Entity]:
     """
     Translate data from NAPALM format to Diode SDK entities.
@@ -226,5 +267,10 @@ def translate_data(data: dict) -> Iterable[Entity]:
             interface = translate_interface(device, if_name, interface_info, defaults)
             entities.append(Entity(interface=interface))
             entities.extend(translate_interface_ips(interface, interfaces_ip, defaults))
+
+    if data.get("vlan"):
+        for vid, vlan_info in data.get("vlan").items():
+            vlan = translate_vlan(vid, vlan_info.get("name"), defaults)
+            entities.append(Entity(vlan=vlan))
 
     return entities

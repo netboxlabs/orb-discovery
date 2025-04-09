@@ -132,6 +132,12 @@ class PolicyRunner:
                     "interface_ip": device.get_interfaces_ip(),
                     "defaults": config.defaults,
                 }
+                try:
+                    data["vlan"] = device.get_vlans()
+                except Exception as e:
+                    logger.error(
+                        f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting VLANs: {e}"
+                    )
                 Client().ingest(scope.hostname, data)
         except Exception as e:
             logger.error(f"Policy {self.name}, Hostname {sanitized_hostname}: {e}")
