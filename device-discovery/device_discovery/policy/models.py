@@ -44,6 +44,14 @@ class VlanParameters(ObjectParameters):
     tenant: str | None = Field(default=None, description="VLAN tenant, optional")
     role: str | None = Field(default=None, description="VLAN role, optional")
 
+class IpamParameters(ObjectParameters):
+    """Model for IPAM parameters."""
+
+    role: str | None = Field(default=None, description="IPAM role, optional")
+    tenant: str | None = Field(default=None, description="IPAM tenant, optional")
+    vrf: str | None = Field(default=None, description="IPAM VRF, optional")
+
+
 class Defaults(BaseModel):
     """Model for default configuration."""
 
@@ -52,8 +60,8 @@ class Defaults(BaseModel):
     tags: list[str] | None = Field(default=None, description="Tags, optional")
     device: ObjectParameters | None = Field(default=None, description="Device parameters, optional")
     interface: ObjectParameters | None = Field(default=None, description="Interface parameters, optional")
-    ipaddress: ObjectParameters | None = Field(default=None, description="IP Address parameters, optional")
-    prefix: ObjectParameters | None = Field(default=None, description="Prefix parameters, optional")
+    ipaddress: IpamParameters | None = Field(default=None, description="IP Address parameters, optional")
+    prefix: IpamParameters | None = Field(default=None, description="Prefix parameters, optional")
     vlan: VlanParameters | None = Field(default=None, description="VLAN parameters, optional")
 
 class Config(BaseModel):

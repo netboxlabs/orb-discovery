@@ -149,20 +149,32 @@ def translate_interface_ips(
     ip_tags = list(tags)
     ip_comments = None
     ip_description = None
+    ip_role = None
+    ip_tenant = None
+    ip_vrf = None
 
     prefix_tags = list(tags)
     prefix_comments = None
     prefix_description = None
+    prefix_role = None
+    prefix_tenant = None
+    prefix_vrf = None
 
     if defaults.ipaddress:
         ip_tags.extend(defaults.ipaddress.tags)
         ip_comments = defaults.ipaddress.comments
         ip_description = defaults.ipaddress.description
+        ip_role = defaults.ipaddress.role
+        ip_tenant = defaults.ipaddress.tenant
+        ip_vrf = defaults.ipaddress.vrf
 
     if defaults.prefix:
         prefix_tags.extend(defaults.prefix.tags)
         prefix_comments = defaults.prefix.comments
         prefix_description = defaults.prefix.description
+        prefix_role = defaults.prefix.role
+        prefix_tenant = defaults.prefix.tenant
+        prefix_vrf = defaults.prefix.vrf
 
     ip_entities = []
 
@@ -177,6 +189,9 @@ def translate_interface_ips(
                             prefix=Prefix(
                                 prefix=str(network),
                                 scope_site=interface.device.site,
+                                vrf=prefix_vrf,
+                                role=prefix_role,
+                                tenant=prefix_tenant,
                                 tags=prefix_tags,
                                 comments=prefix_comments,
                                 description=prefix_description,
@@ -188,6 +203,9 @@ def translate_interface_ips(
                             ip_address=IPAddress(
                                 address=ip_address,
                                 assigned_object_interface=interface,
+                                role=ip_role,
+                                tenant=ip_tenant,
+                                vrf=ip_vrf,
                                 tags=ip_tags,
                                 comments=ip_comments,
                                 description=ip_description,

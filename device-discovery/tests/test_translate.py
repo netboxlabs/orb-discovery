@@ -5,7 +5,12 @@
 import pytest
 from netboxlabs.diode.sdk.ingester import Tag
 
-from device_discovery.policy.models import Defaults, ObjectParameters, VlanParameters
+from device_discovery.policy.models import (
+    Defaults,
+    IpamParameters,
+    ObjectParameters,
+    VlanParameters,
+)
 from device_discovery.translate import (
     translate_data,
     translate_device,
@@ -77,8 +82,8 @@ def sample_defaults():
         tags=["tag1", "tag2"],
         device=ObjectParameters(comments="testing", tags=["devtag"]),
         interface=ObjectParameters(description="testing", tags=["inttag"]),
-        ipaddress=ObjectParameters(description="ip test", tags=["iptag"]),
-        prefix=ObjectParameters(description="prefix test", tags=["prefixtag"]),
+        ipaddress=IpamParameters(description="ip test", tags=["iptag"]),
+        prefix=IpamParameters(description="prefix test", tags=["prefixtag"]),
         vlan=VlanParameters(tags=["vlantag"]),
     )
 
