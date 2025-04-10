@@ -198,13 +198,13 @@ def translate_interface_ips(
     return ip_entities
 
 
-def translate_vlan(vid: int, vlan_name: str, defaults: Defaults) -> VLAN:
+def translate_vlan(vid: str, vlan_name: str, defaults: Defaults) -> VLAN:
     """
     Translate VLAN information for a given VLAN ID.
 
     Args:
     ----
-        vid (int): VLAN ID.
+        vid (str): VLAN ID.
         vlan_name (str): VLAN name.
         defaults (Defaults): Default configuration.
 
@@ -225,7 +225,7 @@ def translate_vlan(vid: int, vlan_name: str, defaults: Defaults) -> VLAN:
         role = defaults.vlan.role
 
     vlan = VLAN(
-        vid=vid,
+        vid=int(vid),
         name=vlan_name,
         group=group,
         tenant=tenant,

@@ -195,7 +195,7 @@ def test_translate_data(
 
 def test_translate_vlan(sample_defaults):
     """Ensure VLAN translation is correct."""
-    vid = 1
+    vid = "1"
     vlan_name = "Test VLAN"
     vlan = translate_vlan(vid, vlan_name, sample_defaults)
 
@@ -215,7 +215,7 @@ def test_translate_vlan_with_defaults(sample_defaults):
         tenant="Default Tenant",
         role="Default Role",
     )
-    vid = 200
+    vid = "200"
     vlan_name = "Default VLAN"
     vlan = translate_vlan(vid, vlan_name, sample_defaults)
 
