@@ -63,6 +63,27 @@ def test_setup_metrics_export(mock_opentelemetry):
     )
 
 
+def test_setup_metrics_export_no_endpoint(mock_opentelemetry, reset_metrics_cache):
+    """Test that metrics export setup is properly disabled when no endpoint is provided."""
+    with patch("device_discovery.metrics.logger") as mock_logger:
+        # Call with None endpoint
+        setup_metrics_export(None, 30)
+
+        # Verify logger message
+        mock_logger.info.assert_called_once_with(
+            "No metrics endpoint provided, metrics collection is disabled"
+        )
+
+        # Verify no OpenTelemetry components were created
+        mock_opentelemetry["exporter"].assert_not_called()
+        mock_opentelemetry["reader"].assert_not_called()
+        mock_opentelemetry["provider"].assert_not_called()
+
+        # Verify get_metric returns None after setup with no endpoint
+        metric = get_metric("api_requests")
+        assert metric is None
+
+
 def test_get_metric_returns_counter(reset_metrics_cache):
     """Test that get_metric returns a counter for counter-type metrics."""
     mock_counter = MagicMock()
@@ -159,3 +180,34 @@ def test_all_expected_metrics_exist(reset_metrics_cache):
         for metric_name in expected_metrics:
             metric = get_metric(metric_name)
             assert metric is not None, f"Expected metric {metric_name} to exist"
+
+
+def test_setup_metrics_export_meter_provider_error(mock_opentelemetry, reset_metrics_cache):
+    """Test handling of errors when setting the meter provider."""
+    endpoint = "http://localhost:4317"
+    export_period = 30
+
+    # Mock set_meter_provider to raise an exception
+    with patch("device_discovery.metrics.otlp_metrics.set_meter_provider",
+              side_effect=Exception("Provider error")), \
+         patch("device_discovery.metrics.logger") as mock_logger:
+
+        # Call function
+        setup_metrics_export(endpoint, export_period)
+
+        # Verify components were created but meter provider wasn't set
+        mock_opentelemetry["exporter"].assert_called_once()
+        mock_opentelemetry["reader"].assert_called_once()
+        mock_opentelemetry["provider"].assert_called_once()
+
+        # Verify warning was logged
+        mock_logger.warning.assert_called_once()
+        warning_message = mock_logger.warning.call_args[0][0]
+        assert "Could not set meter provider" in warning_message
+
+        # Verify meter was not created
+        mock_opentelemetry["provider"].return_value.get_meter.assert_not_called()
+
+        # Verify metrics are not enabled and get_metric returns None
+        metric = get_metric("api_requests")
+        assert metric is None
