@@ -55,6 +55,9 @@ jobs:
         pytest-coverage-path: ${{ env.BE_DIR }}/pytest-coverage.txt
         junitxml-path: ${{ env.BE_DIR }}/pytest.xml
 
+    - name: Print Coverage File
+      run: cat  ${{ env.BE_DIR }}/pytest-coverage.txt
+
     - name: Lint with Ruff
       run: |
         ruff check --output-format=github device_discovery/ tests/
