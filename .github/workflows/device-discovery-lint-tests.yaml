@@ -50,7 +50,6 @@ jobs:
         pytest --junitxml=pytest.xml --cov-report=term-missing:skip-covered --cov=device_discovery/ | tee pytest-coverage.txt
 
     - name: Pytest coverage comment
-      id: coverageComment
       uses: MishaKav/pytest-coverage-comment@81882822c5b22af01f91bd3eacb1cefb6ad73dc2 #v1.1.53
       with:
         pytest-coverage-path: ${{ env.BE_DIR }}/pytest-coverage.txt
