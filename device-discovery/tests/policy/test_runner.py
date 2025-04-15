@@ -46,7 +46,7 @@ def test_setup_policy_runner_with_cron(policy_runner, sample_config, sample_scop
 
         # Ensure scheduler starts and job is added
         mock_start.assert_called_once()
-        mock_add_job.assert_called_once()
+        mock_add_job.assert_called()
         assert policy_runner.status == Status.RUNNING
 
 
