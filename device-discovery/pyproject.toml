@@ -41,7 +41,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["black", "check-manifest", "ruff"]
-test = ["coverage", "pytest", "pytest-cov"]
+test = ["coverage", "pytest", "pytest-cov==6.0.0"]
 
 [project.urls]
 "Homepage" = "https://netboxlabs.com/"
