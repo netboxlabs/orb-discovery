@@ -3,7 +3,7 @@ Orb worker backend - allow running custom Backend implementations
 
 ### Usage
 ```bash
-usage: orb-worker [-h] [-V] [-s HOST] [-p PORT] -t DIODE_TARGET -k DIODE_API_KEY
+usage: orb-worker [-h] [-V] [-s HOST] [-p PORT] -t DIODE_TARGET -c DIODE_CLIENT_ID -k DIODE_CLIENT_SECRET [-a DIODE_APP_NAME_PREFIX]
 
 Orb Worker Backend
 
@@ -14,9 +14,10 @@ options:
   -p PORT, --port PORT  Server port
   -t DIODE_TARGET, --diode-target DIODE_TARGET
                         Diode target
-  -k DIODE_API_KEY, --diode-api-key DIODE_API_KEY
-                        Diode API key. Environment variables can be used by wrapping them in ${} (e.g.
-                        ${MY_API_KEY})
+  -c DIODE_CLIENT_ID, --diode-client-id DIODE_CLIENT_ID
+                        Diode Client ID. Environment variables can be used by wrapping them in ${} (e.g. ${MY_CLIENT_ID})
+  -k DIODE_CLIENT_SECRET, --diode-client-secret DIODE_CLIENT_SECRET
+                        Diode Client Secret. Environment variables can be used by wrapping them in ${} (e.g. ${MY_CLIENT_SECRET})
   -a DIODE_APP_NAME_PREFIX, --diode-app-name-prefix DIODE_APP_NAME_PREFIX
                         Diode producer_app_name prefix
 ```
