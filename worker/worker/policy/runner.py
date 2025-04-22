@@ -55,7 +55,8 @@ class PolicyRunner:
                 else metadata.app_name
             ),
             app_version=metadata.app_version,
-            api_key=diode_config.api_key,
+            client_id=diode_config.client_id,
+            client_secret=diode_config.client_secret,
         )
 
         self.policy = policy
