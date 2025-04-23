@@ -5,13 +5,14 @@
 import logging
 from typing import Any
 
-from device_discovery.version import version_semver
 from opentelemetry import metrics as otlp_metrics
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import (
     PeriodicExportingMetricReader,
 )
+
+from worker.version import version_semver
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
