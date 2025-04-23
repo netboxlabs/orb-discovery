@@ -39,7 +39,7 @@ worker can be run by installing it with pip
 git clone https://github.com/netboxlabs/orb-discovery.git
 cd orb-discovery/
 pip install --no-cache-dir ./worker/
-orb-worker -t 'grpc://192.168.0.10:8080/diode' -k '${DIODE_API_KEY}'
+orb-worker -t 'grpc://192.168.0.10:8080/diode' -c '${DIODE_CLIENT_ID}' -k '${DIODE_CLIENT_SECRET}'
 ```
 
 ## Docker Image
@@ -47,8 +47,8 @@ worker can be build and run using docker:
 ```sh
 cd worker
 docker build --no-cache -t worker:develop -f docker/Dockerfile .
-docker run  -e DIODE_API_KEY={YOUR_API_KEY} -p 8071:8071 worker:develop \
- orb-worker -t 'grpc://192.168.0.10:8080/diode' -k '${DIODE_API_KEY}'
+docker run  -e DIODE_CLIENT_ID=${YOUR_CLIENT} -e DIODE_CLIENT_SECRET=${YOUR_SECRET} -p 8071:8071 worker:develop \
+ orb-worker -t 'grpc://192.168.0.10:8080/diode' -c '${DIODE_CLIENT_ID}' -k '${DIODE_CLIENT_SECRET}'
 ```
 
 ### Routes (v1)

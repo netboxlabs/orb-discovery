@@ -35,7 +35,11 @@ def mock_uvicorn_run():
 def test_main_keyboard_interrupt(mock_parse_args):
     """Test handling of KeyboardInterrupt in main."""
     mock_parse_args.return_value = MagicMock(
-        diode_target="grpc", diode_api_key="abc", host="0.0.0.0", port=1234
+        diode_target="grpc",
+        diode_client_id="abc",
+        diode_client_secret="def",
+        host="0.0.0.0",
+        port=1234,
     )
 
     with patch.object(sys, "exit", side_effect=Exception("Test Exit")):
@@ -115,7 +119,11 @@ def test_main_no_config_file(mock_parse_args):
 def test_main_missing_policy(mock_parse_args):
     """Test handling of missing policy in start_agent."""
     mock_parse_args.return_value = MagicMock(
-        diode_target="grpc", diode_api_key="abc", host="0.0.0.0", port=1234
+        diode_target="grpc",
+        diode_client_id="abc",
+        diode_client_secret="def",
+        host="0.0.0.0",
+        port=1234,
     )
     mock_cfg = MagicMock()
     mock_cfg.policies = {"policy1": None}  # Simulating a missing policy
