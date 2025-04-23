@@ -273,9 +273,8 @@ def test_metrics_during_failed_discovery(
     mock_backend.run.side_effect = Exception("Backend error")
 
     with patch("worker.policy.runner.get_metric", side_effect=mock_get_metric):
-
-        policy_runner.run("test_policy", sample_diode_config, sample_policy)
-
+        mock_diode_client = MagicMock(name="MockDiodeClient")
+        policy_runner.run(mock_diode_client, sample_diode_config, sample_policy)
         # Verify failure metric was called
         mock_backend_execution_failure.add.assert_called_once_with(
             1,
