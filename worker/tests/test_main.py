@@ -49,7 +49,8 @@ def test_main_with_config(mock_parse_args, mock_uvicorn_run):
     """Test running the CLI with a configuration file and no environment file."""
     mock_parse_args.return_value = MagicMock(
         diode_target="grpc",
-        diode_api_key="abc",
+        diode_client_id="abc",
+        diode_client_secret="def",
         diode_app_name_prefix="test",
         host="0.0.0.0",
         port=1234,
@@ -69,7 +70,8 @@ def test_main_start_server_failure(mock_parse_args, mock_uvicorn_run):
     """Test CLI failure when starting the agent."""
     mock_parse_args.return_value = MagicMock(
         diode_target="grpc",
-        diode_api_key="abc",
+        diode_client_id="abc",
+        diode_client_secret="def",
         diode_app_name_prefix="test",
         host="0.0.0.0",
         port=1234,
