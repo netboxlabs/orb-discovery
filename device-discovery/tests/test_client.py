@@ -47,6 +47,7 @@ def sample_data():
             site="New York",
             role=None,
             tags=None,
+            if_type="other",
             device=None,
             interface=None,
             ipaddress=None,

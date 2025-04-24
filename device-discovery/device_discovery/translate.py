@@ -113,6 +113,7 @@ def translate_interface(
         primary_mac_address=interface_info.get("mac_address"),
         description=description,
         tags=tags,
+        type=defaults.if_type,
     )
 
     # Convert napalm interface speed from Mbps to Netbox Kbps
@@ -188,7 +189,7 @@ def translate_interface_ips(
                         Entity(
                             prefix=Prefix(
                                 prefix=str(network),
-                                scope_site=interface.device.site,
+                                scope_site=defaults.site,
                                 vrf=prefix_vrf,
                                 role=prefix_role,
                                 tenant=prefix_tenant,

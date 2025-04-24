@@ -51,12 +51,12 @@ class IpamParameters(ObjectParameters):
     tenant: str | None = Field(default=None, description="IPAM tenant, optional")
     vrf: str | None = Field(default=None, description="IPAM VRF, optional")
 
-
 class Defaults(BaseModel):
     """Model for default configuration."""
 
     site: str | None = Field(default="undefined", description="Site name, optional")
     role: str | None = Field(default="undefined", description="Device Role name, optional")
+    if_type: str | None = Field(default="other", description="Interface type, optional")
     tags: list[str] | None = Field(default=None, description="Tags, optional")
     device: ObjectParameters | None = Field(default=None, description="Device parameters, optional")
     interface: ObjectParameters | None = Field(default=None, description="Interface parameters, optional")

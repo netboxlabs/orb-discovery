@@ -80,6 +80,7 @@ def sample_defaults():
     return Defaults(
         site="New York",
         tags=["tag1", "tag2"],
+        if_type="other",
         device=ObjectParameters(comments="testing", tags=["devtag"]),
         interface=ObjectParameters(description="testing", tags=["inttag"]),
         ipaddress=IpamParameters(description="ip test", tags=["iptag"]),
