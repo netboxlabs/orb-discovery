@@ -105,12 +105,13 @@ def translate_interface(
         description = defaults.interface.description
 
     description = interface_info.get("description", description)
+    mac_address = interface_info.get("mac_address") if interface_info.get("mac_address") != "" else None
 
     interface = Interface(
         device=device,
         name=if_name,
         enabled=interface_info.get("is_enabled"),
-        primary_mac_address=interface_info.get("mac_address"),
+        primary_mac_address=mac_address,
         description=description,
         tags=tags,
         type=defaults.if_type,
