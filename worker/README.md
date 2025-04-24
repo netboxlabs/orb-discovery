@@ -3,7 +3,8 @@ Orb worker backend - allow running custom Backend implementations
 
 ### Usage
 ```bash
-usage: orb-worker [-h] [-V] [-s HOST] [-p PORT] -t DIODE_TARGET -k DIODE_API_KEY
+usage: orb-worker [-h] [-V] [-s HOST] [-p PORT] -t DIODE_TARGET -c DIODE_CLIENT_ID -k DIODE_CLIENT_SECRET [-a DIODE_APP_NAME_PREFIX]
+               [--otel-endpoint OTEL_ENDPOINT] [--otel-export-period OTEL_EXPORT_PERIOD]
 
 Orb Worker Backend
 
@@ -14,11 +15,16 @@ options:
   -p PORT, --port PORT  Server port
   -t DIODE_TARGET, --diode-target DIODE_TARGET
                         Diode target
-  -k DIODE_API_KEY, --diode-api-key DIODE_API_KEY
-                        Diode API key. Environment variables can be used by wrapping them in ${} (e.g.
-                        ${MY_API_KEY})
+  -c DIODE_CLIENT_ID, --diode-client-id DIODE_CLIENT_ID
+                        Diode Client ID. Environment variables can be used by wrapping them in ${} (e.g. ${MY_CLIENT_ID})
+  -k DIODE_CLIENT_SECRET, --diode-client-secret DIODE_CLIENT_SECRET
+                        Diode Client Secret. Environment variables can be used by wrapping them in ${} (e.g. ${MY_CLIENT_SECRET})
   -a DIODE_APP_NAME_PREFIX, --diode-app-name-prefix DIODE_APP_NAME_PREFIX
                         Diode producer_app_name prefix
+  --otel-endpoint OTEL_ENDPOINT
+                        OpenTelemetry exporter endpoint
+  --otel-export-period OTEL_EXPORT_PERIOD
+                        Period in seconds between OpenTelemetry exports (default: 60)
 ```
 
 ### Policy RFC
@@ -38,7 +44,7 @@ worker can be run by installing it with pip
 git clone https://github.com/netboxlabs/orb-discovery.git
 cd orb-discovery/
 pip install --no-cache-dir ./worker/
-orb-worker -t 'grpc://192.168.0.10:8080/diode' -k '${DIODE_API_KEY}'
+orb-worker -t 'grpc://192.168.0.10:8080/diode' -c '${DIODE_CLIENT_ID}' -k '${DIODE_CLIENT_SECRET}'
 ```
 
 ## Docker Image
@@ -46,8 +52,8 @@ worker can be build and run using docker:
 ```sh
 cd worker
 docker build --no-cache -t worker:develop -f docker/Dockerfile .
-docker run  -e DIODE_API_KEY={YOUR_API_KEY} -p 8071:8071 worker:develop \
- orb-worker -t 'grpc://192.168.0.10:8080/diode' -k '${DIODE_API_KEY}'
+docker run  -e DIODE_CLIENT_ID=${YOUR_CLIENT} -e DIODE_CLIENT_SECRET=${YOUR_SECRET} -p 8071:8071 worker:develop \
+ orb-worker -t 'grpc://192.168.0.10:8080/diode' -c '${DIODE_CLIENT_ID}' -k '${DIODE_CLIENT_SECRET}'
 ```
 
 ### Routes (v1)

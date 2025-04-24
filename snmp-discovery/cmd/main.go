@@ -11,14 +11,14 @@ import (
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 
-	"github.com/netboxlabs/orb-discovery/network-discovery/config"
-	"github.com/netboxlabs/orb-discovery/network-discovery/policy"
-	"github.com/netboxlabs/orb-discovery/network-discovery/server"
-	"github.com/netboxlabs/orb-discovery/network-discovery/version"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/policy"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/server"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/version"
 )
 
 // AppName is the application name
-const AppName = "network-discovery"
+const AppName = "snmp-discovery"
 
 func resolveEnv(value string) string {
 	// Check if the value starts with ${ and ends with }
@@ -39,12 +39,10 @@ func resolveEnv(value string) string {
 
 func main() {
 	host := flag.String("host", "0.0.0.0", "server host")
-	port := flag.Int("port", 8073, "server port")
+	port := flag.Int("port", 8070, "server port")
 	diodeTarget := flag.String("diode-target", "", "diode target (REQUIRED)")
-	diodeClientID := flag.String("diode-client-id", "", "diode client ID (REQUIRED)."+
-		" Environment variables can be used by wrapping them in ${} (e.g. ${MY_DIODE_CLIENT_ID})")
-	diodeClientSecret := flag.String("diode-client-secret", "", "diode client secret (REQUIRED)."+
-		" Environment variables can be used by wrapping them in ${} (e.g. ${MY_DIODE_CLIENT_SECRET})")
+	diodeAPIKey := flag.String("diode-api-key", "", "diode api key (REQUIRED)."+
+		" Environment variables can be used by wrapping them in ${} (e.g. ${MY_API_KEY})")
 	diodeAppNamePrefix := flag.String("diode-app-name-prefix", "", "diode producer_app_name prefix")
 	logLevel := flag.String("log-level", "INFO", "log level")
 	logFormat := flag.String("log-format", "TEXT", "log format")
@@ -52,8 +50,8 @@ func main() {
 
 	flag.Parse()
 
-	if *help || *diodeTarget == "" || *diodeClientID == "" || *diodeClientSecret == "" {
-		fmt.Fprintf(os.Stderr, "Usage of network-discovery:\n")
+	if *help || *diodeTarget == "" || *diodeAPIKey == "" {
+		fmt.Fprintf(os.Stderr, "Usage of snmp-discovery:\n")
 		flag.PrintDefaults()
 		if *help {
 			os.Exit(0)
@@ -70,8 +68,7 @@ func main() {
 		*diodeTarget,
 		producerName,
 		version.GetBuildVersion(),
-		diode.WithClientID(resolveEnv(*diodeClientID)),
-		diode.WithClientSecret(resolveEnv(*diodeClientSecret)),
+		diode.WithAPIKey(resolveEnv(*diodeAPIKey)),
 	)
 	if err != nil {
 		fmt.Printf("error creating diode client: %v\n", err)
@@ -94,7 +91,7 @@ func main() {
 		for {
 			select {
 			case <-sigs:
-				logger.Warn("stop signal received, stopping network-discovery")
+				logger.Warn("stop signal received, stopping snmp-discovery")
 				server.Stop()
 				cancelFunc()
 			case <-rootCtx.Done():

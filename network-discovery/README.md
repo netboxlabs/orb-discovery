@@ -12,10 +12,12 @@ sudo setcap cap_net_raw,cap_net_admin=eip $(which nmap)
 ### Usage
 ```sh
 Usage of network-discovery:
-  -diode-api-key string
-    	diode api key (REQUIRED). Environment variables can be used by wrapping them in ${} (e.g. ${MY_API_KEY})
-  -diode-app-name-prefix string
+ -diode-app-name-prefix string
     	diode producer_app_name prefix
+  -diode-client-id string
+    	diode client ID (REQUIRED). Environment variables can be used by wrapping them in ${} (e.g. ${MY_DIODE_CLIENT_ID})
+  -diode-client-secret string
+    	diode client secret (REQUIRED). Environment variables can be used by wrapping them in ${} (e.g. ${MY_DIODE_CLIENT_SECRET})
   -diode-target string
     	diode target (REQUIRED)
   -help
@@ -59,7 +61,7 @@ device-discovery can be run by installing it with pip
 git clone https://github.com/netboxlabs/orb-discovery.git
 cd network-discovery/
 make bin
-build/network-discovery --diode-target grpc://192.168.31.114:8080/diode  --diode-api-key '${DIODE_API_KEY}'
+build/network-discovery --diode-target grpc://192.168.31.114:8080/diode  --diode-client-id '${DIODE_CLIENT_ID}' --diode-client-secret '${DIODE_CLIENT_SECRET}'
 ```
 
 ### ⚠️ Warning
@@ -75,10 +77,12 @@ device-discovery can be build and run using docker:
 ```sh
 cd network-discovery/
 docker build --no-cache -t network-discovery:develop -f docker/Dockerfile .
-docker run --net=host -e DIODE_API_KEY={YOUR_API_KEY} \
+docker run --net=host -e DIODE_CLIENT_ID={YOUR_CLIENT} \
+ -e DIODE_CLIENT_SECRET=${YOUR_SECRET} \
  network-discovery:develop network-discovery \
  --diode-target grpc://192.168.31.114:8080/diode \
- --diode-api-key '${DIODE_API_KEY}'
+ --diode-client-id '${DIODE_CLIENT_ID}' \
+ --diode-client-secret '${DIODE_CLIENT_SECRET}'
 ```
 
 ### Routes (v1)
