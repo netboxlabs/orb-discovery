@@ -51,7 +51,7 @@ def sample_data():
             interface=None,
             ipaddress=None,
             prefix=None,
-            vlan=None
+            vlan=None,
         ),
     }
 
@@ -74,21 +74,27 @@ def test_init_client(mock_diode_client_class, mock_version_semver):
     """Test the initialization of the Diode client."""
     client = Client()
     client.init_client(
-        prefix="prefix", target="https://example.com", api_key="dummy_api_key"
+        prefix="prefix",
+        target="https://example.com",
+        client_id="abc",
+        client_secret="def",
     )
 
     mock_diode_client_class.assert_called_once_with(
         target="https://example.com",
         app_name="prefix/device-discovery",
         app_version=mock_version_semver(),
-        api_key="dummy_api_key",
+        client_id="abc",
+        client_secret="def",
     )
 
 
 def test_ingest_success(mock_diode_client_class, sample_data):
     """Test successful data ingestion."""
     client = Client()
-    client.init_client(prefix="", target="https://example.com", api_key="dummy_api_key")
+    client.init_client(
+        prefix="", target="https://example.com", client_id="abc", client_secret="def"
+    )
 
     mock_diode_instance = mock_diode_client_class.return_value
     mock_diode_instance.ingest.return_value.errors = []
@@ -107,7 +113,10 @@ def test_ingest_failure(mock_diode_client_class, sample_data):
     """Test data ingestion with errors."""
     client = Client()
     client.init_client(
-        prefix="prefix", target="https://example.com", api_key="dummy_api_key"
+        prefix="prefix",
+        target="https://example.com",
+        client_id="abc",
+        client_secret="def",
     )
 
     mock_diode_instance = mock_diode_client_class.return_value
