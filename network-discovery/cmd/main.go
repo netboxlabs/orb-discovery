@@ -41,7 +41,7 @@ func main() {
 	host := flag.String("host", "0.0.0.0", "server host")
 	port := flag.Int("port", 8073, "server port")
 	diodeTarget := flag.String("diode-target", "", "diode target (REQUIRED)")
-	diodeClientID := flag.String("diode-client-id", "", "diode cient ID (REQUIRED)."+
+	diodeClientID := flag.String("diode-client-id", "", "diode client ID (REQUIRED)."+
 		" Environment variables can be used by wrapping them in ${} (e.g. ${MY_DIODE_CLIENT_ID})")
 	diodeClientSecret := flag.String("diode-client-secret", "", "diode client secret (REQUIRED)."+
 		" Environment variables can be used by wrapping them in ${} (e.g. ${MY_DIODE_CLIENT_SECRET})")
