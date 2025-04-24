@@ -32,6 +32,17 @@ def mock_uvicorn_run():
         yield mock
 
 
+@pytest.fixture
+def mock_diode_client():
+    """
+    Fixture to mock the DiodeClient class.
+
+    Mocks the DiodeClient class to prevent actual network calls.
+    """
+    with patch("worker.main.DiodeClient") as mock:
+        yield mock
+
+
 def test_main_keyboard_interrupt(mock_parse_args):
     """Test handling of KeyboardInterrupt in main."""
     mock_parse_args.return_value = MagicMock(
@@ -49,7 +60,7 @@ def test_main_keyboard_interrupt(mock_parse_args):
             assert str(e) == "Test Exit"
 
 
-def test_main_with_config(mock_parse_args, mock_uvicorn_run):
+def test_main_with_config(mock_parse_args, mock_uvicorn_run, mock_diode_client):
     """Test running the CLI with a configuration file and no environment file."""
     mock_parse_args.return_value = MagicMock(
         diode_target="grpc",
@@ -67,10 +78,13 @@ def test_main_with_config(mock_parse_args, mock_uvicorn_run):
             assert str(e) == "Test Exit"
 
     mock_parse_args.assert_called_once()
+    mock_diode_client.assert_called_once()
     mock_uvicorn_run.assert_called_once()
 
 
-def test_main_start_server_failure(mock_parse_args, mock_uvicorn_run):
+def test_main_start_server_failure(
+    mock_parse_args, mock_uvicorn_run, mock_diode_client
+):
     """Test CLI failure when starting the agent."""
     mock_parse_args.return_value = MagicMock(
         diode_target="grpc",
@@ -90,6 +104,7 @@ def test_main_start_server_failure(mock_parse_args, mock_uvicorn_run):
 
     mock_parse_args.assert_called_once()
     mock_uvicorn_run.assert_called_once()
+    mock_diode_client.assert_called_once()
     mock_exit.assert_called_once_with(
         "ERROR: Unable to start worker backend: Test Start Server Failure"
     )

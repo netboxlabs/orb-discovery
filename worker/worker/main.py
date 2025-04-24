@@ -8,6 +8,7 @@ import sys
 
 import netboxlabs.diode.sdk.version as SdkVersion
 import uvicorn
+from netboxlabs.diode.sdk import DiodeClient
 
 from worker.metrics import setup_metrics_export
 from worker.models import DiodeConfig
@@ -113,6 +114,18 @@ def main():
             client_id=client_id,
             client_secret=client_secret,
         )
+
+        try:
+            DiodeClient(
+                target=config.target,
+                app_name="validate",
+                app_version="0.0.0",
+                client_id=client_id,
+                client_secret=client_secret,
+            )
+        except Exception as e:
+            sys.exit(f"ERROR: Unable to connect to Diode Server: {e}")
+
         manager.setup(config)
         uvicorn.run(
             app,
