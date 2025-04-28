@@ -74,7 +74,7 @@ func (r *Runner) run() {
 	defer cancel()
 
 	r.logger.Info("Starting SNMP crawl...")
-	mapper := snmp.NewObjectIDMapper()
+	mapper := snmp.NewObjectIDMapper(r.scope.Mappings)
 	entities := make([]diode.Entity, 0)
 
 	for _, target := range r.scope.Targets {

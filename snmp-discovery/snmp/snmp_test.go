@@ -145,7 +145,13 @@ func (m *MockSNMP) Walk(oid string) (snmp.ObjectIDValueMap, error) {
 }
 
 func TestMapObjectIDsToEntity(t *testing.T) {
-	mapper := snmp.NewObjectIDMapper()
+	mapper := snmp.NewObjectIDMapper([]config.MappingEntry{
+		{
+			OID:    "1.3.6.1.2.1.4.20.1.1",
+			Entity: "ipAddress",
+			Field:  "address",
+		},
+	})
 	objectIDs := snmp.ObjectIDValueMap{
 		"1.3.6.1.2.1.4.20.1.1": "192.168.1.1",
 	}
@@ -159,7 +165,13 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 }
 
 func TestObjectIDs(t *testing.T) {
-	mapper := snmp.NewObjectIDMapper()
+	mapper := snmp.NewObjectIDMapper([]config.MappingEntry{
+		{
+			OID:    "1.3.6.1.2.1.4.20.1.1",
+			Entity: "ipAddress",
+			Field:  "address",
+		},
+	})
 
 	expectedObjectIDs := []string{
 		"1.3.6.1.2.1.4.20.1.1",

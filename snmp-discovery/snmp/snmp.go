@@ -23,11 +23,13 @@ type ObjectIDMapper struct {
 }
 
 // NewObjectIDMapper creates a new ObjectIDMapper
-func NewObjectIDMapper() *ObjectIDMapper {
+func NewObjectIDMapper(mappings []config.MappingEntry) *ObjectIDMapper {
+	mapping := make(ObjectIDMapping)
+	for _, m := range mappings {
+		mapping[m.OID] = fmt.Sprintf("%s.%s", m.Entity, m.Field)
+	}
 	return &ObjectIDMapper{
-		mapping: ObjectIDMapping{
-			"1.3.6.1.2.1.4.20.1.1": "ipAddress.address",
-		},
+		mapping: mapping,
 	}
 }
 

@@ -66,6 +66,13 @@ func TestNewRunner(t *testing.T) {
 					Port: 161,
 				},
 			},
+			Mappings: []config.MappingEntry{
+				{
+					OID:    "1.3.6.1.2.1.4.20.1.1",
+					Entity: "ipAddress",
+					Field:  "address",
+				},
+			},
 		},
 	}
 	ctx := context.Background()
@@ -121,6 +128,13 @@ func TestRunnerRun(t *testing.T) {
 						ProtocolVersion: snmp.ProtocolVersion2c,
 						Community:       "public",
 					},
+					Mappings: []config.MappingEntry{
+						{
+							OID:    "1.3.6.1.2.1.4.20.1.1",
+							Entity: "ipAddress",
+							Field:  "address",
+						},
+					},
 				},
 			}
 			ctx := context.Background()
@@ -154,67 +168,6 @@ func TestRunnerRun(t *testing.T) {
 	}
 }
 
-func TestRunnerWithOptions(t *testing.T) {
-	tests := []struct {
-		name     string
-		policy   config.Policy
-		expected []string
-	}{
-		{
-			name: "with SNMP version and community",
-			policy: config.Policy{
-				Config: config.PolicyConfig{},
-				Scope: config.Scope{
-					Targets: []config.Target{
-						{
-							Host: "localhost",
-							Port: 161,
-						},
-					},
-					Authentication: config.Authentication{
-						ProtocolVersion: snmp.ProtocolVersion2c,
-						Community:       "public",
-					},
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-			mockClient := new(MockDiodeClient)
-			ctx := context.Background()
-
-			// Create runner
-			runner, err := policy.NewRunner(ctx, logger, "test-policy", tt.policy, mockClient, snmp.NewFakeSNMPWalker)
-			assert.NoError(t, err)
-
-			// Use a channel to signal that Ingest was called
-			ingestCalled := make(chan bool, 1)
-
-			mockClient.On("Ingest", mock.Anything, mock.Anything).Run(func(_ mock.Arguments) {
-				ingestCalled <- true
-			}).Return(&diodepb.IngestResponse{}, nil)
-
-			// Start the process
-			runner.Start()
-
-			// Wait for Ingest to be called or timeout
-			select {
-			case <-ingestCalled:
-				// Success
-			case <-time.After(10 * time.Second):
-				t.Fatal("Timeout: Ingest was not called")
-			}
-
-			// Stop the process
-			err = runner.Stop()
-			assert.NoError(t, err)
-		})
-	}
-}
-
 func TestRunnerIngestCalledWithCorrectValues(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	mockClient := new(MockDiodeClient)
@@ -226,6 +179,13 @@ func TestRunnerIngestCalledWithCorrectValues(t *testing.T) {
 			Targets: []config.Target{
 				{
 					Host: "192.168.1.1",
+				},
+			},
+			Mappings: []config.MappingEntry{
+				{
+					OID:    "1.3.6.1.2.1.4.20.1.1",
+					Entity: "ipAddress",
+					Field:  "address",
 				},
 			},
 		},
