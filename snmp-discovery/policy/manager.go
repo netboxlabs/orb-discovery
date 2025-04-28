@@ -49,7 +49,32 @@ func (m *Manager) ParsePolicies(data []byte) (map[string]config.Policy, error) {
 		}
 	}
 
+	// Load the mapping config
+	for name, policy := range payload.Policies {
+		mappingConfig, err := loadMappingConfig(policy)
+		if err != nil {
+			return nil, fmt.Errorf("%s : invalid policy : %w", name, err)
+		}
+
+		policy.Scope.Mappings = mappingConfig.Entries
+	}
+
 	return payload.Policies, nil
+}
+
+func loadMappingConfig(policy config.Policy) (*config.Mapping, error) {
+	// load the mapping config from the file
+	mappingConfigFileContents, err := os.ReadFile(policy.Scope.MappingConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read mapping config file: %w", err)
+	}
+
+	var mappingConfig config.Mapping
+	if err := yaml.Unmarshal(mappingConfigFileContents, &mappingConfig); err != nil {
+		return nil, err
+	}
+
+	return &mappingConfig, nil
 }
 
 func (m *Manager) validatePolicy(policy config.Policy) error {
