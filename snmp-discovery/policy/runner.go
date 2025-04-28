@@ -9,6 +9,7 @@ import (
 	"github.com/netboxlabs/diode-sdk-go/diode"
 
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/mapping"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/snmp"
 )
 
@@ -74,7 +75,7 @@ func (r *Runner) run() {
 	defer cancel()
 
 	r.logger.Info("Starting SNMP crawl...")
-	mapper := snmp.NewObjectIDMapper(r.scope.Mappings)
+	mapper := mapping.NewObjectIDMapper(r.scope.Mappings)
 	entities := make([]diode.Entity, 0)
 
 	for _, target := range r.scope.Targets {

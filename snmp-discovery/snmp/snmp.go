@@ -6,50 +6,10 @@ import (
 	"time"
 
 	"github.com/gosnmp/gosnmp"
-	"github.com/netboxlabs/diode-sdk-go/diode"
 
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/mapping"
 )
-
-// ObjectIDMapping is a map of ObjectIDs to entity types
-type ObjectIDMapping map[string]string
-
-// ObjectIDValueMap is a map of ObjectIDs to their values
-type ObjectIDValueMap map[string]string
-
-// ObjectIDMapper is a struct that maps ObjectIDs to entities
-type ObjectIDMapper struct {
-	mapping ObjectIDMapping
-}
-
-// NewObjectIDMapper creates a new ObjectIDMapper
-func NewObjectIDMapper(mappings []config.MappingEntry) *ObjectIDMapper {
-	mapping := make(ObjectIDMapping)
-	for _, m := range mappings {
-		mapping[m.OID] = fmt.Sprintf("%s.%s", m.Entity, m.Field)
-	}
-	return &ObjectIDMapper{
-		mapping: mapping,
-	}
-}
-
-// MapObjectIDsToEntity maps ObjectIDs to entities
-// In future this will be dynamic based on the ObjectIDMapping from the policy
-func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diode.Entity {
-	ipEntity := &diode.IPAddress{
-		Address: diode.String(objectIDs["1.3.6.1.2.1.4.20.1.1"] + "/32"),
-	}
-	return []diode.Entity{ipEntity}
-}
-
-// ObjectIDs returns the ObjectIDs that the ObjectIDMapper can map
-func (m *ObjectIDMapper) ObjectIDs() []string {
-	objectIDs := make([]string, 0, len(m.mapping))
-	for objectID := range m.mapping {
-		objectIDs = append(objectIDs, objectID)
-	}
-	return objectIDs
-}
 
 // Host is a struct that represents an SNMP host
 type Host struct {
@@ -74,7 +34,7 @@ func NewHost(host string, port uint16, retries int, authentication *config.Authe
 }
 
 // Walk walks the SNMP host
-func (s *Host) Walk(objectIDs []string) (ObjectIDValueMap, error) {
+func (s *Host) Walk(objectIDs []string) (mapping.ObjectIDValueMap, error) {
 	s.logger.Info("Scanning", "host", s.address)
 
 	snmpClient, err := s.ClientFactory(s.address, s.port, s.retries, s.authentication)
@@ -93,7 +53,7 @@ func (s *Host) Walk(objectIDs []string) (ObjectIDValueMap, error) {
 		return nil, err
 	}
 
-	output := make(ObjectIDValueMap)
+	output := make(mapping.ObjectIDValueMap)
 	for _, objectID := range objectIDs {
 		pdu, err := snmpClient.Walk(objectID)
 		if err != nil {
@@ -123,12 +83,12 @@ func (c *Client) Close() error {
 }
 
 // Walk implements the Walker interface by walking the SNMP tree
-func (c *Client) Walk(objectID string) (ObjectIDValueMap, error) {
+func (c *Client) Walk(objectID string) (mapping.ObjectIDValueMap, error) {
 	pdu, err := c.WalkAll(objectID)
 	if err != nil {
 		return nil, err
 	}
-	output := make(ObjectIDValueMap)
+	output := make(mapping.ObjectIDValueMap)
 	for _, pdu := range pdu {
 		if value, ok := pdu.Value.(string); ok {
 			output[pdu.Name] = value
@@ -231,7 +191,7 @@ func getPrivProtocol(privProtocol string) (gosnmp.SnmpV3PrivProtocol, error) {
 // It allows for connecting to SNMP devices, traversing ObjectID trees,
 // and properly closing connections when finished
 type Walker interface {
-	Walk(objectID string) (ObjectIDValueMap, error)
+	Walk(objectID string) (mapping.ObjectIDValueMap, error)
 	Connect() error
 	Close() error
 }

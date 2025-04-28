@@ -1,6 +1,9 @@
 package snmp
 
-import "github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+import (
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/mapping"
+)
 
 // FakeSNMPWalker is a no-op implementation of SNMPWalker
 type FakeSNMPWalker struct{}
@@ -16,13 +19,13 @@ func (n *FakeSNMPWalker) Close() error {
 }
 
 // Walk implements Walker interface
-func (n *FakeSNMPWalker) Walk(oid string) (ObjectIDValueMap, error) {
+func (n *FakeSNMPWalker) Walk(oid string) (mapping.ObjectIDValueMap, error) {
 	if oid == "1.3.6.1.2.1.4.20.1.1" {
-		return ObjectIDValueMap{
+		return mapping.ObjectIDValueMap{
 			"1.3.6.1.2.1.4.20.1.1": "192.168.1.1",
 		}, nil
 	}
-	return make(ObjectIDValueMap), nil
+	return make(mapping.ObjectIDValueMap), nil
 }
 
 // NewFakeSNMPWalker creates a new FakeSNMPWalker

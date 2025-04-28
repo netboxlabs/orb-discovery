@@ -101,7 +101,9 @@ func TestServerCreateDeletePolicy(t *testing.T) {
 
 	// Create a dummy valid mapping file
 	writeMappingConfigFile("valid_mapping.yaml")
-	defer os.Remove("valid_mapping.yaml")
+	defer func() {
+		_ = os.Remove("valid_mapping.yaml")
+	}()
 
 	w := httptest.NewRecorder()
 	request, _ := http.NewRequest(http.MethodPost, "/api/v1/policies", bytes.NewReader(body))
@@ -135,7 +137,9 @@ func TestServerCreateDeletePolicy(t *testing.T) {
     `)
 
 	writeMappingConfigFile("valid_mapping.yaml")
-	defer os.Remove("valid_mapping.yaml")
+	defer func() {
+		_ = os.Remove("valid_mapping.yaml")
+	}()
 
 	w = httptest.NewRecorder()
 	request, _ = http.NewRequest(http.MethodPost, "/api/v1/policies", bytes.NewReader(body))
@@ -164,13 +168,13 @@ func TestServerCreateDeletePolicy(t *testing.T) {
 }
 
 func writeMappingConfigFile(filename string) {
-	os.WriteFile(filename, []byte(`
+	_ = os.WriteFile(filename, []byte(`
     mappings:
       - oid: 1.3.6.1.2.1.1.1.0
         entity: device
         field: description
         description: "Device description string (sysDescr)"
-    `), 0644)
+    `), 0o644)
 }
 
 func TestServerCreateInvalidPolicy(t *testing.T) {
@@ -500,7 +504,9 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			client := new(MockClient)
 
 			writeMappingConfigFile("valid_mapping.yaml")
-			defer os.Remove("valid_mapping.yaml")
+			defer func() {
+				_ = os.Remove("valid_mapping.yaml")
+			}()
 
 			policyManager := policy.NewManager(ctx, logger, client)
 

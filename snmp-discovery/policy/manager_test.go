@@ -35,13 +35,13 @@ func (m *MockRunner) Stop() error {
 }
 
 func writeMappingConfigFile(filename string) {
-	os.WriteFile(filename, []byte(`
+	_ = os.WriteFile(filename, []byte(`
     mappings:
       - oid: 1.3.6.1.2.1.1.1.0
         entity: device
         field: description
         description: "Device description string (sysDescr)"
-    `), 0644)
+    `), 0o644)
 }
 
 func TestManagerParsePolicies(t *testing.T) {
@@ -66,7 +66,9 @@ func TestManagerParsePolicies(t *testing.T) {
 
 		// Create a dummy valid mapping file
 		writeMappingConfigFile("valid_mapping.yaml")
-		defer os.Remove("valid_mapping.yaml")
+		defer func() {
+			_ = os.Remove("valid_mapping.yaml")
+		}()
 
 		policies, err := manager.ParsePolicies(yamlData)
 		assert.NoError(t, err)
@@ -154,7 +156,9 @@ func TestManagerPolicyLifecycle(t *testing.T) {
 
 	// Create a dummy valid mapping file
 	writeMappingConfigFile("valid_mapping.yaml")
-	defer os.Remove("valid_mapping.yaml")
+	defer func() {
+		_ = os.Remove("valid_mapping.yaml")
+	}()
 
 	policies, err := manager.ParsePolicies(yamlData)
 	assert.NoError(t, err)
