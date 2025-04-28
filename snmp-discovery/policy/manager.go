@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"gopkg.in/yaml.v3"
@@ -96,6 +97,15 @@ func (m *Manager) validatePolicy(policy config.Policy) error {
 				return fmt.Errorf("missing priv protocol")
 			}
 		}
+	}
+
+	// Validate MappingConfig
+	if policy.Scope.MappingConfig == "" {
+		return fmt.Errorf("missing mapping configuration file")
+	}
+
+	if _, err := os.Stat(policy.Scope.MappingConfig); os.IsNotExist(err) {
+		return fmt.Errorf("mapping configuration file does not exist")
 	}
 
 	return nil

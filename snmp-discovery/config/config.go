@@ -14,6 +14,7 @@ type Scope struct {
 	Targets        []Target       `yaml:"targets"`
 	Authentication Authentication `yaml:"authentication"`
 	Retries        int            `yaml:"retries"`
+	MappingConfig  string         `yaml:"mapping_config,omitempty"`
 }
 
 // Target represents a target host to crawl

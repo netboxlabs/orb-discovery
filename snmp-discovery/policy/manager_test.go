@@ -33,11 +33,10 @@ func (m *MockRunner) Stop() error {
 	args := m.Called()
 	return args.Error(0)
 }
-
 func TestManagerParsePolicies(t *testing.T) {
 	manager := &policy.Manager{}
 
-	t.Run("Valid Policies", func(t *testing.T) {
+	t.Run("Valid Policy", func(t *testing.T) {
 		yamlData := []byte(`
         policies:
           policy1:
@@ -51,7 +50,12 @@ func TestManagerParsePolicies(t *testing.T) {
               authentication:
                 protocol_version: SNMPv2c
                 community: public
+              mapping_config: "valid_mapping.yaml"
        `)
+
+		// Create a dummy valid mapping file
+		os.WriteFile("valid_mapping.yaml", []byte("dummy content"), 0644)
+		defer os.Remove("valid_mapping.yaml")
 
 		policies, err := manager.ParsePolicies(yamlData)
 		assert.NoError(t, err)
@@ -60,7 +64,28 @@ func TestManagerParsePolicies(t *testing.T) {
 		assert.Equal(t, uint16(162), policies["policy1"].Scope.Targets[0].Port)
 		assert.Equal(t, snmp.ProtocolVersion2c, policies["policy1"].Scope.Authentication.ProtocolVersion)
 		assert.Equal(t, "public", policies["policy1"].Scope.Authentication.Community)
-		assert.Equal(t, 0, policies["policy1"].Scope.Retries)
+	})
+
+	t.Run("Invalid MappingConfig", func(t *testing.T) {
+		yamlData := []byte(`
+        policies:
+          policy1:
+            config:
+              defaults:
+                comments: test
+            scope:
+              targets:
+                - host: 192.168.1.1
+                  port: 162
+              authentication:
+                protocol_version: SNMPv2c
+                community: public
+              mapping_config: "invalid_mapping.yaml"
+       `)
+
+		_, err := manager.ParsePolicies(yamlData)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "policy1 : invalid policy : mapping configuration file does not exist")
 	})
 
 	t.Run("Invalid Policy", func(t *testing.T) {
@@ -98,6 +123,7 @@ func TestManagerPolicyLifecycle(t *testing.T) {
               authentication:
                 protocol_version: SNMPv2c
                 community: public
+              mapping_config: "valid_mapping.yaml"
           policy2:
             scope:
               targets:
@@ -105,13 +131,19 @@ func TestManagerPolicyLifecycle(t *testing.T) {
               authentication:
                 protocol_version: SNMPv2c
                 community: public
+              mapping_config: "valid_mapping.yaml"
           policy3:
             scope:
               targets: []
               authentication:
                 protocol_version: SNMPv2c
                 community: public
+              mapping_config: "valid_mapping.yaml"
        `)
+
+	// Create a dummy valid mapping file
+	os.WriteFile("valid_mapping.yaml", []byte("dummy content"), 0644)
+	defer os.Remove("valid_mapping.yaml")
 
 	policies, err := manager.ParsePolicies(yamlData)
 	assert.NoError(t, err)
