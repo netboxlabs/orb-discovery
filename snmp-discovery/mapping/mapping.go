@@ -33,10 +33,18 @@ func NewObjectIDMapper(mappings []config.MappingEntry) *ObjectIDMapper {
 // MapObjectIDsToEntity maps ObjectIDs to entities
 // In future this will be dynamic based on the ObjectIDMapping from the policy
 func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diode.Entity {
-	ipEntity := &diode.IPAddress{
-		Address: diode.String(objectIDs["1.3.6.1.2.1.4.20.1.1"] + "/32"),
+	for objectID, value := range objectIDs {
+		entityType := m.mapping[objectID]
+		switch entityType {
+		case "ipAddress.address": // TODO: Add support for other entity types and move fields to within each case block
+			ipEntity := &diode.IPAddress{
+				Address: diode.String(value + "/32"),
+			}
+
+			return []diode.Entity{ipEntity}
+		}
 	}
-	return []diode.Entity{ipEntity}
+	return []diode.Entity{}
 }
 
 // ObjectIDs returns the ObjectIDs that the ObjectIDMapper can map
