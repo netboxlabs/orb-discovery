@@ -47,3 +47,20 @@ func TestObjectIDs(t *testing.T) {
 
 	assert.ElementsMatch(t, expectedObjectIDs, objectIDs)
 }
+
+func TestMapObjectIDsToEntity_NotInMapping(t *testing.T) {
+	mapper := mapping.NewObjectIDMapper([]config.MappingEntry{
+		{
+			OID:    "1.3.6.1.2.1.4.20.1.1",
+			Entity: "ipAddress",
+			Field:  "address",
+		},
+	})
+	objectIDs := mapping.ObjectIDValueMap{
+		"1.3.6.1.2.1.4.20.1.2": "192.168.1.2",
+	}
+
+	entities := mapper.MapObjectIDsToEntity(objectIDs)
+
+	assert.Len(t, entities, 0)
+}

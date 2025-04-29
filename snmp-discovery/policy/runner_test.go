@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/mapping"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/policy"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/snmp"
 )
@@ -38,7 +39,7 @@ type MockHost struct {
 	mock.Mock
 }
 
-func (m *MockHost) Walk(objectID string) (snmp.ObjectIDValueMap, error) {
+func (m *MockHost) Walk(objectID string) (mapping.ObjectIDValueMap, error) {
 	args := m.Called(objectID)
 	return nil, args.Error(1)
 }
