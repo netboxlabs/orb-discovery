@@ -66,6 +66,62 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 			},
 		},
 		{
+			name: "Valid Mapping for multiple entities of same type",
+			mapping: []config.MappingEntry{
+				{
+					OID:    "iso.3.6.1.2.1.2.2.1",
+					Entity: "interface",
+					Field:  "_id",
+					MappingEntries: []config.MappingEntry{
+						{
+							OID:    "iso.3.6.1.2.1.2.2.1.2",
+							Entity: "interface",
+							Field:  "name",
+						},
+						{
+							OID:    "iso.3.6.1.2.1.2.2.1.5",
+							Entity: "interface",
+							Field:  "speed",
+						},
+						{
+							OID:    "iso.3.6.1.2.1.2.2.1.6",
+							Entity: "interface",
+							Field:  "macAddress",
+						},
+						{
+							OID:    "iso.3.6.1.2.1.2.2.1.7",
+							Entity: "interface",
+							Field:  "adminStatus",
+						},
+					},
+				},
+			},
+			objectIDs: mapping.ObjectIDValueMap{
+				"iso.3.6.1.2.1.2.2.1.2.999": "GigabitEthernet1/0/1",
+				"iso.3.6.1.2.1.2.2.1.5.999": "1000000000",
+				"iso.3.6.1.2.1.2.2.1.6.999": "00:00:00:00:00:00",
+				"iso.3.6.1.2.1.2.2.1.7.999": "1",
+				"iso.3.6.1.2.1.2.2.1.2.555": "GigabitEthernet1/0/1",
+				"iso.3.6.1.2.1.2.2.1.5.555": "1000000000",
+				"iso.3.6.1.2.1.2.2.1.6.555": "00:00:00:00:00:11",
+				"iso.3.6.1.2.1.2.2.1.7.555": "0",
+			},
+			expected: []diode.Entity{
+				&diode.Interface{
+					Speed:      &[]int32{1000000000}[0],
+					Name:       diode.String("GigabitEthernet1/0/1"),
+					MacAddress: &[]string{"00:00:00:00:00:00"}[0],
+					Enabled:    &[]bool{true}[0],
+				},
+				&diode.Interface{
+					Speed:      &[]int32{1000000000}[0],
+					Name:       diode.String("GigabitEthernet1/0/1"),
+					MacAddress: &[]string{"00:00:00:00:00:11"}[0],
+					Enabled:    &[]bool{false}[0],
+				},
+			},
+		},
+		{
 			name: "Not In Mapping",
 			mapping: []config.MappingEntry{
 				{
