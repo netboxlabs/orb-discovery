@@ -42,6 +42,11 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 							Entity: "interface",
 							Field:  "macAddress",
 						},
+						{
+							OID:    "iso.3.6.1.2.1.2.2.1.7",
+							Entity: "interface",
+							Field:  "adminStatus",
+						},
 					},
 				},
 			},
@@ -49,12 +54,14 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 				"iso.3.6.1.2.1.2.2.1.2.999": "GigabitEthernet1/0/1",
 				"iso.3.6.1.2.1.2.2.1.5.999": "1000000000",
 				"iso.3.6.1.2.1.2.2.1.6.999": "00:00:00:00:00:00",
+				"iso.3.6.1.2.1.2.2.1.7.999": "1",
 			},
 			expected: []diode.Entity{
 				&diode.Interface{
 					Speed:      &[]int32{1000000000}[0],
 					Name:       diode.String("GigabitEthernet1/0/1"),
 					MacAddress: &[]string{"00:00:00:00:00:00"}[0],
+					Enabled:    &[]bool{true}[0],
 				},
 			},
 		},

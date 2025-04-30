@@ -109,6 +109,9 @@ func (m *interfaceMapper) Map(values map[string]string, mappingEntry *mappingEnt
 					interfaceEntity.Speed = &speed32
 				case "macAddress":
 					interfaceEntity.MacAddress = &value
+				case "adminStatus":
+					enabled := value == "1"
+					interfaceEntity.Enabled = &enabled
 				}
 			}
 		}
