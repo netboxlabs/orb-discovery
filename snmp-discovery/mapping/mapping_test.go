@@ -1,6 +1,8 @@
 package mapping_test
 
 import (
+	"log/slog"
+	"os"
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -11,56 +13,129 @@ import (
 )
 
 func TestMapObjectIDsToEntity(t *testing.T) {
-	mapper := mapping.NewObjectIDMapper([]config.MappingEntry{
+	tests := []struct {
+		name      string
+		mapping   []config.MappingEntry
+		objectIDs mapping.ObjectIDValueMap
+		expected  []diode.Entity
+	}{
 		{
-			OID:    "1.3.6.1.2.1.4.20.1.1",
-			Entity: "ipAddress",
-			Field:  "address",
+			name: "Valid Mapping with multiple OIDs for same entity",
+			mapping: []config.MappingEntry{
+				{
+					OID:    "iso.3.6.1.2.1.2.2.1",
+					Entity: "interface",
+					Field:  "_id",
+					MappingEntries: []config.MappingEntry{
+						{
+							OID:    "iso.3.6.1.2.1.2.2.1.2",
+							Entity: "interface",
+							Field:  "name",
+						},
+						{
+							OID:    "iso.3.6.1.2.1.2.2.1.5",
+							Entity: "interface",
+							Field:  "speed",
+						},
+						{
+							OID:    "iso.3.6.1.2.1.2.2.1.6",
+							Entity: "interface",
+							Field:  "macAddress",
+						},
+					},
+				},
+			},
+			objectIDs: mapping.ObjectIDValueMap{
+				"iso.3.6.1.2.1.2.2.1.2.999": "GigabitEthernet1/0/1",
+				"iso.3.6.1.2.1.2.2.1.5.999": "1000000000",
+				"iso.3.6.1.2.1.2.2.1.6.999": "00:00:00:00:00:00",
+			},
+			expected: []diode.Entity{
+				&diode.Interface{
+					Speed:      &[]int32{1000000000}[0],
+					Name:       diode.String("GigabitEthernet1/0/1"),
+					MacAddress: &[]string{"00:00:00:00:00:00"}[0],
+				},
+			},
 		},
-	})
-	objectIDs := mapping.ObjectIDValueMap{
-		"1.3.6.1.2.1.4.20.1.1": "192.168.1.1",
+		{
+			name: "Not In Mapping",
+			mapping: []config.MappingEntry{
+				{
+					OID:    "1.3.6.1.2.1.4.20.1.1",
+					Entity: "ipAddress",
+					Field:  "address",
+				},
+			},
+			objectIDs: mapping.ObjectIDValueMap{
+				"1.3.6.1.2.1.4.20.1.2": "192.168.1.2",
+			},
+			expected: []diode.Entity{},
+		},
 	}
 
-	entities := mapper.MapObjectIDsToEntity(objectIDs)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mapper := mapping.NewObjectIDMapper(tt.mapping, slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false})))
+			entities := mapper.MapObjectIDsToEntity(tt.objectIDs)
 
-	assert.Len(t, entities, 1)
-	ipEntity, ok := entities[0].(*diode.IPAddress)
-	assert.True(t, ok)
-	assert.Equal(t, "192.168.1.1/32", *ipEntity.Address)
+			assert.ElementsMatch(t, tt.expected, entities)
+		})
+	}
 }
 
 func TestObjectIDs(t *testing.T) {
-	mapper := mapping.NewObjectIDMapper([]config.MappingEntry{
+	tests := []struct {
+		name         string
+		mapping      []config.MappingEntry
+		expectedOIDs []string
+	}{
 		{
-			OID:    "1.3.6.1.2.1.4.20.1.1",
-			Entity: "ipAddress",
-			Field:  "address",
+			name: "Single OID",
+			mapping: []config.MappingEntry{
+				{
+					OID:    "1.3.6.1.2.1.4.20.1.1",
+					Entity: "ipAddress",
+					Field:  "address",
+				},
+			},
+			expectedOIDs: []string{
+				"1.3.6.1.2.1.4.20.1.1",
+			},
 		},
-	})
-
-	expectedObjectIDs := []string{
-		"1.3.6.1.2.1.4.20.1.1",
+		{
+			name: "Duplicate OID",
+			mapping: []config.MappingEntry{
+				{
+					OID:    "iso.3.6.1.2.1.2.2.1",
+					Entity: "interface",
+					Field:  "_id",
+					MappingEntries: []config.MappingEntry{
+						{
+							OID:    "iso.3.6.1.2.1.2.2.1.2",
+							Entity: "inteface",
+							Field:  "name",
+						},
+						{
+							OID:    "iso.3.6.1.2.1.2.2.1.5",
+							Entity: "inteface",
+							Field:  "speed",
+						},
+					},
+				},
+			},
+			expectedOIDs: []string{
+				"iso.3.6.1.2.1.2.2.1",
+			},
+		},
 	}
 
-	objectIDs := mapper.ObjectIDs()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mapper := mapping.NewObjectIDMapper(tt.mapping, slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false})))
+			objectIDs := mapper.ObjectIDs()
 
-	assert.ElementsMatch(t, expectedObjectIDs, objectIDs)
-}
-
-func TestMapObjectIDsToEntity_NotInMapping(t *testing.T) {
-	mapper := mapping.NewObjectIDMapper([]config.MappingEntry{
-		{
-			OID:    "1.3.6.1.2.1.4.20.1.1",
-			Entity: "ipAddress",
-			Field:  "address",
-		},
-	})
-	objectIDs := mapping.ObjectIDValueMap{
-		"1.3.6.1.2.1.4.20.1.2": "192.168.1.2",
+			assert.ElementsMatch(t, tt.expectedOIDs, objectIDs)
+		})
 	}
-
-	entities := mapper.MapObjectIDsToEntity(objectIDs)
-
-	assert.Len(t, entities, 0)
 }

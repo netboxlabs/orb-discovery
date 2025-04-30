@@ -75,18 +75,20 @@ func (r *Runner) run() {
 	defer cancel()
 
 	r.logger.Info("Starting SNMP crawl...")
-	mapper := mapping.NewObjectIDMapper(r.scope.Mappings)
+	mapper := mapping.NewObjectIDMapper(r.scope.Mappings, r.logger)
 	entities := make([]diode.Entity, 0)
 
 	for _, target := range r.scope.Targets {
 		host := snmp.NewHost(target.Host, target.Port, r.scope.Retries, &r.scope.Authentication, r.logger, r.ClientFactory)
-		oids, err := host.Walk(mapper.ObjectIDs())
-		if err != nil {
-			r.logger.Warn("Error crawling host", "host", target.Host, "error", err)
-			continue
+		for _, oid := range mapper.ObjectIDs() {
+			oids, err := host.Walk([]string{oid})
+			if err != nil {
+				r.logger.Warn("Error crawling host", "host", target.Host, "error", err)
+				continue
+			}
+			entitiesForTarget := mapper.MapObjectIDsToEntity(oids)
+			entities = append(entities, entitiesForTarget...)
 		}
-		entitiesForTarget := mapper.MapObjectIDsToEntity(oids)
-		entities = append(entities, entitiesForTarget...)
 	}
 	r.logger.Info("SNMP crawl complete.")
 

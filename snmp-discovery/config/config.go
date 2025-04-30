@@ -68,10 +68,11 @@ type Mapping struct {
 
 // MappingEntry represents a single entry in the mapping YAML file
 type MappingEntry struct {
-	OID         string `yaml:"oid"`
-	Entity      string `yaml:"entity"`
-	Field       string `yaml:"field"`
-	Description string `yaml:"description"`
+	OID            string         `yaml:"oid"`
+	Entity         string         `yaml:"entity"`
+	Field          string         `yaml:"field"`
+	Description    string         `yaml:"description"`
+	MappingEntries []MappingEntry `yaml:"mapping_entries"`
 }
 
 // EntityField represents the entity and field combination
