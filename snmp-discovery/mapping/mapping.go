@@ -141,7 +141,7 @@ func (m *interfaceMapper) Map(values map[ObjectIDIndex]ObjectIDValue, mappingEnt
 				case "speed":
 					speed, err := strconv.Atoi(value.Value)
 					if err != nil {
-						panic(err) // TODO: handle error
+						logger.Warn("Error converting speed to int", "error", err, "value", value.Value)
 					}
 					speed32 := int32(speed)
 					interfaceEntity.Speed = &speed32
@@ -218,6 +218,14 @@ func NewObjectIDIndexDetails(index string) *ObjectIDIndexDetails {
 	}
 }
 
+// getIDSize returns the number of parts to use as ID based on the value type
+func getIDSize(value Value) int {
+	if value.Type == IPAddress {
+		return 4
+	}
+	return 1
+}
+
 // MapObjectIDsToEntity maps ObjectIDs to entities
 func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diode.Entity {
 	objectIDIndexMap := m.groupByObjectIDIndex(objectIDs)
@@ -240,32 +248,26 @@ func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[Ob
 	objectIDIndexMap := make(map[ObjectIDIndex]*ObjectIDIndexDetails)
 	for objectID, value := range objectIDs {
 		parts := strings.Split(objectID, ".")
-		var id ObjectIDIndex
-		var parent string
-		if value.Type == IPAddress {
-			// For IP addresses, use last 4 parts as ID
-			if len(parts) >= 4 {
-				id = ObjectIDIndex(strings.Join(parts[len(parts)-4:], "."))
-				parent = strings.Join(parts[:len(parts)-4], ".") // Remove the 4 parts from parent
-			} else {
-				m.logger.Warn("IP address OID does not have enough parts for 4-part ID", "objectID", objectID)
-				continue
-			}
-		} else {
-			// For everything else, use last part as ID
-			id = ObjectIDIndex(parts[len(parts)-1])
-			parent = strings.Join(parts[:len(parts)-1], ".") // Remove the last part from parent
+		idSize := getIDSize(value)
+		if len(parts) <= idSize {
+			m.logger.Warn("Invalid ObjectID length for type", "objectID", objectID, "type", value.Type)
+			continue
 		}
-		if objectIDIndexMap[id] == nil {
-			objectIDIndexMap[id] = NewObjectIDIndexDetails(parent)
-		}
-		objectIDIndexMap[id].Values[ObjectIDIndex(objectID)] = ObjectIDValue{
+		id := ObjectIDIndex(strings.Join(parts[len(parts)-idSize:], "."))
+		parent := strings.Join(parts[:len(parts)-idSize], ".")
+
+		objectIDValue := ObjectIDValue{
 			OID:    objectID,
 			Index:  id,
 			Parent: parent,
 			Value:  value.Value,
 			Type:   value.Type,
 		}
+
+		if objectIDIndexMap[id] == nil {
+			objectIDIndexMap[id] = NewObjectIDIndexDetails(parent)
+		}
+		objectIDIndexMap[id].Values[ObjectIDIndex(objectID)] = objectIDValue
 	}
 	return objectIDIndexMap
 }

@@ -144,7 +144,6 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 				},
 			},
 		},
-
 		{
 			name: "Valid Mapping for IPAdress",
 			mapping: []config.MappingEntry{
@@ -171,20 +170,35 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 				},
 			},
 		},
-		// {
-		// 	name: "Not In Mapping",
-		// 	mapping: []config.MappingEntry{
-		// 		{
-		// 			OID:    "1.3.6.1.2.1.4.20.1.1",
-		// 			Entity: "ipAddress",
-		// 			Field:  "address",
-		// 		},
-		// 	},
-		// 	objectIDs: mapping.ObjectIDValueMap{
-		// 		"1.3.6.1.2.1.4.20.1.2": "192.168.1.2",
-		// 	},
-		// 	expected: []diode.Entity{},
-		// },
+		{
+			name: "Not In Mapping",
+			mapping: []config.MappingEntry{
+				{
+					OID:    "1.3.6.1.2.1.4.20.1.1",
+					Entity: "ipAddress",
+					Field:  "address",
+				},
+			},
+			objectIDs: mapping.ObjectIDValueMap{
+				"1.3.6.1.2.1.4.20.1.2.192.168.1.2": mapping.Value{Value: "192.168.1.2", Type: mapping.Asn1BER(mapping.IPAddress)},
+			},
+			expected: []diode.Entity{},
+		},
+		{
+			name: "Invalid ObjectID length for type",
+			mapping: []config.MappingEntry{
+				{
+					OID:            "1.3.6.1.2.1.4.20.1.1",
+					Entity:         "ipAddress",
+					Field:          "address",
+					IdentifierSize: 4,
+				},
+			},
+			objectIDs: mapping.ObjectIDValueMap{
+				"168.1.2": mapping.Value{Value: "192.168.1.2", Type: mapping.Asn1BER(mapping.IPAddress)},
+			},
+			expected: []diode.Entity{},
+		},
 	}
 
 	for _, tt := range tests {
