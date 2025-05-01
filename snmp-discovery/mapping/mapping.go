@@ -66,7 +66,7 @@ var entityMappers = map[string]orbToEntityMapper{
 	"interface": &interfaceMapper{},
 }
 
-func (m *mappingEntry) MapToEntity(object map[ObjectIDIndex]ObjectIDValue, logger *slog.Logger) []diode.Entity {
+func (m *mappingEntry) MapToEntity(object map[ObjectIDIndex]*ObjectIDValue, logger *slog.Logger) []diode.Entity {
 	logger.Debug("Mapping value to entity", "value", object)
 	if m.Mapper == nil {
 		logger.Warn("No mapper found for entity. Ignoring.", "entity", m.Entity)
@@ -100,12 +100,12 @@ func NewObjectIDMapper(mappings []config.MappingEntry, logger *slog.Logger) *Obj
 }
 
 type orbToEntityMapper interface {
-	Map(values map[ObjectIDIndex]ObjectIDValue, mappingEntry *mappingEntry, logger *slog.Logger) diode.Entity
+	Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *mappingEntry, logger *slog.Logger) diode.Entity
 }
 
 type ipAddressMapper struct{}
 
-func (m *ipAddressMapper) Map(values map[ObjectIDIndex]ObjectIDValue, mappingEntry *mappingEntry, logger *slog.Logger) diode.Entity {
+func (m *ipAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *mappingEntry, logger *slog.Logger) diode.Entity {
 	logger.Debug("Mapping values to ipAddress entity", "values", values, "mappingEntry", mappingEntry)
 	ipAddress := diode.IPAddress{}
 
@@ -128,7 +128,7 @@ func (m *ipAddressMapper) Map(values map[ObjectIDIndex]ObjectIDValue, mappingEnt
 
 type interfaceMapper struct{}
 
-func (m *interfaceMapper) Map(values map[ObjectIDIndex]ObjectIDValue, mappingEntry *mappingEntry, logger *slog.Logger) diode.Entity {
+func (m *interfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *mappingEntry, logger *slog.Logger) diode.Entity {
 	logger.Debug("Mapping values to interface entity", "values", values, "mappingEntry", mappingEntry)
 	interfaceEntity := diode.Interface{}
 	for objectID, value := range values {
@@ -198,7 +198,7 @@ func (o *ObjectIDIndex) HasParent(parent string) bool {
 // ObjectIDIndexDetails is a struct that contains an index and a map of values
 type ObjectIDIndexDetails struct {
 	Index  string
-	Values map[ObjectIDIndex]ObjectIDValue
+	Values map[ObjectIDIndex]*ObjectIDValue
 }
 
 // ObjectIDValue represents a value associated with an ObjectID
@@ -214,7 +214,7 @@ type ObjectIDValue struct {
 func NewObjectIDIndexDetails(index string) *ObjectIDIndexDetails {
 	return &ObjectIDIndexDetails{
 		Index:  index,
-		Values: make(map[ObjectIDIndex]ObjectIDValue),
+		Values: make(map[ObjectIDIndex]*ObjectIDValue),
 	}
 }
 
@@ -247,29 +247,34 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[ObjectIDIndex]*ObjectIDIndexDetails {
 	objectIDIndexMap := make(map[ObjectIDIndex]*ObjectIDIndexDetails)
 	for objectID, value := range objectIDs {
-		parts := strings.Split(objectID, ".")
-		idSize := getIDSize(value)
-		if len(parts) <= idSize {
-			m.logger.Warn("Invalid ObjectID length for type", "objectID", objectID, "type", value.Type)
+		objectIDValue, err := newObjectIDValue(objectID, value)
+		if err != nil {
+			m.logger.Warn("Error creating objectIDValue", "error", err, "objectID", objectID)
 			continue
 		}
-		id := ObjectIDIndex(strings.Join(parts[len(parts)-idSize:], "."))
-		parent := strings.Join(parts[:len(parts)-idSize], ".")
 
-		objectIDValue := ObjectIDValue{
-			OID:    objectID,
-			Index:  id,
-			Parent: parent,
-			Value:  value.Value,
-			Type:   value.Type,
+		if objectIDIndexMap[objectIDValue.Index] == nil {
+			objectIDIndexMap[objectIDValue.Index] = NewObjectIDIndexDetails(objectIDValue.Parent)
 		}
-
-		if objectIDIndexMap[id] == nil {
-			objectIDIndexMap[id] = NewObjectIDIndexDetails(parent)
-		}
-		objectIDIndexMap[id].Values[ObjectIDIndex(objectID)] = objectIDValue
+		objectIDIndexMap[objectIDValue.Index].Values[ObjectIDIndex(objectID)] = objectIDValue
 	}
 	return objectIDIndexMap
+}
+
+func newObjectIDValue(objectID string, value Value) (*ObjectIDValue, error) {
+	parts := strings.Split(objectID, ".")
+	idSize := getIDSize(value)
+	if len(parts) <= idSize {
+		return nil, fmt.Errorf("invalid ObjectID length for type")
+	}
+	objectIDValue := ObjectIDValue{
+		OID:    objectID,
+		Index:  ObjectIDIndex(strings.Join(parts[len(parts)-idSize:], ".")),
+		Parent: strings.Join(parts[:len(parts)-idSize], "."),
+		Value:  value.Value,
+		Type:   value.Type,
+	}
+	return &objectIDValue, nil
 }
 
 // Gets the mapper for the closest parent objectID
