@@ -12,6 +12,7 @@ import (
 
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/policy"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/snmp"
 )
 
 // MockRunner mocks the Runner
@@ -45,13 +46,36 @@ func TestManagerParsePolicies(t *testing.T) {
                 comments: test
             scope:
               targets:
-                - 192.168.1.1
+                - host: 192.168.1.1
+                  port: 162
+              authentication:
+                protocol_version: SNMPv2c
+                community: public
        `)
 
 		policies, err := manager.ParsePolicies(yamlData)
 		assert.NoError(t, err)
 		assert.Contains(t, policies, "policy1")
-		assert.Equal(t, "test", policies["policy1"].Config.Defaults.Comments)
+		assert.Equal(t, "192.168.1.1", policies["policy1"].Scope.Targets[0].Host)
+		assert.Equal(t, uint16(162), policies["policy1"].Scope.Targets[0].Port)
+		assert.Equal(t, snmp.ProtocolVersion2c, policies["policy1"].Scope.Authentication.ProtocolVersion)
+		assert.Equal(t, "public", policies["policy1"].Scope.Authentication.Community)
+		assert.Equal(t, 0, policies["policy1"].Scope.Retries)
+	})
+
+	t.Run("Invalid Policy", func(t *testing.T) {
+		yamlData := []byte(`
+        policies:
+          policy1:
+            scope:
+              targets:
+                - host: 192.168.1.1
+                  port: 162
+    `)
+
+		_, err := manager.ParsePolicies(yamlData)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "policy1 : invalid policy : missing protocol version")
 	})
 
 	t.Run("No Policies", func(t *testing.T) {
@@ -70,14 +94,23 @@ func TestManagerPolicyLifecycle(t *testing.T) {
           policy1:
             scope:
               targets:
-                - 192.168.1.1
+                - host: 192.168.1.1
+              authentication:
+                protocol_version: SNMPv2c
+                community: public
           policy2:
             scope:
               targets:
-                - 192.168.2.1
+                - host: 192.168.2.1
+              authentication:
+                protocol_version: SNMPv2c
+                community: public
           policy3:
             scope:
               targets: []
+              authentication:
+                protocol_version: SNMPv2c
+                community: public
        `)
 
 	policies, err := manager.ParsePolicies(yamlData)

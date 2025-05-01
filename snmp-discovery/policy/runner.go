@@ -9,7 +9,7 @@ import (
 	"github.com/netboxlabs/diode-sdk-go/diode"
 
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
-	"github.com/netboxlabs/orb-discovery/snmp-discovery/crawler"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/snmp"
 )
 
 // Define a custom type for the context key
@@ -23,27 +23,29 @@ const (
 
 // Runner represents the policy runner
 type Runner struct {
-	scheduler gocron.Scheduler
-	ctx       context.Context
-	task      gocron.Task
-	client    diode.Client
-	logger    *slog.Logger
-	timeout   time.Duration
-	scope     config.Scope
-	config    config.PolicyConfig
+	scheduler     gocron.Scheduler
+	ctx           context.Context
+	task          gocron.Task
+	client        diode.Client
+	logger        *slog.Logger
+	timeout       time.Duration
+	scope         config.Scope
+	config        config.PolicyConfig
+	ClientFactory snmp.ClientFactory
 }
 
 // NewRunner returns a new policy runner
-func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client) (*Runner, error) {
+func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client, ClientFactory snmp.ClientFactory) (*Runner, error) {
 	s, err := gocron.NewScheduler()
 	if err != nil {
 		return nil, err
 	}
 
 	runner := &Runner{
-		scheduler: s,
-		client:    client,
-		logger:    logger,
+		scheduler:     s,
+		client:        client,
+		logger:        logger,
+		ClientFactory: ClientFactory,
 	}
 
 	runner.task = gocron.NewTask(runner.run)
@@ -71,12 +73,21 @@ func (r *Runner) run() {
 	ctx, cancel := context.WithTimeout(r.ctx, r.timeout)
 	defer cancel()
 
-	crawler := crawler.NewCrawler(ctx, r.logger, r.client, r.scope.Targets, crawler.NewSNMPWalker)
-	entities, err := crawler.CrawlTargets()
-	if err != nil {
-		r.logger.Error("error crawling targets", slog.Any("error", err), "targets", r.scope.Targets)
-		return
+	r.logger.Info("Starting SNMP crawl...")
+	mapper := snmp.NewObjectIDMapper()
+	entities := make([]diode.Entity, 0)
+
+	for _, target := range r.scope.Targets {
+		host := snmp.NewHost(target.Host, target.Port, r.scope.Retries, &r.scope.Authentication, r.logger, r.ClientFactory)
+		oids, err := host.Walk(mapper.ObjectIDs())
+		if err != nil {
+			r.logger.Warn("Error crawling host", "host", target.Host, "error", err)
+			continue
+		}
+		entitiesForTarget := mapper.MapObjectIDsToEntity(oids)
+		entities = append(entities, entitiesForTarget...)
 	}
+	r.logger.Info("SNMP crawl complete.")
 
 	resp, err := r.client.Ingest(ctx, entities)
 	if err != nil {
@@ -90,6 +101,7 @@ func (r *Runner) run() {
 
 // Start starts the policy runner
 func (r *Runner) Start() {
+	r.logger.Info("Starting policy runner", slog.Any("policy", r.ctx.Value(policyKey)))
 	r.scheduler.Start()
 }
 
