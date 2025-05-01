@@ -60,12 +60,12 @@ func (s *Host) Walk(objectIDs []string) (mapping.ObjectIDValueMap, error) {
 			s.logger.Warn("Error walking ObjectID", "objectID", objectID, "error", err)
 			return nil, err
 		}
-		for k, v := range pdu {
-			if _, ok := output[k]; ok {
+		for k, value := range pdu {
+			if _, exists := output[k]; exists {
 				s.logger.Warn("Duplicate ObjectID", "objectID", k)
 				continue
 			}
-			output[k] = v
+			output[k] = value
 		}
 	}
 
@@ -91,7 +91,10 @@ func (c *Client) Walk(objectID string) (mapping.ObjectIDValueMap, error) {
 	output := make(mapping.ObjectIDValueMap)
 	for _, pdu := range pdu {
 		if value, ok := pdu.Value.(string); ok {
-			output[pdu.Name] = value
+			output[pdu.Name] = mapping.Value{
+				Value: value,
+				Type:  mapping.Asn1BER(pdu.Type),
+			}
 		} else {
 			slog.Warn("Unexpected type for pdu.Value", "name", pdu.Name, "type", fmt.Sprintf("%T", pdu.Value))
 		}

@@ -65,7 +65,7 @@ func TestSNMPHost(t *testing.T) {
 		// Assert
 		assert.NoError(t, err)
 		assert.Equal(t, len(objectIDsToQuery), len(oids))
-		assert.Equal(t, "192.168.1.1", oids[ipAddressObjectID])
+		assert.Equal(t, mapping.Value{Value: "192.168.1.1", Type: mapping.Asn1BER(mapping.IPAddress)}, oids[ipAddressObjectID])
 	})
 
 	t.Run("Handles SNMP connection error", func(t *testing.T) {

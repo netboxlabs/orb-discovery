@@ -11,8 +11,40 @@ import (
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 )
 
+type Value struct {
+	Value string
+	Type  Asn1BER
+}
+
+type Asn1BER byte
+
+const (
+	EndOfContents     Asn1BER = 0x00
+	UnknownType       Asn1BER = 0x00
+	Boolean           Asn1BER = 0x01
+	Integer           Asn1BER = 0x02
+	BitString         Asn1BER = 0x03
+	OctetString       Asn1BER = 0x04
+	Null              Asn1BER = 0x05
+	ObjectIdentifier  Asn1BER = 0x06
+	ObjectDescription Asn1BER = 0x07
+	IPAddress         Asn1BER = 0x40
+	Counter32         Asn1BER = 0x41
+	Gauge32           Asn1BER = 0x42
+	TimeTicks         Asn1BER = 0x43
+	Opaque            Asn1BER = 0x44
+	NsapAddress       Asn1BER = 0x45
+	Counter64         Asn1BER = 0x46
+	Uinteger32        Asn1BER = 0x47
+	OpaqueFloat       Asn1BER = 0x78
+	OpaqueDouble      Asn1BER = 0x79
+	NoSuchObject      Asn1BER = 0x80
+	NoSuchInstance    Asn1BER = 0x81
+	EndOfMibView      Asn1BER = 0x82
+)
+
 // ObjectIDValueMap is a map of ObjectIDs to their values
-type ObjectIDValueMap map[string]string
+type ObjectIDValueMap map[string]Value
 
 // ObjectIDMapper is a struct that maps ObjectIDs to entities
 type ObjectIDMapper struct {
@@ -26,6 +58,7 @@ type mappingEntry struct {
 	Field          string
 	MappingEntries []mappingEntry
 	Mapper         orbToEntityMapper
+	IdentifierSize int
 }
 
 var entityMappers = map[string]orbToEntityMapper{
@@ -33,7 +66,7 @@ var entityMappers = map[string]orbToEntityMapper{
 	"interface": &interfaceMapper{},
 }
 
-func (m *mappingEntry) MapToEntity(object map[string]string, logger *slog.Logger) []diode.Entity {
+func (m *mappingEntry) MapToEntity(object map[ObjectIDIndex]ObjectIDValue, logger *slog.Logger) []diode.Entity {
 	logger.Debug("Mapping value to entity", "value", object)
 	if m.Mapper == nil {
 		logger.Warn("No mapper found for entity. Ignoring.", "entity", m.Entity)
@@ -67,20 +100,26 @@ func NewObjectIDMapper(mappings []config.MappingEntry, logger *slog.Logger) *Obj
 }
 
 type orbToEntityMapper interface {
-	Map(values map[string]string, mappingEntry *mappingEntry, logger *slog.Logger) diode.Entity
+	Map(values map[ObjectIDIndex]ObjectIDValue, mappingEntry *mappingEntry, logger *slog.Logger) diode.Entity
 }
 
 type ipAddressMapper struct{}
 
-func (m *ipAddressMapper) Map(values map[string]string, mappingEntry *mappingEntry, _ *slog.Logger) diode.Entity {
+func (m *ipAddressMapper) Map(values map[ObjectIDIndex]ObjectIDValue, mappingEntry *mappingEntry, logger *slog.Logger) diode.Entity {
+	logger.Debug("Mapping values to ipAddress entity", "values", values, "mappingEntry", mappingEntry)
 	ipAddress := diode.IPAddress{}
 
 	// for each value in the map, map it to the ip address entity
 	for objectID, value := range values {
-		if objectID == mappingEntry.OID {
-			switch mappingEntry.Field {
-			case "address":
-				ipAddress.Address = &value
+		for _, propertyMappingEntry := range mappingEntry.MappingEntries {
+			if objectID.HasParent(mappingEntry.OID) {
+				switch propertyMappingEntry.Field {
+				case "address":
+					addressCopy := value.Value
+					ipAddress.Address = &addressCopy
+				default:
+					logger.Warn("Unknown field", "field", mappingEntry.Field)
+				}
 			}
 		}
 	}
@@ -89,29 +128,30 @@ func (m *ipAddressMapper) Map(values map[string]string, mappingEntry *mappingEnt
 
 type interfaceMapper struct{}
 
-func (m *interfaceMapper) Map(values map[string]string, mappingEntry *mappingEntry, logger *slog.Logger) diode.Entity {
+func (m *interfaceMapper) Map(values map[ObjectIDIndex]ObjectIDValue, mappingEntry *mappingEntry, logger *slog.Logger) diode.Entity {
 	logger.Debug("Mapping values to interface entity", "values", values, "mappingEntry", mappingEntry)
 	interfaceEntity := diode.Interface{}
-	// for each value in the map, map it to the interface entity
 	for objectID, value := range values {
-		logger.Debug("Mapping value to interface entity", "objectID", objectID, "value", value, "mappingEntry", mappingEntry)
-		for _, childMappingEntry := range mappingEntry.MappingEntries {
-			if objectID == childMappingEntry.OID {
-				switch childMappingEntry.Field {
+		for _, propertyMappingEntry := range mappingEntry.MappingEntries {
+			if objectID.HasParent(propertyMappingEntry.OID) {
+				logger.Debug("Mapping value to interface entity with mapper", "objectID", objectID, "value", value, "mappingEntry", propertyMappingEntry)
+				switch propertyMappingEntry.Field {
 				case "name":
-					interfaceEntity.Name = &value
+					interfaceEntity.Name = &value.Value
 				case "speed":
-					speed, err := strconv.Atoi(value)
+					speed, err := strconv.Atoi(value.Value)
 					if err != nil {
-						panic(err)
+						panic(err) // TODO: handle error
 					}
 					speed32 := int32(speed)
 					interfaceEntity.Speed = &speed32
 				case "macAddress":
-					interfaceEntity.MacAddress = &value
+					interfaceEntity.MacAddress = &value.Value
 				case "adminStatus":
-					enabled := value == "1"
+					enabled := value.Value == "1"
 					interfaceEntity.Enabled = &enabled
+				default:
+					logger.Warn("Unknown field", "field", propertyMappingEntry.Field)
 				}
 			}
 		}
@@ -130,6 +170,7 @@ func newMappingEntry(m config.MappingEntry, logger *slog.Logger) *mappingEntry {
 		Entity:         m.Entity,
 		Field:          m.Field,
 		Mapper:         mapper,
+		IdentifierSize: m.IdentifierSize,
 		MappingEntries: newChildMappingEntries(m.MappingEntries, logger),
 	}
 }
@@ -148,17 +189,32 @@ func newChildMappingEntries(configMappingEntries []config.MappingEntry, logger *
 	return childMappingEntries
 }
 
-// ObjectIDIndex is a struct that contains an index and a map of values
-type ObjectIDIndex struct {
-	Index  string
-	Values map[string]string
+type ObjectIDIndex string
+
+func (o *ObjectIDIndex) HasParent(parent string) bool {
+	return strings.HasPrefix(string(*o), parent)
 }
 
-// NewObjectIDIndex creates a new ObjectIDIndex
-func NewObjectIDIndex(index string) *ObjectIDIndex {
-	return &ObjectIDIndex{
+// ObjectIDIndexDetails is a struct that contains an index and a map of values
+type ObjectIDIndexDetails struct {
+	Index  string
+	Values map[ObjectIDIndex]ObjectIDValue
+}
+
+// ObjectIDValue represents a value associated with an ObjectID
+type ObjectIDValue struct {
+	OID    string
+	Index  ObjectIDIndex
+	Parent string
+	Value  string
+	Type   Asn1BER
+}
+
+// NewObjectIDIndexDetails creates a new ObjectIDIndexDetails
+func NewObjectIDIndexDetails(index string) *ObjectIDIndexDetails {
+	return &ObjectIDIndexDetails{
 		Index:  index,
-		Values: make(map[string]string),
+		Values: make(map[ObjectIDIndex]ObjectIDValue),
 	}
 }
 
@@ -180,15 +236,36 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 	return entities
 }
 
-func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[string]*ObjectIDIndex {
-	objectIDIndexMap := make(map[string]*ObjectIDIndex)
+func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[ObjectIDIndex]*ObjectIDIndexDetails {
+	objectIDIndexMap := make(map[ObjectIDIndex]*ObjectIDIndexDetails)
 	for objectID, value := range objectIDs {
 		parts := strings.Split(objectID, ".")
-		id := parts[len(parts)-1]
-		if objectIDIndexMap[id] == nil {
-			objectIDIndexMap[id] = NewObjectIDIndex(strings.Join(parts[:len(parts)-1], "."))
+		var id ObjectIDIndex
+		var parent string
+		if value.Type == IPAddress {
+			// For IP addresses, use last 4 parts as ID
+			if len(parts) >= 4 {
+				id = ObjectIDIndex(strings.Join(parts[len(parts)-4:], "."))
+				parent = strings.Join(parts[:len(parts)-4], ".") // Remove the 4 parts from parent
+			} else {
+				m.logger.Warn("IP address OID does not have enough parts for 4-part ID", "objectID", objectID)
+				continue
+			}
+		} else {
+			// For everything else, use last part as ID
+			id = ObjectIDIndex(parts[len(parts)-1])
+			parent = strings.Join(parts[:len(parts)-1], ".") // Remove the last part from parent
 		}
-		objectIDIndexMap[id].Values[strings.Join(parts[:len(parts)-1], ".")] = value
+		if objectIDIndexMap[id] == nil {
+			objectIDIndexMap[id] = NewObjectIDIndexDetails(parent)
+		}
+		objectIDIndexMap[id].Values[ObjectIDIndex(objectID)] = ObjectIDValue{
+			OID:    objectID,
+			Index:  id,
+			Parent: parent,
+			Value:  value.Value,
+			Type:   value.Type,
+		}
 	}
 	return objectIDIndexMap
 }
@@ -212,7 +289,7 @@ func (m *ObjectIDMapper) getMappingEntry(objectID string, logger *slog.Logger) (
 		}
 		objectID = objectID[:lastDotIndex]
 	}
-	return nil, fmt.Errorf("no mapping entry found for objectID %s", objectID)
+	return nil, fmt.Errorf("no mapping entry found")
 }
 
 // ObjectIDs returns the ObjectIDs that the ObjectIDMapper can map

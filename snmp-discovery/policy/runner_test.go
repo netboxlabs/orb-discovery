@@ -52,136 +52,136 @@ func (m *MockHost) Close() error {
 	return nil
 }
 
-// func TestNewRunner(t *testing.T) {
-// 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-// 	mockClient := new(MockDiodeClient)
-// 	cron := "0 0 * * *"
-// 	policyConfig := config.Policy{
-// 		Config: config.PolicyConfig{
-// 			Schedule: &cron,
-// 		},
-// 		Scope: config.Scope{
-// 			Targets: []config.Target{
-// 				{
-// 					Host: "localhost",
-// 					Port: 161,
-// 				},
-// 			},
-// 			Mappings: []config.MappingEntry{
-// 				{
-// 					OID:    "iso.3.6.1.2.1.2.2.1",
-// 					Entity: "interface",
-// 					Field:  "_id",
-// 					MappingEntries: []config.MappingEntry{
-// 						{
-// 							OID:    "iso.3.6.1.2.1.2.2.1.2",
-// 							Entity: "interface",
-// 							Field:  "name",
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	}
-// 	ctx := context.Background()
+func TestNewRunner(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
+	mockClient := new(MockDiodeClient)
+	cron := "0 0 * * *"
+	policyConfig := config.Policy{
+		Config: config.PolicyConfig{
+			Schedule: &cron,
+		},
+		Scope: config.Scope{
+			Targets: []config.Target{
+				{
+					Host: "localhost",
+					Port: 161,
+				},
+			},
+			Mappings: []config.MappingEntry{
+				{
+					OID:    "iso.3.6.1.2.1.2.2.1",
+					Entity: "interface",
+					Field:  "_id",
+					MappingEntries: []config.MappingEntry{
+						{
+							OID:    "iso.3.6.1.2.1.2.2.1.2",
+							Entity: "interface",
+							Field:  "name",
+						},
+					},
+				},
+			},
+		},
+	}
+	ctx := context.Background()
 
-// 	// Create new runner
-// 	_, err := policy.NewRunner(ctx, logger, "test-policy", policyConfig, mockClient, snmp.NewFakeSNMPWalker)
-// 	assert.NoError(t, err, "policy.NewRunner should not return an error")
-// }
+	// Create new runner
+	_, err := policy.NewRunner(ctx, logger, "test-policy", policyConfig, mockClient, snmp.NewFakeSNMPWalker)
+	assert.NoError(t, err, "policy.NewRunner should not return an error")
+}
 
-// func TestRunnerRun(t *testing.T) {
-// 	tests := []*struct {
-// 		desc         string
-// 		mockResponse diodepb.IngestResponse
-// 		mockError    error
-// 	}{
-// 		{
-// 			desc:         "no error",
-// 			mockResponse: diodepb.IngestResponse{},
-// 			mockError:    nil,
-// 		},
-// 		{
-// 			desc:         "local error",
-// 			mockResponse: diodepb.IngestResponse{},
-// 			mockError:    errors.New("ingestion failed"),
-// 		},
-// 		{
-// 			desc:         "server error",
-// 			mockResponse: diodepb.IngestResponse{Errors: []string{"fail1", "fail2"}},
-// 			mockError:    nil,
-// 		},
-// 	}
-// 	for _, tt := range tests {
-// 		t.Run(tt.desc, func(t *testing.T) {
-// 			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-// 			mockClient := new(MockDiodeClient)
-// 			policyConfig := config.Policy{
-// 				Config: config.PolicyConfig{
-// 					Schedule: nil,
-// 					Defaults: config.Defaults{
-// 						Description: "Test",
-// 						Comments:    "This is a test",
-// 						Tags:        []string{"test", "snmp"},
-// 					},
-// 				},
-// 				Scope: config.Scope{
-// 					Targets: []config.Target{
-// 						{
-// 							Host: "localhost",
-// 							Port: 161,
-// 						},
-// 					},
-// 					Authentication: config.Authentication{
-// 						ProtocolVersion: snmp.ProtocolVersion2c,
-// 						Community:       "public",
-// 					},
-// 					Mappings: []config.MappingEntry{
-// 						{
-// 							OID:    "iso.3.6.1.2.1.2.2.1",
-// 							Entity: "interface",
-// 							Field:  "_id",
-// 							MappingEntries: []config.MappingEntry{
-// 								{
-// 									OID:    "iso.3.6.1.2.1.2.2.1.2",
-// 									Entity: "interface",
-// 									Field:  "name",
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			}
-// 			ctx := context.Background()
+func TestRunnerRun(t *testing.T) {
+	tests := []*struct {
+		desc         string
+		mockResponse diodepb.IngestResponse
+		mockError    error
+	}{
+		{
+			desc:         "no error",
+			mockResponse: diodepb.IngestResponse{},
+			mockError:    nil,
+		},
+		{
+			desc:         "local error",
+			mockResponse: diodepb.IngestResponse{},
+			mockError:    errors.New("ingestion failed"),
+		},
+		{
+			desc:         "server error",
+			mockResponse: diodepb.IngestResponse{Errors: []string{"fail1", "fail2"}},
+			mockError:    nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
+			mockClient := new(MockDiodeClient)
+			policyConfig := config.Policy{
+				Config: config.PolicyConfig{
+					Schedule: nil,
+					Defaults: config.Defaults{
+						Description: "Test",
+						Comments:    "This is a test",
+						Tags:        []string{"test", "snmp"},
+					},
+				},
+				Scope: config.Scope{
+					Targets: []config.Target{
+						{
+							Host: "localhost",
+							Port: 161,
+						},
+					},
+					Authentication: config.Authentication{
+						ProtocolVersion: snmp.ProtocolVersion2c,
+						Community:       "public",
+					},
+					Mappings: []config.MappingEntry{
+						{
+							OID:    "iso.3.6.1.2.1.2.2.1",
+							Entity: "interface",
+							Field:  "_id",
+							MappingEntries: []config.MappingEntry{
+								{
+									OID:    "iso.3.6.1.2.1.2.2.1.2",
+									Entity: "interface",
+									Field:  "name",
+								},
+							},
+						},
+					},
+				},
+			}
+			ctx := context.Background()
 
-// 			// Create runner
-// 			runner, err := policy.NewRunner(ctx, logger, "test-policy", policyConfig, mockClient, snmp.NewFakeSNMPWalker)
-// 			assert.NoError(t, err, "policy.NewRunner should not return an error")
+			// Create runner
+			runner, err := policy.NewRunner(ctx, logger, "test-policy", policyConfig, mockClient, snmp.NewFakeSNMPWalker)
+			assert.NoError(t, err, "policy.NewRunner should not return an error")
 
-// 			// Use a channel to signal that Ingest was called
-// 			ingestCalled := make(chan bool, 1)
+			// Use a channel to signal that Ingest was called
+			ingestCalled := make(chan bool, 1)
 
-// 			mockClient.On("Ingest", mock.Anything, mock.Anything).Run(func(_ mock.Arguments) {
-// 				ingestCalled <- true
-// 			}).Return(&tt.mockResponse, tt.mockError)
+			mockClient.On("Ingest", mock.Anything, mock.Anything).Run(func(_ mock.Arguments) {
+				ingestCalled <- true
+			}).Return(&tt.mockResponse, tt.mockError)
 
-// 			// Start the process
-// 			runner.Start()
+			// Start the process
+			runner.Start()
 
-// 			// Wait for Ingest to be called or timeout
-// 			select {
-// 			case <-ingestCalled:
-// 				// Ingest was called, proceed
-// 			case <-time.After(10 * time.Second):
-// 				t.Fatal("Timeout: Ingest was not called")
-// 			}
+			// Wait for Ingest to be called or timeout
+			select {
+			case <-ingestCalled:
+				// Ingest was called, proceed
+			case <-time.After(10 * time.Second):
+				t.Fatal("Timeout: Ingest was not called")
+			}
 
-// 			// Stop the process
-// 			err = runner.Stop()
-// 			assert.NoError(t, err, "Runner.Stop should not return an error")
-// 		})
-// 	}
-// }
+			// Stop the process
+			err = runner.Stop()
+			assert.NoError(t, err, "Runner.Stop should not return an error")
+		})
+	}
+}
 
 func TestRunnerIngestCalledWithCorrectValues(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
