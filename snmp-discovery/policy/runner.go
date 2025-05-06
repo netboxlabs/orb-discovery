@@ -81,15 +81,14 @@ func (r *Runner) run() {
 
 	for _, target := range r.scope.Targets {
 		host := snmp.NewHost(target.Host, target.Port, r.scope.Retries, &r.scope.Authentication, r.logger, r.ClientFactory)
-		for _, oid := range objectIDs {
-			oids, err := host.Walk([]string{oid})
-			if err != nil {
-				r.logger.Warn("Error crawling host", "host", target.Host, "error", err)
-				continue
-			}
-			entitiesForTarget := mapper.MapObjectIDsToEntity(oids)
-			entities = append(entities, entitiesForTarget...)
+		oids, err := host.Walk(objectIDs)
+		if err != nil {
+			r.logger.Warn("Error crawling host", "host", target.Host, "error", err)
+			continue
 		}
+
+		entitiesForTarget := mapper.MapObjectIDsToEntity(oids)
+		entities = append(entities, entitiesForTarget...)
 	}
 	r.logger.Info("SNMP crawl complete.")
 
