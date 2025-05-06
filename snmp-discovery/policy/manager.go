@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"gopkg.in/yaml.v3"
@@ -67,7 +68,11 @@ func (m *Manager) ParsePolicies(data []byte) (map[string]config.Policy, error) {
 
 func (m *Manager) loadMappingConfig(policy config.Policy) (config.Mapping, error) {
 	m.logger.Debug("Loading mapping config", "mappingConfig", policy.Scope.MappingConfig)
-	mappingConfigFileContents, err := os.ReadFile(policy.Scope.MappingConfig)
+	mappingFilePath, err := filepath.Abs(policy.Scope.MappingConfig)
+	if err != nil {
+		return config.Mapping{}, fmt.Errorf("failed to get absolute path for mapping config: %w", err)
+	}
+	mappingConfigFileContents, err := os.ReadFile(mappingFilePath)
 	if err != nil {
 		return config.Mapping{}, fmt.Errorf("failed to read mapping config file: %w", err)
 	}
@@ -132,7 +137,12 @@ func (m *Manager) validatePolicy(policy config.Policy) error {
 		return fmt.Errorf("missing mapping configuration file")
 	}
 
-	if _, err := os.Stat(policy.Scope.MappingConfig); os.IsNotExist(err) {
+	mappingFilePath, err := filepath.Abs(policy.Scope.MappingConfig)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path for mapping config: %w", err)
+	}
+
+	if _, err := os.Stat(mappingFilePath); os.IsNotExist(err) {
 		return fmt.Errorf("mapping configuration file does not exist")
 	}
 
