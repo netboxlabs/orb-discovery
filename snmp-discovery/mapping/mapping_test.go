@@ -246,12 +246,12 @@ func TestObjectIDs(t *testing.T) {
 					MappingEntries: []config.MappingEntry{
 						{
 							OID:    ".1.3.6.1.2.1.2.2.1.2",
-							Entity: "inteface",
+							Entity: "interface",
 							Field:  "name",
 						},
 						{
 							OID:    ".1.3.6.1.2.1.2.2.1.5",
-							Entity: "inteface",
+							Entity: "interface",
 							Field:  "speed",
 						},
 					},
