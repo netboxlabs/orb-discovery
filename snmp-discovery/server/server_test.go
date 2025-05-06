@@ -169,11 +169,10 @@ func TestServerCreateDeletePolicy(t *testing.T) {
 
 func writeMappingConfigFile(filename string) {
 	_ = os.WriteFile(filename, []byte(`
-    mappings:
-      - oid: 1.3.6.1.2.1.1.1.0
+    entries:
+      - oid: .1.3.6.1.2.1.1.1.0
         entity: device
         field: description
-        description: "Device description string (sysDescr)"
     `), 0o644)
 }
 

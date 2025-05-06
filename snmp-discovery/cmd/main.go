@@ -30,7 +30,7 @@ func resolveEnv(value string) string {
 		if envValue != "" {
 			return envValue
 		}
-		fmt.SPrintf("error: a provided environment %s variable is not set\n", envVar)
+		fmt.Printf("error: a provided environment %s variable is not set\n", envVar)
 		os.Exit(1)
 	}
 	// Return the original value if no substitution occurs

@@ -23,28 +23,28 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 			name: "Valid Mapping for multiple entities of same type",
 			mapping: []config.MappingEntry{
 				{
-					OID:            "iso.3.6.1.2.1.2.2.1",
+					OID:            ".1.3.6.1.2.1.2.2.1",
 					Entity:         "interface",
 					Field:          "_id",
 					IdentifierSize: 1,
 					MappingEntries: []config.MappingEntry{
 						{
-							OID:    "iso.3.6.1.2.1.2.2.1.2",
+							OID:    ".1.3.6.1.2.1.2.2.1.2",
 							Entity: "interface",
 							Field:  "name",
 						},
 						{
-							OID:    "iso.3.6.1.2.1.2.2.1.5",
+							OID:    ".1.3.6.1.2.1.2.2.1.5",
 							Entity: "interface",
 							Field:  "speed",
 						},
 						{
-							OID:    "iso.3.6.1.2.1.2.2.1.6",
+							OID:    ".1.3.6.1.2.1.2.2.1.6",
 							Entity: "interface",
 							Field:  "macAddress",
 						},
 						{
-							OID:    "iso.3.6.1.2.1.2.2.1.7",
+							OID:    ".1.3.6.1.2.1.2.2.1.7",
 							Entity: "interface",
 							Field:  "adminStatus",
 						},
@@ -52,27 +52,31 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 				},
 			},
 			objectIDs: mapping.ObjectIDValueMap{
-				"iso.3.6.1.2.1.2.2.1.2.999": mapping.Value{Value: "GigabitEthernet1/0/1", Type: mapping.Asn1BER(mapping.OctetString)},
-				"iso.3.6.1.2.1.2.2.1.5.999": mapping.Value{Value: "1000000000", Type: mapping.Asn1BER(mapping.Integer)},
-				"iso.3.6.1.2.1.2.2.1.6.999": mapping.Value{Value: "00:00:00:00:00:00", Type: mapping.Asn1BER(mapping.OctetString)},
-				"iso.3.6.1.2.1.2.2.1.7.999": mapping.Value{Value: "1", Type: mapping.Asn1BER(mapping.Integer)},
-				"iso.3.6.1.2.1.2.2.1.2.555": mapping.Value{Value: "GigabitEthernet1/0/1", Type: mapping.Asn1BER(mapping.OctetString)},
-				"iso.3.6.1.2.1.2.2.1.5.555": mapping.Value{Value: "1000000000", Type: mapping.Asn1BER(mapping.Integer)},
-				"iso.3.6.1.2.1.2.2.1.6.555": mapping.Value{Value: "00:00:00:00:00:11", Type: mapping.Asn1BER(mapping.OctetString)},
-				"iso.3.6.1.2.1.2.2.1.7.555": mapping.Value{Value: "0", Type: mapping.Asn1BER(mapping.Integer)},
+				".1.3.6.1.2.1.2.2.1.2.999": mapping.Value{Value: "GigabitEthernet1/0/1", Type: mapping.Asn1BER(mapping.OctetString)},
+				".1.3.6.1.2.1.2.2.1.5.999": mapping.Value{Value: "1000000000", Type: mapping.Asn1BER(mapping.Integer)},
+				".1.3.6.1.2.1.2.2.1.6.999": mapping.Value{Value: "00:00:00:00:00:00", Type: mapping.Asn1BER(mapping.OctetString)},
+				".1.3.6.1.2.1.2.2.1.7.999": mapping.Value{Value: "1", Type: mapping.Asn1BER(mapping.Integer)},
+				".1.3.6.1.2.1.2.2.1.2.555": mapping.Value{Value: "GigabitEthernet1/0/1", Type: mapping.Asn1BER(mapping.OctetString)},
+				".1.3.6.1.2.1.2.2.1.5.555": mapping.Value{Value: "1000000000", Type: mapping.Asn1BER(mapping.Integer)},
+				".1.3.6.1.2.1.2.2.1.6.555": mapping.Value{Value: "00:00:00:00:00:11", Type: mapping.Asn1BER(mapping.OctetString)},
+				".1.3.6.1.2.1.2.2.1.7.555": mapping.Value{Value: "0", Type: mapping.Asn1BER(mapping.Integer)},
 			},
 			expected: []diode.Entity{
 				&diode.Interface{
-					Speed:      &[]int32{1000000000}[0],
-					Name:       diode.String("GigabitEthernet1/0/1"),
-					MacAddress: &[]string{"00:00:00:00:00:00"}[0],
-					Enabled:    &[]bool{true}[0],
+					Speed: &[]int64{1000000000}[0],
+					Name:  diode.String("GigabitEthernet1/0/1"),
+					PrimaryMacAddress: &diode.MACAddress{
+						MacAddress: &[]string{"00:00:00:00:00:00"}[0],
+					},
+					Enabled: &[]bool{true}[0],
 				},
 				&diode.Interface{
-					Speed:      &[]int32{1000000000}[0],
-					Name:       diode.String("GigabitEthernet1/0/1"),
-					MacAddress: &[]string{"00:00:00:00:00:11"}[0],
-					Enabled:    &[]bool{false}[0],
+					Speed: &[]int64{1000000000}[0],
+					Name:  diode.String("GigabitEthernet1/0/1"),
+					PrimaryMacAddress: &diode.MACAddress{
+						MacAddress: &[]string{"00:00:00:00:00:11"}[0],
+					},
+					Enabled: &[]bool{false}[0],
 				},
 			},
 		},
@@ -80,45 +84,45 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 			name: "Valid Mapping for multiple entities of different types",
 			mapping: []config.MappingEntry{
 				{
-					OID:            "iso.3.6.1.2.1.2.2.1",
+					OID:            ".1.3.6.1.2.1.2.2.1",
 					Entity:         "interface",
 					Field:          "_id",
 					IdentifierSize: 1,
 					MappingEntries: []config.MappingEntry{
 						{
-							OID:    "iso.3.6.1.2.1.2.2.1.2",
+							OID:    ".1.3.6.1.2.1.2.2.1.2",
 							Entity: "interface",
 							Field:  "name",
 						},
 						{
-							OID:    "iso.3.6.1.2.1.2.2.1.5",
+							OID:    ".1.3.6.1.2.1.2.2.1.5",
 							Entity: "interface",
 							Field:  "speed",
 						},
 						{
-							OID:    "iso.3.6.1.2.1.2.2.1.6",
+							OID:    ".1.3.6.1.2.1.2.2.1.6",
 							Entity: "interface",
 							Field:  "macAddress",
 						},
 						{
-							OID:    "iso.3.6.1.2.1.2.2.1.7",
+							OID:    ".1.3.6.1.2.1.2.2.1.7",
 							Entity: "interface",
 							Field:  "adminStatus",
 						},
 					},
 				},
 				{
-					OID:            "iso.3.6.1.2.1.4.20.1",
+					OID:            ".1.3.6.1.2.1.4.20.1",
 					Entity:         "ipAddress",
 					IdentifierSize: 4,
 					MappingEntries: []config.MappingEntry{
 						{
-							OID:    "iso.3.6.1.2.1.4.20.1.1",
+							OID:    ".1.3.6.1.2.1.4.20.1.1",
 							Entity: "ipAddress",
 							Field:  "address",
 						},
 						{
-							OID:    "iso.3.6.1.2.1.4.20.1.2",
+							OID:    ".1.3.6.1.2.1.4.20.1.2",
 							Entity: "ipAddress",
 							Field:  "_id",
 						},
@@ -126,18 +130,20 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 				},
 			},
 			objectIDs: mapping.ObjectIDValueMap{
-				"iso.3.6.1.2.1.2.2.1.2.999":          mapping.Value{Value: "GigabitEthernet1/0/1", Type: mapping.Asn1BER(mapping.OctetString)},
-				"iso.3.6.1.2.1.2.2.1.5.999":          mapping.Value{Value: "1000000000", Type: mapping.Asn1BER(mapping.Integer)},
-				"iso.3.6.1.2.1.2.2.1.6.999":          mapping.Value{Value: "00:00:00:00:00:00", Type: mapping.Asn1BER(mapping.OctetString)},
-				"iso.3.6.1.2.1.2.2.1.7.999":          mapping.Value{Value: "1", Type: mapping.Asn1BER(mapping.Integer)},
-				"iso.3.6.1.2.1.4.20.1.1.192.168.1.2": mapping.Value{Value: "192.168.1.2", Type: mapping.Asn1BER(mapping.IPAddress)},
+				".1.3.6.1.2.1.2.2.1.2.999":          mapping.Value{Value: "GigabitEthernet1/0/1", Type: mapping.Asn1BER(mapping.OctetString)},
+				".1.3.6.1.2.1.2.2.1.5.999":          mapping.Value{Value: "1000000000", Type: mapping.Asn1BER(mapping.Integer)},
+				".1.3.6.1.2.1.2.2.1.6.999":          mapping.Value{Value: "00:00:00:00:00:00", Type: mapping.Asn1BER(mapping.OctetString)},
+				".1.3.6.1.2.1.2.2.1.7.999":          mapping.Value{Value: "1", Type: mapping.Asn1BER(mapping.Integer)},
+				".1.3.6.1.2.1.4.20.1.1.192.168.1.2": mapping.Value{Value: "192.168.1.2", Type: mapping.Asn1BER(mapping.IPAddress)},
 			},
 			expected: []diode.Entity{
 				&diode.Interface{
-					Speed:      &[]int32{1000000000}[0],
-					Name:       diode.String("GigabitEthernet1/0/1"),
-					MacAddress: &[]string{"00:00:00:00:00:00"}[0],
-					Enabled:    &[]bool{true}[0],
+					Speed: &[]int64{1000000000}[0],
+					Name:  diode.String("GigabitEthernet1/0/1"),
+					PrimaryMacAddress: &diode.MACAddress{
+						MacAddress: &[]string{"00:00:00:00:00:00"}[0],
+					},
+					Enabled: &[]bool{true}[0],
 				},
 				&diode.IPAddress{
 					Address: diode.String("192.168.1.2"),
@@ -148,13 +154,13 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 			name: "Valid Mapping for IPAdress",
 			mapping: []config.MappingEntry{
 				{
-					OID:            "iso.3.6.1.2.1.4.20.1",
+					OID:            ".1.3.6.1.2.1.4.20.1",
 					Entity:         "ipAddress",
 					Field:          "_id",
 					IdentifierSize: 4,
 					MappingEntries: []config.MappingEntry{
 						{
-							OID:    "iso.3.6.1.2.1.4.20.1.1",
+							OID:    ".1.3.6.1.2.1.4.20.1.1",
 							Entity: "ipAddress",
 							Field:  "address",
 						},
@@ -162,7 +168,7 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 				},
 			},
 			objectIDs: mapping.ObjectIDValueMap{
-				"iso.3.6.1.2.1.4.20.1.1.192.168.1.2": mapping.Value{Value: "192.168.1.2", Type: mapping.Asn1BER(mapping.IPAddress)},
+				".1.3.6.1.2.1.4.20.1.1.192.168.1.2": mapping.Value{Value: "192.168.1.2", Type: mapping.Asn1BER(mapping.IPAddress)},
 			},
 			expected: []diode.Entity{
 				&diode.IPAddress{
@@ -234,17 +240,17 @@ func TestObjectIDs(t *testing.T) {
 			name: "Duplicate OID",
 			mapping: []config.MappingEntry{
 				{
-					OID:    "iso.3.6.1.2.1.2.2.1",
+					OID:    ".1.3.6.1.2.1.2.2.1",
 					Entity: "interface",
 					Field:  "_id",
 					MappingEntries: []config.MappingEntry{
 						{
-							OID:    "iso.3.6.1.2.1.2.2.1.2",
+							OID:    ".1.3.6.1.2.1.2.2.1.2",
 							Entity: "inteface",
 							Field:  "name",
 						},
 						{
-							OID:    "iso.3.6.1.2.1.2.2.1.5",
+							OID:    ".1.3.6.1.2.1.2.2.1.5",
 							Entity: "inteface",
 							Field:  "speed",
 						},
@@ -252,7 +258,7 @@ func TestObjectIDs(t *testing.T) {
 				},
 			},
 			expectedOIDs: []string{
-				"iso.3.6.1.2.1.2.2.1",
+				".1.3.6.1.2.1.2.2.1",
 			},
 		},
 	}

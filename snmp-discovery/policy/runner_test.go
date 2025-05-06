@@ -278,9 +278,8 @@ func TestRunnerWalkError(t *testing.T) {
 	runner, err := policy.NewRunner(ctx, logger, "test-policy", policyConfig, mockClient, mockClientFactory)
 	assert.NoError(t, err)
 
-	// Use a channel to signal that Ingest was called
+	// Set up a channel to detect if Ingest is called (it shouldn't be)
 	ingestCalled := make(chan bool, 1)
-
 	mockClient.On("Ingest", mock.Anything, mock.Anything).Run(func(_ mock.Arguments) {
 		ingestCalled <- true
 	}).Return(&diodepb.IngestResponse{}, nil)
@@ -288,18 +287,15 @@ func TestRunnerWalkError(t *testing.T) {
 	// Start the process
 	runner.Start()
 
-	// Wait for Ingest to be called or timeout
+	// Wait to verify that Ingest is NOT called
 	select {
 	case <-ingestCalled:
-		// Ingest was called, proceed
-	case <-time.After(10 * time.Second):
-		t.Fatal("Timeout: Ingest was not called")
+		t.Fatal("Ingest was called when it should not have been")
+	case <-time.After(2 * time.Second):
+		// Success - Ingest was not called
 	}
 
 	// Stop the process
 	err = runner.Stop()
 	assert.NoError(t, err, "Runner.Stop should not return an error")
-
-	// Verify that the logger captured the error
-	// This part depends on how you want to verify the log output
 }

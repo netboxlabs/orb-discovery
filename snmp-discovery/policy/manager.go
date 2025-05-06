@@ -67,7 +67,6 @@ func (m *Manager) ParsePolicies(data []byte) (map[string]config.Policy, error) {
 
 func (m *Manager) loadMappingConfig(policy config.Policy) (config.Mapping, error) {
 	m.logger.Debug("Loading mapping config", "mappingConfig", policy.Scope.MappingConfig)
-	// load the mapping config from the file
 	mappingConfigFileContents, err := os.ReadFile(policy.Scope.MappingConfig)
 	if err != nil {
 		return config.Mapping{}, fmt.Errorf("failed to read mapping config file: %w", err)

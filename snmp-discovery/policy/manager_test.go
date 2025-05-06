@@ -36,7 +36,7 @@ func (m *MockRunner) Stop() error {
 
 func writeMappingConfigFile(filename string) {
 	_ = os.WriteFile(filename, []byte(`
-    mappings:
+    entries:
       - oid: 1.3.6.1.2.1.1.1.0
         entity: device
         field: description
@@ -45,7 +45,8 @@ func writeMappingConfigFile(filename string) {
 }
 
 func TestManagerParsePolicies(t *testing.T) {
-	manager := &policy.Manager{}
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
+	manager := policy.NewManager(context.Background(), logger, nil)
 
 	t.Run("Valid Policy", func(t *testing.T) {
 		yamlData := []byte(`
