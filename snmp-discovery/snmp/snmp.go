@@ -90,13 +90,45 @@ func (c *Client) Walk(objectID string) (mapping.ObjectIDValueMap, error) {
 	}
 	output := make(mapping.ObjectIDValueMap)
 	for _, pdu := range pdu {
-		if value, ok := pdu.Value.(string); ok {
-			output[pdu.Name] = mapping.Value{
-				Value: value,
-				Type:  mapping.Asn1BER(pdu.Type),
+		var value string
+		switch pdu.Type {
+		case gosnmp.OctetString:
+			if str, ok := pdu.Value.(string); ok {
+				value = str
+			} else if bytes, ok := pdu.Value.([]byte); ok {
+				value = string(bytes)
 			}
-		} else {
-			slog.Warn("Unexpected type for pdu.Value", "name", pdu.Name, "type", fmt.Sprintf("%T", pdu.Value))
+		case gosnmp.Integer:
+			if intVal, ok := pdu.Value.(int); ok {
+				value = fmt.Sprintf("%d", intVal)
+			}
+		case gosnmp.IPAddress:
+			if ip, ok := pdu.Value.(string); ok {
+				value = ip
+			}
+		case gosnmp.ObjectIdentifier:
+			if oid, ok := pdu.Value.(string); ok {
+				value = oid
+			}
+		case gosnmp.TimeTicks:
+			if ticks, ok := pdu.Value.(uint32); ok {
+				value = fmt.Sprintf("%d", ticks)
+			}
+		case gosnmp.Counter32, gosnmp.Gauge32:
+			if val, ok := pdu.Value.(uint32); ok {
+				value = fmt.Sprintf("%d", val)
+			}
+		case gosnmp.Counter64:
+			if val, ok := pdu.Value.(uint64); ok {
+				value = fmt.Sprintf("%d", val)
+			}
+		default:
+			slog.Warn("Unhandled SNMP type", "name", pdu.Name, "type", pdu.Type)
+			continue
+		}
+		output[pdu.Name] = mapping.Value{
+			Value: value,
+			Type:  mapping.Asn1BER(pdu.Type),
 		}
 	}
 	return output, nil

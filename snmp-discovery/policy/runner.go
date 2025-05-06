@@ -74,13 +74,14 @@ func (r *Runner) run() {
 	ctx, cancel := context.WithTimeout(r.ctx, r.timeout)
 	defer cancel()
 
-	r.logger.Info("Starting SNMP crawl...")
 	mapper := mapping.NewObjectIDMapper(r.scope.Mappings, r.logger)
+	objectIDs := mapper.ObjectIDs()
+	r.logger.Info("Starting SNMP crawl of targets", slog.Any("targetCount", len(r.scope.Targets)), slog.Any("objectCount", len(objectIDs)))
 	entities := make([]diode.Entity, 0)
 
 	for _, target := range r.scope.Targets {
 		host := snmp.NewHost(target.Host, target.Port, r.scope.Retries, &r.scope.Authentication, r.logger, r.ClientFactory)
-		for _, oid := range mapper.ObjectIDs() {
+		for _, oid := range objectIDs {
 			oids, err := host.Walk([]string{oid})
 			if err != nil {
 				r.logger.Warn("Error crawling host", "host", target.Host, "error", err)
@@ -91,6 +92,11 @@ func (r *Runner) run() {
 		}
 	}
 	r.logger.Info("SNMP crawl complete.")
+
+	if len(entities) == 0 {
+		r.logger.Info("No entities to ingest", slog.Any("policy", r.ctx.Value(policyKey)))
+		return
+	}
 
 	resp, err := r.client.Ingest(ctx, entities)
 	if err != nil {

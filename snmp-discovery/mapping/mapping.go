@@ -143,10 +143,12 @@ func (m *interfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					if err != nil {
 						logger.Warn("Error converting speed to int", "error", err, "value", value.Value)
 					}
-					speed32 := int32(speed)
-					interfaceEntity.Speed = &speed32
+					speed64 := int64(speed)
+					interfaceEntity.Speed = &speed64
 				case "macAddress":
-					interfaceEntity.MacAddress = &value.Value
+					interfaceEntity.PrimaryMacAddress = &diode.MACAddress{
+						MacAddress: &value.Value,
+					}
 				case "adminStatus":
 					enabled := value.Value == "1"
 					interfaceEntity.Enabled = &enabled
@@ -234,7 +236,7 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 
 	entities := make([]diode.Entity, 0, len(objectIDIndexMap))
 	for _, value := range objectIDIndexMap {
-		mappingEntry, err := m.getMappingEntry(value.Index, m.logger)
+		mappingEntry, err := m.getMappingEntry(value.Index)
 		if err != nil {
 			m.logger.Warn("Error finding mapping entry", "error", err, "objectID", value.Index)
 			continue
@@ -278,12 +280,12 @@ func newObjectIDValue(objectID string, value Value) (*ObjectIDValue, error) {
 }
 
 // Gets the mapper for the closest parent objectID
-func (m *ObjectIDMapper) getMappingEntry(objectID string, logger *slog.Logger) (*mappingEntry, error) {
+func (m *ObjectIDMapper) getMappingEntry(objectID string) (*mappingEntry, error) {
 	mappingKeys := make([]string, 0, len(m.mapping))
 	for k := range m.mapping {
 		mappingKeys = append(mappingKeys, k)
 	}
-	logger.Debug("Getting mapping entry for objectID", "objectID", objectID, "mappingKeys", mappingKeys)
+	m.logger.Debug("Getting mapping entry for objectID", "objectID", objectID, "mappingKeys", mappingKeys)
 
 	for {
 		if value, found := m.mapping[objectID]; found {

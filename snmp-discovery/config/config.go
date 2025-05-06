@@ -75,9 +75,3 @@ type MappingEntry struct {
 	MappingEntries []MappingEntry `yaml:"mapping_entries"`
 	IdentifierSize int            `yaml:"identifier_size"`
 }
-
-// EntityField represents the entity and field combination
-type EntityField struct {
-	Entity string `yaml:"entity"`
-	Field  string `yaml:"field"`
-}
