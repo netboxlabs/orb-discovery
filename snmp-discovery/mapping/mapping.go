@@ -11,13 +11,16 @@ import (
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 )
 
+// Value is a struct that contains a value and a type of an SNMP object
 type Value struct {
 	Value string
 	Type  Asn1BER
 }
 
+// Asn1BER is a type that represents the type of an SNMP object
 type Asn1BER byte
 
+// Asn1BER constants
 const (
 	EndOfContents     Asn1BER = 0x00
 	UnknownType       Asn1BER = 0x00
@@ -191,8 +194,10 @@ func newChildMappingEntries(configMappingEntries []config.MappingEntry, logger *
 	return childMappingEntries
 }
 
+// ObjectIDIndex is a type that represents an ObjectID index
 type ObjectIDIndex string
 
+// HasParent returns true if the ObjectIDIndex has a parent
 func (o *ObjectIDIndex) HasParent(parent string) bool {
 	return strings.HasPrefix(string(*o), parent)
 }
