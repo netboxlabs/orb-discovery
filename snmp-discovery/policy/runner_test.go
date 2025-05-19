@@ -39,8 +39,8 @@ type MockHost struct {
 	mock.Mock
 }
 
-func (m *MockHost) Walk(objectID string) (mapping.ObjectIDValueMap, error) {
-	args := m.Called(objectID)
+func (m *MockHost) Walk(objectID string, identifierSize int) (mapping.ObjectIDValueMap, error) {
+	args := m.Called(objectID, identifierSize)
 	return nil, args.Error(1)
 }
 
@@ -267,7 +267,7 @@ func TestRunnerWalkError(t *testing.T) {
 
 	// Create a mock host that returns an error on Walk
 	mockHost := new(MockHost)
-	mockHost.On("Walk", mock.Anything).Return(nil, errors.New("walk error"))
+	mockHost.On("Walk", mock.Anything, mock.Anything).Return(nil, errors.New("walk error"))
 
 	// Create a mock client factory that returns the mock host
 	mockClientFactory := func(_ string, _ uint16, _ int, _ *config.Authentication) (snmp.Walker, error) {
