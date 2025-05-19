@@ -34,7 +34,7 @@ func NewHost(host string, port uint16, retries int, authentication *config.Authe
 }
 
 // Walk walks the SNMP host
-func (s *Host) Walk(objectIDs []string) (mapping.ObjectIDValueMap, error) {
+func (s *Host) Walk(objectIDs map[string]int) (mapping.ObjectIDValueMap, error) {
 	s.logger.Info("Scanning", "host", s.address)
 
 	snmpClient, err := s.ClientFactory(s.address, s.port, s.retries, s.authentication)
@@ -54,8 +54,8 @@ func (s *Host) Walk(objectIDs []string) (mapping.ObjectIDValueMap, error) {
 	}
 
 	output := make(mapping.ObjectIDValueMap)
-	for _, objectID := range objectIDs {
-		pdu, err := snmpClient.Walk(objectID)
+	for objectID, identifierSize := range objectIDs {
+		pdu, err := snmpClient.Walk(objectID, identifierSize)
 		if err != nil {
 			s.logger.Warn("Error walking ObjectID", "objectID", objectID, "error", err)
 			return nil, err
@@ -83,8 +83,8 @@ func (c *Client) Close() error {
 }
 
 // Walk implements the Walker interface by walking the SNMP tree
-func (c *Client) Walk(objectID string) (mapping.ObjectIDValueMap, error) {
-	pdu, err := c.WalkAll(objectID)
+func (c *Client) Walk(objectIDs string, identifierSize int) (mapping.ObjectIDValueMap, error) {
+	pdu, err := c.WalkAll(objectIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -127,8 +127,9 @@ func (c *Client) Walk(objectID string) (mapping.ObjectIDValueMap, error) {
 			continue
 		}
 		output[pdu.Name] = mapping.Value{
-			Value: value,
-			Type:  mapping.Asn1BER(pdu.Type),
+			Value:          value,
+			Type:           mapping.Asn1BER(pdu.Type),
+			IdentifierSize: identifierSize,
 		}
 	}
 	return output, nil
@@ -226,7 +227,7 @@ func getPrivProtocol(privProtocol string) (gosnmp.SnmpV3PrivProtocol, error) {
 // It allows for connecting to SNMP devices, traversing ObjectID trees,
 // and properly closing connections when finished
 type Walker interface {
-	Walk(objectID string) (mapping.ObjectIDValueMap, error)
+	Walk(objectID string, identifierSize int) (mapping.ObjectIDValueMap, error)
 	Connect() error
 	Close() error
 }

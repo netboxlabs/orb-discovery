@@ -19,7 +19,7 @@ func (n *FakeSNMPWalker) Close() error {
 }
 
 // Walk implements Walker interface
-func (n *FakeSNMPWalker) Walk(oid string) (mapping.ObjectIDValueMap, error) {
+func (n *FakeSNMPWalker) Walk(oid string, _ int) (mapping.ObjectIDValueMap, error) {
 	if oid == "1.3.6.1.2.1.4.20.1.1" {
 		return mapping.ObjectIDValueMap{
 			"1.3.6.1.2.1.4.20.1.1": mapping.Value{Value: "192.168.1.1", Type: mapping.Asn1BER(mapping.IPAddress)},
