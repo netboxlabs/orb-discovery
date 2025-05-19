@@ -333,3 +333,182 @@ func TestNewClient(t *testing.T) {
 		})
 	}
 }
+
+func TestMapPDU(t *testing.T) {
+	testCases := []struct {
+		name          string
+		pdu           snmp.PDU
+		expectedValue mapping.Value
+		expectError   bool
+	}{
+		{
+			name: "OctetString as string",
+			pdu: snmp.PDU{
+				Name:  "test.1",
+				Type:  gosnmp.OctetString,
+				Value: "test string",
+			},
+			expectedValue: mapping.Value{
+				Type:  mapping.Asn1BER(gosnmp.OctetString),
+				Value: "test string",
+			},
+			expectError: false,
+		},
+		{
+			name: "OctetString as bytes",
+			pdu: snmp.PDU{
+				Name:  "test.2",
+				Type:  gosnmp.OctetString,
+				Value: []byte("test bytes"),
+			},
+			expectedValue: mapping.Value{
+				Type:  mapping.Asn1BER(gosnmp.OctetString),
+				Value: "test bytes",
+			},
+			expectError: false,
+		},
+		{
+			name: "Integer",
+			pdu: snmp.PDU{
+				Name:  "test.3",
+				Type:  gosnmp.Integer,
+				Value: 42,
+			},
+			expectedValue: mapping.Value{
+				Type:  mapping.Asn1BER(gosnmp.Integer),
+				Value: "42",
+			},
+			expectError: false,
+		},
+		{
+			name: "IPAddress",
+			pdu: snmp.PDU{
+				Name:  "test.4",
+				Type:  gosnmp.IPAddress,
+				Value: "192.168.1.1",
+			},
+			expectedValue: mapping.Value{
+				Type:  mapping.Asn1BER(gosnmp.IPAddress),
+				Value: "192.168.1.1",
+			},
+			expectError: false,
+		},
+		{
+			name: "ObjectIdentifier",
+			pdu: snmp.PDU{
+				Name:  "test.5",
+				Type:  gosnmp.ObjectIdentifier,
+				Value: "1.3.6.1.2.1.1.1.0",
+			},
+			expectedValue: mapping.Value{
+				Type:  mapping.Asn1BER(gosnmp.ObjectIdentifier),
+				Value: "1.3.6.1.2.1.1.1.0",
+			},
+			expectError: false,
+		},
+		{
+			name: "TimeTicks",
+			pdu: snmp.PDU{
+				Name:  "test.6",
+				Type:  gosnmp.TimeTicks,
+				Value: uint32(123456),
+			},
+			expectedValue: mapping.Value{
+				Type:  mapping.Asn1BER(gosnmp.TimeTicks),
+				Value: "123456",
+			},
+			expectError: false,
+		},
+		{
+			name: "Counter32",
+			pdu: snmp.PDU{
+				Name:  "test.7",
+				Type:  gosnmp.Counter32,
+				Value: uint32(4294967295),
+			},
+			expectedValue: mapping.Value{
+				Type:  mapping.Asn1BER(gosnmp.Counter32),
+				Value: "4294967295",
+			},
+			expectError: false,
+		},
+		{
+			name: "Gauge32",
+			pdu: snmp.PDU{
+				Name:  "test.8",
+				Type:  gosnmp.Gauge32,
+				Value: uint32(65535),
+			},
+			expectedValue: mapping.Value{
+				Type:  mapping.Asn1BER(gosnmp.Gauge32),
+				Value: "65535",
+			},
+			expectError: false,
+		},
+		{
+			name: "Counter64",
+			pdu: snmp.PDU{
+				Name:  "test.9",
+				Type:  gosnmp.Counter64,
+				Value: uint64(18446744073709551615),
+			},
+			expectedValue: mapping.Value{
+				Type:  mapping.Asn1BER(gosnmp.Counter64),
+				Value: "18446744073709551615",
+			},
+			expectError: false,
+		},
+		{
+			name: "Unhandled type",
+			pdu: snmp.PDU{
+				Name:  "test.10",
+				Type:  gosnmp.Asn1BER(255), // Invalid type
+				Value: "test",
+			},
+			expectedValue: mapping.Value{},
+			expectError:   true,
+		},
+		{
+			name: "Empty OctetString",
+			pdu: snmp.PDU{
+				Name:  "test.11",
+				Type:  gosnmp.OctetString,
+				Value: "",
+			},
+			expectedValue: mapping.Value{
+				Type:  mapping.Asn1BER(gosnmp.OctetString),
+				Value: "",
+			},
+			expectError: false,
+		},
+		{
+			name: "Zero Integer",
+			pdu: snmp.PDU{
+				Name:  "test.12",
+				Type:  gosnmp.Integer,
+				Value: 0,
+			},
+			expectedValue: mapping.Value{
+				Type:  mapping.Asn1BER(gosnmp.Integer),
+				Value: "0",
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := snmp.MapPDU(tc.pdu)
+
+			if tc.expectError {
+				assert.Error(t, err)
+				assert.Empty(t, result)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tc.expectedValue.Type, result.Type)
+				assert.Equal(t, tc.expectedValue.Value, result.Value)
+				assert.Equal(t, tc.pdu.IdentifierSize, result.IdentifierSize)
+			}
+		})
+	}
+}

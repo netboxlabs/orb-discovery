@@ -62,7 +62,7 @@ func (s *Host) Walk(objectIDs map[string]int) (mapping.ObjectIDValueMap, error) 
 		}
 		for k, value := range pdu {
 			s.logger.Debug("PDU", "objectID", k, "value", value)
-			value, err := mapPDU(value)
+			value, err := MapPDU(value)
 			if err != nil {
 				s.logger.Warn("Error mapping PDU", "objectID", k, "error", err)
 				continue
@@ -74,7 +74,8 @@ func (s *Host) Walk(objectIDs map[string]int) (mapping.ObjectIDValueMap, error) 
 	return output, nil
 }
 
-func mapPDU(pdu PDU) (mapping.Value, error) {
+// MapPDU maps a PDU to a mapping.Value
+func MapPDU(pdu PDU) (mapping.Value, error) {
 	var value string
 	switch pdu.Type {
 	case gosnmp.OctetString:
