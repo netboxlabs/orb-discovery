@@ -123,29 +123,6 @@ func TestSNMPHost(t *testing.T) {
 		mockWalker.AssertExpectations(t)
 	})
 
-	// t.Run("Handles PDU mapping errors", func(t *testing.T) {
-	// 	// Setup
-	// 	mockWalker := &MockSNMP{}
-	// 	mockWalker.On("Connect").Return(nil)
-	// 	mockWalker.On("Close").Return(nil)
-	// 	mockWalker.On("Walk", ipAddressObjectID, 4).Return(map[string]snmp.PDU{
-	// 		ipAddressObjectID: {Value: "invalid", Type: gosnmp.IPAddress, IdentifierSize: 4}, // Invalid IP address
-	// 	}, nil)
-
-	// 	snmpClientFactory := func(_ string, _ uint16, _ int, _ *config.Authentication) (snmp.Walker, error) {
-	// 		return mockWalker, nil
-	// 	}
-	// 	host := snmp.NewHost("192.168.1.1", 161, 3, nil, logger, snmpClientFactory)
-
-	// 	// Execute
-	// 	oids, err := host.Walk(objectIDsToQuery)
-
-	// 	// Assert
-	// 	assert.NoError(t, err)
-	// 	assert.Equal(t, 0, len(oids)) // Should skip invalid PDU
-	// 	mockWalker.AssertExpectations(t)
-	// })
-
 	t.Run("Handles connection close errors", func(t *testing.T) {
 		// Setup
 		mockWalker := &MockSNMP{}
@@ -208,6 +185,38 @@ func TestSNMPHost(t *testing.T) {
 		// Assert
 		assert.Error(t, err)
 		assert.Nil(t, oids)
+		mockWalker.AssertExpectations(t)
+	})
+
+	t.Run("Handles PDU mapping error", func(t *testing.T) {
+		// Setup
+		mockWalker := &MockSNMP{}
+		mockWalker.On("Connect").Return(nil)
+		mockWalker.On("Close").Return(nil)
+		mockWalker.On("Walk", ipAddressObjectID, 4).Return(map[string]snmp.PDU{
+			ipAddressObjectID: {Value: "192.168.1.1", Type: gosnmp.IPAddress, IdentifierSize: 4},
+		}, nil)
+		mockWalker.On("Walk", interfaceObjectID, 1).Return(map[string]snmp.PDU{
+			interfaceObjectID + ".1": {Value: "GigabitEthernet1/0/1", Type: gosnmp.OctetString, IdentifierSize: 1},
+			interfaceObjectID + ".2": {Value: "invalid", Type: gosnmp.Asn1BER(255), IdentifierSize: 1}, // Invalid type
+		}, nil)
+
+		snmpClientFactory := func(_ string, _ uint16, _ int, _ *config.Authentication) (snmp.Walker, error) {
+			return mockWalker, nil
+		}
+		host := snmp.NewHost("192.168.1.1", 161, 3, nil, logger, snmpClientFactory)
+
+		// Execute
+		oids, err := host.Walk(objectIDsToQuery)
+
+		// Assert
+		assert.NoError(t, err)        // Walk should continue despite PDU mapping error
+		assert.Equal(t, 2, len(oids)) // Should have 2 valid PDUs
+		assert.Equal(t, mapping.Value{Value: "192.168.1.1", Type: mapping.Asn1BER(mapping.IPAddress), IdentifierSize: 4}, oids[ipAddressObjectID])
+		assert.Equal(t, mapping.Value{Value: "GigabitEthernet1/0/1", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1}, oids[interfaceObjectID+".1"])
+		// The invalid PDU should be skipped
+		_, exists := oids[interfaceObjectID+".2"]
+		assert.False(t, exists)
 		mockWalker.AssertExpectations(t)
 	})
 
