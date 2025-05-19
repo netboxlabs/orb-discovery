@@ -61,7 +61,7 @@ func (s *Host) Walk(objectIDs map[string]int) (mapping.ObjectIDValueMap, error) 
 			return nil, err
 		}
 		for k, value := range pdu {
-			s.logger.Debug("PDU", "objectID", k, "value", value)
+			s.logger.Debug("Mapping PDU", "objectID", k, "value", value)
 			value, err := MapPDU(value)
 			if err != nil {
 				s.logger.Warn("Error mapping PDU", "objectID", k, "error", err)
