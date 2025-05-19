@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/gosnmp/gosnmp"
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/diode-sdk-go/diode/v1/diodepb"
 	"github.com/stretchr/testify/assert"
@@ -35,9 +36,9 @@ func (m *MockSNMP) Close() error {
 }
 
 // Walk implements Walker interface
-func (m *MockSNMP) Walk(oid string, identifierSize int) (mapping.ObjectIDValueMap, error) {
-	args := m.Called(oid)
-	return nil, args.Error(1)
+func (m *MockSNMP) Walk(oid string, identifierSize int) (map[string]snmp.PDU, error) {
+	args := m.Called(oid, identifierSize)
+	return args.Get(0).(map[string]snmp.PDU), args.Error(1)
 }
 
 // MockConn is a mock for the connection
@@ -68,8 +69,11 @@ func (m *MockClient) Ingest(context.Context, []diode.Entity) (*diodepb.IngestRes
 func TestSNMPHost(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	const ipAddressObjectID = "1.3.6.1.2.1.4.20.1.1"
+	const interfaceObjectID = "1.3.6.1.2.1.2.2.1"
 	objectIDsToQuery := make(map[string]int)
 	objectIDsToQuery[ipAddressObjectID] = 4
+	objectIDsToQuery[interfaceObjectID] = 1
+
 	t.Run("Successfully walks a host", func(t *testing.T) {
 		// Setup
 		snmpClientFactory := func(_ string, _ uint16, _ int, _ *config.Authentication) (snmp.Walker, error) {
@@ -79,12 +83,93 @@ func TestSNMPHost(t *testing.T) {
 		host := snmp.NewHost("192.168.1.1", 161, 3, nil, logger, snmpClientFactory)
 
 		// Execute
+		oids, err := host.Walk(map[string]int{
+			ipAddressObjectID: 4,
+		})
+
+		// Assert
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(oids))
+		assert.Equal(t, mapping.Value{Value: "192.168.1.1", Type: mapping.Asn1BER(mapping.IPAddress)}, oids[ipAddressObjectID])
+	})
+
+	t.Run("Handles multiple OIDs with different types", func(t *testing.T) {
+		// Setup
+		mockWalker := &MockSNMP{}
+		mockWalker.On("Connect").Return(nil)
+		mockWalker.On("Close").Return(nil)
+		mockWalker.On("Walk", ipAddressObjectID, 4).Return(map[string]snmp.PDU{
+			ipAddressObjectID: {Value: "192.168.1.1", Type: gosnmp.IPAddress, IdentifierSize: 4},
+		}, nil)
+		mockWalker.On("Walk", interfaceObjectID, 1).Return(map[string]snmp.PDU{
+			interfaceObjectID + ".1": {Value: "GigabitEthernet1/0/1", Type: gosnmp.OctetString, IdentifierSize: 1},
+			interfaceObjectID + ".2": {Value: 1000000, Type: gosnmp.Integer, IdentifierSize: 1},
+		}, nil)
+
+		snmpClientFactory := func(_ string, _ uint16, _ int, _ *config.Authentication) (snmp.Walker, error) {
+			return mockWalker, nil
+		}
+		host := snmp.NewHost("192.168.1.1", 161, 3, nil, logger, snmpClientFactory)
+
+		// Execute
 		oids, err := host.Walk(objectIDsToQuery)
 
 		// Assert
 		assert.NoError(t, err)
-		assert.Equal(t, len(objectIDsToQuery), len(oids))
-		assert.Equal(t, mapping.Value{Value: "192.168.1.1", Type: mapping.Asn1BER(mapping.IPAddress)}, oids[ipAddressObjectID])
+		assert.Equal(t, 3, len(oids))
+		assert.Equal(t, mapping.Value{Value: "192.168.1.1", Type: mapping.Asn1BER(mapping.IPAddress), IdentifierSize: 4}, oids[ipAddressObjectID])
+		assert.Equal(t, mapping.Value{Value: "GigabitEthernet1/0/1", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1}, oids[interfaceObjectID+".1"])
+		assert.Equal(t, mapping.Value{Value: "1000000", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 1}, oids[interfaceObjectID+".2"])
+		mockWalker.AssertExpectations(t)
+	})
+
+	// t.Run("Handles PDU mapping errors", func(t *testing.T) {
+	// 	// Setup
+	// 	mockWalker := &MockSNMP{}
+	// 	mockWalker.On("Connect").Return(nil)
+	// 	mockWalker.On("Close").Return(nil)
+	// 	mockWalker.On("Walk", ipAddressObjectID, 4).Return(map[string]snmp.PDU{
+	// 		ipAddressObjectID: {Value: "invalid", Type: gosnmp.IPAddress, IdentifierSize: 4}, // Invalid IP address
+	// 	}, nil)
+
+	// 	snmpClientFactory := func(_ string, _ uint16, _ int, _ *config.Authentication) (snmp.Walker, error) {
+	// 		return mockWalker, nil
+	// 	}
+	// 	host := snmp.NewHost("192.168.1.1", 161, 3, nil, logger, snmpClientFactory)
+
+	// 	// Execute
+	// 	oids, err := host.Walk(objectIDsToQuery)
+
+	// 	// Assert
+	// 	assert.NoError(t, err)
+	// 	assert.Equal(t, 0, len(oids)) // Should skip invalid PDU
+	// 	mockWalker.AssertExpectations(t)
+	// })
+
+	t.Run("Handles connection close errors", func(t *testing.T) {
+		// Setup
+		mockWalker := &MockSNMP{}
+		mockWalker.On("Connect").Return(nil)
+		mockWalker.On("Close").Return(fmt.Errorf("close error"))
+		mockWalker.On("Walk", ipAddressObjectID, 4).Return(map[string]snmp.PDU{
+			ipAddressObjectID: {Value: "192.168.1.1", Type: gosnmp.IPAddress, IdentifierSize: 4},
+		}, nil)
+
+		snmpClientFactory := func(_ string, _ uint16, _ int, _ *config.Authentication) (snmp.Walker, error) {
+			return mockWalker, nil
+		}
+		host := snmp.NewHost("192.168.1.1", 161, 3, nil, logger, snmpClientFactory)
+
+		// Execute
+		oids, err := host.Walk(map[string]int{
+			ipAddressObjectID: 4,
+		})
+
+		// Assert
+		assert.NoError(t, err) // Close error should be logged but not returned
+		assert.Equal(t, 1, len(oids))
+		assert.Equal(t, mapping.Value{Value: "192.168.1.1", Type: mapping.Asn1BER(mapping.IPAddress), IdentifierSize: 4}, oids[ipAddressObjectID])
+		mockWalker.AssertExpectations(t)
 	})
 
 	t.Run("Handles SNMP connection error", func(t *testing.T) {
@@ -111,7 +196,7 @@ func TestSNMPHost(t *testing.T) {
 		mockWalker := &MockSNMP{}
 		mockWalker.On("Connect").Return(nil)
 		mockWalker.On("Close").Return(nil)
-		mockWalker.On("Walk", mock.Anything, mock.Anything).Return(nil, assert.AnError)
+		mockWalker.On("Walk", mock.Anything, mock.Anything).Return(make(map[string]snmp.PDU), assert.AnError)
 		snmpClientFactory := func(_ string, _ uint16, _ int, _ *config.Authentication) (snmp.Walker, error) {
 			return mockWalker, nil
 		}
