@@ -61,8 +61,10 @@ func (s *Host) Walk(objectIDs map[string]int) (mapping.ObjectIDValueMap, error) 
 			return nil, err
 		}
 		for k, value := range pdu {
-			if _, exists := output[k]; exists {
-				s.logger.Warn("Duplicate ObjectID", "objectID", k)
+			s.logger.Debug("PDU", "objectID", k, "value", value)
+			value, err := mapPDU(value)
+			if err != nil {
+				s.logger.Warn("Error mapping PDU", "objectID", k, "error", err)
 				continue
 			}
 			output[k] = value
@@ -70,6 +72,50 @@ func (s *Host) Walk(objectIDs map[string]int) (mapping.ObjectIDValueMap, error) 
 	}
 
 	return output, nil
+}
+
+func mapPDU(pdu PDU) (mapping.Value, error) {
+	var value string
+	switch pdu.Type {
+	case gosnmp.OctetString:
+		if str, ok := pdu.Value.(string); ok {
+			value = str
+		} else if bytes, ok := pdu.Value.([]byte); ok {
+			value = string(bytes)
+		}
+	case gosnmp.Integer:
+		if intVal, ok := pdu.Value.(int); ok {
+			value = fmt.Sprintf("%d", intVal)
+		}
+	case gosnmp.IPAddress:
+		if ip, ok := pdu.Value.(string); ok {
+			value = ip
+		}
+	case gosnmp.ObjectIdentifier:
+		if oid, ok := pdu.Value.(string); ok {
+			value = oid
+		}
+	case gosnmp.TimeTicks:
+		if ticks, ok := pdu.Value.(uint32); ok {
+			value = fmt.Sprintf("%d", ticks)
+		}
+	case gosnmp.Counter32, gosnmp.Gauge32:
+		if val, ok := pdu.Value.(uint32); ok {
+			value = fmt.Sprintf("%d", val)
+		}
+	case gosnmp.Counter64:
+		if val, ok := pdu.Value.(uint64); ok {
+			value = fmt.Sprintf("%d", val)
+		}
+	default:
+		slog.Warn("Unhandled SNMP type", "name", pdu.Name, "type", pdu.Type)
+		return mapping.Value{}, fmt.Errorf("unhandled SNMP type: %s", pdu.Type)
+	}
+	return mapping.Value{
+		Type:           mapping.Asn1BER(pdu.Type),
+		Value:          value,
+		IdentifierSize: pdu.IdentifierSize,
+	}, nil
 }
 
 // Client wraps gosnmp.GoSNMP to implement the Walker interface
@@ -83,56 +129,28 @@ func (c *Client) Close() error {
 }
 
 // Walk implements the Walker interface by walking the SNMP tree
-func (c *Client) Walk(objectIDs string, identifierSize int) (mapping.ObjectIDValueMap, error) {
+func (c *Client) Walk(objectIDs string, identifierSize int) (map[string]PDU, error) {
 	pdu, err := c.WalkAll(objectIDs)
 	if err != nil {
 		return nil, err
 	}
-	output := make(mapping.ObjectIDValueMap)
+	output := make(map[string]PDU)
 	for _, pdu := range pdu {
-		var value string
-		switch pdu.Type {
-		case gosnmp.OctetString:
-			if str, ok := pdu.Value.(string); ok {
-				value = str
-			} else if bytes, ok := pdu.Value.([]byte); ok {
-				value = string(bytes)
-			}
-		case gosnmp.Integer:
-			if intVal, ok := pdu.Value.(int); ok {
-				value = fmt.Sprintf("%d", intVal)
-			}
-		case gosnmp.IPAddress:
-			if ip, ok := pdu.Value.(string); ok {
-				value = ip
-			}
-		case gosnmp.ObjectIdentifier:
-			if oid, ok := pdu.Value.(string); ok {
-				value = oid
-			}
-		case gosnmp.TimeTicks:
-			if ticks, ok := pdu.Value.(uint32); ok {
-				value = fmt.Sprintf("%d", ticks)
-			}
-		case gosnmp.Counter32, gosnmp.Gauge32:
-			if val, ok := pdu.Value.(uint32); ok {
-				value = fmt.Sprintf("%d", val)
-			}
-		case gosnmp.Counter64:
-			if val, ok := pdu.Value.(uint64); ok {
-				value = fmt.Sprintf("%d", val)
-			}
-		default:
-			slog.Warn("Unhandled SNMP type", "name", pdu.Name, "type", pdu.Type)
-			continue
-		}
-		output[pdu.Name] = mapping.Value{
-			Value:          value,
-			Type:           mapping.Asn1BER(pdu.Type),
+		output[pdu.Name] = PDU{
+			Name:           pdu.Name,
+			Type:           pdu.Type,
+			Value:          pdu.Value,
 			IdentifierSize: identifierSize,
 		}
 	}
 	return output, nil
+}
+
+type PDU struct {
+	Name           string
+	Type           gosnmp.Asn1BER
+	Value          any
+	IdentifierSize int
 }
 
 const (
@@ -227,7 +245,7 @@ func getPrivProtocol(privProtocol string) (gosnmp.SnmpV3PrivProtocol, error) {
 // It allows for connecting to SNMP devices, traversing ObjectID trees,
 // and properly closing connections when finished
 type Walker interface {
-	Walk(objectID string, identifierSize int) (mapping.ObjectIDValueMap, error)
+	Walk(objectID string, identifierSize int) (map[string]PDU, error)
 	Connect() error
 	Close() error
 }
