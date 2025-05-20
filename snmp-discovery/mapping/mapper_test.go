@@ -5,8 +5,9 @@ import (
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
-	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 )
 
 func TestIPAddressMapper_Map(t *testing.T) {

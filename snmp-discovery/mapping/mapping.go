@@ -61,40 +61,33 @@ func NewEntityRegistry(logger *slog.Logger) *EntityRegistry {
 	}
 }
 
-// GetOrCreateOrGetEntity returns an entity from the EntityRegistry
-func (r *EntityRegistry) GetOrCreateOrGetEntity(entityType EntityType, index ObjectIDIndex) diode.Entity {
+// GetOrCreateEntity returns an entity from the EntityRegistry or creates a new one if it doesn't exist
+func (r *EntityRegistry) GetOrCreateEntity(entityType EntityType, index ObjectIDIndex) diode.Entity {
 	r.logger.Debug("Getting entity", "entityType", entityType, "index", index, "from", r.entities)
 	if r.entities[entityType] == nil {
 		r.entities[entityType] = make(map[ObjectIDIndex]diode.Entity)
 	}
 	if r.entities[entityType][index] == nil {
-		r.entities[entityType][index] = makePlaceholderEntity(entityType)
-	}
-	return r.entities[entityType][index]
-}
-
-func makePlaceholderEntity(entityType EntityType) diode.Entity {
-	switch entityType {
-	case "ipAddress":
-		return &diode.IPAddress{}
-	case "interface":
-		return &diode.Interface{}
-	case "device":
-		return &diode.Device{}
-	}
-	panic("unimplemented")
-}
-
-// CreateOrGetEntity creates an entity in the EntityRegistry
-func (r *EntityRegistry) GetOrCreateEntity(entityType EntityType, index ObjectIDIndex, entity diode.Entity) diode.Entity {
-	r.logger.Debug("Creating entity", "entityType", entityType, "index", index, "entity", entity)
-	if r.entities[entityType] == nil {
-		r.entities[entityType] = make(map[ObjectIDIndex]diode.Entity)
-	}
-	if r.entities[entityType][index] == nil {
+		entity, err := createEntity(entityType)
+		if err != nil {
+			r.logger.Warn("Error creating entity", "error", err, "entityType", entityType, "index", index)
+			return nil
+		}
 		r.entities[entityType][index] = entity
 	}
 	return r.entities[entityType][index]
+}
+
+func createEntity(entityType EntityType) (diode.Entity, error) {
+	switch entityType {
+	case "ipAddress":
+		return &diode.IPAddress{}, nil
+	case "interface":
+		return &diode.Interface{}, nil
+	case "device":
+		return &diode.Device{}, nil
+	}
+	return nil, fmt.Errorf("unimplemented entity type: %s", entityType)
 }
 
 // ObjectIDValueMap is a map of ObjectIDs to their values
@@ -162,8 +155,10 @@ type orbToEntityMapper interface {
 	Map(pdus map[ObjectIDIndex]*ObjectIDValue, mappingEntry *mappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity
 }
 
+// IPAddressMapper is a struct that maps IP addresses to entities
 type IPAddressMapper struct{}
 
+// Map maps IP addresses to entities
 func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *mappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
 	logger.Debug("Mapping values to ipAddress entity", "values", values, "mappingEntry", mappingEntry)
 	ipAddress := diode.IPAddress{}
@@ -179,7 +174,7 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					ipAddress.Address = &x
 				case "assigned_object":
 					if propertyMappingEntry.Relationship != (config.Relationship{}) {
-						linkedEntity := entityRegistry.GetOrCreateOrGetEntity(EntityType(propertyMappingEntry.Relationship.Type), ObjectIDIndex(value.Value))
+						linkedEntity := entityRegistry.GetOrCreateEntity(EntityType(propertyMappingEntry.Relationship.Type), ObjectIDIndex(value.Value))
 						if linkedEntity == nil {
 							logger.Warn("No linked entity found while mapping assigned object", "relationship", propertyMappingEntry.Relationship)
 							continue
@@ -198,11 +193,13 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 	return &ipAddress
 }
 
+// InterfaceMapper is a struct that maps interfaces to entities
 type InterfaceMapper struct{}
 
+// Map maps interfaces to entities
 func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *mappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
 	logger.Debug("Mapping values to interface entity", "values", values, "mappingEntry", mappingEntry)
-	interfaceEntity := entityRegistry.GetOrCreateEntity(EntityType(mappingEntry.Entity), getIndex(values), &diode.Interface{}).(*diode.Interface)
+	interfaceEntity := entityRegistry.GetOrCreateEntity(EntityType(mappingEntry.Entity), getIndex(values)).(*diode.Interface)
 
 	for objectID, value := range values {
 		for _, propertyMappingEntry := range mappingEntry.MappingEntries {
@@ -357,11 +354,6 @@ func newObjectIDValue(objectID string, value Value) (*ObjectIDValue, error) {
 
 // Gets the mapper for the closest parent objectID
 func (m *ObjectIDMapper) getMappingEntry(objectID string) (*mappingEntry, error) {
-	mappingKeys := make([]string, 0, len(m.mapping))
-	for k := range m.mapping {
-		mappingKeys = append(mappingKeys, k)
-	}
-
 	for {
 		if value, found := m.mapping[objectID]; found {
 			return value, nil

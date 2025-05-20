@@ -62,6 +62,19 @@ func (m *Manager) ParsePolicies(data []byte) (map[string]config.Policy, error) {
 		payload.Policies[name] = updatedPolicy
 	}
 
+	// Load the mapping config
+	for name, policy := range payload.Policies {
+		mappingConfig, err := m.loadMappingConfig(policy)
+		if err != nil {
+			return nil, fmt.Errorf("%s : invalid policy : %w", name, err)
+		}
+
+		// Create a new policy with updated mappings
+		updatedPolicy := payload.Policies[name]
+		updatedPolicy.Scope.Mappings = mappingConfig.Entries
+		payload.Policies[name] = updatedPolicy
+	}
+
 	return payload.Policies, nil
 }
 
@@ -148,8 +161,13 @@ func (m *Manager) HasPolicy(name string) bool {
 // StartPolicy starts the policy
 func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 	m.logger.Debug("Starting policy", "policy", policy)
+	m.logger.Debug("Starting policy", "policy", policy)
 	if len(policy.Scope.Targets) == 0 {
 		return fmt.Errorf("%s : no targets found in the policy", name)
+	}
+
+	if len(policy.Scope.Mappings) == 0 {
+		return fmt.Errorf("%s : no mappings found in the policy", name)
 	}
 
 	if len(policy.Scope.Mappings) == 0 {
