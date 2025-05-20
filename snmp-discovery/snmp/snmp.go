@@ -68,6 +68,7 @@ func (s *Host) Walk(objectIDs map[string]int) (mapping.ObjectIDValueMap, error) 
 				continue
 			}
 			output[k] = value
+			output[k] = value
 		}
 	}
 
@@ -147,6 +148,7 @@ func (c *Client) Walk(objectIDs string, identifierSize int) (map[string]PDU, err
 	return output, nil
 }
 
+// PDU is a struct that represents an SNMP PDU
 type PDU struct {
 	Name           string
 	Type           gosnmp.Asn1BER

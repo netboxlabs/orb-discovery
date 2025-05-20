@@ -23,8 +23,6 @@ type MockSNMP struct {
 	mock.Mock
 }
 
-<<<<<<< HEAD
-=======
 // Connect implements Walker interface
 func (m *MockSNMP) Connect() error {
 	args := m.Called()
@@ -43,7 +41,6 @@ func (m *MockSNMP) Walk(oid string, identifierSize int) (map[string]snmp.PDU, er
 	return args.Get(0).(map[string]snmp.PDU), args.Error(1)
 }
 
->>>>>>> 78c6cdd (refactors to make adding more snmp tests easier)
 // MockConn is a mock for the connection
 type MockConn struct {
 	mock.Mock
@@ -79,7 +76,6 @@ func TestSNMPHost(t *testing.T) {
 
 	t.Run("Successfully walks a host", func(t *testing.T) {
 		// Setup
-		objectIDsToQuery := []string{ipAddressObjectID}
 		snmpClientFactory := func(_ string, _ uint16, _ int, _ *config.Authentication) (snmp.Walker, error) {
 			fakeWalker, _ := snmp.NewFakeSNMPWalker("192.168.1.1", 161, 3, nil)
 			return fakeWalker, nil
@@ -164,7 +160,7 @@ func TestSNMPHost(t *testing.T) {
 		host := snmp.NewHost("192.168.1.1", 161, 3, nil, logger, snmpClientFactory)
 
 		// Execute
-		oids, err := host.Walk([]string{"1.3.6.1.2.1.4.20.1.1"})
+		oids, err := host.Walk(objectIDsToQuery)
 
 		// Assert
 		assert.Error(t, err)
@@ -177,18 +173,14 @@ func TestSNMPHost(t *testing.T) {
 		mockWalker := &MockSNMP{}
 		mockWalker.On("Connect").Return(nil)
 		mockWalker.On("Close").Return(nil)
-<<<<<<< HEAD
-		mockWalker.On("Walk", mock.Anything).Return(nil, assert.AnError)
-=======
 		mockWalker.On("Walk", mock.Anything, mock.Anything).Return(make(map[string]snmp.PDU), assert.AnError)
->>>>>>> 78c6cdd (refactors to make adding more snmp tests easier)
 		snmpClientFactory := func(_ string, _ uint16, _ int, _ *config.Authentication) (snmp.Walker, error) {
 			return mockWalker, nil
 		}
 		host := snmp.NewHost("192.168.1.1", 161, 3, nil, logger, snmpClientFactory)
 
 		// Execute
-		oids, err := host.Walk([]string{ipAddressObjectID})
+		oids, err := host.Walk(objectIDsToQuery)
 
 		// Assert
 		assert.Error(t, err)
@@ -233,37 +225,19 @@ func TestSNMPHost(t *testing.T) {
 		mockWalker := &MockSNMP{}
 		mockWalker.On("Connect").Return(nil)
 		mockWalker.On("Close").Return(nil)
-		mockWalker.On("Walk", mock.Anything).Return(nil, assert.AnError)
+		mockWalker.On("Walk", mock.Anything, mock.Anything).Return(nil, assert.AnError)
 		snmpClientFactory := func(_ string, _ uint16, _ int, _ *config.Authentication) (snmp.Walker, error) {
 			return nil, fmt.Errorf("error creating client")
 		}
 		host := snmp.NewHost("192.168.1.1", 161, 3, nil, logger, snmpClientFactory)
 
 		// Execute
-		oids, err := host.Walk([]string{ipAddressObjectID})
+		oids, err := host.Walk(objectIDsToQuery)
 
 		// Assert
 		assert.Error(t, err)
 		assert.Nil(t, oids)
 	})
-}
-
-// Connect implements Walker interface
-func (m *MockSNMP) Connect() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
-// Close implements Walker interface
-func (m *MockSNMP) Close() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
-// Walk implements Walker interface
-func (m *MockSNMP) Walk(oid string) (mapping.ObjectIDValueMap, error) {
-	args := m.Called(oid)
-	return nil, args.Error(1)
 }
 
 func TestNewClient(t *testing.T) {
