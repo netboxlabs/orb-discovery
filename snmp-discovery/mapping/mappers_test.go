@@ -316,7 +316,7 @@ func TestDeviceMapper_Map(t *testing.T) {
 	mockManufacturers.On("GetManufacturer", 999).Return(data.Manufacturer{}, fmt.Errorf("manufacturer not found"))
 
 	mapper := &DeviceMapper{
-		manufacturers: mockManufacturers,
+		devices: mockManufacturers,
 	}
 
 	tests := []struct {

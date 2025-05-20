@@ -34,7 +34,7 @@ type Runner struct {
 	scope         config.Scope
 	config        config.PolicyConfig
 	ClientFactory snmp.ClientFactory
-	manufacturers data.ManufacturerDataRetreiver
+	manufacturers data.DeviceDataRetreiver
 }
 
 // NewRunner returns a new policy runner
@@ -44,9 +44,9 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 		return nil, err
 	}
 
-	manufacturers := data.NewEmptyManufacturersList()
+	manufacturers := data.NewEmptyDevicesList()
 	if policy.Config.ManufacturersFile != "" {
-		manufacturers, err = data.NewManufacturers(policy.Config.ManufacturersFile)
+		manufacturers, err = data.NewDevices(policy.Config.ManufacturersFile)
 		if err != nil {
 			return nil, err
 		}

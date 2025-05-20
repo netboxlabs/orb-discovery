@@ -90,7 +90,7 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 
 // DeviceMapper is a struct that maps devices to entities
 type DeviceMapper struct {
-	manufacturers data.ManufacturerDataRetreiver
+	devices data.DeviceDataRetreiver
 }
 
 // Map maps devices to entities
@@ -138,7 +138,7 @@ func (m *DeviceMapper) GetDeviceModel(objectID string) (string, error) {
 	if len(parts) > 6 {
 		manID, err := strconv.Atoi(parts[6])
 		if err == nil {
-			man, err := m.manufacturers.GetManufacturer(manID)
+			man, err := m.devices.GetManufacturer(manID)
 			if err != nil {
 				return "", err
 			}
