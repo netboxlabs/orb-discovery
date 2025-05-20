@@ -45,8 +45,8 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 	}
 
 	manufacturers := data.NewEmptyDevicesList()
-	if policy.Config.ManufacturersFile != "" {
-		manufacturers, err = data.NewDevices(policy.Config.ManufacturersFile)
+	if policy.Config.DevicesFile != "" {
+		manufacturers, err = data.NewDevices(policy.Config.DevicesFile)
 		if err != nil {
 			return nil, err
 		}
