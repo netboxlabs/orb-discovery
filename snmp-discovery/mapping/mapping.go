@@ -8,6 +8,7 @@ import (
 	"github.com/netboxlabs/diode-sdk-go/diode"
 
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/data"
 )
 
 // Value is a struct that contains a value and a type of an SNMP object
@@ -112,11 +113,6 @@ type mappingEntry struct {
 	Relationship   config.Relationship
 }
 
-var entityMappers = map[string]orbToEntityMapper{
-	"ipAddress": &IPAddressMapper{},
-	"interface": &InterfaceMapper{},
-}
-
 func (m *mappingEntry) MapToEntity(pdus map[ObjectIDIndex]*ObjectIDValue, entityRegistry *EntityRegistry, logger *slog.Logger) []diode.Entity {
 	logger.Debug("Mapping value to entity", "value", pdus)
 	if m.Mapper == nil {
@@ -133,16 +129,24 @@ func (m *mappingEntry) MapToEntity(pdus map[ObjectIDIndex]*ObjectIDValue, entity
 }
 
 // NewObjectIDMapper creates a new ObjectIDMapper
-func NewObjectIDMapper(mappings []config.MappingEntry, logger *slog.Logger) *ObjectIDMapper {
+func NewObjectIDMapper(mappings []config.MappingEntry, logger *slog.Logger, manufacturers data.ManufacturerDataRetreiver) *ObjectIDMapper {
+	var entityMappers = map[string]orbToEntityMapper{
+		"ipAddress": &IPAddressMapper{},
+		"interface": &InterfaceMapper{},
+		"device": &DeviceMapper{
+			manufacturers: manufacturers,
+		},
+	}
 	mapping := make(map[string]*mappingEntry)
 	for _, m := range mappings {
 		logger.Debug("Adding mapping", "oid", m.OID, "entity", m.Entity, "field", m.Field, "relationship", m.Relationship)
-		mappingEntry := newMappingEntry(m, logger)
+		mappingEntry := newMappingEntry(m, logger, entityMappers)
 		if mappingEntry == nil {
 			continue
 		}
 		mapping[m.OID] = mappingEntry
 	}
+
 	return &ObjectIDMapper{
 		mapping:  mapping,
 		logger:   logger,
@@ -161,7 +165,7 @@ func getIndex(values map[ObjectIDIndex]*ObjectIDValue) ObjectIDIndex {
 	return ""
 }
 
-func newMappingEntry(m config.MappingEntry, logger *slog.Logger) *mappingEntry {
+func newMappingEntry(m config.MappingEntry, logger *slog.Logger, entityMappers map[string]orbToEntityMapper) *mappingEntry {
 	mapper := entityMappers[m.Entity]
 	if mapper == nil {
 		logger.Warn("No mapper found for entity. Ignoring.", "entity", m.Entity)

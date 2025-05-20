@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/data"
 )
 
 // IPAddressMapper is a struct that maps IP addresses to entities
@@ -87,7 +89,9 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 }
 
 // DeviceMapper is a struct that maps devices to entities
-type DeviceMapper struct{}
+type DeviceMapper struct {
+	manufacturers data.ManufacturerDataRetreiver
+}
 
 // Map maps devices to entities
 func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *mappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
@@ -101,6 +105,17 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 				switch propertyMappingEntry.Field {
 				case "name":
 					device.Name = &value.Value
+				case "platform":
+					manufacturer, err := m.GetDeviceModel(value.Value)
+					if err != nil {
+						logger.Warn("Error getting device model", "error", err, "value", value.Value)
+						continue
+					}
+					device.Platform = &diode.Platform{
+						Manufacturer: &diode.Manufacturer{
+							Name: diode.String(manufacturer),
+						},
+					}
 				default:
 					logger.Warn("Unknown field", "field", propertyMappingEntry.Field)
 				}
@@ -108,4 +123,35 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 		}
 	}
 	return &device
+}
+
+func (m *DeviceMapper) GetDeviceModel(objectID string) (string, error) {
+	manufacturer := "unknown"
+
+	// Split the OID into parts
+	parts := strings.Split(objectID, ".")
+	if len(parts) > 0 && parts[0] == "" {
+		parts = parts[1:]
+	}
+
+	// Check if we have enough parts to extract manufacturer and model IDs
+	if len(parts) > 6 {
+		manID, err := strconv.Atoi(parts[6])
+		if err == nil {
+			man, err := m.manufacturers.GetManufacturer(manID)
+			if err != nil {
+				return "", err
+			}
+			manufacturer = man.Name
+			// modelID, err := strconv.Atoi(parts[len(parts)-1])
+			// if err == nil {
+			// 	if device, ok := man.Products[modelID]; ok {
+			// 		deviceType = device
+			// 	}
+			// }
+
+		}
+	}
+
+	return manufacturer, nil
 }

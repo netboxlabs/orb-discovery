@@ -57,7 +57,8 @@ func TestNewRunner(t *testing.T) {
 	cron := "0 0 * * *"
 	policyConfig := config.Policy{
 		Config: config.PolicyConfig{
-			Schedule: &cron,
+			Schedule:          &cron,
+			ManufacturersFile: "manufacturers.yaml",
 		},
 		Scope: config.Scope{
 			Targets: []config.Target{
@@ -83,6 +84,16 @@ func TestNewRunner(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
+
+	// Create a dummy manufacturers file
+	_ = os.WriteFile("manufacturers.yaml", []byte(`
+	manufacturers:
+	  - id: 9
+		name: "Cisco"
+	`), 0o644)
+	defer func() {
+		_ = os.Remove("manufacturers.yaml")
+	}()
 
 	// Create new runner
 	_, err := policy.NewRunner(ctx, logger, "test-policy", policyConfig, mockClient, snmp.NewFakeSNMPWalker)
@@ -123,6 +134,7 @@ func TestRunnerRun(t *testing.T) {
 						Comments:    "This is a test",
 						Tags:        []string{"test", "snmp"},
 					},
+					ManufacturersFile: "manufacturers.yaml",
 				},
 				Scope: config.Scope{
 					Targets: []config.Target{
@@ -152,6 +164,16 @@ func TestRunnerRun(t *testing.T) {
 				},
 			}
 			ctx := context.Background()
+
+			// Create a dummy manufacturers file
+			_ = os.WriteFile("manufacturers.yaml", []byte(`
+			manufacturers:
+			  - id: 9
+				name: "Cisco"
+			`), 0o644)
+			defer func() {
+				_ = os.Remove("manufacturers.yaml")
+			}()
 
 			// Create runner
 			runner, err := policy.NewRunner(ctx, logger, "test-policy", policyConfig, mockClient, snmp.NewFakeSNMPWalker)

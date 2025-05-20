@@ -131,6 +131,8 @@ func TestManagerPolicyLifecycle(t *testing.T) {
 	yamlData := []byte(`
         policies:
           policy1:
+            config:
+              manufacturers_file: "manufacturers.yaml"
             scope:
               targets:
                 - host: 192.168.1.1
@@ -139,6 +141,8 @@ func TestManagerPolicyLifecycle(t *testing.T) {
                 community: public
               mapping_config: "valid_mapping.yaml"
           policy2:
+            config:
+              manufacturers_file: "manufacturers.yaml"
             scope:
               targets:
                 - host: 192.168.2.1
@@ -147,6 +151,8 @@ func TestManagerPolicyLifecycle(t *testing.T) {
                 community: public
               mapping_config: "valid_mapping.yaml"
           policy3:
+            config:
+              manufacturers_file: "manufacturers.yaml"
             scope:
               targets: []
               authentication:
@@ -159,6 +165,16 @@ func TestManagerPolicyLifecycle(t *testing.T) {
 	writeMappingConfigFile("valid_mapping.yaml")
 	defer func() {
 		_ = os.Remove("valid_mapping.yaml")
+	}()
+
+	// Create a dummy manufacturers file
+	_ = os.WriteFile("manufacturers.yaml", []byte(`
+	manufacturers:
+	  - id: 9
+		name: "Cisco"
+	`), 0o644)
+	defer func() {
+		_ = os.Remove("manufacturers.yaml")
 	}()
 
 	policies, err := manager.ParsePolicies(yamlData)
