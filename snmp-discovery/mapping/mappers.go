@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
+
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/data"
 )
@@ -94,7 +95,7 @@ type DeviceMapper struct {
 }
 
 // Map maps devices to entities
-func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *mappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
+func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *mappingEntry, _ *EntityRegistry, logger *slog.Logger) diode.Entity {
 	logger.Debug("Mapping values to device entity", "values", values, "mappingEntry", mappingEntry)
 	device := diode.Device{}
 
@@ -125,6 +126,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 	return &device
 }
 
+// GetDeviceModel returns the device model for a given OID
 func (m *DeviceMapper) GetDeviceModel(objectID string) (string, error) {
 	manufacturer := "unknown"
 

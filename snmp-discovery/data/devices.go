@@ -24,6 +24,7 @@ type Device struct {
 	Name                    string `yaml:"name"`
 }
 
+// DeviceDataRetreiver is a type that can retrieve device data
 type DeviceDataRetreiver interface {
 	GetManufacturer(id int) (Manufacturer, error)
 }
@@ -40,7 +41,10 @@ func NewDevices(filePath string) (DeviceDataRetreiver, error) {
 	if err != nil {
 		return nil, err
 	}
-	yaml.Unmarshal(yamlFile, &devices)
+	err = yaml.Unmarshal(yamlFile, &devices)
+	if err != nil {
+		return nil, err
+	}
 
 	manufacturersData := make(map[int]Manufacturer)
 	for _, manufacturer := range devices.Manufacturers {
@@ -51,7 +55,7 @@ func NewDevices(filePath string) (DeviceDataRetreiver, error) {
 	}, nil
 }
 
-// GetDevice returns a manufacturer by its private enterprise number
+// GetManufacturer returns a manufacturer by its private enterprise number
 func (d *Devices) GetManufacturer(id int) (Manufacturer, error) {
 	device, ok := d.manufacturers[id]
 	if !ok {

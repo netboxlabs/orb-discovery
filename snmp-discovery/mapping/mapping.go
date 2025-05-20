@@ -130,7 +130,7 @@ func (m *mappingEntry) MapToEntity(pdus map[ObjectIDIndex]*ObjectIDValue, entity
 
 // NewObjectIDMapper creates a new ObjectIDMapper
 func NewObjectIDMapper(mappings []config.MappingEntry, logger *slog.Logger, devices data.DeviceDataRetreiver) *ObjectIDMapper {
-	var entityMappers = map[string]orbToEntityMapper{
+	entityMappers := map[string]orbToEntityMapper{
 		"ipAddress": &IPAddressMapper{},
 		"interface": &InterfaceMapper{},
 		"device": &DeviceMapper{
