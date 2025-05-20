@@ -136,6 +136,7 @@ func (m *DeviceMapper) GetDeviceModel(objectID string) (string, error) {
 		parts = parts[1:]
 	}
 
+	const ManufacturerIDIndex = 6
 	// Check if we have enough parts to extract manufacturer and model IDs
 	if len(parts) > ManufacturerIDIndex {
 		manID, err := strconv.Atoi(parts[ManufacturerIDIndex])
