@@ -109,8 +109,8 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 				case "platform":
 					manufacturer, err := m.GetDeviceModel(value.Value)
 					if err != nil {
-						logger.Warn("Error getting device model", "error", err, "value", value.Value)
-						continue
+						logger.Warn("Error getting device model, assigning default manufacturer", "error", err, "value", value.Value)
+						manufacturer = "unknown"
 					}
 					device.Platform = &diode.Platform{
 						Manufacturer: &diode.Manufacturer{
@@ -137,14 +137,18 @@ func (m *DeviceMapper) GetDeviceModel(objectID string) (string, error) {
 	}
 
 	// Check if we have enough parts to extract manufacturer and model IDs
-	if len(parts) > 6 {
-		manID, err := strconv.Atoi(parts[6])
+	if len(parts) > ManufacturerIDIndex {
+		manID, err := strconv.Atoi(parts[ManufacturerIDIndex])
 		if err == nil {
 			man, err := m.devices.GetManufacturer(manID)
 			if err != nil {
 				return "", err
 			}
 			manufacturer = man.Name
+			// TODO: Handle modelID extraction and mapping once the functionality for
+			//       associating model IDs with devices is implemented. This code is
+			//       currently a placeholder and should be activated when the feature
+			//       is ready.
 			// modelID, err := strconv.Atoi(parts[len(parts)-1])
 			// if err == nil {
 			// 	if device, ok := man.Products[modelID]; ok {
