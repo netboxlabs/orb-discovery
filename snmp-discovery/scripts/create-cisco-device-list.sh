@@ -12,7 +12,7 @@ curl -sS "$MIB_URL" -o "$TMPFILE"
 # Start YAML
 echo "devices:"
 
-echo `wc -l "$TMPFILE"`
+# Removed line count output to maintain YAML structure
 
 # Parse each matching line and append to YAML
 grep "1\.3\.6\.1\.4\.1\.9\.1\." "$TMPFILE" | while read -r line; do
