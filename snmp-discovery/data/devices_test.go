@@ -104,19 +104,19 @@ func TestGetManufacturer(t *testing.T) {
 	tests := []struct {
 		name    string
 		id      int
-		want    Manufacturer
+		want    string
 		wantErr bool
 	}{
 		{
 			name:    "existing manufacturer",
 			id:      123,
-			want:    Manufacturer{PrivateEnterpriseNumber: 123, Name: "Test Manufacturer 1"},
+			want:    "Test Manufacturer 1",
 			wantErr: false,
 		},
 		{
 			name:    "non-existing manufacturer",
 			id:      789,
-			want:    Manufacturer{},
+			want:    "",
 			wantErr: true,
 		},
 	}
@@ -126,7 +126,7 @@ func TestGetManufacturer(t *testing.T) {
 			got, err := devices.GetManufacturer(tt.id)
 			if tt.wantErr {
 				assert.Error(t, err)
-				assert.Equal(t, Manufacturer{}, got)
+				assert.Equal(t, "", got)
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.want, got)
