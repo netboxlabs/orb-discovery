@@ -109,24 +109,24 @@ type EntityType string
 
 // ObjectIDMapper is a struct that maps ObjectIDs to entities
 type ObjectIDMapper struct {
-	mapping  map[string]*MappingEntry
+	mapping  map[string]*Entry
 	logger   *slog.Logger
 	registry *EntityRegistry
 }
 
-// MappingEntry is a struct that contains a mapping entry
-type MappingEntry struct {
+// Entry is a struct that contains a mapping entry
+type Entry struct {
 	OID            string
 	Entity         string
 	Field          string
-	MappingEntries []MappingEntry
+	MappingEntries []Entry
 	Mapper         orbToEntityMapper
 	IdentifierSize int
 	Relationship   config.Relationship
 }
 
 // MapToEntity maps a value to an entity
-func (m *MappingEntry) MapToEntity(pdus map[ObjectIDIndex]*ObjectIDValue, entityRegistry *EntityRegistry, logger *slog.Logger) []diode.Entity {
+func (m *Entry) MapToEntity(pdus map[ObjectIDIndex]*ObjectIDValue, entityRegistry *EntityRegistry, logger *slog.Logger) []diode.Entity {
 	logger.Debug("Mapping value to entity", "value", pdus)
 	if m.Mapper == nil {
 		logger.Warn("No mapper found for entity. Ignoring.", "entity", m.Entity)
@@ -150,14 +150,14 @@ func NewObjectIDMapper(mappings []config.MappingEntry, logger *slog.Logger, devi
 			devices: devices,
 		},
 	}
-	mapping := make(map[string]*MappingEntry)
+	mapping := make(map[string]*Entry)
 	for _, m := range mappings {
 		logger.Debug("Adding mapping", "oid", m.OID, "entity", m.Entity, "field", m.Field, "relationship", m.Relationship)
-		MappingEntry := newMappingEntry(m, logger, entityMappers)
-		if MappingEntry == nil {
+		Entry := newMappingEntry(m, logger, entityMappers)
+		if Entry == nil {
 			continue
 		}
-		mapping[m.OID] = MappingEntry
+		mapping[m.OID] = Entry
 	}
 
 	registry := NewEntityRegistry(logger)
@@ -173,7 +173,7 @@ func NewObjectIDMapper(mappings []config.MappingEntry, logger *slog.Logger, devi
 }
 
 type orbToEntityMapper interface {
-	Map(pdus map[ObjectIDIndex]*ObjectIDValue, MappingEntry *MappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity
+	Map(pdus map[ObjectIDIndex]*ObjectIDValue, Entry *Entry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity
 }
 
 func getIndex(values map[ObjectIDIndex]*ObjectIDValue) ObjectIDIndex {
@@ -183,13 +183,13 @@ func getIndex(values map[ObjectIDIndex]*ObjectIDValue) ObjectIDIndex {
 	return ""
 }
 
-func newMappingEntry(m config.MappingEntry, logger *slog.Logger, entityMappers map[string]orbToEntityMapper) *MappingEntry {
+func newMappingEntry(m config.MappingEntry, logger *slog.Logger, entityMappers map[string]orbToEntityMapper) *Entry {
 	mapper := entityMappers[m.Entity]
 	if mapper == nil {
 		logger.Warn("No mapper found for entity. Ignoring.", "entity", m.Entity)
 		return nil
 	}
-	return &MappingEntry{
+	return &Entry{
 		OID:            m.OID,
 		Entity:         m.Entity,
 		Field:          m.Field,
@@ -200,11 +200,11 @@ func newMappingEntry(m config.MappingEntry, logger *slog.Logger, entityMappers m
 	}
 }
 
-func newChildMappingEntries(configMappingEntries []config.MappingEntry, logger *slog.Logger) []MappingEntry {
-	childMappingEntries := make([]MappingEntry, 0, len(configMappingEntries))
+func newChildMappingEntries(configMappingEntries []config.MappingEntry, logger *slog.Logger) []Entry {
+	childMappingEntries := make([]Entry, 0, len(configMappingEntries))
 	for _, m := range configMappingEntries {
 		logger.Debug("Adding child mapping entry", "oid", m.OID, "entity", m.Entity, "field", m.Field, "relationship", m.Relationship)
-		child := &MappingEntry{
+		child := &Entry{
 			OID:            m.OID,
 			Entity:         m.Entity,
 			Field:          m.Field,
@@ -254,12 +254,12 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 	entities := make([]diode.Entity, 0, len(objectIDIndexMap))
 	for index, value := range objectIDIndexMap {
 		m.logger.Debug("Mapping objectIDIndex", "objectIDIndex", index, "values", value.Values)
-		MappingEntry, err := m.getMappingEntry(value.Index)
+		Entry, err := m.getMappingEntry(value.Index)
 		if err != nil {
 			m.logger.Warn("Error finding mapping entry", "error", err, "objectID", value.Index)
 			continue
 		}
-		entities = append(entities, MappingEntry.MapToEntity(value.Values, m.registry, m.logger)...)
+		entities = append(entities, Entry.MapToEntity(value.Values, m.registry, m.logger)...)
 	}
 	return entities
 }
@@ -297,7 +297,7 @@ func newObjectIDValue(objectID string, value Value) (*ObjectIDValue, error) {
 }
 
 // Gets the mapper for the closest parent objectID
-func (m *ObjectIDMapper) getMappingEntry(objectID string) (*MappingEntry, error) {
+func (m *ObjectIDMapper) getMappingEntry(objectID string) (*Entry, error) {
 	for {
 		if value, found := m.mapping[objectID]; found {
 			return value, nil

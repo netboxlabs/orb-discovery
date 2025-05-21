@@ -16,7 +16,7 @@ import (
 type IPAddressMapper struct{}
 
 // Map maps IP addresses to entities
-func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *MappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
+func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *Entry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
 	logger.Debug("Mapping values to ipAddress entity", "values", values, "mappingEntry", mappingEntry)
 	ipAddress := diode.IPAddress{}
 
@@ -90,7 +90,7 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 type InterfaceMapper struct{}
 
 // Map maps interfaces to entities
-func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *MappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
+func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *Entry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
 	logger.Debug("Mapping values to interface entity", "values", values, "mappingEntry", mappingEntry)
 	interfaceEntity := entityRegistry.GetOrCreateEntity(EntityType(mappingEntry.Entity), getIndex(values)).(*diode.Interface)
 
@@ -168,7 +168,7 @@ func NewDeviceMapper(devices data.DeviceDataRetreiver) *DeviceMapper {
 }
 
 // Map maps devices to entities
-func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *MappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
+func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *Entry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
 	logger.Debug("Mapping values to device entity", "values", values, "mappingEntry", mappingEntry)
 	deviceEntity := entityRegistry.GetOrCreateEntity(EntityType(mappingEntry.Entity), getIndex(values)).(*diode.Device)
 

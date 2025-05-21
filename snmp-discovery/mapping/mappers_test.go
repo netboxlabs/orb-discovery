@@ -21,7 +21,7 @@ func TestIPAddressMapper_Map(t *testing.T) {
 	tests := []struct {
 		name           string
 		values         map[mapping.ObjectIDIndex]*mapping.ObjectIDValue
-		mappingEntry   *mapping.MappingEntry
+		mappingEntry   *mapping.Entry
 		expectedEntity *diode.IPAddress
 		expectError    bool
 	}{
@@ -36,11 +36,11 @@ func TestIPAddressMapper_Map(t *testing.T) {
 					Type:   mapping.IPAddress,
 				},
 			},
-			mappingEntry: &mapping.MappingEntry{
+			mappingEntry: &mapping.Entry{
 				OID:    "1.3.6.1.2.1.4.20.1.1",
 				Entity: "ipAddress",
 				Field:  "_id",
-				MappingEntries: []mapping.MappingEntry{
+				MappingEntries: []mapping.Entry{
 					{
 						OID:    "1.3.6.1.2.1.4.20.1.1",
 						Entity: "ipAddress",
@@ -76,11 +76,11 @@ func TestIPAddressMapper_Map(t *testing.T) {
 					Type:   mapping.Integer,
 				},
 			},
-			mappingEntry: &mapping.MappingEntry{
+			mappingEntry: &mapping.Entry{
 				OID:    "1.3.6.1.2.1.4.20.1.1",
 				Entity: "ipAddress",
 				Field:  "_id",
-				MappingEntries: []mapping.MappingEntry{
+				MappingEntries: []mapping.Entry{
 					{
 						OID:    "1.3.6.1.2.1.4.20.1.1",
 						Entity: "ipAddress",
@@ -109,7 +109,7 @@ func TestIPAddressMapper_Map(t *testing.T) {
 		{
 			name:   "empty values map",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{},
-			mappingEntry: &mapping.MappingEntry{
+			mappingEntry: &mapping.Entry{
 				OID:    "1.3.6.1.2.1.4.20.1.1",
 				Entity: "ipAddress",
 				Field:  "_id",
@@ -140,7 +140,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 	tests := []struct {
 		name           string
 		values         map[mapping.ObjectIDIndex]*mapping.ObjectIDValue
-		mappingEntry   *mapping.MappingEntry
+		mappingEntry   *mapping.Entry
 		expectedEntity *diode.Interface
 		expectError    bool
 	}{
@@ -183,11 +183,11 @@ func TestInterfaceMapper_Map(t *testing.T) {
 					Type:   mapping.Integer,
 				},
 			},
-			mappingEntry: &mapping.MappingEntry{
+			mappingEntry: &mapping.Entry{
 				OID:    "1.3.6.1.2.1.2.2.1.1",
 				Entity: "interface",
 				Field:  "_id",
-				MappingEntries: []mapping.MappingEntry{
+				MappingEntries: []mapping.Entry{
 					{
 						OID:    "1.3.6.1.2.1.2.2.1.1",
 						Entity: "interface",
@@ -241,11 +241,11 @@ func TestInterfaceMapper_Map(t *testing.T) {
 					Type:   mapping.Integer,
 				},
 			},
-			mappingEntry: &mapping.MappingEntry{
+			mappingEntry: &mapping.Entry{
 				OID:    "1.3.6.1.2.1.2.2.1.1",
 				Entity: "interface",
 				Field:  "_id",
-				MappingEntries: []mapping.MappingEntry{
+				MappingEntries: []mapping.Entry{
 					{
 						OID:    "1.3.6.1.2.1.2.2.1.1",
 						Entity: "interface",
@@ -264,7 +264,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 		{
 			name:   "empty values map",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{},
-			mappingEntry: &mapping.MappingEntry{
+			mappingEntry: &mapping.Entry{
 				OID:    "1.3.6.1.2.1.2.2.1.1",
 				Entity: "interface",
 				Field:  "_id",
@@ -316,7 +316,7 @@ func TestDeviceMapper_Map(t *testing.T) {
 	tests := []struct {
 		name           string
 		values         map[mapping.ObjectIDIndex]*mapping.ObjectIDValue
-		mappingEntry   *mapping.MappingEntry
+		mappingEntry   *mapping.Entry
 		expectedEntity *diode.Device
 		expectError    bool
 	}{
@@ -338,11 +338,11 @@ func TestDeviceMapper_Map(t *testing.T) {
 					Type:   mapping.ObjectIdentifier,
 				},
 			},
-			mappingEntry: &mapping.MappingEntry{
+			mappingEntry: &mapping.Entry{
 				OID:    "1.3.6.1.2.1.1",
 				Entity: "device",
 				Field:  "_id",
-				MappingEntries: []mapping.MappingEntry{
+				MappingEntries: []mapping.Entry{
 					{
 						OID:    "1.3.6.1.2.1.1.5",
 						Entity: "device",
@@ -389,11 +389,11 @@ func TestDeviceMapper_Map(t *testing.T) {
 					Type:   mapping.ObjectIdentifier,
 				},
 			},
-			mappingEntry: &mapping.MappingEntry{
+			mappingEntry: &mapping.Entry{
 				OID:    "1.3.6.1.2.1.1",
 				Entity: "device",
 				Field:  "_id",
-				MappingEntries: []mapping.MappingEntry{
+				MappingEntries: []mapping.Entry{
 					{
 						OID:    "1.3.6.1.2.1.1.5",
 						Entity: "device",
@@ -414,7 +414,7 @@ func TestDeviceMapper_Map(t *testing.T) {
 		{
 			name:   "empty values map",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{},
-			mappingEntry: &mapping.MappingEntry{
+			mappingEntry: &mapping.Entry{
 				OID:    "1.3.6.1.2.1.1",
 				Entity: "device",
 				Field:  "_id",
