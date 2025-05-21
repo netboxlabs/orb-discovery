@@ -109,12 +109,12 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 				case "platform":
 					manufacturerID, modelID, err := m.getDeviceIDs(value.Value)
 					if err != nil {
-						logger.Warn(err.Error())
+						logger.Warn("Error getting device IDs, skipping", "error", err, "objectID", objectID, "value", value.Value)
 						continue
 					}
 					manufacturer, err := m.devices.GetManufacturer(manufacturerID)
 					if err != nil {
-						logger.Warn("Error getting manufacturer, skipping", "error", err, "value", value.Value)
+						logger.Warn("Error getting manufacturer, skipping", "error", err, "objectID", objectID, "value", value.Value)
 						continue
 					}
 					device.Platform = &diode.Platform{
@@ -124,7 +124,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 					}
 					model, err := m.devices.GetDeviceModel(modelID)
 					if err != nil {
-						logger.Warn("Error getting device model, assigning default model", "error", err, "value", value.Value)
+						logger.Warn("Error getting device model, assigning default model", "error", err, "objectID", objectID, "value", value.Value)
 						continue
 					}
 					device.DeviceType = &diode.DeviceType{
