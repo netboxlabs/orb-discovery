@@ -14,11 +14,11 @@ import (
 
 type FakeManufacturers struct{}
 
-func (f *FakeManufacturers) GetManufacturer(id int) (string, error) {
+func (f *FakeManufacturers) GetManufacturer(_ int) (string, error) {
 	return "Cisco", nil
 }
 
-func (f *FakeManufacturers) GetDeviceModel(id int) (string, error) {
+func (f *FakeManufacturers) GetDeviceModel(_ int) (string, error) {
 	return "cisco4000", nil
 }
 

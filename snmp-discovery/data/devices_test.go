@@ -38,24 +38,28 @@ devices:
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() {
+		_ = os.Remove(tmpFile.Name())
+	}()
 
 	if _, err := tmpFile.Write([]byte(testYAML)); err != nil {
 		t.Fatalf("Failed to write test YAML: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	// Create a temporary file with invalid YAML
 	invalidTmpFile, err := os.CreateTemp("", "test-devices-invalid-*.yaml")
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(invalidTmpFile.Name())
+	defer func() {
+		_ = os.Remove(invalidTmpFile.Name())
+	}()
 
 	if _, err := invalidTmpFile.Write([]byte(invalidYAML)); err != nil {
 		t.Fatalf("Failed to write invalid test YAML: %v", err)
 	}
-	invalidTmpFile.Close()
+	_ = invalidTmpFile.Close()
 
 	tests := []struct {
 		name     string
