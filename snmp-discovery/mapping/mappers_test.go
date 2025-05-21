@@ -1,4 +1,4 @@
-package mapping
+package mapping_test
 
 import (
 	"fmt"
@@ -10,36 +10,37 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/mapping"
 )
 
 func TestIPAddressMapper_Map(t *testing.T) {
 	logger := slog.Default()
-	registry := NewEntityRegistry(logger)
-	mapper := &IPAddressMapper{}
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := &mapping.IPAddressMapper{}
 
 	tests := []struct {
 		name           string
-		values         map[ObjectIDIndex]*ObjectIDValue
-		mappingEntry   *mappingEntry
+		values         map[mapping.ObjectIDIndex]*mapping.ObjectIDValue
+		mappingEntry   *mapping.MappingEntry
 		expectedEntity *diode.IPAddress
 		expectError    bool
 	}{
 		{
 			name: "successful mapping with all fields",
-			values: map[ObjectIDIndex]*ObjectIDValue{
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
 					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
 					Index:  "192.168.1.1",
 					Parent: "1.3.6.1.2.1.4.20.1.1",
 					Value:  "192.168.1.1",
-					Type:   IPAddress,
+					Type:   mapping.IPAddress,
 				},
 			},
-			mappingEntry: &mappingEntry{
+			mappingEntry: &mapping.MappingEntry{
 				OID:    "1.3.6.1.2.1.4.20.1.1",
 				Entity: "ipAddress",
 				Field:  "_id",
-				MappingEntries: []mappingEntry{
+				MappingEntries: []mapping.MappingEntry{
 					{
 						OID:    "1.3.6.1.2.1.4.20.1.1",
 						Entity: "ipAddress",
@@ -59,27 +60,27 @@ func TestIPAddressMapper_Map(t *testing.T) {
 		},
 		{
 			name: "mapping with interface relationship",
-			values: map[ObjectIDIndex]*ObjectIDValue{
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
 					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
 					Index:  "192.168.1.1",
 					Parent: "1.3.6.1.2.1.4.20.1.1",
 					Value:  "192.168.1.1",
-					Type:   IPAddress,
+					Type:   mapping.IPAddress,
 				},
 				"1.3.6.1.2.1.4.20.1.2.192.168.1.1": {
 					OID:    "1.3.6.1.2.1.4.20.1.2.192.168.1.1",
 					Index:  "192.168.1.1",
 					Parent: "1.3.6.1.2.1.4.20.1.2",
 					Value:  "1",
-					Type:   Integer,
+					Type:   mapping.Integer,
 				},
 			},
-			mappingEntry: &mappingEntry{
+			mappingEntry: &mapping.MappingEntry{
 				OID:    "1.3.6.1.2.1.4.20.1.1",
 				Entity: "ipAddress",
 				Field:  "_id",
-				MappingEntries: []mappingEntry{
+				MappingEntries: []mapping.MappingEntry{
 					{
 						OID:    "1.3.6.1.2.1.4.20.1.1",
 						Entity: "ipAddress",
@@ -107,8 +108,8 @@ func TestIPAddressMapper_Map(t *testing.T) {
 		},
 		{
 			name:   "empty values map",
-			values: map[ObjectIDIndex]*ObjectIDValue{},
-			mappingEntry: &mappingEntry{
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{},
+			mappingEntry: &mapping.MappingEntry{
 				OID:    "1.3.6.1.2.1.4.20.1.1",
 				Entity: "ipAddress",
 				Field:  "_id",
@@ -138,55 +139,55 @@ func TestIPAddressMapper_Map(t *testing.T) {
 func TestInterfaceMapper_Map(t *testing.T) {
 	tests := []struct {
 		name           string
-		values         map[ObjectIDIndex]*ObjectIDValue
-		mappingEntry   *mappingEntry
+		values         map[mapping.ObjectIDIndex]*mapping.ObjectIDValue
+		mappingEntry   *mapping.MappingEntry
 		expectedEntity *diode.Interface
 		expectError    bool
 	}{
 		{
 			name: "successful mapping with all fields",
-			values: map[ObjectIDIndex]*ObjectIDValue{
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.2.2.1.1.1": {
 					OID:    "1.3.6.1.2.1.2.2.1.1.1",
 					Index:  "1",
 					Parent: "1.3.6.1.2.1.2.2.1.1",
 					Value:  "1",
-					Type:   Integer,
+					Type:   mapping.Integer,
 				},
 				"1.3.6.1.2.1.2.2.1.2.1": {
 					OID:    "1.3.6.1.2.1.2.2.1.2.1",
 					Index:  "1",
 					Parent: "1.3.6.1.2.1.2.2.1.2",
 					Value:  "eth0",
-					Type:   OctetString,
+					Type:   mapping.OctetString,
 				},
 				"1.3.6.1.2.1.2.2.1.5.1": {
 					OID:    "1.3.6.1.2.1.2.2.1.5.1",
 					Index:  "1",
 					Parent: "1.3.6.1.2.1.2.2.1.5",
 					Value:  "1000000",
-					Type:   Integer,
+					Type:   mapping.Integer,
 				},
 				"1.3.6.1.2.1.2.2.1.6.1": {
 					OID:    "1.3.6.1.2.1.2.2.1.6.1",
 					Index:  "1",
 					Parent: "1.3.6.1.2.1.2.2.1.6",
 					Value:  "00:11:22:33:44:55",
-					Type:   OctetString,
+					Type:   mapping.OctetString,
 				},
 				"1.3.6.1.2.1.2.2.1.7.1": {
 					OID:    "1.3.6.1.2.1.2.2.1.7.1",
 					Index:  "1",
 					Parent: "1.3.6.1.2.1.2.2.1.7",
 					Value:  "1",
-					Type:   Integer,
+					Type:   mapping.Integer,
 				},
 			},
-			mappingEntry: &mappingEntry{
+			mappingEntry: &mapping.MappingEntry{
 				OID:    "1.3.6.1.2.1.2.2.1.1",
 				Entity: "interface",
 				Field:  "_id",
-				MappingEntries: []mappingEntry{
+				MappingEntries: []mapping.MappingEntry{
 					{
 						OID:    "1.3.6.1.2.1.2.2.1.1",
 						Entity: "interface",
@@ -224,27 +225,27 @@ func TestInterfaceMapper_Map(t *testing.T) {
 		},
 		{
 			name: "mapping with invalid speed value",
-			values: map[ObjectIDIndex]*ObjectIDValue{
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.2.2.1.1.1": {
 					OID:    "1.3.6.1.2.1.2.2.1.1.1",
 					Index:  "1",
 					Parent: "1.3.6.1.2.1.2.2.1.1",
 					Value:  "1",
-					Type:   Integer,
+					Type:   mapping.Integer,
 				},
 				"1.3.6.1.2.1.2.2.1.5.1": {
 					OID:    "1.3.6.1.2.1.2.2.1.5.1",
 					Index:  "1",
 					Parent: "1.3.6.1.2.1.2.2.1.5",
 					Value:  "invalid",
-					Type:   Integer,
+					Type:   mapping.Integer,
 				},
 			},
-			mappingEntry: &mappingEntry{
+			mappingEntry: &mapping.MappingEntry{
 				OID:    "1.3.6.1.2.1.2.2.1.1",
 				Entity: "interface",
 				Field:  "_id",
-				MappingEntries: []mappingEntry{
+				MappingEntries: []mapping.MappingEntry{
 					{
 						OID:    "1.3.6.1.2.1.2.2.1.1",
 						Entity: "interface",
@@ -262,8 +263,8 @@ func TestInterfaceMapper_Map(t *testing.T) {
 		},
 		{
 			name:   "empty values map",
-			values: map[ObjectIDIndex]*ObjectIDValue{},
-			mappingEntry: &mappingEntry{
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{},
+			mappingEntry: &mapping.MappingEntry{
 				OID:    "1.3.6.1.2.1.2.2.1.1",
 				Entity: "interface",
 				Field:  "_id",
@@ -276,8 +277,8 @@ func TestInterfaceMapper_Map(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger := slog.Default()
-			registry := NewEntityRegistry(logger)
-			mapper := &InterfaceMapper{}
+			registry := mapping.NewEntityRegistry(logger)
+			mapper := &mapping.InterfaceMapper{}
 			entity := mapper.Map(tt.values, tt.mappingEntry, registry, logger)
 
 			if tt.expectError {
@@ -300,7 +301,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 
 func TestDeviceMapper_Map(t *testing.T) {
 	logger := slog.Default()
-	registry := NewEntityRegistry(logger)
+	registry := mapping.NewEntityRegistry(logger)
 
 	// Create a mock manufacturer data retriever
 	mockManufacturers := &MockManufacturerDataRetriever{}
@@ -310,40 +311,38 @@ func TestDeviceMapper_Map(t *testing.T) {
 	mockManufacturers.On("GetDeviceModel", 1234).Return("cisco4000", nil)
 	mockManufacturers.On("GetDeviceModel", 999).Return("", fmt.Errorf("device model not found"))
 
-	mapper := &DeviceMapper{
-		devices: mockManufacturers,
-	}
+	mapper := mapping.NewDeviceMapper(mockManufacturers)
 
 	tests := []struct {
 		name           string
-		values         map[ObjectIDIndex]*ObjectIDValue
-		mappingEntry   *mappingEntry
+		values         map[mapping.ObjectIDIndex]*mapping.ObjectIDValue
+		mappingEntry   *mapping.MappingEntry
 		expectedEntity *diode.Device
 		expectError    bool
 	}{
 		{
 			name: "successful mapping with name and platform",
-			values: map[ObjectIDIndex]*ObjectIDValue{
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.1.5.0": {
 					OID:    "1.3.6.1.2.1.1.5.0",
 					Index:  "0",
 					Parent: "1.3.6.1.2.1.1.5",
 					Value:  "router1",
-					Type:   OctetString,
+					Type:   mapping.OctetString,
 				},
 				"1.3.6.1.2.1.1.2.0": {
 					OID:    "1.3.6.1.2.1.1.2.0",
 					Index:  "0",
 					Parent: "1.3.6.1.2.1.1.2",
 					Value:  "1.3.6.1.4.1.9.1.1234",
-					Type:   ObjectIdentifier,
+					Type:   mapping.ObjectIdentifier,
 				},
 			},
-			mappingEntry: &mappingEntry{
+			mappingEntry: &mapping.MappingEntry{
 				OID:    "1.3.6.1.2.1.1",
 				Entity: "device",
 				Field:  "_id",
-				MappingEntries: []mappingEntry{
+				MappingEntries: []mapping.MappingEntry{
 					{
 						OID:    "1.3.6.1.2.1.1.5",
 						Entity: "device",
@@ -360,34 +359,46 @@ func TestDeviceMapper_Map(t *testing.T) {
 				Name: stringPtr("router1"),
 				DeviceType: &diode.DeviceType{
 					Manufacturer: &diode.Manufacturer{
-						Name: diode.String("Cisco"),
+						Name: stringPtr("Cisco"),
 					},
-					Model: diode.String("cisco4000"),
+					Model: stringPtr("cisco4000"),
 				},
 				Platform: &diode.Platform{
 					Manufacturer: &diode.Manufacturer{
-						Name: diode.String("Cisco"),
+						Name: stringPtr("Cisco"),
 					},
 				},
 			},
 			expectError: false,
 		},
 		{
-			name: "mapping with unknown manufacturer",
-			values: map[ObjectIDIndex]*ObjectIDValue{
+			name: "mapping with invalid platform OID",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.1.5.0": {
+					OID:    "1.3.6.1.2.1.1.5.0",
+					Index:  "0",
+					Parent: "1.3.6.1.2.1.1.5",
+					Value:  "router1",
+					Type:   mapping.OctetString,
+				},
 				"1.3.6.1.2.1.1.2.0": {
 					OID:    "1.3.6.1.2.1.1.2.0",
 					Index:  "0",
 					Parent: "1.3.6.1.2.1.1.2",
-					Value:  "1.3.6.1.4.1.999.1.1234",
-					Type:   ObjectIdentifier,
+					Value:  "invalid",
+					Type:   mapping.ObjectIdentifier,
 				},
 			},
-			mappingEntry: &mappingEntry{
+			mappingEntry: &mapping.MappingEntry{
 				OID:    "1.3.6.1.2.1.1",
 				Entity: "device",
 				Field:  "_id",
-				MappingEntries: []mappingEntry{
+				MappingEntries: []mapping.MappingEntry{
+					{
+						OID:    "1.3.6.1.2.1.1.5",
+						Entity: "device",
+						Field:  "name",
+					},
 					{
 						OID:    "1.3.6.1.2.1.1.2",
 						Entity: "device",
@@ -396,62 +407,20 @@ func TestDeviceMapper_Map(t *testing.T) {
 				},
 			},
 			expectedEntity: &diode.Device{
-				Platform: &diode.Platform{
-					Manufacturer: &diode.Manufacturer{
-						Name: diode.String("unknown"),
-					},
-				},
+				Name: stringPtr("router1"),
 			},
 			expectError: false,
 		},
 		{
 			name:   "empty values map",
-			values: map[ObjectIDIndex]*ObjectIDValue{},
-			mappingEntry: &mappingEntry{
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{},
+			mappingEntry: &mapping.MappingEntry{
 				OID:    "1.3.6.1.2.1.1",
 				Entity: "device",
 				Field:  "_id",
 			},
 			expectedEntity: &diode.Device{},
 			expectError:    false,
-		},
-		{
-			name: "invalid OID format",
-			values: map[ObjectIDIndex]*ObjectIDValue{
-				"1.3.6.1.2.1.1.2.0": {
-					OID:    "1.3.6.1.2.1.1.2.0",
-					Index:  "0",
-					Parent: "1.3.6.1.2.1.1.2",
-					Value:  "invalid.oid",
-					Type:   ObjectIdentifier,
-				},
-			},
-			mappingEntry: &mappingEntry{
-				OID:    "1.3.6.1.2.1.1",
-				Entity: "device",
-				Field:  "_id",
-				MappingEntries: []mappingEntry{
-					{
-						OID:    "1.3.6.1.2.1.1.2",
-						Entity: "device",
-						Field:  "platform",
-					},
-				},
-			},
-			expectedEntity: &diode.Device{
-				DeviceType: &diode.DeviceType{
-					Manufacturer: &diode.Manufacturer{
-						Name: diode.String("unknown"),
-					},
-					Model: diode.String("unknown"),
-				},
-				Platform: &diode.Platform{
-					Manufacturer: &diode.Manufacturer{
-						Name: diode.String("unknown"),
-					},
-				},
-			},
-			expectError: false,
 		},
 	}
 
@@ -468,7 +437,11 @@ func TestDeviceMapper_Map(t *testing.T) {
 			device, ok := entity.(*diode.Device)
 			assert.True(t, ok)
 			assert.Equal(t, tt.expectedEntity.Name, device.Name)
-			if tt.expectedEntity.Platform != nil && device.Platform != nil {
+			if tt.expectedEntity.DeviceType != nil {
+				assert.Equal(t, tt.expectedEntity.DeviceType.Manufacturer.Name, device.DeviceType.Manufacturer.Name)
+				assert.Equal(t, tt.expectedEntity.DeviceType.Model, device.DeviceType.Model)
+			}
+			if tt.expectedEntity.Platform != nil {
 				assert.Equal(t, tt.expectedEntity.Platform.Manufacturer.Name, device.Platform.Manufacturer.Name)
 			}
 		})

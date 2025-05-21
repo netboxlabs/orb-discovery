@@ -16,7 +16,7 @@ import (
 type IPAddressMapper struct{}
 
 // Map maps IP addresses to entities
-func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *mappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
+func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *MappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
 	logger.Debug("Mapping values to ipAddress entity", "values", values, "mappingEntry", mappingEntry)
 	ipAddress := diode.IPAddress{}
 
@@ -47,6 +47,42 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 			}
 		}
 	}
+
+	// Apply defaults if available
+	if defaults := entityRegistry.GetDefaults(); defaults != nil {
+		// Apply IP address specific defaults
+		if defaults.IPAddress.Description != "" {
+			ipAddress.Description = &defaults.IPAddress.Description
+		}
+		if defaults.IPAddress.Comments != "" {
+			ipAddress.Comments = &defaults.IPAddress.Comments
+		}
+		var tags []*diode.Tag
+		// Add entity-specific tags
+		if len(defaults.IPAddress.Tags) > 0 {
+			for _, tag := range defaults.IPAddress.Tags {
+				tags = append(tags, &diode.Tag{Name: &tag})
+			}
+		}
+		// Add global tags
+		if len(defaults.Tags) > 0 {
+			for _, tag := range defaults.Tags {
+				tags = append(tags, &diode.Tag{Name: &tag})
+			}
+		}
+		if len(tags) > 0 {
+			ipAddress.Tags = tags
+		}
+
+		// Apply global defaults if not overridden by entity-specific defaults
+		if ipAddress.Description == nil && defaults.Description != "" {
+			ipAddress.Description = &defaults.Description
+		}
+		if ipAddress.Comments == nil && defaults.Comments != "" {
+			ipAddress.Comments = &defaults.Comments
+		}
+	}
+
 	return &ipAddress
 }
 
@@ -54,7 +90,7 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 type InterfaceMapper struct{}
 
 // Map maps interfaces to entities
-func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *mappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
+func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *MappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
 	logger.Debug("Mapping values to interface entity", "values", values, "mappingEntry", mappingEntry)
 	interfaceEntity := entityRegistry.GetOrCreateEntity(EntityType(mappingEntry.Entity), getIndex(values)).(*diode.Interface)
 
@@ -86,6 +122,36 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 			}
 		}
 	}
+
+	// Apply defaults if available
+	if defaults := entityRegistry.GetDefaults(); defaults != nil {
+		// Apply interface specific defaults
+		if defaults.Interface.Description != "" {
+			interfaceEntity.Description = &defaults.Interface.Description
+		}
+		var tags []*diode.Tag
+		// Add entity-specific tags
+		if len(defaults.Interface.Tags) > 0 {
+			for _, tag := range defaults.Interface.Tags {
+				tags = append(tags, &diode.Tag{Name: &tag})
+			}
+		}
+		// Add global tags
+		if len(defaults.Tags) > 0 {
+			for _, tag := range defaults.Tags {
+				tags = append(tags, &diode.Tag{Name: &tag})
+			}
+		}
+		if len(tags) > 0 {
+			interfaceEntity.Tags = tags
+		}
+
+		// Apply global defaults if not overridden by entity-specific defaults
+		if interfaceEntity.Description == nil && defaults.Description != "" {
+			interfaceEntity.Description = &defaults.Description
+		}
+	}
+
 	return interfaceEntity
 }
 
@@ -94,10 +160,17 @@ type DeviceMapper struct {
 	devices data.DeviceDataRetreiver
 }
 
+// NewDeviceMapper creates a new DeviceMapper
+func NewDeviceMapper(devices data.DeviceDataRetreiver) *DeviceMapper {
+	return &DeviceMapper{
+		devices: devices,
+	}
+}
+
 // Map maps devices to entities
-func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *mappingEntry, _ *EntityRegistry, logger *slog.Logger) diode.Entity {
+func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *MappingEntry, entityRegistry *EntityRegistry, logger *slog.Logger) diode.Entity {
 	logger.Debug("Mapping values to device entity", "values", values, "mappingEntry", mappingEntry)
-	device := diode.Device{}
+	deviceEntity := entityRegistry.GetOrCreateEntity(EntityType(mappingEntry.Entity), getIndex(values)).(*diode.Device)
 
 	for objectID, value := range values {
 		for _, propertyMappingEntry := range mappingEntry.MappingEntries {
@@ -105,33 +178,35 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 				logger.Debug("Mapping value to device entity with mapper", "objectID", objectID, "value", value, "mappingEntry", propertyMappingEntry)
 				switch propertyMappingEntry.Field {
 				case "name":
-					device.Name = &value.Value
+					deviceEntity.Name = &value.Value
 				case "platform":
+					// Use getDeviceIDs to get the manufacturer and model
 					manufacturerID, modelID, err := m.getDeviceIDs(value.Value)
 					if err != nil {
-						logger.Warn("Error getting device IDs, skipping", "error", err, "objectID", objectID, "value", value.Value)
+						logger.Warn("Error getting device IDs", "error", err, "value", value.Value)
 						continue
 					}
 					manufacturer, err := m.devices.GetManufacturer(manufacturerID)
 					if err != nil {
-						logger.Warn("Error getting manufacturer, skipping", "error", err, "objectID", objectID, "value", value.Value)
+						logger.Warn("Error getting manufacturer", "error", err, "manufacturerID", manufacturerID)
 						continue
 					}
-					device.Platform = &diode.Platform{
-						Manufacturer: &diode.Manufacturer{
-							Name: diode.String(manufacturer),
-						},
+
+					manufacturerEntity := diode.Manufacturer{
+						Name: &manufacturer,
 					}
-					model, err := m.devices.GetDeviceModel(modelID)
+
+					deviceEntity.Platform = &diode.Platform{
+						Manufacturer: &manufacturerEntity,
+					}
+
+					deviceModel, err := m.devices.GetDeviceModel(modelID)
 					if err != nil {
-						logger.Warn("Error getting device model, assigning default model", "error", err, "objectID", objectID, "value", value.Value)
-						continue
+						logger.Warn("Error getting device model", "error", err, "modelID", modelID)
 					}
-					device.DeviceType = &diode.DeviceType{
-						Manufacturer: &diode.Manufacturer{
-							Name: diode.String(manufacturer),
-						},
-						Model: &model,
+					deviceEntity.DeviceType = &diode.DeviceType{
+						Model:        &deviceModel,
+						Manufacturer: &manufacturerEntity,
 					}
 				default:
 					logger.Warn("Unknown field", "field", propertyMappingEntry.Field)
@@ -139,7 +214,37 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 			}
 		}
 	}
-	return &device
+
+	// Apply defaults if available
+	if defaults := entityRegistry.GetDefaults(); defaults != nil {
+		// Apply device specific defaults
+		if defaults.Device.Description != "" {
+			deviceEntity.Description = &defaults.Device.Description
+		}
+		var tags []*diode.Tag
+		// Add entity-specific tags
+		if len(defaults.Device.Tags) > 0 {
+			for _, tag := range defaults.Device.Tags {
+				tags = append(tags, &diode.Tag{Name: &tag})
+			}
+		}
+		// Add global tags
+		if len(defaults.Tags) > 0 {
+			for _, tag := range defaults.Tags {
+				tags = append(tags, &diode.Tag{Name: &tag})
+			}
+		}
+		if len(tags) > 0 {
+			deviceEntity.Tags = tags
+		}
+
+		// Apply global defaults if not overridden by entity-specific defaults
+		if deviceEntity.Description == nil && defaults.Description != "" {
+			deviceEntity.Description = &defaults.Description
+		}
+	}
+
+	return deviceEntity
 }
 
 func (m *DeviceMapper) getDeviceIDs(objectID string) (int, int, error) {
