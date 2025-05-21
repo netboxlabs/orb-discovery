@@ -20,8 +20,9 @@ type Manufacturer struct {
 
 // Device represents a device
 type Device struct {
-	PrivateEnterpriseNumber int    `yaml:"pen"`
-	Name                    string `yaml:"name"`
+	ID   int    `yaml:"id"`
+	OID  string `yaml:"oid"`
+	Name string `yaml:"name"`
 }
 
 // DeviceDataRetreiver is a type that can retrieve device data
