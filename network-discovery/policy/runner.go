@@ -223,8 +223,16 @@ func (r *Runner) run() {
 	}
 
 	entities := make([]diode.Entity, 0, len(result.Hosts))
+	if len(result.Hosts) == 0 {
+		r.logger.Warn("discovery complete: no hosts found", slog.Any("targets", r.scope.Targets),
+			slog.String("policy", policyName))
+		return
+	}
+	r.logger.Info("discovery complete", slog.Int("hosts_found", len(result.Hosts)), slog.String("policy", policyName))
 
 	for _, host := range result.Hosts {
+		r.logger.Debug("processing host", slog.Any("host_address", host.Addresses), slog.Any("host_ports", host.Ports),
+			slog.Any("host_hostnames", host.Hostnames), slog.String("policy", policyName))
 		ip := &diode.IPAddress{
 			Address: diode.String(host.Addresses[0].Addr + "/32"),
 		}
