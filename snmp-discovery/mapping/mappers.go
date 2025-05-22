@@ -20,6 +20,7 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 	logger.Debug("Mapping values to ipAddress entity", "values", values, "mappingEntry", mappingEntry)
 	ipAddress := diode.IPAddress{}
 
+	fieldFound := false
 	// for each value in the map, map it to the ip address entity
 	for objectID, value := range values {
 		logger.Debug("Mapping value to ipAddress entity", "objectID", objectID, "value", value)
@@ -29,6 +30,7 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 				case "address":
 					x := fmt.Sprintf("%s/32", string(value.Index))
 					ipAddress.Address = &x
+					fieldFound = true
 				case "assigned_object":
 					if propertyMappingEntry.Relationship != (config.Relationship{}) {
 						linkedEntity := entityRegistry.GetOrCreateEntity(EntityType(propertyMappingEntry.Relationship.Type), ObjectIDIndex(value.Value))
@@ -39,6 +41,7 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 						// Handle relationship mapping
 						if propertyMappingEntry.Relationship.Type == "interface" {
 							ipAddress.AssignedObject = linkedEntity.(*diode.Interface)
+							fieldFound = true
 						}
 					}
 				default:
@@ -49,7 +52,7 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 	}
 
 	// Apply defaults if available
-	if defaults := entityRegistry.GetDefaults(); defaults != nil {
+	if defaults := entityRegistry.GetDefaults(); defaults != nil && fieldFound {
 		// Apply IP address specific defaults
 		if defaults.IPAddress.Description != "" {
 			ipAddress.Description = &defaults.IPAddress.Description
@@ -94,6 +97,7 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 	logger.Debug("Mapping values to interface entity", "values", values, "mappingEntry", mappingEntry)
 	interfaceEntity := entityRegistry.GetOrCreateEntity(EntityType(mappingEntry.Entity), getIndex(values)).(*diode.Interface)
 
+	fieldFound := false
 	for objectID, value := range values {
 		for _, propertyMappingEntry := range mappingEntry.MappingEntries {
 			if objectID.HasParent(propertyMappingEntry.OID) {
@@ -101,6 +105,7 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 				switch propertyMappingEntry.Field {
 				case "name":
 					interfaceEntity.Name = &value.Value
+					fieldFound = true
 				case "speed":
 					speed, err := strconv.Atoi(value.Value)
 					if err != nil {
@@ -109,13 +114,16 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					}
 					speed64 := int64(speed)
 					interfaceEntity.Speed = &speed64
+					fieldFound = true
 				case "macAddress":
 					interfaceEntity.PrimaryMacAddress = &diode.MACAddress{
 						MacAddress: &value.Value,
 					}
+					fieldFound = true
 				case "adminStatus":
 					enabled := value.Value == "1"
 					interfaceEntity.Enabled = &enabled
+					fieldFound = true
 				default:
 					logger.Warn("Unknown field", "field", propertyMappingEntry.Field)
 				}
@@ -124,7 +132,7 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 	}
 
 	// Apply defaults if available
-	if defaults := entityRegistry.GetDefaults(); defaults != nil {
+	if defaults := entityRegistry.GetDefaults(); defaults != nil && fieldFound {
 		// Apply interface specific defaults
 		if defaults.Interface.Description != "" {
 			interfaceEntity.Description = &defaults.Interface.Description
@@ -172,6 +180,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 	logger.Debug("Mapping values to device entity", "values", values, "mappingEntry", mappingEntry)
 	deviceEntity := entityRegistry.GetOrCreateEntity(EntityType(mappingEntry.Entity), getIndex(values)).(*diode.Device)
 
+	fieldFound := false
 	for objectID, value := range values {
 		for _, propertyMappingEntry := range mappingEntry.MappingEntries {
 			if objectID.HasParent(propertyMappingEntry.OID) {
@@ -179,6 +188,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 				switch propertyMappingEntry.Field {
 				case "name":
 					deviceEntity.Name = &value.Value
+					fieldFound = true
 				case "platform":
 					// Use getDeviceIDs to get the manufacturer and model
 					manufacturerID, modelID, err := m.getDeviceIDs(value.Value)
@@ -208,6 +218,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 						Model:        &deviceModel,
 						Manufacturer: &manufacturerEntity,
 					}
+					fieldFound = true
 				default:
 					logger.Warn("Unknown field", "field", propertyMappingEntry.Field)
 				}
@@ -216,7 +227,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 	}
 
 	// Apply defaults if available
-	if defaults := entityRegistry.GetDefaults(); defaults != nil {
+	if defaults := entityRegistry.GetDefaults(); fieldFound && defaults != nil {
 		// Apply device specific defaults
 		if defaults.Device.Description != "" {
 			deviceEntity.Description = &defaults.Device.Description
