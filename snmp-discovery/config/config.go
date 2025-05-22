@@ -13,7 +13,6 @@ type Status struct {
 type Scope struct {
 	Targets        []Target       `yaml:"targets"`
 	Authentication Authentication `yaml:"authentication"`
-	Retries        int            `yaml:"retries"`
 	MappingConfig  string         `yaml:"mapping_config,omitempty"`
 	Mappings       []MappingEntry `yaml:"mappings,omitempty"`
 }
@@ -36,18 +35,30 @@ type Authentication struct {
 	PrivPassphrase  string `yaml:"priv_passphrase"`
 }
 
-// Defaults represents the supported default values for a policy
-type Defaults struct {
+// EntityDefaults represents default values for a specific entity type
+type EntityDefaults struct {
 	Description string   `yaml:"description,omitempty"`
 	Comments    string   `yaml:"comments,omitempty"`
 	Tags        []string `yaml:"tags,omitempty"`
 }
 
+// Defaults represents the supported default values for a policy
+type Defaults struct {
+	Description string         `yaml:"description,omitempty"`
+	Comments    string         `yaml:"comments,omitempty"`
+	Tags        []string       `yaml:"tags,omitempty"`
+	IPAddress   EntityDefaults `yaml:"ip_address,omitempty"`
+	Interface   EntityDefaults `yaml:"interface,omitempty"`
+	Device      EntityDefaults `yaml:"device,omitempty"`
+}
+
 // PolicyConfig represents the configuration of a policy
 type PolicyConfig struct {
-	Schedule *string  `yaml:"schedule,omitempty"`
-	Defaults Defaults `yaml:"defaults"`
-	Timeout  int      `yaml:"timeout"`
+	Schedule    *string  `yaml:"schedule,omitempty"`
+	Defaults    Defaults `yaml:"defaults"`
+	Timeout     int      `yaml:"timeout"`
+	DevicesFile string   `yaml:"devices_file,omitempty"`
+	Retries     int      `yaml:"retries"`
 }
 
 // Policy represents a snmp-discovery policy
