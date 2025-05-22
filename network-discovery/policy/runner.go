@@ -10,11 +10,10 @@ import (
 	"github.com/Ullaakut/nmap/v3"
 	"github.com/go-co-op/gocron/v2"
 	"github.com/netboxlabs/diode-sdk-go/diode"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
-
 	"github.com/netboxlabs/orb-discovery/network-discovery/config"
 	"github.com/netboxlabs/orb-discovery/network-discovery/metrics"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Define a custom type for the context key
