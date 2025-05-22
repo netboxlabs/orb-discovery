@@ -34,7 +34,7 @@ config:
     tags:  # Optional: Global tags for all entities
       - "global"
       - "snmp"
-    ipAddress:  # Optional: Defaults specific to IP addresses
+    ip_address:  # Optional: Defaults specific to IP addresses
       description: "IP Address description"
       comments: "IP Address comments"
       tags:
@@ -55,7 +55,7 @@ scope:
     - host: "192.168.1.1"  # Required: Hostname or IP address
       port: 161  # Optional: SNMP port (default: 161)
   authentication:  # SNMP authentication settings
-    protocolVersion: "2c"  # Required: SNMP protocol version ("1", "2c", or "3")
+    protocol_version: "2c"  # Required: SNMP protocol version ("1", "2c", or "3")
     community: "public"  # Required for v1/v2c: SNMP community string
     # Optional for v3:
     # username: "user"
