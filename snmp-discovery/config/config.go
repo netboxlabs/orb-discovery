@@ -47,6 +47,7 @@ type Defaults struct {
 	Description string         `yaml:"description,omitempty"`
 	Comments    string         `yaml:"comments,omitempty"`
 	Tags        []string       `yaml:"tags,omitempty"`
+	Tenant      string         `yaml:"tenant,omitempty"`
 	IPAddress   EntityDefaults `yaml:"ip_address,omitempty"`
 	Interface   EntityDefaults `yaml:"interface,omitempty"`
 	Device      EntityDefaults `yaml:"device,omitempty"`

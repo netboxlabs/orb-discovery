@@ -64,7 +64,7 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 type InterfaceMapper struct{}
 
 // applyEntityDefaults applies default values to an entity based on the provided defaults
-func applyEntityDefaults(entity interface{}, defaults *config.Defaults, getEntityDefaults func(defaults config.Defaults) config.EntityDefaults) {
+func applyEntityDefaults(entity diode.Entity, defaults *config.Defaults, getEntityDefaults func(defaults config.Defaults) config.EntityDefaults) {
 	if defaults == nil {
 		return
 	}
@@ -134,6 +134,11 @@ func applyEntityDefaults(entity interface{}, defaults *config.Defaults, getEntit
 		}
 		if e.Comments == nil && defaults.Comments != "" {
 			e.Comments = &defaults.Comments
+		}
+		if e.Tenant == nil && defaults.Tenant != "" {
+			e.Tenant = &diode.Tenant{
+				Name: &defaults.Tenant,
+			}
 		}
 	}
 }

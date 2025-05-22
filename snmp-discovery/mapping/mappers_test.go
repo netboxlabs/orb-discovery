@@ -319,6 +319,78 @@ func TestIPAddressMapper_Map(t *testing.T) {
 			},
 			expectError: false,
 		},
+		{
+			name: "mapping with tenant default",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
+					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
+					Index:  "192.168.1.1",
+					Parent: "1.3.6.1.2.1.4.20.1.1",
+					Value:  "192.168.1.1",
+					Type:   mapping.IPAddress,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.4.20.1.1",
+				Entity: "ipAddress",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.1",
+						Entity: "ipAddress",
+						Field:  "address",
+					},
+				},
+			},
+			defaults: &config.Defaults{
+				Tenant: "test-tenant",
+			},
+			expectedEntity: &diode.IPAddress{
+				Address: stringPtr("192.168.1.1/32"),
+				Tenant: &diode.Tenant{
+					Name: stringPtr("test-tenant"),
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "mapping with tenant default and entity-specific defaults",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
+					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
+					Index:  "192.168.1.1",
+					Parent: "1.3.6.1.2.1.4.20.1.1",
+					Value:  "192.168.1.1",
+					Type:   mapping.IPAddress,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.4.20.1.1",
+				Entity: "ipAddress",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.1",
+						Entity: "ipAddress",
+						Field:  "address",
+					},
+				},
+			},
+			defaults: &config.Defaults{
+				Tenant: "global-tenant",
+				IPAddress: config.EntityDefaults{
+					Description: "IP Address specific description",
+				},
+			},
+			expectedEntity: &diode.IPAddress{
+				Address:     stringPtr("192.168.1.1/32"),
+				Description: stringPtr("IP Address specific description"),
+				Tenant: &diode.Tenant{
+					Name: stringPtr("global-tenant"),
+				},
+			},
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -343,6 +415,10 @@ func TestIPAddressMapper_Map(t *testing.T) {
 				for i, tag := range tt.expectedEntity.Tags {
 					assert.Equal(t, tag.Name, ipAddress.Tags[i].Name)
 				}
+			}
+			if tt.expectedEntity.Tenant != nil {
+				assert.NotNil(t, ipAddress.Tenant)
+				assert.Equal(t, tt.expectedEntity.Tenant.Name, ipAddress.Tenant.Name)
 			}
 		})
 	}
