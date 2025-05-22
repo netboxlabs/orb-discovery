@@ -252,6 +252,73 @@ func TestIPAddressMapper_Map(t *testing.T) {
 			expectedEntity: &diode.IPAddress{},
 			expectError:    false,
 		},
+		{
+			name: "mapping with global comments",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
+					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
+					Index:  "192.168.1.1",
+					Parent: "1.3.6.1.2.1.4.20.1.1",
+					Value:  "192.168.1.1",
+					Type:   mapping.IPAddress,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.4.20.1.1",
+				Entity: "ipAddress",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.1",
+						Entity: "ipAddress",
+						Field:  "address",
+					},
+				},
+			},
+			defaults: &config.Defaults{
+				Comments: "Global comments",
+			},
+			expectedEntity: &diode.IPAddress{
+				Address:  stringPtr("192.168.1.1/32"),
+				Comments: stringPtr("Global comments"),
+			},
+			expectError: false,
+		},
+		{
+			name: "mapping with entity-specific comments",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
+					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
+					Index:  "192.168.1.1",
+					Parent: "1.3.6.1.2.1.4.20.1.1",
+					Value:  "192.168.1.1",
+					Type:   mapping.IPAddress,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.4.20.1.1",
+				Entity: "ipAddress",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.1",
+						Entity: "ipAddress",
+						Field:  "address",
+					},
+				},
+			},
+			defaults: &config.Defaults{
+				Comments: "Global comments",
+				IPAddress: config.EntityDefaults{
+					Comments: "IP Address specific comments",
+				},
+			},
+			expectedEntity: &diode.IPAddress{
+				Address:  stringPtr("192.168.1.1/32"),
+				Comments: stringPtr("IP Address specific comments"),
+			},
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -854,6 +921,73 @@ func TestDeviceMapper_Map(t *testing.T) {
 			},
 			expectedEntity: &diode.Device{},
 			expectError:    false,
+		},
+		{
+			name: "mapping with global comments",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.1.5.0": {
+					OID:    "1.3.6.1.2.1.1.5.0",
+					Index:  "0",
+					Parent: "1.3.6.1.2.1.1.5",
+					Value:  "router1",
+					Type:   mapping.OctetString,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.1",
+				Entity: "device",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.1.5",
+						Entity: "device",
+						Field:  "name",
+					},
+				},
+			},
+			defaults: &config.Defaults{
+				Comments: "Global comments",
+			},
+			expectedEntity: &diode.Device{
+				Name:     stringPtr("router1"),
+				Comments: stringPtr("Global comments"),
+			},
+			expectError: false,
+		},
+		{
+			name: "mapping with entity-specific comments",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.1.5.0": {
+					OID:    "1.3.6.1.2.1.1.5.0",
+					Index:  "0",
+					Parent: "1.3.6.1.2.1.1.5",
+					Value:  "router1",
+					Type:   mapping.OctetString,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.1",
+				Entity: "device",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.1.5",
+						Entity: "device",
+						Field:  "name",
+					},
+				},
+			},
+			defaults: &config.Defaults{
+				Comments: "Global comments",
+				Device: config.EntityDefaults{
+					Comments: "Device specific comments",
+				},
+			},
+			expectedEntity: &diode.Device{
+				Name:     stringPtr("router1"),
+				Comments: stringPtr("Device specific comments"),
+			},
+			expectError: false,
 		},
 	}
 

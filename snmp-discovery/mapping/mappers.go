@@ -81,6 +81,14 @@ func applyEntityDefaults(entity interface{}, defaults *config.Defaults, getEntit
 			e.Description = &entityDefaults.Description
 		}
 	}
+	if entityDefaults.Comments != "" {
+		switch e := entity.(type) {
+		case *diode.Device:
+			e.Comments = &entityDefaults.Comments
+		case *diode.IPAddress:
+			e.Comments = &entityDefaults.Comments
+		}
+	}
 
 	// Collect tags from both entity-specific and global defaults
 	var tags []*diode.Tag
@@ -116,6 +124,9 @@ func applyEntityDefaults(entity interface{}, defaults *config.Defaults, getEntit
 	case *diode.Device:
 		if e.Description == nil && defaults.Description != "" {
 			e.Description = &defaults.Description
+		}
+		if e.Comments == nil && defaults.Comments != "" {
+			e.Comments = &defaults.Comments
 		}
 	case *diode.IPAddress:
 		if e.Description == nil && defaults.Description != "" {
