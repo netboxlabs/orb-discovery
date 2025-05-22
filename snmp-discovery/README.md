@@ -55,33 +55,16 @@ scope:
     - host: "192.168.1.1"  # Required: Hostname or IP address
       port: 161  # Optional: SNMP port (default: 161)
   authentication:  # SNMP authentication settings
-    protocol_version: "2c"  # Required: SNMP protocol version ("1", "2c", or "3")
+    protocol_version: "SNMPv2c"  # Required: SNMP protocol version ("SNMPv1", "SNMPv2c", or "SNMPv3")
     community: "public"  # Required for v1/v2c: SNMP community string
     # Optional for v3:
     # username: "user"
-    # authProtocol: "SHA"
-    # authKey: "authkey"
-    # privProtocol: "AES"
-    # privKey: "privkey"
-  retries: 3  # Optional: Number of SNMP retries (default: 3)
-  mappings:  # List of SNMP OID mappings
-    - oid: "iso.3.6.1.2.1.2.2.1"  # Required: SNMP OID to map
-      entity: "interface"  # Required: Entity type to map to
-      field: "_id"  # Required: Field to map to
-      identifierSize: 1  # Optional: Size of the identifier in the OID (default: 1)
-      mappingEntries:  # Optional: Nested mappings
-        - oid: "iso.3.6.1.2.1.2.2.1.2"
-          entity: "interface"
-          field: "name"
-        - oid: "iso.3.6.1.2.1.2.2.1.5"
-          entity: "interface"
-          field: "speed"
-        - oid: "iso.3.6.1.2.1.2.2.1.6"
-          entity: "interface"
-          field: "macAddress"
-        - oid: "iso.3.6.1.2.1.2.2.1.7"
-          entity: "interface"
-          field: "adminStatus"
+    # security_level: authPriv # Allowed values: ("NoAuthNoPriv", "AuthNoPriv", "AuthPriv")
+    # auth_protocol: "SHA"
+    # auth_passphrase: "authkey"
+    # priv_protocol: "AES"
+    # priv_passphrase: "privkey"
+  retries: 3  # Optional: Number of SNMP retries (default: 0)
 ```
 
 ### Defaults
