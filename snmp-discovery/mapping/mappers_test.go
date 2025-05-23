@@ -723,8 +723,10 @@ func TestDeviceMapper_Map(t *testing.T) {
 				},
 			},
 			defaults: &config.Defaults{
-				Tags: []string{"global-tag1", "global-tag2"},
-				Role: "test-role",
+				Tags:     []string{"global-tag1", "global-tag2"},
+				Role:     "test-role",
+				Site:     "test-site",
+				Location: "test-location",
 				Device: config.DeviceDefaults{
 					Description: "Device specific description",
 					Tags:        []string{"device-tag1", "device-tag2"},
@@ -743,6 +745,15 @@ func TestDeviceMapper_Map(t *testing.T) {
 				},
 				Role: &diode.DeviceRole{
 					Name: stringPtr("test-role"),
+				},
+				Site: &diode.Site{
+					Name: stringPtr("test-site"),
+				},
+				Location: &diode.Location{
+					Name: stringPtr("test-location"),
+					Site: &diode.Site{
+						Name: stringPtr("test-site"),
+					},
 				},
 			},
 			expectError: false,
@@ -824,6 +835,13 @@ func TestDeviceMapper_Map(t *testing.T) {
 				assert.Equal(t, tt.expectedEntity.Platform.Manufacturer.Name, device.Platform.Manufacturer.Name)
 			}
 			assert.Equal(t, tt.expectedEntity.Description, device.Description)
+			if tt.expectedEntity.Location != nil {
+				assert.Equal(t, tt.expectedEntity.Location.Name, device.Location.Name)
+				assert.Equal(t, tt.expectedEntity.Location.Site.Name, device.Location.Site.Name)
+			}
+			if tt.expectedEntity.Site != nil {
+				assert.Equal(t, tt.expectedEntity.Site.Name, device.Site.Name)
+			}
 			if tt.expectedEntity.Tags != nil {
 				assert.Equal(t, len(tt.expectedEntity.Tags), len(device.Tags))
 				for i, tag := range tt.expectedEntity.Tags {

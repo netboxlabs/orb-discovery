@@ -246,6 +246,24 @@ func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defa
 			Name: &defaults.Role,
 		}
 	}
+
+	if entity.Site == nil && defaults.Site != "" {
+		entity.Site = &diode.Site{
+			Name: &defaults.Site,
+		}
+	}
+
+	if entity.Location == nil && defaults.Location != "" {
+		entity.Location = &diode.Location{
+			Name: &defaults.Location,
+		}
+		if entity.Location.Site == nil && defaults.Site != "" {
+			entity.Location.Site = &diode.Site{
+				Name: &defaults.Site,
+			}
+		}
+	}
+
 }
 
 // NewDeviceMapper creates a new DeviceMapper
