@@ -60,6 +60,15 @@ func (m *IPAddressMapper) applyDefaults(entity *diode.IPAddress, defaults *confi
 			Name: &entityDefaults.Tenant,
 		}
 	}
+	if entity.Role == nil && entityDefaults.Role != "" {
+		entity.Role = &entityDefaults.Role
+	}
+	if entity.Vrf == nil && entityDefaults.Vrf != "" {
+		entity.Vrf = &diode.VRF{
+			Name: &entityDefaults.Vrf,
+			Rd:   &entityDefaults.Vrf,
+		}
+	}
 }
 
 // Map maps IP addresses to entities
@@ -263,7 +272,6 @@ func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defa
 			}
 		}
 	}
-
 }
 
 // NewDeviceMapper creates a new DeviceMapper

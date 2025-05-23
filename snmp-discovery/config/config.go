@@ -42,7 +42,7 @@ type IPAddressDefaults struct {
 	Comments    string   `yaml:"comments,omitempty"`
 	Role        string   `yaml:"role,omitempty"`
 	Tenant      string   `yaml:"tenant,omitempty"`
-	VRF         string   `yaml:"vrf,omitempty"`
+	Vrf         string   `yaml:"vrf,omitempty"`
 }
 
 type InterfaceDefaults struct {
