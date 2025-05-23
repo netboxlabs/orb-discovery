@@ -35,7 +35,7 @@ type Authentication struct {
 	PrivPassphrase  string `yaml:"priv_passphrase"`
 }
 
-// EntityDefaults represents default values for a specific entity type
+// IPAddressDefaults represents default values for a specific entity type
 type IPAddressDefaults struct {
 	Description string   `yaml:"description,omitempty"`
 	Tags        []string `yaml:"tags,omitempty"`
@@ -45,12 +45,14 @@ type IPAddressDefaults struct {
 	Vrf         string   `yaml:"vrf,omitempty"`
 }
 
+// InterfaceDefaults represents default values for a specific entity type
 type InterfaceDefaults struct {
 	Description string   `yaml:"description,omitempty"`
 	Tags        []string `yaml:"tags,omitempty"`
 	Type        string   `yaml:"if_type,omitempty"`
 }
 
+// DeviceDefaults represents default values for a specific entity type
 type DeviceDefaults struct {
 	Description string   `yaml:"description,omitempty"`
 	Tags        []string `yaml:"tags,omitempty"`
