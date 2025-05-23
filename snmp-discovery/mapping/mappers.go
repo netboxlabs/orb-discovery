@@ -240,6 +240,12 @@ func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defa
 	if entity.Comments == nil && entityDefaults.Comments != "" {
 		entity.Comments = &entityDefaults.Comments
 	}
+
+	if entity.Role == nil && defaults.Role != "" {
+		entity.Role = &diode.DeviceRole{
+			Name: &defaults.Role,
+		}
+	}
 }
 
 // NewDeviceMapper creates a new DeviceMapper

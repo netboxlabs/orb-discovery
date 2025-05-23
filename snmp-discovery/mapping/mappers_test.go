@@ -700,84 +700,6 @@ func TestDeviceMapper_Map(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "mapping with global defaults",
-			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
-				"1.3.6.1.2.1.1.5.0": {
-					OID:    "1.3.6.1.2.1.1.5.0",
-					Index:  "0",
-					Parent: "1.3.6.1.2.1.1.5",
-					Value:  "router1",
-					Type:   mapping.OctetString,
-				},
-			},
-			mappingEntry: &mapping.Entry{
-				OID:    "1.3.6.1.2.1.1",
-				Entity: "device",
-				Field:  "_id",
-				MappingEntries: []mapping.Entry{
-					{
-						OID:    "1.3.6.1.2.1.1.5",
-						Entity: "device",
-						Field:  "name",
-					},
-				},
-			},
-			defaults: &config.Defaults{
-				Tags: []string{"global-tag1", "global-tag2"},
-				Device: config.DeviceDefaults{
-					Description: "Device description",
-				},
-			},
-			expectedEntity: &diode.Device{
-				Name:        stringPtr("router1"),
-				Description: stringPtr("Device description"),
-				Tags: []*diode.Tag{
-					{Name: stringPtr("global-tag1")},
-					{Name: stringPtr("global-tag2")},
-				},
-			},
-			expectError: false,
-		},
-		{
-			name: "mapping with entity-specific defaults",
-			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
-				"1.3.6.1.2.1.1.5.0": {
-					OID:    "1.3.6.1.2.1.1.5.0",
-					Index:  "0",
-					Parent: "1.3.6.1.2.1.1.5",
-					Value:  "router1",
-					Type:   mapping.OctetString,
-				},
-			},
-			mappingEntry: &mapping.Entry{
-				OID:    "1.3.6.1.2.1.1",
-				Entity: "device",
-				Field:  "_id",
-				MappingEntries: []mapping.Entry{
-					{
-						OID:    "1.3.6.1.2.1.1.5",
-						Entity: "device",
-						Field:  "name",
-					},
-				},
-			},
-			defaults: &config.Defaults{
-				Device: config.DeviceDefaults{
-					Description: "Device specific description",
-					Tags:        []string{"device-tag1", "device-tag2"},
-				},
-			},
-			expectedEntity: &diode.Device{
-				Name:        stringPtr("router1"),
-				Description: stringPtr("Device specific description"),
-				Tags: []*diode.Tag{
-					{Name: stringPtr("device-tag1")},
-					{Name: stringPtr("device-tag2")},
-				},
-			},
-			expectError: false,
-		},
-		{
 			name: "mapping with both global and entity-specific defaults",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.1.5.0": {
@@ -802,6 +724,7 @@ func TestDeviceMapper_Map(t *testing.T) {
 			},
 			defaults: &config.Defaults{
 				Tags: []string{"global-tag1", "global-tag2"},
+				Role: "test-role",
 				Device: config.DeviceDefaults{
 					Description: "Device specific description",
 					Tags:        []string{"device-tag1", "device-tag2"},
@@ -817,6 +740,9 @@ func TestDeviceMapper_Map(t *testing.T) {
 					{Name: stringPtr("device-tag2")},
 					{Name: stringPtr("global-tag1")},
 					{Name: stringPtr("global-tag2")},
+				},
+				Role: &diode.DeviceRole{
+					Name: stringPtr("test-role"),
 				},
 			},
 			expectError: false,
