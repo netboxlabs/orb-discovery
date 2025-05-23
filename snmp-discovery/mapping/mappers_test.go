@@ -484,58 +484,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "mapping with global defaults",
-			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
-				"1.3.6.1.2.1.2.2.1.1.1": {
-					OID:    "1.3.6.1.2.1.2.2.1.1.1",
-					Index:  "1",
-					Parent: "1.3.6.1.2.1.2.2.1.1",
-					Value:  "1",
-					Type:   mapping.Integer,
-				},
-				"1.3.6.1.2.1.2.2.1.2.1": {
-					OID:    "1.3.6.1.2.1.2.2.1.2.1",
-					Index:  "1",
-					Parent: "1.3.6.1.2.1.2.2.1.2",
-					Value:  "eth0",
-					Type:   mapping.OctetString,
-				},
-			},
-			mappingEntry: &mapping.Entry{
-				OID:    "1.3.6.1.2.1.2.2.1.1",
-				Entity: "interface",
-				Field:  "_id",
-				MappingEntries: []mapping.Entry{
-					{
-						OID:    "1.3.6.1.2.1.2.2.1.1",
-						Entity: "interface",
-						Field:  "_id",
-					},
-					{
-						OID:    "1.3.6.1.2.1.2.2.1.2",
-						Entity: "interface",
-						Field:  "name",
-					},
-				},
-			},
-			defaults: &config.Defaults{
-				Interface: config.InterfaceDefaults{
-					Description: "Global description",
-				},
-				Tags: []string{"global-tag1", "global-tag2"},
-			},
-			expectedEntity: &diode.Interface{
-				Name:        stringPtr("eth0"),
-				Description: stringPtr("Global description"),
-				Tags: []*diode.Tag{
-					{Name: stringPtr("global-tag1")},
-					{Name: stringPtr("global-tag2")},
-				},
-			},
-			expectError: false,
-		},
-		{
-			name: "mapping with entity-specific defaults",
+			name: "mapping with defaults",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.2.2.1.1.1": {
 					OID:    "1.3.6.1.2.1.2.2.1.1.1",
@@ -573,59 +522,9 @@ func TestInterfaceMapper_Map(t *testing.T) {
 				Interface: config.InterfaceDefaults{
 					Description: "Interface specific description",
 					Tags:        []string{"interface-tag1", "interface-tag2"},
+					Type:        "ethernet",
 				},
-			},
-			expectedEntity: &diode.Interface{
-				Name:        stringPtr("eth0"),
-				Description: stringPtr("Interface specific description"),
-				Tags: []*diode.Tag{
-					{Name: stringPtr("interface-tag1")},
-					{Name: stringPtr("interface-tag2")},
-				},
-			},
-			expectError: false,
-		},
-		{
-			name: "mapping with both global and entity-specific defaults",
-			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
-				"1.3.6.1.2.1.2.2.1.1.1": {
-					OID:    "1.3.6.1.2.1.2.2.1.1.1",
-					Index:  "1",
-					Parent: "1.3.6.1.2.1.2.2.1.1",
-					Value:  "1",
-					Type:   mapping.Integer,
-				},
-				"1.3.6.1.2.1.2.2.1.2.1": {
-					OID:    "1.3.6.1.2.1.2.2.1.2.1",
-					Index:  "1",
-					Parent: "1.3.6.1.2.1.2.2.1.2",
-					Value:  "eth0",
-					Type:   mapping.OctetString,
-				},
-			},
-			mappingEntry: &mapping.Entry{
-				OID:    "1.3.6.1.2.1.2.2.1.1",
-				Entity: "interface",
-				Field:  "_id",
-				MappingEntries: []mapping.Entry{
-					{
-						OID:    "1.3.6.1.2.1.2.2.1.1",
-						Entity: "interface",
-						Field:  "_id",
-					},
-					{
-						OID:    "1.3.6.1.2.1.2.2.1.2",
-						Entity: "interface",
-						Field:  "name",
-					},
-				},
-			},
-			defaults: &config.Defaults{
 				Tags: []string{"global-tag1", "global-tag2"},
-				Interface: config.InterfaceDefaults{
-					Description: "Interface specific description",
-					Tags:        []string{"interface-tag1", "interface-tag2"},
-				},
 			},
 			expectedEntity: &diode.Interface{
 				Name:        stringPtr("eth0"),
@@ -636,6 +535,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 					{Name: stringPtr("global-tag1")},
 					{Name: stringPtr("global-tag2")},
 				},
+				Type: stringPtr("ethernet"),
 			},
 			expectError: false,
 		},
@@ -713,6 +613,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 			if tt.expectedEntity.PrimaryMacAddress != nil {
 				assert.Equal(t, tt.expectedEntity.PrimaryMacAddress.MacAddress, iface.PrimaryMacAddress.MacAddress)
 			}
+			assert.Equal(t, tt.expectedEntity.Type, iface.Type)
 			assert.Equal(t, tt.expectedEntity.Enabled, iface.Enabled)
 			assert.Equal(t, tt.expectedEntity.Description, iface.Description)
 			if tt.expectedEntity.Tags != nil {

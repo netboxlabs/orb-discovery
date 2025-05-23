@@ -142,6 +142,10 @@ func (m *InterfaceMapper) applyDefaults(entity *diode.Interface, defaults *confi
 	if entity.Description == nil && entityDefaults.Description != "" {
 		entity.Description = &entityDefaults.Description
 	}
+
+	if entity.Type == nil && entityDefaults.Type != "" {
+		entity.Type = &entityDefaults.Type
+	}
 }
 
 // Map maps interfaces to entities
