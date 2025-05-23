@@ -119,19 +119,17 @@ func TestRunnerRun(t *testing.T) {
 				Config: config.PolicyConfig{
 					Schedule: nil,
 					Defaults: config.Defaults{
-						Description: "Test",
-						Comments:    "This is a test",
-						Tags:        []string{"test", "snmp"},
-						IPAddress: config.EntityDefaults{
+						Tags: []string{"test", "snmp"},
+						IPAddress: config.IPAddressDefaults{
 							Description: "IP Address Default",
 							Comments:    "IP Address Comment",
 							Tags:        []string{"ip", "default"},
 						},
-						Interface: config.EntityDefaults{
+						Interface: config.InterfaceDefaults{
 							Description: "Interface Default",
 							Tags:        []string{"interface", "default"},
 						},
-						Device: config.EntityDefaults{
+						Device: config.DeviceDefaults{
 							Description: "Device Default",
 							Tags:        []string{"device", "default"},
 						},
@@ -203,19 +201,17 @@ func TestRunnerIngestCalledWithCorrectValues(t *testing.T) {
 	policyConfig := config.Policy{
 		Config: config.PolicyConfig{
 			Defaults: config.Defaults{
-				Description: "Test",
-				Comments:    "This is a test",
-				Tags:        []string{"test", "snmp"},
-				IPAddress: config.EntityDefaults{
+				Tags: []string{"test", "snmp"},
+				IPAddress: config.IPAddressDefaults{
 					Description: "IP Address Default",
 					Comments:    "IP Address Comment",
 					Tags:        []string{"ip", "default"},
 				},
-				Interface: config.EntityDefaults{
+				Interface: config.InterfaceDefaults{
 					Description: "Interface Default",
 					Tags:        []string{"interface", "default"},
 				},
-				Device: config.EntityDefaults{
+				Device: config.DeviceDefaults{
 					Description: "Device Default",
 					Tags:        []string{"device", "default"},
 				},

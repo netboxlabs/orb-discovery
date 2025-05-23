@@ -36,21 +36,36 @@ type Authentication struct {
 }
 
 // EntityDefaults represents default values for a specific entity type
-type EntityDefaults struct {
+type IPAddressDefaults struct {
 	Description string   `yaml:"description,omitempty"`
-	Comments    string   `yaml:"comments,omitempty"`
 	Tags        []string `yaml:"tags,omitempty"`
+	Comments    string   `yaml:"comments,omitempty"`
+	Role        string   `yaml:"role,omitempty"`
+	Tenant      string   `yaml:"tenant,omitempty"`
+	VRF         string   `yaml:"vrf,omitempty"`
+}
+
+type InterfaceDefaults struct {
+	Description string   `yaml:"description,omitempty"`
+	Tags        []string `yaml:"tags,omitempty"`
+	Type        string   `yaml:"if_type,omitempty"`
+}
+
+type DeviceDefaults struct {
+	Description string   `yaml:"description,omitempty"`
+	Tags        []string `yaml:"tags,omitempty"`
+	Comments    string   `yaml:"comments,omitempty"`
 }
 
 // Defaults represents the supported default values for a policy
 type Defaults struct {
-	Description string         `yaml:"description,omitempty"`
-	Comments    string         `yaml:"comments,omitempty"`
-	Tags        []string       `yaml:"tags,omitempty"`
-	Tenant      string         `yaml:"tenant,omitempty"`
-	IPAddress   EntityDefaults `yaml:"ip_address,omitempty"`
-	Interface   EntityDefaults `yaml:"interface,omitempty"`
-	Device      EntityDefaults `yaml:"device,omitempty"`
+	Tags      []string          `yaml:"tags,omitempty"`
+	Site      string            `yaml:"site,omitempty"`
+	Location  string            `yaml:"location,omitempty"`
+	Role      string            `yaml:"role,omitempty"`
+	IPAddress IPAddressDefaults `yaml:"ip_address,omitempty"`
+	Interface InterfaceDefaults `yaml:"interface,omitempty"`
+	Device    DeviceDefaults    `yaml:"device,omitempty"`
 }
 
 // PolicyConfig represents the configuration of a policy

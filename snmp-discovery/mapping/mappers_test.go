@@ -87,12 +87,14 @@ func TestIPAddressMapper_Map(t *testing.T) {
 				},
 			},
 			defaults: &config.Defaults{
-				Description: "Global description",
-				Tags:        []string{"global-tag1", "global-tag2"},
+				IPAddress: config.IPAddressDefaults{
+					Description: "IP Address Description",
+					Tags:        []string{"global-tag1", "global-tag2"},
+				},
 			},
 			expectedEntity: &diode.IPAddress{
 				Address:     stringPtr("192.168.1.1/32"),
-				Description: stringPtr("Global description"),
+				Description: stringPtr("IP Address Description"),
 				Tags: []*diode.Tag{
 					{Name: stringPtr("global-tag1")},
 					{Name: stringPtr("global-tag2")},
@@ -129,7 +131,7 @@ func TestIPAddressMapper_Map(t *testing.T) {
 				},
 			},
 			defaults: &config.Defaults{
-				IPAddress: config.EntityDefaults{
+				IPAddress: config.IPAddressDefaults{
 					Description: "IP Address specific description",
 					Tags:        []string{"ip-tag1", "ip-tag2"},
 				},
@@ -173,9 +175,8 @@ func TestIPAddressMapper_Map(t *testing.T) {
 				},
 			},
 			defaults: &config.Defaults{
-				Description: "Global description",
-				Tags:        []string{"global-tag1", "global-tag2"},
-				IPAddress: config.EntityDefaults{
+				Tags: []string{"global-tag1", "global-tag2"},
+				IPAddress: config.IPAddressDefaults{
 					Description: "IP Address specific description",
 					Tags:        []string{"ip-tag1", "ip-tag2"},
 				},
@@ -253,38 +254,6 @@ func TestIPAddressMapper_Map(t *testing.T) {
 			expectError:    false,
 		},
 		{
-			name: "mapping with global comments",
-			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
-				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
-					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
-					Index:  "192.168.1.1",
-					Parent: "1.3.6.1.2.1.4.20.1.1",
-					Value:  "192.168.1.1",
-					Type:   mapping.IPAddress,
-				},
-			},
-			mappingEntry: &mapping.Entry{
-				OID:    "1.3.6.1.2.1.4.20.1.1",
-				Entity: "ipAddress",
-				Field:  "_id",
-				MappingEntries: []mapping.Entry{
-					{
-						OID:    "1.3.6.1.2.1.4.20.1.1",
-						Entity: "ipAddress",
-						Field:  "address",
-					},
-				},
-			},
-			defaults: &config.Defaults{
-				Comments: "Global comments",
-			},
-			expectedEntity: &diode.IPAddress{
-				Address:  stringPtr("192.168.1.1/32"),
-				Comments: stringPtr("Global comments"),
-			},
-			expectError: false,
-		},
-		{
 			name: "mapping with entity-specific comments",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
@@ -308,8 +277,7 @@ func TestIPAddressMapper_Map(t *testing.T) {
 				},
 			},
 			defaults: &config.Defaults{
-				Comments: "Global comments",
-				IPAddress: config.EntityDefaults{
+				IPAddress: config.IPAddressDefaults{
 					Comments: "IP Address specific comments",
 				},
 			},
@@ -343,7 +311,9 @@ func TestIPAddressMapper_Map(t *testing.T) {
 				},
 			},
 			defaults: &config.Defaults{
-				Tenant: "test-tenant",
+				IPAddress: config.IPAddressDefaults{
+					Tenant: "test-tenant",
+				},
 			},
 			expectedEntity: &diode.IPAddress{
 				Address: stringPtr("192.168.1.1/32"),
@@ -377,16 +347,16 @@ func TestIPAddressMapper_Map(t *testing.T) {
 				},
 			},
 			defaults: &config.Defaults{
-				Tenant: "global-tenant",
-				IPAddress: config.EntityDefaults{
+				IPAddress: config.IPAddressDefaults{
 					Description: "IP Address specific description",
+					Tenant:      "ip-address-tenant",
 				},
 			},
 			expectedEntity: &diode.IPAddress{
 				Address:     stringPtr("192.168.1.1/32"),
 				Description: stringPtr("IP Address specific description"),
 				Tenant: &diode.Tenant{
-					Name: stringPtr("global-tenant"),
+					Name: stringPtr("ip-address-tenant"),
 				},
 			},
 			expectError: false,
@@ -549,8 +519,10 @@ func TestInterfaceMapper_Map(t *testing.T) {
 				},
 			},
 			defaults: &config.Defaults{
-				Description: "Global description",
-				Tags:        []string{"global-tag1", "global-tag2"},
+				Interface: config.InterfaceDefaults{
+					Description: "Global description",
+				},
+				Tags: []string{"global-tag1", "global-tag2"},
 			},
 			expectedEntity: &diode.Interface{
 				Name:        stringPtr("eth0"),
@@ -598,7 +570,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 				},
 			},
 			defaults: &config.Defaults{
-				Interface: config.EntityDefaults{
+				Interface: config.InterfaceDefaults{
 					Description: "Interface specific description",
 					Tags:        []string{"interface-tag1", "interface-tag2"},
 				},
@@ -649,9 +621,8 @@ func TestInterfaceMapper_Map(t *testing.T) {
 				},
 			},
 			defaults: &config.Defaults{
-				Description: "Global description",
-				Tags:        []string{"global-tag1", "global-tag2"},
-				Interface: config.EntityDefaults{
+				Tags: []string{"global-tag1", "global-tag2"},
+				Interface: config.InterfaceDefaults{
 					Description: "Interface specific description",
 					Tags:        []string{"interface-tag1", "interface-tag2"},
 				},
@@ -851,12 +822,14 @@ func TestDeviceMapper_Map(t *testing.T) {
 				},
 			},
 			defaults: &config.Defaults{
-				Description: "Global description",
-				Tags:        []string{"global-tag1", "global-tag2"},
+				Tags: []string{"global-tag1", "global-tag2"},
+				Device: config.DeviceDefaults{
+					Description: "Device description",
+				},
 			},
 			expectedEntity: &diode.Device{
 				Name:        stringPtr("router1"),
-				Description: stringPtr("Global description"),
+				Description: stringPtr("Device description"),
 				Tags: []*diode.Tag{
 					{Name: stringPtr("global-tag1")},
 					{Name: stringPtr("global-tag2")},
@@ -888,7 +861,7 @@ func TestDeviceMapper_Map(t *testing.T) {
 				},
 			},
 			defaults: &config.Defaults{
-				Device: config.EntityDefaults{
+				Device: config.DeviceDefaults{
 					Description: "Device specific description",
 					Tags:        []string{"device-tag1", "device-tag2"},
 				},
@@ -927,16 +900,17 @@ func TestDeviceMapper_Map(t *testing.T) {
 				},
 			},
 			defaults: &config.Defaults{
-				Description: "Global description",
-				Tags:        []string{"global-tag1", "global-tag2"},
-				Device: config.EntityDefaults{
+				Tags: []string{"global-tag1", "global-tag2"},
+				Device: config.DeviceDefaults{
 					Description: "Device specific description",
 					Tags:        []string{"device-tag1", "device-tag2"},
+					Comments:    "Device specific comments",
 				},
 			},
 			expectedEntity: &diode.Device{
 				Name:        stringPtr("router1"),
 				Description: stringPtr("Device specific description"),
+				Comments:    stringPtr("Device specific comments"),
 				Tags: []*diode.Tag{
 					{Name: stringPtr("device-tag1")},
 					{Name: stringPtr("device-tag2")},
@@ -997,73 +971,6 @@ func TestDeviceMapper_Map(t *testing.T) {
 			},
 			expectedEntity: &diode.Device{},
 			expectError:    false,
-		},
-		{
-			name: "mapping with global comments",
-			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
-				"1.3.6.1.2.1.1.5.0": {
-					OID:    "1.3.6.1.2.1.1.5.0",
-					Index:  "0",
-					Parent: "1.3.6.1.2.1.1.5",
-					Value:  "router1",
-					Type:   mapping.OctetString,
-				},
-			},
-			mappingEntry: &mapping.Entry{
-				OID:    "1.3.6.1.2.1.1",
-				Entity: "device",
-				Field:  "_id",
-				MappingEntries: []mapping.Entry{
-					{
-						OID:    "1.3.6.1.2.1.1.5",
-						Entity: "device",
-						Field:  "name",
-					},
-				},
-			},
-			defaults: &config.Defaults{
-				Comments: "Global comments",
-			},
-			expectedEntity: &diode.Device{
-				Name:     stringPtr("router1"),
-				Comments: stringPtr("Global comments"),
-			},
-			expectError: false,
-		},
-		{
-			name: "mapping with entity-specific comments",
-			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
-				"1.3.6.1.2.1.1.5.0": {
-					OID:    "1.3.6.1.2.1.1.5.0",
-					Index:  "0",
-					Parent: "1.3.6.1.2.1.1.5",
-					Value:  "router1",
-					Type:   mapping.OctetString,
-				},
-			},
-			mappingEntry: &mapping.Entry{
-				OID:    "1.3.6.1.2.1.1",
-				Entity: "device",
-				Field:  "_id",
-				MappingEntries: []mapping.Entry{
-					{
-						OID:    "1.3.6.1.2.1.1.5",
-						Entity: "device",
-						Field:  "name",
-					},
-				},
-			},
-			defaults: &config.Defaults{
-				Comments: "Global comments",
-				Device: config.EntityDefaults{
-					Comments: "Device specific comments",
-				},
-			},
-			expectedEntity: &diode.Device{
-				Name:     stringPtr("router1"),
-				Comments: stringPtr("Device specific comments"),
-			},
-			expectError: false,
 		},
 	}
 
