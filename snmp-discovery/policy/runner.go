@@ -7,11 +7,11 @@ import (
 
 	"github.com/go-co-op/gocron/v2"
 	"github.com/netboxlabs/diode-sdk-go/diode"
-
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/data"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/mapping"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/snmp"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/targets"
 )
 
 // Define a custom type for the context key
@@ -87,10 +87,27 @@ func (r *Runner) run() {
 
 	mapper := mapping.NewObjectIDMapper(r.scope.Mappings, r.logger, r.manufacturers, &r.config.Defaults)
 	objectIDs := mapper.ObjectIDs()
+
 	r.logger.Info("Starting SNMP crawl of targets", slog.Any("targetCount", len(r.scope.Targets)), slog.Any("objectCount", len(objectIDs)))
 	entities := make([]diode.Entity, 0)
 
+	// Expand all targets
+	var expandedTargets []config.Target
 	for _, target := range r.scope.Targets {
+		ips, err := targets.Expand(target.Host)
+		if err != nil {
+			r.logger.Warn("Error expanding target host", "host", target.Host, "error", err)
+			continue
+		}
+		for _, ip := range ips {
+			expandedTargets = append(expandedTargets, config.Target{
+				Host: ip,
+				Port: target.Port,
+			})
+		}
+	}
+
+	for _, target := range expandedTargets {
 		host := snmp.NewHost(target.Host, target.Port, r.config.Retries, &r.scope.Authentication, r.logger, r.ClientFactory)
 		oids, err := host.Walk(objectIDs)
 		if err != nil {
