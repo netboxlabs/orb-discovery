@@ -92,32 +92,9 @@ func (r *Runner) run() {
 	entities := make([]diode.Entity, 0)
 
 	// Expand all targets
-	var expandedTargets []config.Target
-	for _, target := range r.scope.Targets {
-		ips, err := targets.Expand(target.Host)
-		if err != nil {
-			r.logger.Warn("Error expanding target host", "host", target.Host, "error", err)
-			continue
-		}
-		for _, ip := range ips {
-			expandedTargets = append(expandedTargets, config.Target{
-				Host: ip,
-				Port: target.Port,
-			})
-		}
-	}
+	expandedTargets := r.expandTargetRanges(r.scope.Targets)
 
-	for _, target := range expandedTargets {
-		host := snmp.NewHost(target.Host, target.Port, r.config.Retries, &r.scope.Authentication, r.logger, r.ClientFactory)
-		oids, err := host.Walk(objectIDs)
-		if err != nil {
-			r.logger.Warn("Error crawling host", "host", target.Host, "error", err)
-			continue
-		}
-
-		entitiesForTarget := mapper.MapObjectIDsToEntity(oids)
-		entities = append(entities, entitiesForTarget...)
-	}
+	entities = r.queryTargets(expandedTargets, objectIDs, mapper, entities)
 	r.logger.Info("SNMP crawl complete.")
 
 	if len(entities) == 0 {
@@ -133,6 +110,39 @@ func (r *Runner) run() {
 	} else {
 		r.logger.Info("entities ingested successfully", slog.Any("policy", r.ctx.Value(policyKey)))
 	}
+}
+
+func (r *Runner) queryTargets(expandedTargets []config.Target, objectIDs map[string]int, mapper *mapping.ObjectIDMapper, entities []diode.Entity) []diode.Entity {
+	for _, target := range expandedTargets {
+		host := snmp.NewHost(target.Host, target.Port, r.config.Retries, &r.scope.Authentication, r.logger, r.ClientFactory)
+		oids, err := host.Walk(objectIDs)
+		if err != nil {
+			r.logger.Warn("Error crawling host", "host", target.Host, "error", err)
+			continue
+		}
+
+		entitiesForTarget := mapper.MapObjectIDsToEntity(oids)
+		entities = append(entities, entitiesForTarget...)
+	}
+	return entities
+}
+
+func (r *Runner) expandTargetRanges(configuredTargets []config.Target) []config.Target {
+	var expandedTargets []config.Target
+	for _, target := range configuredTargets {
+		ips, err := targets.Expand(target.Host)
+		if err != nil {
+			r.logger.Warn("Error expanding target host", "host", target.Host, "error", err)
+			continue
+		}
+		for _, ip := range ips {
+			expandedTargets = append(expandedTargets, config.Target{
+				Host: ip,
+				Port: target.Port,
+			})
+		}
+	}
+	return expandedTargets
 }
 
 // Start starts the policy runner
