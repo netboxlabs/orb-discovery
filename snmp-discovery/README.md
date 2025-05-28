@@ -3,22 +3,25 @@ Orb snmp discovery backend
 
 ### Usage
 ```bash
-usage: snmp-discovery [-h] [-V] [-s HOST] [-p PORT] -t DIODE_TARGET -k DIODE_API_KEY
-
-Orb SNMP Discovery Backend
-
-options:
-  -h, --help            show this help message and exit
-  -V, --version         Display SNMP Discover version
-  -s HOST, --host HOST  Server host
-  -p PORT, --port PORT  Server port
-  -t DIODE_TARGET, --diode-target DIODE_TARGET
-                        Diode target
-  -k DIODE_API_KEY, --diode-api-key DIODE_API_KEY
-                        Diode API key. Environment variables can be used by wrapping them in ${} (e.g.
-                        ${MY_API_KEY})
-  -a DIODE_APP_NAME_PREFIX, --diode-app-name-prefix DIODE_APP_NAME_PREFIX
-                        Diode producer_app_name prefix
+Usage of snmp-discovery:
+ -diode-app-name-prefix string
+    	diode producer_app_name prefix
+  -diode-client-id string
+    	diode client ID (REQUIRED). Environment variables can be used by wrapping them in ${} (e.g. ${MY_DIODE_CLIENT_ID})
+  -diode-client-secret string
+    	diode client secret (REQUIRED). Environment variables can be used by wrapping them in ${} (e.g. ${MY_DIODE_CLIENT_SECRET})
+  -diode-target string
+    	diode target (REQUIRED). Environment variables can be used by wrapping them in ${} (e.g. ${MY_DIODE_TARGET})
+  -help
+    	show this help
+  -host string
+    	server host (default "0.0.0.0")
+  -log-format string
+    	log format (default "TEXT")
+  -log-level string
+    	log level (default "INFO")
+  -port int
+    	server port (default 8070)
 ```
 
 ## Configuration
@@ -54,6 +57,9 @@ scope:
   targets:  # List of SNMP targets to discover
     - host: "192.168.1.1"  # Required: Hostname or IP address
       port: 161  # Optional: SNMP port (default: 161)
+    - host: "10.10.10.0/24"  # CIDR range: expands to all IPs in the subnet
+    - host: "10.10.10.10-20" # Dash range: expands to 10.10.10.10, 10.10.10.11, ..., 10.10.10.20
+    - host: "mydevice.local" # Hostname
   authentication:  # SNMP authentication settings
     protocol_version: "SNMPv2c"  # Required: SNMP protocol version ("SNMPv1", "SNMPv2c", or "SNMPv3")
     community: "public"  # Required for v1/v2c: SNMP community string
@@ -65,7 +71,21 @@ scope:
     # priv_protocol: "AES"
     # priv_passphrase: "privkey"
   retries: 3  # Optional: Number of SNMP retries (default: 0)
-```
+
+#### Target Range Formats
+
+The `host` field in `targets` supports the following formats:
+
+- **Single IP address:**
+  - `192.168.1.1`
+- **Hostname:**
+  - `mydevice.local`
+- **CIDR range:**
+  - `10.10.10.0/24` (expands to all IPs in the subnet)
+- **Dash range:**
+  - `10.10.10.10-20` (expands to 10.10.10.10, 10.10.10.11, ..., 10.10.10.20)
+
+Invalid or out-of-bounds ranges will be skipped and logged.
 
 ### Defaults
 

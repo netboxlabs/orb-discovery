@@ -10,7 +10,6 @@ import (
 	"syscall"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
-
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/policy"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/server"
@@ -67,7 +66,7 @@ func main() {
 	}
 
 	client, err := diode.NewClient(
-		*diodeTarget,
+		resolveEnv(*diodeTarget),
 		producerName,
 		version.GetBuildVersion(),
 		diode.WithClientID(resolveEnv(*diodeClientID)),
