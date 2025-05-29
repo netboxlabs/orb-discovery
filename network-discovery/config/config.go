@@ -47,16 +47,18 @@ type Scope struct {
 	TopPorts     *int     `yaml:"top_ports,omitempty"`
 	ScanTypes    []string `yaml:"scan_types,omitempty"`
 	MaxRetries   *int     `yaml:"max_retries,omitempty"`
+	DNSServers   []string `yaml:"dns_servers,omitempty"`
 }
 
 // Defaults represents the supported default values for a policy
 type Defaults struct {
-	Vrf         string   `yaml:"vrf,omitempty"`
-	Tenant      string   `yaml:"tenant,omitempty"`
-	Role        string   `yaml:"role,omitempty"`
-	Description string   `yaml:"description,omitempty"`
-	Comments    string   `yaml:"comments,omitempty"`
-	Tags        []string `yaml:"tags,omitempty"`
+	Vrf           string   `yaml:"vrf,omitempty"`
+	Tenant        string   `yaml:"tenant,omitempty"`
+	Role          string   `yaml:"role,omitempty"`
+	Description   string   `yaml:"description,omitempty"`
+	Comments      string   `yaml:"comments,omitempty"`
+	Tags          []string `yaml:"tags,omitempty"`
+	NetworkPrefix *int     `yaml:"network_prefix,omitempty"`
 }
 
 // PolicyConfig represents the configuration of a policy
