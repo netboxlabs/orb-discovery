@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	// SNMPDefaultPort is the default SNMP port
 	SNMPDefaultPort = 161
 )
 
