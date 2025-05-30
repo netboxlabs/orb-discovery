@@ -69,6 +69,7 @@ func (m *Manager) ParsePolicies(data []byte) (map[string]config.Policy, error) {
 	return payload.Policies, nil
 }
 
+// loadMappingConfig loads the mapping config from the file
 func (m *Manager) loadMappingConfig(policy config.Policy) (config.Mapping, error) {
 	m.logger.Debug("Loading mapping config", "mappingConfig", policy.Scope.MappingConfig)
 	mappingConfigFileContents, err := os.ReadFile(policy.Scope.MappingConfig)
@@ -84,6 +85,8 @@ func (m *Manager) loadMappingConfig(policy config.Policy) (config.Mapping, error
 	return mappingConfig, nil
 }
 
+// applyDefaults applies the default values to the policy
+// Note: this is different to the default mapping values (comments, tags etc)
 func (m *Manager) applyDefaults(policy *config.Policy) {
 	for i, target := range policy.Scope.Targets {
 		if target.Port == 0 {
@@ -92,6 +95,7 @@ func (m *Manager) applyDefaults(policy *config.Policy) {
 	}
 }
 
+// validatePolicy validates the policy
 func (m *Manager) validatePolicy(policy config.Policy) error {
 	if policy.Scope.Authentication.ProtocolVersion == "" {
 		return fmt.Errorf("missing protocol version")
@@ -106,8 +110,6 @@ func (m *Manager) validatePolicy(policy config.Policy) error {
 			return fmt.Errorf("missing community")
 		}
 	}
-
-	// m.logger.Info("validating policy", "policy", policy.Scope.Authentication)
 
 	if policy.Scope.Authentication.ProtocolVersion == "SNMPv3" {
 		if policy.Scope.Authentication.SecurityLevel != "noAuthNoPriv" &&
