@@ -13,6 +13,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	SNMPDefaultPort = 161
+)
+
 // Manager represents the policy manager
 type Manager struct {
 	policies map[string]*Runner
@@ -83,7 +87,7 @@ func (m *Manager) loadMappingConfig(policy config.Policy) (config.Mapping, error
 func (m *Manager) applyDefaults(policy *config.Policy) {
 	for i, target := range policy.Scope.Targets {
 		if target.Port == 0 {
-			policy.Scope.Targets[i].Port = 161
+			policy.Scope.Targets[i].Port = SNMPDefaultPort
 		}
 	}
 }
