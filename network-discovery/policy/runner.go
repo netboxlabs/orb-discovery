@@ -120,9 +120,9 @@ func (r *Runner) run() {
 		options = append(options, nmap.WithMostCommonPorts(*r.scope.TopPorts))
 	}
 
-	NetPrefix := "/32"
-	if r.config.Defaults.NetworkPrefix != nil && *r.config.Defaults.NetworkPrefix > 0 {
-		NetPrefix = fmt.Sprintf("/%d", *r.config.Defaults.NetworkPrefix)
+	NetMask := "/32"
+	if r.config.Defaults.NetworkMask != nil && *r.config.Defaults.NetworkMask > 0 {
+		NetMask = fmt.Sprintf("/%d", *r.config.Defaults.NetworkMask)
 	}
 
 	hasOtherScans := false
@@ -243,7 +243,7 @@ func (r *Runner) run() {
 		r.logger.Debug("processing host", slog.Any("host_address", host.Addresses), slog.Any("host_ports", host.Ports),
 			slog.Any("host_hostnames", host.Hostnames), slog.String("policy", policyName))
 		ip := &diode.IPAddress{
-			Address: diode.String(host.Addresses[0].Addr + NetPrefix),
+			Address: diode.String(host.Addresses[0].Addr + NetMask),
 		}
 		if r.config.Defaults.Description != "" {
 			ip.Description = diode.String(r.config.Defaults.Description)

@@ -52,13 +52,13 @@ type Scope struct {
 
 // Defaults represents the supported default values for a policy
 type Defaults struct {
-	Vrf           string   `yaml:"vrf,omitempty"`
-	Tenant        string   `yaml:"tenant,omitempty"`
-	Role          string   `yaml:"role,omitempty"`
-	Description   string   `yaml:"description,omitempty"`
-	Comments      string   `yaml:"comments,omitempty"`
-	Tags          []string `yaml:"tags,omitempty"`
-	NetworkPrefix *int     `yaml:"network_prefix,omitempty"`
+	Vrf         string   `yaml:"vrf,omitempty"`
+	Tenant      string   `yaml:"tenant,omitempty"`
+	Role        string   `yaml:"role,omitempty"`
+	Description string   `yaml:"description,omitempty"`
+	Comments    string   `yaml:"comments,omitempty"`
+	Tags        []string `yaml:"tags,omitempty"`
+	NetworkMask *int     `yaml:"network_mask,omitempty"`
 }
 
 // PolicyConfig represents the configuration of a policy

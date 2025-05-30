@@ -134,8 +134,8 @@ func TestRunnerWithOptions(t *testing.T) {
 			policy: config.Policy{
 				Config: config.PolicyConfig{
 					Defaults: config.Defaults{
-						Description:   "Test with ports",
-						NetworkPrefix: intPtr(24),
+						Description: "Test with ports",
+						NetworkMask: intPtr(24),
 					},
 				},
 				Scope: config.Scope{
