@@ -158,6 +158,16 @@ func TestRunnerWithOptions(t *testing.T) {
 			},
 		},
 		{
+			name: "with os detection",
+			policy: config.Policy{
+				Config: config.PolicyConfig{},
+				Scope: config.Scope{
+					Targets:     []string{"localhost"},
+					OSDetection: boolPtr(true),
+				},
+			},
+		},
+		{
 			name: "with top ports and ping scan",
 			policy: config.Policy{
 				Config: config.PolicyConfig{},

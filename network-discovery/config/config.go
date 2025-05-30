@@ -48,6 +48,7 @@ type Scope struct {
 	ScanTypes    []string `yaml:"scan_types,omitempty"`
 	MaxRetries   *int     `yaml:"max_retries,omitempty"`
 	DNSServers   []string `yaml:"dns_servers,omitempty"`
+	OSDetection  *bool    `yaml:"os_detection,omitempty"`
 }
 
 // Defaults represents the supported default values for a policy

@@ -108,6 +108,11 @@ func (r *Runner) run() {
 		options = append(options, nmap.WithCustomDNSServers(r.scope.DNSServers...))
 	}
 
+	if r.scope.OSDetection != nil && *r.scope.OSDetection {
+		options = append(options, nmap.WithOSDetection())
+		options = append(options, nmap.WithPrivileged())
+	}
+
 	if r.scope.FastMode != nil && *r.scope.FastMode {
 		options = append(options, nmap.WithFastMode())
 	}
