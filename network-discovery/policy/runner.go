@@ -294,7 +294,7 @@ func (r *Runner) run() {
 	}
 	r.logger.Info("discovery complete", slog.Int("hosts_found", len(result.Hosts)), slog.String("policy", policyName))
 
-	// Track which IP+mask combinations we've already processed
+	// Track discovered hosts
 	processedEntries := make(map[string]bool)
 
 	defaultMask := "/32"
