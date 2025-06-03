@@ -10,8 +10,11 @@ import (
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/data"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/mapping"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/metrics"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/snmp"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/targets"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Define a custom type for the context key
@@ -82,6 +85,26 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 
 // run runs the policy
 func (r *Runner) run() {
+	policyName := r.ctx.Value(policyKey).(string)
+	// Track policy execution
+	if rMetric := metrics.GetPolicyExecutions(); rMetric != nil {
+		rMetric.Add(r.ctx, 1,
+			metric.WithAttributes(
+				attribute.String("policy", r.ctx.Value(policyKey).(string)),
+			))
+	}
+	startTime := time.Now()
+
+	defer func() {
+		if rMetric := metrics.GetDiscoveryLatency(); rMetric != nil {
+			// Calculate duration in milliseconds
+			duration := float64(time.Since(startTime).Milliseconds())
+			rMetric.Record(r.ctx, duration, metric.WithAttributes(
+				attribute.String("policy", policyName),
+			))
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(r.ctx, r.timeout)
 	defer cancel()
 
@@ -114,15 +137,56 @@ func (r *Runner) run() {
 
 func (r *Runner) queryTargets(expandedTargets []config.Target, objectIDs map[string]int, mapper *mapping.ObjectIDMapper, entities []diode.Entity) []diode.Entity {
 	for _, target := range expandedTargets {
+		policyName := r.ctx.Value(policyKey).(string)
+		// Track discovery attempt
+		if rMetric := metrics.GetDiscoveryAttempts(); rMetric != nil {
+			rMetric.Add(r.ctx, 1,
+				metric.WithAttributes(
+					attribute.String("policy", policyName)))
+		}
+
+		// Start timing the discovery
+		startTime := time.Now()
+
 		host := snmp.NewHost(target.Host, target.Port, r.config.Retries, &r.scope.Authentication, r.logger, r.ClientFactory)
 		oids, err := host.Walk(objectIDs)
 		if err != nil {
 			r.logger.Warn("Error crawling host", "host", target.Host, "error", err)
+			// Track failed discovery
+			if rMetric := metrics.GetDiscoveryFailure(); rMetric != nil {
+				policyName := r.ctx.Value(policyKey).(string)
+				rMetric.Add(r.ctx, 1,
+					metric.WithAttributes(
+						attribute.String("policy", policyName),
+						attribute.String("error", err.Error()),
+					))
+			}
 			continue
+		}
+
+		// Track successful discovery
+		if rMetric := metrics.GetDiscoverySuccess(); rMetric != nil {
+			rMetric.Add(r.ctx, 1,
+				metric.WithAttributes(
+					attribute.String("policy", policyName)))
+		}
+
+		// Record discovery latency
+		if rMetric := metrics.GetDiscoveryLatency(); rMetric != nil {
+			rMetric.Record(r.ctx, time.Since(startTime).Seconds(),
+				metric.WithAttributes(
+					attribute.String("policy", policyName)))
 		}
 
 		entitiesForTarget := mapper.MapObjectIDsToEntity(oids)
 		entities = append(entities, entitiesForTarget...)
+
+		// Update discovered hosts gauge
+		if rMetric := metrics.GetDiscoveredHosts(); rMetric != nil {
+			rMetric.Record(r.ctx, int64(len(entitiesForTarget)),
+				metric.WithAttributes(
+					attribute.String("policy", policyName)))
+		}
 	}
 	return entities
 }

@@ -11,7 +11,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/metrics"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/policy"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Response represents the server response
@@ -38,6 +41,41 @@ func init() {
 	gin.SetMode(gin.ReleaseMode)
 }
 
+// metricsMiddleware is a middleware that records API metrics
+func metricsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if apiMetric := metrics.GetAPIRequests(); apiMetric != nil {
+			apiMetric.Add(c.Request.Context(), 1,
+				metric.WithAttributes(
+					attribute.String("endpoint", c.Request.URL.Path),
+					attribute.String("method", c.Request.Method),
+					attribute.Int("status", c.Writer.Status()),
+				),
+			)
+		}
+
+		// Start timing the request
+		startTime := time.Now()
+
+		// Process request
+		c.Next()
+
+		// Record API response latency
+
+		if apiMetric := metrics.GetAPIResponseLatency(); apiMetric != nil {
+			// Calculate duration in milliseconds
+			duration := float64(time.Since(startTime).Milliseconds())
+			apiMetric.Record(c.Request.Context(), duration,
+				metric.WithAttributes(
+					attribute.String("endpoint", c.Request.URL.Path),
+					attribute.String("method", c.Request.Method),
+					attribute.Int("status", c.Writer.Status()),
+				),
+			)
+		}
+	}
+}
+
 // NewServer returns a new snmp-discovery server
 func NewServer(host string, port int, logger *slog.Logger, manager *policy.Manager, version string) *Server {
 	server := &Server{
@@ -51,6 +89,9 @@ func NewServer(host string, port int, logger *slog.Logger, manager *policy.Manag
 		host:   host,
 		port:   port,
 	}
+
+	// Add metrics middleware
+	server.router.Use(metricsMiddleware())
 
 	v1 := server.router.Group("/api/v1")
 	{

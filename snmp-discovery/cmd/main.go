@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/metrics"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/policy"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/server"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/version"
@@ -48,6 +50,10 @@ func main() {
 	logLevel := flag.String("log-level", "INFO", "log level")
 	logFormat := flag.String("log-format", "TEXT", "log format")
 	help := flag.Bool("help", false, "show this help")
+	// Add new flags for metrics
+	otelEndpoint := flag.String("otel-endpoint", "", "OpenTelemetry exporter endpoint (e.g. localhost:4317)."+
+		" Environment variables can be used by wrapping them in ${} (e.g. ${OTEL_ENDPOINT})")
+	otelExportPeriod := flag.Int("otel-export-period", 10, "Period in seconds between OpenTelemetry exports")
 
 	flag.Parse()
 
@@ -80,6 +86,14 @@ func main() {
 	ctx := context.Background()
 	logger := config.NewLogger(*logLevel, *logFormat)
 
+	if otelEndpoint != nil && *otelEndpoint != "" {
+		if err := metrics.SetupMetricsExport(ctx, logger, *otelEndpoint, *otelExportPeriod); err != nil {
+			logger.Error("failed to setup metrics export", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("Metrics export configured", slog.String("endpoint", *otelEndpoint), slog.Int("period_seconds", *otelExportPeriod))
+	}
+
 	policyManager := policy.NewManager(ctx, logger, client)
 	server := server.NewServer(*host, *port, logger, policyManager, version.GetBuildVersion())
 
@@ -95,6 +109,10 @@ func main() {
 			case <-sigs:
 				logger.Warn("stop signal received, stopping snmp-discovery")
 				server.Stop()
+				// Shutdown metrics
+				if err := metrics.Shutdown(ctx); err != nil {
+					logger.Error("failed to shutdown metrics", "error", err)
+				}
 				cancelFunc()
 			case <-rootCtx.Done():
 				logger.Warn("main context cancelled")
