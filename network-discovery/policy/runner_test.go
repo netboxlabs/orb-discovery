@@ -158,12 +158,13 @@ func TestRunnerWithOptions(t *testing.T) {
 			},
 		},
 		{
-			name: "with os detection",
+			name: "with os detection and without target masks",
 			policy: config.Policy{
 				Config: config.PolicyConfig{},
 				Scope: config.Scope{
-					Targets:     []string{"localhost"},
-					OSDetection: boolPtr(true),
+					Targets:        []string{"localhost"},
+					OSDetection:    boolPtr(true),
+					UseTargetMasks: boolPtr(false),
 				},
 			},
 		},
@@ -354,10 +355,9 @@ func TestRunnerWithNetworkMask(t *testing.T) {
 			Schedule: nil, // Run immediately
 		},
 		Scope: config.Scope{
-			Targets:        []string{"127.0.0.1/28"},
-			FastMode:       boolPtr(true),
-			MaxRetries:     intPtr(0),
-			UseTargetMasks: boolPtr(true),
+			Targets:    []string{"127.0.0.1/28"},
+			FastMode:   boolPtr(true),
+			MaxRetries: intPtr(0),
 		},
 	}
 

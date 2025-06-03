@@ -318,10 +318,10 @@ func (r *Runner) run() {
 		}
 
 		var ipAddr string
-		if r.scope.UseTargetMasks != nil && *r.scope.UseTargetMasks {
-			ipAddr = r.getIPWithMask(addr, defaultMask)
-		} else {
+		if r.scope.UseTargetMasks != nil && !*r.scope.UseTargetMasks {
 			ipAddr = addr + defaultMask
+		} else {
+			ipAddr = r.getIPWithMask(addr, defaultMask)
 		}
 		processedEntries[addr] = true
 
