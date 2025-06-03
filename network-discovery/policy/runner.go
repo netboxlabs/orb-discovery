@@ -303,15 +303,13 @@ func (r *Runner) run() {
 	}
 
 	for _, host := range result.Hosts {
-
 		r.logger.Debug("processing host", slog.Any("host_address", host.Addresses), slog.Any("host_ports", host.Ports),
 			slog.Any("host_hostnames", host.Hostnames), slog.String("policy", policyName))
-
 		if len(host.Addresses) == 0 {
 			continue
 		}
-		addr := host.Addresses[0].Addr
 
+		addr := host.Addresses[0].Addr
 		if _, exists := processedEntries[addr]; exists {
 			r.logger.Info("skipping already processed IP address", slog.String("ip_address", addr), slog.String("policy", policyName))
 			continue
