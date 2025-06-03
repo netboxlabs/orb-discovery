@@ -354,9 +354,10 @@ func TestRunnerWithNetworkMask(t *testing.T) {
 			Schedule: nil, // Run immediately
 		},
 		Scope: config.Scope{
-			Targets:    []string{"127.0.0.1/28"},
-			FastMode:   boolPtr(true),
-			MaxRetries: intPtr(0),
+			Targets:        []string{"127.0.0.1/28"},
+			FastMode:       boolPtr(true),
+			MaxRetries:     intPtr(0),
+			UseTargetMasks: boolPtr(true),
 		},
 	}
 

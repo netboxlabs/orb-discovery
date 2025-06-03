@@ -65,23 +65,26 @@ func parseTargets(targets []string) []targetInfo {
 	return result
 }
 
-// getIPWithMask returns the IP address with the appropriate mask based on the target network
-func (r *Runner) getIPWithMask(ipStr string, defaultMask string, processedEntries map[string]bool) string {
+// getIPWithMask returns the IP address with the appropriate mask based on the most specific target network
+func (r *Runner) getIPWithMask(ipStr string, defaultMask string) string {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return ipStr + defaultMask
 	}
-	var matchingTargets []targetInfo
+
+	var bestTarget *targetInfo
+	var bestMask int
 	for _, target := range r.targets {
 		if target.network.Contains(ip) {
-			matchingTargets = append(matchingTargets, target)
+			maskBits, _ := target.network.Mask.Size()
+			if bestTarget == nil || maskBits > bestMask {
+				bestTarget = &target
+				bestMask = maskBits
+			}
 		}
 	}
-	for _, target := range matchingTargets {
-		if _, exists := processedEntries[ipStr+target.mask]; exists {
-			continue
-		}
-		return ipStr + target.mask
+	if bestTarget != nil {
+		return ipStr + bestTarget.mask
 	}
 	return ipStr + defaultMask
 }
@@ -307,9 +310,20 @@ func (r *Runner) run() {
 		if len(host.Addresses) == 0 {
 			continue
 		}
+		addr := host.Addresses[0].Addr
 
-		ipAddr := r.getIPWithMask(host.Addresses[0].Addr, defaultMask, processedEntries)
-		processedEntries[ipAddr] = true
+		if _, exists := processedEntries[addr]; exists {
+			r.logger.Info("skipping already processed IP address", slog.String("ip_address", addr), slog.String("policy", policyName))
+			continue
+		}
+
+		var ipAddr string
+		if r.scope.UseTargetMasks != nil && *r.scope.UseTargetMasks {
+			ipAddr = r.getIPWithMask(addr, defaultMask)
+		} else {
+			ipAddr = addr + defaultMask
+		}
+		processedEntries[addr] = true
 
 		ip := &diode.IPAddress{
 			Address: diode.String(ipAddr),
