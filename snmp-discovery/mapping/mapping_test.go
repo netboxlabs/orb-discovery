@@ -323,7 +323,7 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 						Manufacturer: &diode.Manufacturer{
 							Name: diode.String("Cisco"),
 						},
-						Model: &[]string{"cisco4000"}[0],
+						// Model: &[]string{"cisco4000"}[0],
 					},
 					Platform: &diode.Platform{
 						Name: diode.String("Cisco"),

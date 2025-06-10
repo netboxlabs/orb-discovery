@@ -35,7 +35,7 @@ func (m *MockRunner) Stop() error {
 
 func TestManagerParsePolicies(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-	manager, err := policy.NewManager(context.Background(), logger, nil)
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
 	assert.NoError(t, err)
 
 	t.Run("Valid Policy", func(t *testing.T) {
@@ -113,7 +113,7 @@ func TestManagerParsePolicies(t *testing.T) {
 
 func TestManagerPolicyLifecycle(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-	manager, err := policy.NewManager(context.Background(), logger, nil)
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
 	assert.NoError(t, err)
 	yamlData := []byte(`
         policies:

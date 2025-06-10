@@ -37,23 +37,15 @@ type Runner struct {
 	scope         config.Scope
 	config        config.PolicyConfig
 	ClientFactory snmp.ClientFactory
-	manufacturers data.DeviceDataRetreiver
+	manufacturers data.ManufacturerRetriever
 	mappingConfig *config.Mapping
 }
 
 // NewRunner returns a new policy runner
-func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client, ClientFactory snmp.ClientFactory, mappingConfig *config.Mapping) (*Runner, error) {
+func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client, ClientFactory snmp.ClientFactory, mappingConfig *config.Mapping, manufacturers data.ManufacturerRetriever) (*Runner, error) {
 	s, err := gocron.NewScheduler()
 	if err != nil {
 		return nil, err
-	}
-
-	manufacturers := data.NewEmptyDevicesList()
-	if policy.Config.DevicesFile != "" {
-		manufacturers, err = data.NewDevices(policy.Config.DevicesFile)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	runner := &Runner{

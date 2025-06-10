@@ -262,8 +262,8 @@ func (m *InterfaceMapper) FormatMACAddress(input string) (string, error) {
 
 // DeviceMapper is a struct that maps devices to entities
 type DeviceMapper struct {
-	devices data.DeviceDataRetreiver
-	logger  *slog.Logger
+	manufacturers data.ManufacturerRetriever
+	logger        *slog.Logger
 }
 
 // applyDefaults applies default values to a device entity
@@ -332,10 +332,10 @@ func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defa
 }
 
 // NewDeviceMapper creates a new DeviceMapper
-func NewDeviceMapper(devices data.DeviceDataRetreiver, logger *slog.Logger) *DeviceMapper {
+func NewDeviceMapper(manufacturers data.ManufacturerRetriever, logger *slog.Logger) *DeviceMapper {
 	return &DeviceMapper{
-		devices: devices,
-		logger:  logger,
+		manufacturers: manufacturers,
+		logger:        logger,
 	}
 }
 
@@ -355,12 +355,12 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 					fieldFound = true
 				case "platform":
 					// Use getDeviceIDs to get the manufacturer and model
-					manufacturerID, modelID, err := m.getDeviceIDs(value.Value)
+					manufacturerID, _, err := m.getDeviceIDs(value.Value)
 					if err != nil {
 						m.logger.Warn("Error getting device IDs", "error", err, "value", value.Value)
 						continue
 					}
-					manufacturer, err := m.devices.GetManufacturer(manufacturerID)
+					manufacturer, err := m.manufacturers.GetManufacturer(manufacturerID)
 					if err != nil {
 						m.logger.Warn("Error getting manufacturer", "error", err, "manufacturerID", manufacturerID)
 						continue
@@ -376,12 +376,13 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 						Manufacturer: &manufacturerEntity,
 					}
 
-					deviceModel, err := m.devices.GetDeviceModel(modelID)
-					if err != nil {
-						m.logger.Warn("Error getting device model", "error", err, "modelID", modelID)
-					}
+					// TODO: reimplement this
+					// deviceModel, err := m.devices.GetDeviceModel(modelID)
+					// if err != nil {
+					// 	m.logger.Warn("Error getting device model", "error", err, "modelID", modelID)
+					// }
 					deviceEntity.DeviceType = &diode.DeviceType{
-						Model:        &deviceModel,
+						// Model:        &deviceModel,
 						Manufacturer: &manufacturerEntity,
 					}
 					fieldFound = true
