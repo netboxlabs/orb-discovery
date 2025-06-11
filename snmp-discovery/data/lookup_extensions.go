@@ -121,7 +121,9 @@ func LoadDeviceLookupExtensions(dir string) (*DeviceLookup, error) {
 
 		filePath := filepath.Join(dir, file.Name())
 		if err := loadYAMLFile(filePath, &devicesByVendor); err != nil {
-			log.Printf("Warning: failed to load YAML file %s: %v", filePath, err)
+			safeFilePath := strings.ReplaceAll(filePath, "\n", "")
+			safeFilePath = strings.ReplaceAll(safeFilePath, "\r", "")
+			log.Printf("Warning: failed to load YAML file %s: %v", safeFilePath, err)
 			continue
 		}
 	}
