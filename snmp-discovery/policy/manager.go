@@ -148,7 +148,7 @@ func (m *Manager) validatePolicy(policy config.Policy) error {
 		}
 	}
 
-	if policy.Config.LookupExtenstionsDir == "" {
+	if policy.Config.LookupExtensionsDir == "" {
 		return fmt.Errorf("missing lookup extensions directory")
 	}
 
@@ -170,11 +170,11 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 
 	if !m.HasPolicy(name) {
 		// Load device lookup extensions
-		deviceLookup, err := data.LoadDeviceLookupExtensions(policy.Config.LookupExtenstionsDir)
+		deviceLookup, err := data.LoadDeviceLookupExtensions(policy.Config.LookupExtensionsDir)
 		if err != nil {
-			m.logger.Warn("Failed to load device lookup extensions", "error", err, "directory", policy.Config.LookupExtenstionsDir)
+			m.logger.Warn("Failed to load device lookup extensions", "error", err, "directory", policy.Config.LookupExtensionsDir)
 		} else {
-			m.logger.Info("Loaded device lookup extensions", "directory", policy.Config.LookupExtenstionsDir)
+			m.logger.Info("Loaded device lookup extensions", "directory", policy.Config.LookupExtensionsDir)
 		}
 
 		r, err := NewRunner(m.ctx, m.logger, name, policy, m.client, snmp.NewClient, &m.mappingConfig, m.manufacturers, deviceLookup)

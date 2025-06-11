@@ -246,7 +246,7 @@ devices:
 	// Create a policy with device lookup extensions directory
 	policyData := config.Policy{
 		Config: config.PolicyConfig{
-			LookupExtenstionsDir: tempDir,
+			LookupExtensionsDir: tempDir,
 		},
 		Scope: config.Scope{
 			Authentication: config.Authentication{
