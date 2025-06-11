@@ -365,7 +365,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 					manufacturer, err := m.manufacturers.GetManufacturer(manufacturerID)
 					if err != nil {
 						m.logger.Warn("Error getting manufacturer", "error", err, "manufacturerID", manufacturerID)
-						continue
+						manufacturer = value.Value
 					}
 
 					manufacturerEntity := diode.Manufacturer{
@@ -381,7 +381,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 					deviceModel, err := m.deviceLookup.GetDevice(manufacturerID, modelID)
 					if err != nil {
 						m.logger.Warn("Error getting device model falling back to OID", "error", err, "modelID", modelID)
-						deviceModel = string(objectID)
+						deviceModel = value.Value
 					}
 					deviceEntity.DeviceType = &diode.DeviceType{
 						Model:        &deviceModel,

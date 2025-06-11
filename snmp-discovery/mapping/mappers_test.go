@@ -618,11 +618,13 @@ func TestDeviceMapper_Map(t *testing.T) {
 	mockDeviceLookup := &MockDeviceLookup{}
 	mockDeviceLookup.On("GetDevice", "9", "1.1234").Return("cisco4000", nil)
 	mockDeviceLookup.On("GetDevice", "9", "1.9999").Return("", fmt.Errorf("device not found"))
+	mockDeviceLookup.On("GetDevice", "123", "1.5678").Return("device-with-unknown-manufacturer", nil)
 
 	mockManufacturers := &MockManufacturerDataRetriever{}
 	mockManufacturers.On("GetManufacturer", "9").Return("Cisco", nil)
 	mockManufacturers.On("GetManufacturer", "25506").Return("Juniper", nil)
 	mockManufacturers.On("GetManufacturer", "999").Return("", fmt.Errorf("manufacturer not found"))
+	mockManufacturers.On("GetManufacturer", "123").Return("", fmt.Errorf("manufacturer not found"))
 	mapper := mapping.NewDeviceMapper(mockManufacturers, mockDeviceLookup, logger)
 
 	tests := []struct {
@@ -727,11 +729,64 @@ func TestDeviceMapper_Map(t *testing.T) {
 					Manufacturer: &diode.Manufacturer{
 						Name: mapping.StringPtr("Cisco"),
 					},
-					Model: mapping.StringPtr("1.3.6.1.2.1.1.2.0"),
+					Model: mapping.StringPtr("1.3.6.1.4.1.9.1.9999"),
 				},
 				Platform: &diode.Platform{
 					Manufacturer: &diode.Manufacturer{
 						Name: mapping.StringPtr("Cisco"),
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "manufacturer lookup fails and falls back to objectID as manufacturer",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.1.5.0": {
+					OID:    "1.3.6.1.2.1.1.5.0",
+					Index:  "0",
+					Parent: "1.3.6.1.2.1.1.5",
+					Value:  "router2",
+					Type:   mapping.OctetString,
+				},
+				"1.3.6.1.2.1.1.2.0": {
+					OID:    "1.3.6.1.2.1.1.2.0",
+					Index:  "0",
+					Parent: "1.3.6.1.2.1.1.2",
+					Value:  "1.3.6.1.4.1.123.1.5678",
+					Type:   mapping.ObjectIdentifier,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.1",
+				Entity: "device",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.1.5",
+						Entity: "device",
+						Field:  "name",
+					},
+					{
+						OID:    "1.3.6.1.2.1.1.2",
+						Entity: "device",
+						Field:  "platform",
+					},
+				},
+			},
+			defaults: nil,
+			expectedEntity: &diode.Device{
+				Name: mapping.StringPtr("router2"),
+				DeviceType: &diode.DeviceType{
+					Manufacturer: &diode.Manufacturer{
+						Name: mapping.StringPtr("1.3.6.1.4.1.123.1.5678"),
+					},
+					Model: mapping.StringPtr("device-with-unknown-manufacturer"),
+				},
+				Platform: &diode.Platform{
+					Name: mapping.StringPtr("1.3.6.1.4.1.123.1.5678"),
+					Manufacturer: &diode.Manufacturer{
+						Name: mapping.StringPtr("1.3.6.1.4.1.123.1.5678"),
 					},
 				},
 			},
