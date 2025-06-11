@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -18,12 +17,12 @@ var manufacturersData embed.FS
 
 // ManufacturerRetriever is an interface that provides a method to retrieve a manufacturer by ID
 type ManufacturerRetriever interface {
-	GetManufacturer(id int) (string, error)
+	GetManufacturer(id string) (string, error)
 }
 
 // ManufacturerLookup represents a manufacturer lookup service
 type ManufacturerLookup struct {
-	data *map[int]string
+	data *map[string]string
 }
 
 // NewManufacturerLookup creates a new manufacturer lookup service
@@ -38,7 +37,7 @@ func NewManufacturerLookup() (*ManufacturerLookup, error) {
 		}
 	}()
 
-	manufacturers := make(map[int]string)
+	manufacturers := make(map[string]string)
 	// Don't use yaml.Unmarshal because it is way too slow for a large file
 	scanner := bufio.NewScanner(file)
 
@@ -58,13 +57,8 @@ func NewManufacturerLookup() (*ManufacturerLookup, error) {
 			continue
 		}
 
-		idStr := strings.TrimSpace(parts[0])
+		id := strings.TrimSpace(parts[0])
 		name := strings.TrimSpace(parts[1])
-
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			continue // Skip invalid entries
-		}
 
 		manufacturers[id] = name
 	}
@@ -79,7 +73,7 @@ func NewManufacturerLookup() (*ManufacturerLookup, error) {
 }
 
 // GetManufacturer returns the manufacturer name for a given ID
-func (m *ManufacturerLookup) GetManufacturer(id int) (string, error) {
+func (m *ManufacturerLookup) GetManufacturer(id string) (string, error) {
 	if name, ok := (*m.data)[id]; ok {
 		return name, nil
 	}

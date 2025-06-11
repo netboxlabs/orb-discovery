@@ -43,55 +43,55 @@ func TestManufacturerLookup_GetManufacturer(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		id      int
+		id      string
 		want    string
 		wantErr bool
 	}{
 		{
 			name:    "existing manufacturer - Reserved",
-			id:      0,
+			id:      "0",
 			want:    "Reserved",
 			wantErr: false,
 		},
 		{
 			name:    "existing manufacturer - IBM",
-			id:      2,
+			id:      "2",
 			want:    "IBM httpsw3ibmcomstandards",
 			wantErr: false,
 		},
 		{
 			name:    "existing manufacturer - Cisco Systems",
-			id:      9,
+			id:      "9",
 			want:    "ciscoSystems",
 			wantErr: false,
 		},
 		{
 			name:    "existing manufacturer - Hewlett Packard",
-			id:      11,
+			id:      "11",
 			want:    "HewlettPackard",
 			wantErr: false,
 		},
 		{
 			name:    "existing manufacturer - Apple Computer Inc",
-			id:      63,
+			id:      "63",
 			want:    "Apple Computer Inc",
 			wantErr: false,
 		},
 		{
 			name:    "non-existing manufacturer - negative ID",
-			id:      -1,
+			id:      "-1",
 			want:    "",
 			wantErr: true,
 		},
 		{
 			name:    "non-existing manufacturer - large ID",
-			id:      999999,
+			id:      "999999",
 			want:    "",
 			wantErr: true,
 		},
 		{
 			name:    "non-existing manufacturer - zero ID that doesn't exist",
-			id:      100000,
+			id:      "100000",
 			want:    "",
 			wantErr: true,
 		},
@@ -123,11 +123,11 @@ func TestManufacturerLookup_GetManufacturer_DataIntegrity(t *testing.T) {
 	assert.Greater(t, dataSize, 1000, "Expected at least 1000 manufacturers in the data")
 
 	// Test some well-known manufacturers that should exist
-	wellKnownManufacturers := map[int]string{
-		9:   "ciscoSystems",
-		43:  "3Com",
-		161: "Motorola",
-		11:  "HewlettPackard",
+	wellKnownManufacturers := map[string]string{
+		"9":   "ciscoSystems",
+		"43":  "3Com",
+		"161": "Motorola",
+		"11":  "HewlettPackard",
 	}
 
 	for id, expectedName := range wellKnownManufacturers {
@@ -146,11 +146,11 @@ func TestManufacturerLookup_EdgeCases(t *testing.T) {
 	// Test boundary conditions
 	tests := []struct {
 		name string
-		id   int
+		id   string
 	}{
-		{"zero ID", 0},
-		{"max int32", 2147483647},
-		{"min int32", -2147483648},
+		{"zero ID", "0"},
+		{"max int32", "2147483647"},
+		{"min int32", "-2147483648"},
 	}
 
 	for _, tt := range tests {

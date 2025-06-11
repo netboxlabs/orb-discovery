@@ -140,7 +140,7 @@ func (m *Entry) MapToEntity(pdus map[ObjectIDIndex]*ObjectIDValue, entityRegistr
 }
 
 // NewObjectIDMapper creates a new ObjectIDMapper
-func NewObjectIDMapper(mappings []config.MappingEntry, logger *slog.Logger, manufacturers data.ManufacturerRetriever, defaults *config.Defaults) *ObjectIDMapper {
+func NewObjectIDMapper(mappings []config.MappingEntry, logger *slog.Logger, manufacturers data.ManufacturerRetriever, deviceLookup data.DeviceRetriever, defaults *config.Defaults) *ObjectIDMapper {
 	entityMappers := map[string]orbToEntityMapper{
 		"ipAddress": &IPAddressMapper{
 			logger: logger,
@@ -151,6 +151,7 @@ func NewObjectIDMapper(mappings []config.MappingEntry, logger *slog.Logger, manu
 		"device": &DeviceMapper{
 			logger:        logger,
 			manufacturers: manufacturers,
+			deviceLookup:  deviceLookup,
 		},
 	}
 	mapping := make(map[string]*Entry)

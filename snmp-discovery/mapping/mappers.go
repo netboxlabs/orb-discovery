@@ -263,6 +263,7 @@ func (m *InterfaceMapper) FormatMACAddress(input string) (string, error) {
 // DeviceMapper is a struct that maps devices to entities
 type DeviceMapper struct {
 	manufacturers data.ManufacturerRetriever
+	deviceLookup  data.DeviceRetriever
 	logger        *slog.Logger
 }
 
@@ -332,9 +333,10 @@ func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defa
 }
 
 // NewDeviceMapper creates a new DeviceMapper
-func NewDeviceMapper(manufacturers data.ManufacturerRetriever, logger *slog.Logger) *DeviceMapper {
+func NewDeviceMapper(manufacturers data.ManufacturerRetriever, deviceLookup data.DeviceRetriever, logger *slog.Logger) *DeviceMapper {
 	return &DeviceMapper{
 		manufacturers: manufacturers,
+		deviceLookup:  deviceLookup,
 		logger:        logger,
 	}
 }
@@ -355,7 +357,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 					fieldFound = true
 				case "platform":
 					// Use getDeviceIDs to get the manufacturer and model
-					manufacturerID, _, err := m.getDeviceIDs(value.Value)
+					manufacturerID, modelID, err := m.getDeviceIDs(value.Value)
 					if err != nil {
 						m.logger.Warn("Error getting device IDs", "error", err, "value", value.Value)
 						continue
@@ -376,13 +378,13 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 						Manufacturer: &manufacturerEntity,
 					}
 
-					// TODO: reimplement this
-					// deviceModel, err := m.devices.GetDeviceModel(modelID)
-					// if err != nil {
-					// 	m.logger.Warn("Error getting device model", "error", err, "modelID", modelID)
-					// }
+					deviceModel, err := m.deviceLookup.GetDevice(manufacturerID, modelID)
+					if err != nil {
+						m.logger.Warn("Error getting device model falling back to OID", "error", err, "modelID", modelID)
+						deviceModel = string(objectID)
+					}
 					deviceEntity.DeviceType = &diode.DeviceType{
-						// Model:        &deviceModel,
+						Model:        &deviceModel,
 						Manufacturer: &manufacturerEntity,
 					}
 					fieldFound = true
@@ -406,7 +408,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 	return deviceEntity
 }
 
-func (m *DeviceMapper) getDeviceIDs(objectID string) (int, int, error) {
+func (m *DeviceMapper) getDeviceIDs(objectID string) (string, string, error) {
 	parts := strings.Split(objectID, ".")
 	if len(parts) > 0 && parts[0] == "" {
 		parts = parts[1:]
@@ -415,20 +417,10 @@ func (m *DeviceMapper) getDeviceIDs(objectID string) (int, int, error) {
 	const ManufacturerIDIndex = 6
 	// Check if we have enough parts to extract manufacturer and model IDs
 	if len(parts) > ManufacturerIDIndex {
-		manID, err := strconv.Atoi(parts[ManufacturerIDIndex])
-		if err != nil {
-			return 0, 0, err
-		}
-
-		modelID, err := strconv.Atoi(parts[len(parts)-1])
-		if err != nil {
-			return 0, 0, err
-		}
-
-		return manID, modelID, nil
+		return parts[ManufacturerIDIndex], strings.Join(parts[ManufacturerIDIndex+1:], "."), nil
 	}
 
-	return 0, 0, fmt.Errorf("invalid objectID: %s", objectID)
+	return "", "", fmt.Errorf("invalid objectID: %s", objectID)
 }
 
 func toSlug(input *string) *string {

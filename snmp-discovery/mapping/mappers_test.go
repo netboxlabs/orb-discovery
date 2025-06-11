@@ -615,11 +615,14 @@ func TestDeviceMapper_Map(t *testing.T) {
 	logger := slog.Default()
 
 	// Create a mock manufacturer data retriever
+	mockDeviceLookup := &MockDeviceLookup{}
+	mockDeviceLookup.On("GetDevice", "9", "1.1234").Return("cisco4000", nil)
+
 	mockManufacturers := &MockManufacturerDataRetriever{}
-	mockManufacturers.On("GetManufacturer", 9).Return("Cisco", nil)
-	mockManufacturers.On("GetManufacturer", 25506).Return("Juniper", nil)
-	mockManufacturers.On("GetManufacturer", 999).Return("", fmt.Errorf("manufacturer not found"))
-	mapper := mapping.NewDeviceMapper(mockManufacturers, logger)
+	mockManufacturers.On("GetManufacturer", "9").Return("Cisco", nil)
+	mockManufacturers.On("GetManufacturer", "25506").Return("Juniper", nil)
+	mockManufacturers.On("GetManufacturer", "999").Return("", fmt.Errorf("manufacturer not found"))
+	mapper := mapping.NewDeviceMapper(mockManufacturers, mockDeviceLookup, logger)
 
 	tests := []struct {
 		name           string
@@ -671,7 +674,7 @@ func TestDeviceMapper_Map(t *testing.T) {
 					Manufacturer: &diode.Manufacturer{
 						Name: mapping.StringPtr("Cisco"),
 					},
-					// Model: mapping.StringPtr("cisco4000"),
+					Model: mapping.StringPtr("cisco4000"),
 				},
 				Platform: &diode.Platform{
 					Manufacturer: &diode.Manufacturer{
@@ -838,8 +841,17 @@ type MockManufacturerDataRetriever struct {
 	mock.Mock
 }
 
-func (m *MockManufacturerDataRetriever) GetManufacturer(id int) (string, error) {
+func (m *MockManufacturerDataRetriever) GetManufacturer(id string) (string, error) {
 	args := m.Called(id)
+	return args.Get(0).(string), args.Error(1)
+}
+
+type MockDeviceLookup struct {
+	mock.Mock
+}
+
+func (m *MockDeviceLookup) GetDevice(vendorID, deviceID string) (string, error) {
+	args := m.Called(vendorID, deviceID)
 	return args.Get(0).(string), args.Error(1)
 }
 
