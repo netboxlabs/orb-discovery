@@ -617,6 +617,7 @@ func TestDeviceMapper_Map(t *testing.T) {
 	// Create a mock manufacturer data retriever
 	mockDeviceLookup := &MockDeviceLookup{}
 	mockDeviceLookup.On("GetDevice", "9", "1.1234").Return("cisco4000", nil)
+	mockDeviceLookup.On("GetDevice", "9", "1.9999").Return("", fmt.Errorf("device not found"))
 
 	mockManufacturers := &MockManufacturerDataRetriever{}
 	mockManufacturers.On("GetManufacturer", "9").Return("Cisco", nil)
@@ -675,6 +676,58 @@ func TestDeviceMapper_Map(t *testing.T) {
 						Name: mapping.StringPtr("Cisco"),
 					},
 					Model: mapping.StringPtr("cisco4000"),
+				},
+				Platform: &diode.Platform{
+					Manufacturer: &diode.Manufacturer{
+						Name: mapping.StringPtr("Cisco"),
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "device lookup fails and falls back to objectID as model",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.1.5.0": {
+					OID:    "1.3.6.1.2.1.1.5.0",
+					Index:  "0",
+					Parent: "1.3.6.1.2.1.1.5",
+					Value:  "router1",
+					Type:   mapping.OctetString,
+				},
+				"1.3.6.1.2.1.1.2.0": {
+					OID:    "1.3.6.1.2.1.1.2.0",
+					Index:  "0",
+					Parent: "1.3.6.1.2.1.1.2",
+					Value:  "1.3.6.1.4.1.9.1.9999",
+					Type:   mapping.ObjectIdentifier,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.1",
+				Entity: "device",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.1.5",
+						Entity: "device",
+						Field:  "name",
+					},
+					{
+						OID:    "1.3.6.1.2.1.1.2",
+						Entity: "device",
+						Field:  "platform",
+					},
+				},
+			},
+			defaults: nil,
+			expectedEntity: &diode.Device{
+				Name: mapping.StringPtr("router1"),
+				DeviceType: &diode.DeviceType{
+					Manufacturer: &diode.Manufacturer{
+						Name: mapping.StringPtr("Cisco"),
+					},
+					Model: mapping.StringPtr("1.3.6.1.2.1.1.2.0"),
 				},
 				Platform: &diode.Platform{
 					Manufacturer: &diode.Manufacturer{
