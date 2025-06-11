@@ -106,7 +106,9 @@ func LoadDeviceLookupExtensions(dir string) (*DeviceLookup, error) {
 	// Read all files in the directory
 	files, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read directory %s: %w", dir, err)
+		return &DeviceLookup{
+			devicesByVendor: make(map[string]map[string]string),
+		}, fmt.Errorf("failed to read directory %s: %w", dir, err)
 	}
 
 	devicesByVendor := make(map[string]map[string]string)

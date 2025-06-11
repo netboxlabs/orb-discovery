@@ -394,7 +394,6 @@ func TestLoadDeviceLookupExtensions_ErrorCases(t *testing.T) {
 			deviceLookup, err := LoadDeviceLookupExtensions(tt.dir)
 			if tt.wantErr {
 				assert.Error(t, err)
-				assert.Nil(t, deviceLookup)
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, deviceLookup)

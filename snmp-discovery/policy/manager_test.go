@@ -47,6 +47,7 @@ func TestManagerParsePolicies(t *testing.T) {
             config:
               defaults:
                 comments: test
+              lookup_extensions_dir: /tmp/extensions
             scope:
               targets:
                 - host: 192.168.1.1
@@ -75,6 +76,7 @@ func TestManagerParsePolicies(t *testing.T) {
             config:
               defaults:
                 comments: test
+              lookup_extensions_dir: /tmp/extensions
             scope:
               targets:
                 - host: 192.168.1.1
@@ -90,10 +92,12 @@ func TestManagerParsePolicies(t *testing.T) {
 		assert.Contains(t, policies, "policy1")
 	})
 
-	t.Run("Invalid Policy", func(t *testing.T) {
+	t.Run("Invalid Policy - Missing Protocol Version", func(t *testing.T) {
 		yamlData := []byte(`
         policies:
           policy1:
+            config:
+              lookup_extensions_dir: /tmp/extensions
             scope:
               targets:
                 - host: 192.168.1.1
@@ -103,6 +107,27 @@ func TestManagerParsePolicies(t *testing.T) {
 		_, err := manager.ParsePolicies(yamlData)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "policy1 : invalid policy : missing protocol version")
+	})
+
+	t.Run("Invalid Policy - Missing LookupExtensionsDir", func(t *testing.T) {
+		yamlData := []byte(`
+        policies:
+          policy1:
+            config:
+              defaults:
+                comments: test
+            scope:
+              targets:
+                - host: 192.168.1.1
+                  port: 162
+              authentication:
+                protocol_version: SNMPv2c
+                community: public
+    `)
+
+		_, err := manager.ParsePolicies(yamlData)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "policy1 : invalid policy : missing lookup extensions directory")
 	})
 
 	t.Run("No Policies", func(t *testing.T) {
@@ -120,6 +145,8 @@ func TestManagerPolicyLifecycle(t *testing.T) {
 	yamlData := []byte(`
         policies:
           policy1:
+            config:
+              lookup_extensions_dir: /tmp/extensions
             scope:
               targets:
                 - host: 192.168.1.1
@@ -127,6 +154,8 @@ func TestManagerPolicyLifecycle(t *testing.T) {
                 protocol_version: SNMPv2c
                 community: public
           policy2:
+            config:
+              lookup_extensions_dir: /tmp/extensions
             scope:
               targets:
                 - host: 192.168.2.1
@@ -134,6 +163,8 @@ func TestManagerPolicyLifecycle(t *testing.T) {
                 protocol_version: SNMPv2c
                 community: public
           policy3:
+            config:
+              lookup_extensions_dir: /tmp/extensions
             scope:
               targets: []
               authentication:
