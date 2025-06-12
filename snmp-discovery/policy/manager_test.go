@@ -4,10 +4,12 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/data"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/policy"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/snmp"
 	"github.com/stretchr/testify/assert"
@@ -33,19 +35,10 @@ func (m *MockRunner) Stop() error {
 	return args.Error(0)
 }
 
-func writeMappingConfigFile(filename string) {
-	_ = os.WriteFile(filename, []byte(`
-    entries:
-      - oid: 1.3.6.1.2.1.1.1.0
-        entity: device
-        field: description
-        description: "Device description string (sysDescr)"
-    `), 0o644)
-}
-
 func TestManagerParsePolicies(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-	manager := policy.NewManager(context.Background(), logger, nil)
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
+	assert.NoError(t, err)
 
 	t.Run("Valid Policy", func(t *testing.T) {
 		yamlData := []byte(`
@@ -54,6 +47,7 @@ func TestManagerParsePolicies(t *testing.T) {
             config:
               defaults:
                 comments: test
+              lookup_extensions_dir: /tmp/extensions
             scope:
               targets:
                 - host: 192.168.1.1
@@ -62,14 +56,7 @@ func TestManagerParsePolicies(t *testing.T) {
               authentication:
                 protocol_version: SNMPv2c
                 community: public
-              mapping_config: "valid_mapping.yaml"
        `)
-
-		// Create a dummy valid mapping file
-		writeMappingConfigFile("valid_mapping.yaml")
-		defer func() {
-			_ = os.Remove("valid_mapping.yaml")
-		}()
 
 		policies, err := manager.ParsePolicies(yamlData)
 		assert.NoError(t, err)
@@ -82,7 +69,47 @@ func TestManagerParsePolicies(t *testing.T) {
 		assert.Equal(t, uint16(161), policies["policy1"].Scope.Targets[1].Port)
 	})
 
-	t.Run("Invalid MappingConfig", func(t *testing.T) {
+	t.Run("Valid Policy with Embedded Mapping", func(t *testing.T) {
+		yamlData := []byte(`
+        policies:
+          policy1:
+            config:
+              defaults:
+                comments: test
+              lookup_extensions_dir: /tmp/extensions
+            scope:
+              targets:
+                - host: 192.168.1.1
+                  port: 162
+              authentication:
+                protocol_version: SNMPv2c
+                community: public
+       `)
+
+		// With embedded mapping, policies should parse successfully
+		policies, err := manager.ParsePolicies(yamlData)
+		assert.NoError(t, err)
+		assert.Contains(t, policies, "policy1")
+	})
+
+	t.Run("Invalid Policy - Missing Protocol Version", func(t *testing.T) {
+		yamlData := []byte(`
+        policies:
+          policy1:
+            config:
+              lookup_extensions_dir: /tmp/extensions
+            scope:
+              targets:
+                - host: 192.168.1.1
+                  port: 162
+    `)
+
+		_, err := manager.ParsePolicies(yamlData)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "policy1 : invalid policy : missing protocol version")
+	})
+
+	t.Run("Invalid Policy - Missing LookupExtensionsDir", func(t *testing.T) {
 		yamlData := []byte(`
         policies:
           policy1:
@@ -96,27 +123,11 @@ func TestManagerParsePolicies(t *testing.T) {
               authentication:
                 protocol_version: SNMPv2c
                 community: public
-              mapping_config: "invalid_mapping.yaml"
-       `)
-
-		_, err := manager.ParsePolicies(yamlData)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "policy1 : invalid policy : mapping configuration file does not exist")
-	})
-
-	t.Run("Invalid Policy", func(t *testing.T) {
-		yamlData := []byte(`
-        policies:
-          policy1:
-            scope:
-              targets:
-                - host: 192.168.1.1
-                  port: 162
     `)
 
 		_, err := manager.ParsePolicies(yamlData)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "policy1 : invalid policy : missing protocol version")
+		assert.Contains(t, err.Error(), "policy1 : invalid policy : missing lookup extensions directory")
 	})
 
 	t.Run("No Policies", func(t *testing.T) {
@@ -129,39 +140,37 @@ func TestManagerParsePolicies(t *testing.T) {
 
 func TestManagerPolicyLifecycle(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-	manager := policy.NewManager(context.Background(), logger, nil)
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
+	assert.NoError(t, err)
 	yamlData := []byte(`
         policies:
           policy1:
+            config:
+              lookup_extensions_dir: /tmp/extensions
             scope:
               targets:
                 - host: 192.168.1.1
               authentication:
                 protocol_version: SNMPv2c
                 community: public
-              mapping_config: "valid_mapping.yaml"
           policy2:
+            config:
+              lookup_extensions_dir: /tmp/extensions
             scope:
               targets:
                 - host: 192.168.2.1
               authentication:
                 protocol_version: SNMPv2c
                 community: public
-              mapping_config: "valid_mapping.yaml"
           policy3:
+            config:
+              lookup_extensions_dir: /tmp/extensions
             scope:
               targets: []
               authentication:
                 protocol_version: SNMPv2c
                 community: public
-              mapping_config: "valid_mapping.yaml"
        `)
-
-	// Create a dummy valid mapping file
-	writeMappingConfigFile("valid_mapping.yaml")
-	defer func() {
-		_ = os.Remove("valid_mapping.yaml")
-	}()
 
 	policies, err := manager.ParsePolicies(yamlData)
 	assert.NoError(t, err)
@@ -205,4 +214,59 @@ func TestManagerGetCapabilities(t *testing.T) {
 
 	capabilities := manager.GetCapabilities()
 	assert.Equal(t, []string{"targets"}, capabilities)
+}
+
+func TestManagerStartPolicyWithDeviceLookupExtensions(t *testing.T) {
+	// Create a temporary directory for device lookup files
+	tempDir := t.TempDir()
+
+	// Create a sample YAML file with device information
+	deviceYAML := `
+devices:
+  vendor1:
+    device1: "Test Device 1"
+    device2: "Test Device 2"
+  vendor2:
+    device3: "Test Device 3"
+`
+	yamlFile := filepath.Join(tempDir, "devices.yaml")
+	err := os.WriteFile(yamlFile, []byte(deviceYAML), 0o644)
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	mockClient := new(MockDiodeClient)
+
+	// Create mock manufacturer lookup
+	manufacturerLookup := &data.ManufacturerLookup{}
+
+	manager, err := policy.NewManager(ctx, logger, mockClient, manufacturerLookup)
+	assert.NoError(t, err)
+
+	// Create a policy with device lookup extensions directory
+	policyData := config.Policy{
+		Config: config.PolicyConfig{
+			LookupExtensionsDir: tempDir,
+		},
+		Scope: config.Scope{
+			Authentication: config.Authentication{
+				ProtocolVersion: "SNMPv2c",
+				Community:       "public",
+			},
+			Targets: []config.Target{
+				{Host: "192.168.1.1", Port: 161},
+			},
+		},
+	}
+
+	// Start the policy - this should load device lookup extensions
+	err = manager.StartPolicy("test-policy-with-devices", policyData)
+	assert.NoError(t, err)
+
+	// Verify policy was started
+	assert.True(t, manager.HasPolicy("test-policy-with-devices"))
+
+	// Clean up
+	err = manager.StopPolicy("test-policy-with-devices")
+	assert.NoError(t, err)
 }

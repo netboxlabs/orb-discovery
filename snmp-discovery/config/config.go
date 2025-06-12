@@ -13,8 +13,6 @@ type Status struct {
 type Scope struct {
 	Targets        []Target       `yaml:"targets"`
 	Authentication Authentication `yaml:"authentication"`
-	MappingConfig  string         `yaml:"mapping_config,omitempty"`
-	Mappings       []MappingEntry `yaml:"mappings,omitempty"`
 }
 
 // Target represents a target host to crawl
@@ -72,11 +70,11 @@ type Defaults struct {
 
 // PolicyConfig represents the configuration of a policy
 type PolicyConfig struct {
-	Schedule    *string  `yaml:"schedule,omitempty"`
-	Defaults    Defaults `yaml:"defaults"`
-	Timeout     int      `yaml:"timeout"`
-	DevicesFile string   `yaml:"devices_file,omitempty"`
-	Retries     int      `yaml:"retries"`
+	Schedule            *string  `yaml:"schedule,omitempty"`
+	Defaults            Defaults `yaml:"defaults"`
+	Timeout             int      `yaml:"timeout"`
+	Retries             int      `yaml:"retries"`
+	LookupExtensionsDir string   `yaml:"lookup_extensions_dir,omitempty"`
 }
 
 // Policy represents a snmp-discovery policy

@@ -83,11 +83,18 @@ func createEntity(entityType EntityType) (diode.Entity, error) {
 	case "ipAddress":
 		return &diode.IPAddress{}, nil
 	case "interface":
-		return &diode.Interface{}, nil
+		return &diode.Interface{
+			Name: StringPtr("Unknown"),
+		}, nil
 	case "device":
 		return &diode.Device{}, nil
 	}
 	return nil, fmt.Errorf("unimplemented entity type: %s", entityType)
+}
+
+// StringPtr is a helper function to create a pointer to a string
+func StringPtr(s string) *string {
+	return &s
 }
 
 // ObjectIDValueMap is a map of ObjectIDs to their values
@@ -133,7 +140,7 @@ func (m *Entry) MapToEntity(pdus map[ObjectIDIndex]*ObjectIDValue, entityRegistr
 }
 
 // NewObjectIDMapper creates a new ObjectIDMapper
-func NewObjectIDMapper(mappings []config.MappingEntry, logger *slog.Logger, devices data.DeviceDataRetreiver, defaults *config.Defaults) *ObjectIDMapper {
+func NewObjectIDMapper(mappings []config.MappingEntry, logger *slog.Logger, manufacturers data.ManufacturerRetriever, deviceLookup data.DeviceRetriever, defaults *config.Defaults) *ObjectIDMapper {
 	entityMappers := map[string]orbToEntityMapper{
 		"ipAddress": &IPAddressMapper{
 			logger: logger,
@@ -142,8 +149,9 @@ func NewObjectIDMapper(mappings []config.MappingEntry, logger *slog.Logger, devi
 			logger: logger,
 		},
 		"device": &DeviceMapper{
-			logger:  logger,
-			devices: devices,
+			logger:        logger,
+			manufacturers: manufacturers,
+			deviceLookup:  deviceLookup,
 		},
 	}
 	mapping := make(map[string]*Entry)

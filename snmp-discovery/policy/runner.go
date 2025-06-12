@@ -37,22 +37,16 @@ type Runner struct {
 	scope         config.Scope
 	config        config.PolicyConfig
 	ClientFactory snmp.ClientFactory
-	manufacturers data.DeviceDataRetreiver
+	manufacturers data.ManufacturerRetriever
+	mappingConfig *config.Mapping
+	deviceLookup  data.DeviceRetriever
 }
 
 // NewRunner returns a new policy runner
-func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client, ClientFactory snmp.ClientFactory) (*Runner, error) {
+func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client, ClientFactory snmp.ClientFactory, mappingConfig *config.Mapping, manufacturers data.ManufacturerRetriever, deviceLookup data.DeviceRetriever) (*Runner, error) {
 	s, err := gocron.NewScheduler()
 	if err != nil {
 		return nil, err
-	}
-
-	manufacturers := data.NewEmptyDevicesList()
-	if policy.Config.DevicesFile != "" {
-		manufacturers, err = data.NewDevices(policy.Config.DevicesFile)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	runner := &Runner{
@@ -61,6 +55,8 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 		logger:        logger,
 		ClientFactory: ClientFactory,
 		manufacturers: manufacturers,
+		mappingConfig: mappingConfig,
+		deviceLookup:  deviceLookup,
 	}
 
 	runner.task = gocron.NewTask(runner.run)
@@ -108,7 +104,7 @@ func (r *Runner) run() {
 	ctx, cancel := context.WithTimeout(r.ctx, r.timeout)
 	defer cancel()
 
-	mapper := mapping.NewObjectIDMapper(r.scope.Mappings, r.logger, r.manufacturers, &r.config.Defaults)
+	mapper := mapping.NewObjectIDMapper(r.mappingConfig.Entries, r.logger, r.manufacturers, r.deviceLookup, &r.config.Defaults)
 	objectIDs := mapper.ObjectIDs()
 
 	r.logger.Info("Starting SNMP crawl of targets", slog.Any("targetCount", len(r.scope.Targets)), slog.Any("objectCount", len(objectIDs)))

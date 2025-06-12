@@ -38,9 +38,10 @@ func TestServerConfigureAndStart(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	client := new(MockClient)
-	policyManager := policy.NewManager(ctx, logger, client)
+	policyManager, err := policy.NewManager(ctx, logger, client, nil)
+	require.NoError(t, err)
 
-	err := setupTestMeter(t)
+	err = setupTestMeter(t)
 	require.NoError(t, err)
 
 	srv := server.NewServer("localhost", 8081, logger, policyManager, "1.0.0")
@@ -65,7 +66,8 @@ func TestServerGetCapabilities(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	client := new(MockClient)
-	policyManager := policy.NewManager(ctx, logger, client)
+	policyManager, err := policy.NewManager(ctx, logger, client, nil)
+	require.NoError(t, err)
 
 	srv := server.NewServer("localhost", 8081, logger, policyManager, "1.0.0")
 
@@ -84,7 +86,8 @@ func TestServerCreateDeletePolicy(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	client := new(MockClient)
-	policyManager := policy.NewManager(ctx, logger, client)
+	policyManager, err := policy.NewManager(ctx, logger, client, nil)
+	require.NoError(t, err)
 
 	srv := server.NewServer("localhost", 8081, logger, policyManager, "1.0.0")
 
@@ -92,6 +95,7 @@ func TestServerCreateDeletePolicy(t *testing.T) {
     policies:
       test-policy:
         config:
+          lookup_extensions_dir: /tmp/lookup_extensions
           defaults:
             site: New York NY
         scope:
@@ -100,16 +104,9 @@ func TestServerCreateDeletePolicy(t *testing.T) {
           authentication:
             protocol_version: SNMPv2c
             community: public
-          mapping_config: valid_mapping.yaml
     `)
 
-	// Create a dummy valid mapping file
-	writeMappingConfigFile("valid_mapping.yaml")
-	defer func() {
-		_ = os.Remove("valid_mapping.yaml")
-	}()
-
-	err := setupTestMeter(t)
+	err = setupTestMeter(t)
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
@@ -125,28 +122,16 @@ func TestServerCreateDeletePolicy(t *testing.T) {
 	// Try to create the same policy again
 	body = []byte(`
     policies:
-      test-pol:
-        scope:
-          targets: 
-            - host: 192.168.31.1
-          authentication:
-            protocol_version: SNMPv2c
-            community: public
-          mapping_config: valid_mapping.yaml
       test-policy:
+        config:
+          lookup_extensions_dir: /tmp/lookup_extensions
         scope:
           targets: 
             - host: 192.168.31.1
           authentication:
             protocol_version: SNMPv2c
             community: public
-          mapping_config: valid_mapping.yaml
     `)
-
-	writeMappingConfigFile("valid_mapping.yaml")
-	defer func() {
-		_ = os.Remove("valid_mapping.yaml")
-	}()
 
 	w = httptest.NewRecorder()
 	request, _ = http.NewRequest(http.MethodPost, "/api/v1/policies", bytes.NewReader(body))
@@ -180,15 +165,6 @@ func setupTestMeter(_ *testing.T) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	// Use the no-op meter provider for testing to avoid actual metrics export
 	return metrics.SetupMetricsExport(ctx, logger, "localhost:4317", 10)
-}
-
-func writeMappingConfigFile(filename string) {
-	_ = os.WriteFile(filename, []byte(`
-    entries:
-      - oid: .1.3.6.1.2.1.1.1.0
-        entity: device
-        field: description
-    `), 0o644)
 }
 
 func TestServerCreateInvalidPolicy(t *testing.T) {
@@ -228,15 +204,17 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			body: []byte(`
             policies:
               test-policy:
+                config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                 scope:
                   targets:
                     - host: 192.168.31.1
                   authentication:
                     protocol_version: SNMPv2c
                     community: public
-                  mapping_config: valid_mapping.yaml
               test-policy-invalid:
                 config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                   defaults:
                     site: New York NY
                 scope:
@@ -244,7 +222,6 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
                   authentication:
                     protocol_version: SNMPv2c
                     community: public
-                  mapping_config: valid_mapping.yaml
             `),
 			returnCode:    http.StatusBadRequest,
 			returnMessage: `test-policy-invalid : no targets found in the policy`,
@@ -255,21 +232,22 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			body: []byte(`
             policies:
               test-policy:
+                config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                 scope:
                   targets:
                     - host: 192.168.31.1
                   authentication:
                     protocol_version: SNMPv2c
                     community: public
-                  mapping_config: valid_mapping.yaml
               test-policy-invalid:
                 config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                   defaults:
                     site: New York NY
                 scope:
                   targets:
                     - host: 192.168.31.1
-                  mapping_config: valid_mapping.yaml
             `),
 			returnCode:    http.StatusBadRequest,
 			returnMessage: `test-policy-invalid : invalid policy : missing protocol version`,
@@ -280,13 +258,14 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			body: []byte(`
             policies:
               test-policy:
+                config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                 scope:
                   targets:
                     - host: 192.168.31.1
                   authentication:
                     protocol_version: SNMPv4
                     community: public
-                  mapping_config: valid_mapping.yaml
             `),
 			returnCode:    http.StatusBadRequest,
 			returnMessage: `test-policy : invalid policy : unsupported protocol version`,
@@ -297,12 +276,13 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			body: []byte(`
             policies:
               test-policy:
+                config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                 scope:
                   targets:
                     - host: 192.168.31.1
                   authentication:
                     protocol_version: SNMPv2c
-                  mapping_config: valid_mapping.yaml
             `),
 			returnCode:    http.StatusBadRequest,
 			returnMessage: `test-policy : invalid policy : missing community`,
@@ -313,6 +293,8 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			body: []byte(`
             policies:
               test-policy:
+                config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                 scope:
                   targets:
                     - host: 192.168.31.1
@@ -324,7 +306,6 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
                     auth_protocol: MD5
                     priv_passphrase: pass
                     priv_protocol: DES
-                  mapping_config: valid_mapping.yaml
             `),
 			returnCode:    http.StatusBadRequest,
 			returnMessage: `test-policy : invalid policy : invalid security level`,
@@ -335,6 +316,8 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			body: []byte(`
             policies:
               test-policy:
+                config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                 scope:
                   targets:
                     - host: 192.168.31.1
@@ -345,7 +328,6 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
                     auth_protocol: MD5
                     priv_passphrase: pass
                     priv_protocol: DES
-                  mapping_config: valid_mapping.yaml
             `),
 			returnCode:    http.StatusBadRequest,
 			returnMessage: `test-policy : invalid policy : invalid security level`,
@@ -356,6 +338,8 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			body: []byte(`
             policies:
               test-policy:
+                config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                 scope:
                   targets:
                     - host: 192.168.31.1
@@ -374,6 +358,8 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			body: []byte(`
             policies:
               test-policy:
+                config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                 scope:
                   targets:
                     - host: 192.168.31.1
@@ -392,6 +378,8 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			body: []byte(`
             policies:
               test-policy:
+                config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                 scope:
                   targets:
                     - host: 192.168.31.1
@@ -410,6 +398,8 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			body: []byte(`
             policies:
               test-policy:
+                config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                 scope:
                   targets:
                     - host: 192.168.31.1
@@ -420,7 +410,6 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
                     auth_passphrase: pass
                     auth_protocol: MD5
                     priv_protocol: DES
-                  mapping_config: valid_mapping.yaml
             `),
 			returnCode:    http.StatusBadRequest,
 			returnMessage: `test-policy : invalid policy : missing priv passphrase`,
@@ -431,6 +420,8 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			body: []byte(`
             policies:
               test-policy:
+                config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                 scope:
                   targets:
                     - host: 192.168.31.1
@@ -441,7 +432,6 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
                     auth_passphrase: pass
                     priv_passphrase: pass
                     priv_protocol: DES
-                  mapping_config: valid_mapping.yaml
             `),
 			returnCode:    http.StatusBadRequest,
 			returnMessage: `test-policy : invalid policy : missing auth protocol`,
@@ -452,6 +442,8 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			body: []byte(`
             policies:
               test-policy:
+                config:
+                  lookup_extensions_dir: /tmp/lookup_extensions
                 scope:
                   targets:
                     - host: 192.168.31.1
@@ -462,53 +454,9 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
                     auth_passphrase: pass
                     priv_passphrase: pass
                     auth_protocol: MD5
-                  mapping_config: valid_mapping.yaml
             `),
 			returnCode:    http.StatusBadRequest,
 			returnMessage: `test-policy : invalid policy : missing priv protocol`,
-		},
-		{
-			desc:        "missing mapping config",
-			contentType: "application/x-yaml",
-			body: []byte(`
-            policies:
-              test-policy:
-                scope:
-                  targets:
-                    - host: 192.168.31.1
-                  authentication:
-                    protocol_version: SNMPv3
-                    security_level: authPriv
-                    username: user
-                    auth_passphrase: pass
-                    priv_passphrase: pass
-                    auth_protocol: MD5
-                    priv_protocol: DES
-            `),
-			returnCode:    http.StatusBadRequest,
-			returnMessage: `test-policy : invalid policy : missing mapping config`,
-		},
-		{
-			desc:        "missing mapping config file",
-			contentType: "application/x-yaml",
-			body: []byte(`
-            policies:
-              test-policy:
-                scope:
-                  targets:
-                    - host: 192.168.31.1
-                  authentication:
-                    protocol_version: SNMPv3
-                    security_level: authPriv
-                    username: user
-                    auth_passphrase: pass
-                    priv_passphrase: pass
-                    auth_protocol: MD5
-                    priv_protocol: DES
-                  mapping_config: invalid_mapping.yaml
-            `),
-			returnCode:    http.StatusBadRequest,
-			returnMessage: `test-policy : invalid policy : mapping configuration file does not exist`,
 		},
 	}
 	for _, tt := range tests {
@@ -517,12 +465,8 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 			client := new(MockClient)
 
-			writeMappingConfigFile("valid_mapping.yaml")
-			defer func() {
-				_ = os.Remove("valid_mapping.yaml")
-			}()
-
-			policyManager := policy.NewManager(ctx, logger, client)
+			policyManager, err := policy.NewManager(ctx, logger, client, nil)
+			require.NoError(t, err)
 
 			srv := server.NewServer("localhost", 8073, logger, policyManager, "1.0.0")
 
