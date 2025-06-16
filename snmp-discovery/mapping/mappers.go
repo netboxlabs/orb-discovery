@@ -344,7 +344,8 @@ func NewDeviceMapper(manufacturers data.ManufacturerRetriever, deviceLookup data
 // Map maps devices to entities
 func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *Entry, entityRegistry *EntityRegistry, defaults *config.Defaults) diode.Entity {
 	m.logger.Debug("Mapping values to device entity", "values", values, "mappingEntry", mappingEntry)
-	deviceEntity := entityRegistry.GetOrCreateEntity(EntityType(mappingEntry.Entity), getIndex(values)).(*diode.Device)
+	index := "CURRENT" // There's only one device per crawl
+	deviceEntity := entityRegistry.GetOrCreateEntity(EntityType(mappingEntry.Entity), ObjectIDIndex(index)).(*diode.Device)
 
 	fieldFound := false
 	for objectID, value := range values {
