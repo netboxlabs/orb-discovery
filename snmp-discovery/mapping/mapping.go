@@ -104,8 +104,11 @@ type ObjectIDValueMap map[string]Value
 type EntityType string
 
 const (
-	DeviceEntityType    EntityType = "device"
+	// DeviceEntityType is the type of the device entity
+	DeviceEntityType EntityType = "device"
+	// InterfaceEntityType is the type of the interface entity
 	InterfaceEntityType EntityType = "interface"
+	// IPAddressEntityType is the type of the IP address entity
 	IPAddressEntityType EntityType = "ipAddress"
 )
 
@@ -259,12 +262,12 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 	uniqueEntities := make(map[diode.Entity]bool)
 	for index, value := range objectIDIndexMap {
 		m.logger.Debug("Mapping objectIDIndex", "objectIDIndex", index, "values", value.Values)
-		Entry, err := m.getMappingEntry(value.Index)
+		entry, err := m.getMappingEntry(value.Index)
 		if err != nil {
 			m.logger.Warn("Error finding mapping entry", "error", err, "objectID", value.Index)
 			continue
 		}
-		newEntity := Entry.MapToEntity(value.Values, m.registry, m.defaults, m.logger)
+		newEntity := entry.MapToEntity(value.Values, m.registry, m.defaults, m.logger)
 		uniqueEntities[newEntity] = true
 	}
 

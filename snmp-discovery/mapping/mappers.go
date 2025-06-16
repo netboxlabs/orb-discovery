@@ -332,6 +332,7 @@ func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defa
 	}
 }
 
+// CurrentDeviceIndex is the index of the current device
 const CurrentDeviceIndex = "CURRENT"
 
 // NewDeviceMapper creates a new DeviceMapper
