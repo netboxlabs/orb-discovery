@@ -103,6 +103,12 @@ type ObjectIDValueMap map[string]Value
 // EntityType is a type that represents an entity type
 type EntityType string
 
+const (
+	DeviceEntityType    EntityType = "device"
+	InterfaceEntityType EntityType = "interface"
+	IPAddressEntityType EntityType = "ipAddress"
+)
+
 // ObjectIDMapper is a struct that maps ObjectIDs to entities
 type ObjectIDMapper struct {
 	mapping  map[string]*Entry
@@ -262,7 +268,7 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 		uniqueEntities[newEntity] = true
 	}
 
-	currentDevice := m.registry.GetOrCreateEntity(EntityType("device"), ObjectIDIndex("CURRENT")).(*diode.Device)
+	currentDevice := m.registry.GetOrCreateEntity(DeviceEntityType, CurrentDeviceIndex).(*diode.Device)
 	entities := make([]diode.Entity, 0, len(uniqueEntities))
 	for entity := range uniqueEntities {
 		if diodeInterface, ok := entity.(*diode.Interface); ok {
