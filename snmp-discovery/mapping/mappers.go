@@ -181,7 +181,7 @@ func (m *InterfaceMapper) applyDefaults(entity *diode.Interface, defaults *confi
 // Map maps interfaces to entities
 func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry *Entry, entityRegistry *EntityRegistry, defaults *config.Defaults) diode.Entity {
 	m.logger.Debug("Mapping values to interface entity", "values", values, "mappingEntry", mappingEntry)
-	interfaceEntity := entityRegistry.GetOrCreateEntity(IPAddressEntityType, getIndex(values)).(*diode.Interface)
+	interfaceEntity := entityRegistry.GetOrCreateEntity(InterfaceEntityType, getIndex(values)).(*diode.Interface)
 
 	fieldFound := false
 	for objectID, value := range values {
