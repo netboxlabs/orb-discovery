@@ -80,9 +80,9 @@ func (m *ManufacturerLookup) GetManufacturer(id string) (string, error) {
 	return "", fmt.Errorf("manufacturer not found")
 }
 
-// DeviceRetriever is an interface that provides a method to retrieve device information by vendor and device IDs
+// DeviceRetriever is an interface that provides a method to retrieve device information by device OID
 type DeviceRetriever interface {
-	GetDevice(deviceID string) (string, error)
+	GetDevice(deviceOID string) (string, error)
 }
 
 // DeviceLookup represents a device lookup service
@@ -90,7 +90,7 @@ type DeviceLookup struct {
 	devicesByVendor map[string]string
 }
 
-// GetDevice returns the device name for given vendor ID and device ID
+// GetDevice returns the device name for given device OID
 func (d *DeviceLookup) GetDevice(deviceOID string) (string, error) {
 	if device, ok := d.devicesByVendor[deviceOID]; ok {
 		return device, nil

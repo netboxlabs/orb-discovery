@@ -385,7 +385,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 
 					deviceModel, err := m.deviceLookup.GetDevice(value.Value)
 					if err != nil {
-						m.logger.Warn("Error getting device model falling back to OID", "error", err, "modelID", value.Value)
+						m.logger.Warn("Error getting device model falling back to OID", "error", err, "deviceOID", value.Value)
 						deviceModel = value.Value
 					}
 					deviceEntity.DeviceType = &diode.DeviceType{
