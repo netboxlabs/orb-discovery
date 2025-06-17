@@ -362,8 +362,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 					deviceEntity.Description = &value.Value
 					fieldFound = true
 				case "platform":
-					// Use getDeviceIDs to get the manufacturer and model
-					manufacturerID, _, err := m.getDeviceIDs(value.Value)
+					manufacturerID, err := m.getManufacturerID(value.Value)
 					if err != nil {
 						m.logger.Warn("Error getting device IDs", "error", err, "value", value.Value)
 						continue
@@ -414,7 +413,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 	return deviceEntity
 }
 
-func (m *DeviceMapper) getDeviceIDs(objectID string) (string, string, error) {
+func (m *DeviceMapper) getManufacturerID(objectID string) (string, error) {
 	parts := strings.Split(objectID, ".")
 	if len(parts) > 0 && parts[0] == "" {
 		parts = parts[1:]
@@ -423,10 +422,10 @@ func (m *DeviceMapper) getDeviceIDs(objectID string) (string, string, error) {
 	const ManufacturerIDIndex = 6
 	// Check if we have enough parts to extract manufacturer and model IDs
 	if len(parts) > ManufacturerIDIndex {
-		return parts[ManufacturerIDIndex], strings.Join(parts[ManufacturerIDIndex+1:], "."), nil
+		return parts[ManufacturerIDIndex], nil
 	}
 
-	return "", "", fmt.Errorf("invalid objectID: %s", objectID)
+	return "", fmt.Errorf("invalid objectID: %s", objectID)
 }
 
 func toSlug(input *string) *string {
