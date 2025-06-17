@@ -19,7 +19,7 @@ func (f *FakeManufacturers) GetManufacturer(_ string) (string, error) {
 
 type FakeDeviceLookup struct{}
 
-func (f *FakeDeviceLookup) GetDevice(_ string, _ string) (string, error) {
+func (f *FakeDeviceLookup) GetDevice(_ string) (string, error) {
 	return "cisco4000", nil
 }
 
@@ -456,7 +456,7 @@ func TestObjectIDIndex_HasParent(t *testing.T) {
 			name:     "empty parent",
 			index:    "1.2.3.4",
 			parent:   "",
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "empty index",
