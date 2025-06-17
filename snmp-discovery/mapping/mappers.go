@@ -363,7 +363,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 					fieldFound = true
 				case "platform":
 					// Use getDeviceIDs to get the manufacturer and model
-					manufacturerID, modelID, err := m.getDeviceIDs(value.Value)
+					manufacturerID, _, err := m.getDeviceIDs(value.Value)
 					if err != nil {
 						m.logger.Warn("Error getting device IDs", "error", err, "value", value.Value)
 						continue
@@ -384,9 +384,9 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 						Manufacturer: &manufacturerEntity,
 					}
 
-					deviceModel, err := m.deviceLookup.GetDevice(manufacturerID, modelID)
+					deviceModel, err := m.deviceLookup.GetDevice(value.Value)
 					if err != nil {
-						m.logger.Warn("Error getting device model falling back to OID", "error", err, "modelID", modelID)
+						m.logger.Warn("Error getting device model falling back to OID", "error", err, "modelID", value.Value)
 						deviceModel = value.Value
 					}
 					deviceEntity.DeviceType = &diode.DeviceType{
