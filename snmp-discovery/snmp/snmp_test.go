@@ -445,11 +445,11 @@ func TestMapPDU(t *testing.T) {
 			pdu: snmp.PDU{
 				Name:  "test.8",
 				Type:  gosnmp.Gauge32,
-				Value: uint32(65535),
+				Value: "4294967295",
 			},
 			expectedValue: mapping.Value{
 				Type:  mapping.Asn1BER(gosnmp.Gauge32),
-				Value: "65535",
+				Value: "4294967295",
 			},
 			expectError: false,
 		},

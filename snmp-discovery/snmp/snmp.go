@@ -3,6 +3,7 @@ package snmp
 import (
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/gosnmp/gosnmp"
@@ -67,7 +68,7 @@ func (s *Host) Walk(objectIDs map[string]int) (mapping.ObjectIDValueMap, error) 
 				continue
 			}
 			output[k] = value
-			output[k] = value
+			s.logger.Debug("Mapped PDU", "objectID", k, "value", value)
 		}
 	}
 
@@ -101,11 +102,19 @@ func MapPDU(pdu PDU) (mapping.Value, error) {
 			value = fmt.Sprintf("%d", ticks)
 		}
 	case gosnmp.Counter32, gosnmp.Gauge32:
-		if val, ok := pdu.Value.(uint32); ok {
+		if str, ok := pdu.Value.(string); ok {
+			if val, err := strconv.ParseUint(str, 10, 32); err == nil {
+				value = fmt.Sprintf("%d", uint32(val))
+			}
+		} else if val, ok := pdu.Value.(uint32); ok {
 			value = fmt.Sprintf("%d", val)
 		}
 	case gosnmp.Counter64:
-		if val, ok := pdu.Value.(uint64); ok {
+		if str, ok := pdu.Value.(string); ok {
+			if val, err := strconv.ParseUint(str, 10, 64); err == nil {
+				value = fmt.Sprintf("%d", val)
+			}
+		} else if val, ok := pdu.Value.(uint64); ok {
 			value = fmt.Sprintf("%d", val)
 		}
 	default:
