@@ -255,7 +255,7 @@ func (m *InterfaceMapper) FormatMACAddress(input string) (string, error) {
 		parts = append(parts, fmt.Sprintf("%02x", b))
 	}
 
-	output := strings.Join(parts, ":")
+	output := strings.ToUpper(strings.Join(parts, ":"))
 	m.logger.Debug("Formatted mac address", "input", input, "output", output)
 	return output, nil
 }
