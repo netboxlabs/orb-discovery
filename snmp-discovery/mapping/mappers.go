@@ -205,6 +205,19 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					speed64 := int64(speed)
 					interfaceEntity.Speed = &speed64
 					fieldFound = true
+				case "mtu":
+					if value.Value == "" {
+						m.logger.Debug("mtu is empty", "value", value.Value)
+						continue
+					}
+					mtu, err := strconv.ParseInt(value.Value, 10, 64)
+					if err != nil {
+						m.logger.Warn("Error converting mtu to int64", "error", err, "value", value.Value)
+						continue
+					}
+					mtu64 := mtu
+					interfaceEntity.Mtu = &mtu64
+					fieldFound = true
 				case "macAddress":
 					macAddress, err := m.FormatMACAddress(value.Value)
 					if err != nil {
@@ -252,7 +265,7 @@ func (m *InterfaceMapper) FormatMACAddress(input string) (string, error) {
 	// Format to colon-separated hex string
 	var parts []string
 	for _, b := range bytes {
-		parts = append(parts, fmt.Sprintf("%02X", b))
+		parts = append(parts, fmt.Sprintf("%02x", b))
 	}
 
 	output := strings.Join(parts, ":")
