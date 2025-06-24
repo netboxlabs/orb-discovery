@@ -272,8 +272,9 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 						m.logger.Warn("Error converting speed to int", "error", err, "value", value.Value)
 						continue
 					}
-					speed64 := int64(speed)
-					interfaceEntity.Speed = &speed64
+					bitsPerSecond := int64(speed)
+					kiloBitsPerSecond := bitsPerSecond / 1000
+					interfaceEntity.Speed = &kiloBitsPerSecond
 					fieldFound = true
 				case "mtu":
 					if value.Value == "" {
