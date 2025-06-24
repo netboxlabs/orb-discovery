@@ -244,6 +244,10 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 				case "name":
 					interfaceEntity.Name = &value.Value
 					fieldFound = true
+				case "type":
+					interfaceType := GetNetboxType(value.Value, defaults.Interface.Type, interfaceEntity.Speed)
+					interfaceEntity.Type = &interfaceType
+					fieldFound = true
 				case "speed":
 					if value.Value == "" {
 						m.logger.Debug("Speed is empty", "value", value.Value)
