@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -236,7 +237,14 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 	interfaceEntity := entityRegistry.GetOrCreateEntity(InterfaceEntityType, getIndex(values)).(*diode.Interface)
 
 	fieldFound := false
-	for objectID, value := range values {
+	valueKeys := make([]ObjectIDIndex, 0, len(values))
+	for objectID := range values {
+		valueKeys = append(valueKeys, objectID)
+	}
+	slices.Sort(valueKeys)
+	slices.Reverse(valueKeys)
+	for _, objectID := range valueKeys {
+		value := values[objectID]
 		for _, propertyMappingEntry := range mappingEntry.MappingEntries {
 			if objectID.HasParent(propertyMappingEntry.OID) {
 				m.logger.Debug("Mapping value to interface entity with mapper", "objectID", objectID, "value", value)
@@ -245,7 +253,11 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					interfaceEntity.Name = &value.Value
 					fieldFound = true
 				case "type":
-					interfaceType := GetNetboxType(value.Value, defaults.Interface.Type, interfaceEntity.Speed)
+					defaultType := ""
+					if defaults != nil && defaults.Interface.Type != "" {
+						defaultType = defaults.Interface.Type
+					}
+					interfaceType := GetNetboxType(value.Value, defaultType, interfaceEntity.Speed)
 					interfaceEntity.Type = &interfaceType
 					fieldFound = true
 				case "speed":
