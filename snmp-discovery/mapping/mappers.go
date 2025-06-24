@@ -241,6 +241,8 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 	for objectID := range values {
 		valueKeys = append(valueKeys, objectID)
 	}
+	// Sort the keys to ensure a consistent processing order.
+	// Reverse the keys to prioritize fields like speed before type during mapping.
 	slices.Sort(valueKeys)
 	slices.Reverse(valueKeys)
 	for _, objectID := range valueKeys {
