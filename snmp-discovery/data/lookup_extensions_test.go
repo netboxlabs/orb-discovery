@@ -546,7 +546,6 @@ func TestLoadYAMLFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
 			// Create initial devicesByVendor map
 			devicesByVendor := make(map[string]string)
 			for k, v := range tt.initial {
