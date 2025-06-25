@@ -93,7 +93,7 @@ func main() {
 		)
 	}
 	if err != nil {
-		fmt.Printf("error creating diode client: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error creating diode client: %v\n", err)
 		os.Exit(1)
 	}
 
