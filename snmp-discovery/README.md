@@ -25,7 +25,7 @@ Usage of snmp-discovery:
   -log-level string
     	log level (default "INFO")
   -otel-endpoint string
-    	OpenTelemetry exporter endpoint (e.g. localhost:4317). Environment variables can be used by wrapping them in ${} (e.g. ${OTEL_ENDPOINT})
+    	OpenTelemetry exporter endpoint (e.g. localhost:4317). Environment variable can be used by wrapping it in ${} (e.g. ${OTEL_ENDPOINT})
   -otel-export-period int
     	Period in seconds between OpenTelemetry exports (default 10)
   -port int

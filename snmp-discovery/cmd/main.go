@@ -57,7 +57,7 @@ func main() {
 	help := flag.Bool("help", false, "show this help")
 	// Add new flags for metrics
 	otelEndpoint := flag.String("otel-endpoint", "", "OpenTelemetry exporter endpoint (e.g. localhost:4317)."+
-		" Environment variables can be used by wrapping them in ${} (e.g. ${OTEL_ENDPOINT})")
+		" Environment variable can be used by wrapping it in ${} (e.g. ${OTEL_ENDPOINT})")
 	otelExportPeriod := flag.Int("otel-export-period", 10, "Period in seconds between OpenTelemetry exports")
 
 	flag.Parse()
