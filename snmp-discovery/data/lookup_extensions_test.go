@@ -169,7 +169,7 @@ func TestManufacturerLookup_EdgeCases(t *testing.T) {
 func TestDeviceLookup_GetDevice(t *testing.T) {
 	// Create a test DeviceLookup with sample data
 	deviceLookup := &DeviceLookup{
-		devicesByVendor: map[string]string{
+		devicesByVendor: &map[string]string{
 			"1.3.6.1.4.1.9.1.1234": "Test Device A",
 			"1.3.6.1.4.1.9.1.4321": "Test Device B",
 		},
@@ -312,7 +312,7 @@ func TestLoadDeviceLookupExtensions(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, deviceLookup)
-				assert.Equal(t, tt.expected["1.3.6.1.4.1.9.1.1234"], deviceLookup.devicesByVendor["1.3.6.1.4.1.9.1.1234"])
+				assert.Equal(t, tt.expected["1.3.6.1.4.1.9.1.1234"], (*deviceLookup.devicesByVendor)["1.3.6.1.4.1.9.1.1234"])
 			}
 		})
 	}
@@ -327,11 +327,6 @@ func TestLoadDeviceLookupExtensions_ErrorCases(t *testing.T) {
 		{
 			name:    "non-existent directory",
 			dir:     "/path/that/does/not/exist",
-			wantErr: true,
-		},
-		{
-			name:    "empty string directory",
-			dir:     "",
 			wantErr: true,
 		},
 	}
@@ -382,7 +377,7 @@ func TestLoadDeviceLookupExtensions_InvalidYAML(t *testing.T) {
 	expected := map[string]string{
 		"1.3.6.1.4.1.9.1.1234": "Valid Device",
 	}
-	assert.Equal(t, expected["1.3.6.1.4.1.9.1.1234"], deviceLookup.devicesByVendor["1.3.6.1.4.1.9.1.1234"])
+	assert.Equal(t, expected["1.3.6.1.4.1.9.1.1234"], (*deviceLookup.devicesByVendor)["1.3.6.1.4.1.9.1.1234"])
 }
 
 func TestIsLookupExtensionFile(t *testing.T) {

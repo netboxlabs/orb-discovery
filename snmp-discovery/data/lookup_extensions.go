@@ -88,12 +88,12 @@ type DeviceRetriever interface {
 
 // DeviceLookup represents a device lookup service
 type DeviceLookup struct {
-	devicesByVendor map[string]string
+	devicesByVendor *map[string]string
 }
 
 // GetDevice returns the device name for given device OID
 func (d *DeviceLookup) GetDevice(deviceOID string) (string, error) {
-	if device, ok := d.devicesByVendor[deviceOID]; ok {
+	if device, ok := (*d.devicesByVendor)[deviceOID]; ok {
 		return device, nil
 	}
 	return "", fmt.Errorf("device ID %s not found", deviceOID)
@@ -105,20 +105,24 @@ var lookupExtensionsData embed.FS
 // LoadDeviceLookupExtensions loads device data from YAML files in the specified directory
 func LoadDeviceLookupExtensions(dir string) (*DeviceLookup, error) {
 	devicesByVendor := make(map[string]string)
+	deviceLookup := DeviceLookup{
+		devicesByVendor: &devicesByVendor,
+	}
+
 	err := loadBuiltInExtensions(&devicesByVendor)
 	if err != nil {
-		return nil, err
+		return &deviceLookup, err
 	}
 
-	// Override built in extensions with user provided extensions
-	err = loadUserProvidedExtensions(dir, &devicesByVendor)
-	if err != nil {
-		return nil, err
+	if dir != "" {
+		// Extend built in extensions with user provided extensions
+		err = loadUserProvidedExtensions(dir, &devicesByVendor)
+		if err != nil {
+			return &deviceLookup, err
+		}
 	}
 
-	return &DeviceLookup{
-		devicesByVendor: devicesByVendor,
-	}, nil
+	return &deviceLookup, nil
 }
 
 func loadBuiltInExtensions(devicesByVendor *map[string]string) error {
