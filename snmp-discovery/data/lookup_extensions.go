@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"embed"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -98,17 +99,68 @@ func (d *DeviceLookup) GetDevice(deviceOID string) (string, error) {
 	return "", fmt.Errorf("device ID %s not found", deviceOID)
 }
 
+//go:embed lookup_extensions/*.yaml
+var lookupExtensionsData embed.FS
+
 // LoadDeviceLookupExtensions loads device data from YAML files in the specified directory
 func LoadDeviceLookupExtensions(dir string) (*DeviceLookup, error) {
+	devicesByVendor := make(map[string]string)
+	err := loadBuiltInExtensions(&devicesByVendor)
+	if err != nil {
+		return nil, err
+	}
+
+	// Override built in extensions with user provided extensions
+	err = loadUserProvidedExtensions(dir, &devicesByVendor)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DeviceLookup{
+		devicesByVendor: devicesByVendor,
+	}, nil
+}
+
+func loadBuiltInExtensions(devicesByVendor *map[string]string) error {
+	files, err := lookupExtensionsData.ReadDir("lookup_extensions")
+	if err != nil {
+		return fmt.Errorf("failed to read directory %s: %w", "lookup_extensions", err)
+	}
+
+	for _, file := range files {
+		if !isLookupExtensionFile(file) {
+			continue
+		}
+
+		filePath := filepath.Join("lookup_extensions", file.Name())
+		extensionFile, err := lookupExtensionsData.Open(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to open file %s: %w", file.Name(), err)
+		}
+
+		defer func() {
+			if err := extensionFile.Close(); err != nil {
+				log.Println("Error closing file:", err)
+			}
+		}()
+		extensionFileData, err := io.ReadAll(extensionFile)
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %w", file.Name(), err)
+		}
+
+		if err := loadYAMLFile(extensionFileData, devicesByVendor); err != nil {
+			return fmt.Errorf("failed to load YAML file %s: %w", file.Name(), err)
+		}
+	}
+	return nil
+}
+
+func loadUserProvidedExtensions(dir string, devicesByVendor *map[string]string) error {
 	// Read all files in the directory
 	files, err := os.ReadDir(dir)
 	if err != nil {
-		return &DeviceLookup{
-			devicesByVendor: make(map[string]string),
-		}, fmt.Errorf("failed to read directory %s: %w", dir, err)
+		return fmt.Errorf("failed to read directory %s: %w", dir, err)
 	}
-
-	devicesByVendor := make(map[string]string)
 
 	for _, file := range files {
 		if !isLookupExtensionFile(file) {
@@ -117,7 +169,12 @@ func LoadDeviceLookupExtensions(dir string) (*DeviceLookup, error) {
 		}
 
 		filePath := filepath.Join(dir, file.Name())
-		if err := loadYAMLFile(filePath, &devicesByVendor); err != nil {
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %w", filePath, err)
+		}
+
+		if err := loadYAMLFile(data, devicesByVendor); err != nil {
 			safeFilePath := strings.ReplaceAll(filePath, "\n", "")
 			safeFilePath = strings.ReplaceAll(safeFilePath, "\r", "")
 			safeErr := strings.ReplaceAll(err.Error(), "\n", "")
@@ -126,10 +183,7 @@ func LoadDeviceLookupExtensions(dir string) (*DeviceLookup, error) {
 			continue
 		}
 	}
-
-	return &DeviceLookup{
-		devicesByVendor: devicesByVendor,
-	}, nil
+	return nil
 }
 
 func isLookupExtensionFile(file os.DirEntry) bool {
@@ -139,12 +193,7 @@ func isLookupExtensionFile(file os.DirEntry) bool {
 }
 
 // loadYAMLFile loads a single YAML file and merges its data into devicesByVendor
-func loadYAMLFile(filePath string, devicesByVendor *map[string]string) error {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to read file %s: %w", filePath, err)
-	}
-
+func loadYAMLFile(data []byte, devicesByVendor *map[string]string) error {
 	var fileData struct {
 		Devices map[string]string `yaml:"devices"`
 	}
