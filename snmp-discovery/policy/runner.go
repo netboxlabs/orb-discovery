@@ -69,7 +69,7 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 	if err != nil {
 		return nil, err
 	}
-	runner.timeout = time.Duration(policy.Config.Timeout) * time.Minute
+	runner.timeout = time.Duration(policy.Config.Timeout) * time.Second
 	if runner.timeout == 0 {
 		runner.timeout = defaultTimeout
 	}
