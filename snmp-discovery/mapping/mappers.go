@@ -280,7 +280,7 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					}
 					// Check if speed is within valid range (1 to 2147483647 inclusive)
 					if speed < minInterfaceSpeed || speed > maxInterfaceSpeed {
-						m.logger.Warn("Interface speed is outside valid range (1-2147483647)", "speed", speed, "value", value.Value)
+						m.logger.Warn("Interface speed is outside valid range (1-2147483647)", "speed", speed, "value", value.Value, "mappingID", propertyMappingEntry.OID, "interfaceIndex", objectID)
 						continue
 					}
 					bitsPerSecond := int64(speed)
