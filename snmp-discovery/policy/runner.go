@@ -144,7 +144,7 @@ func (r *Runner) queryTargets(expandedTargets []config.Target, objectIDs map[str
 		// Start timing the discovery
 		startTime := time.Now()
 
-		host := snmp.NewHost(target.Host, target.Port, r.config.Retries, &r.scope.Authentication, r.logger, r.ClientFactory)
+		host := snmp.NewHost(target.Host, target.Port, r.config.Retries, r.timeout, &r.scope.Authentication, r.logger, r.ClientFactory)
 		oids, err := host.Walk(objectIDs)
 		if err != nil {
 			r.logger.Warn("Error crawling host", "host", target.Host, "error", err)
