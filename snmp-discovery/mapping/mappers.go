@@ -14,6 +14,12 @@ import (
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/data"
 )
 
+// Interface speed constants
+const (
+	minInterfaceSpeed = 1
+	maxInterfaceSpeed = 2147483647
+)
+
 // IPAddressMapper is a struct that maps IP addresses to entities
 type IPAddressMapper struct {
 	logger *slog.Logger
@@ -270,6 +276,11 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					speed, err := strconv.Atoi(value.Value)
 					if err != nil {
 						m.logger.Warn("Error converting speed to int", "error", err, "value", value.Value)
+						continue
+					}
+					// Check if speed is within valid range (1 to 2147483647 inclusive)
+					if speed < minInterfaceSpeed || speed > maxInterfaceSpeed {
+						m.logger.Warn("Interface speed is outside valid range (1-2147483647)", "speed", speed, "value", value.Value)
 						continue
 					}
 					bitsPerSecond := int64(speed)
