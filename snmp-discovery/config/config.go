@@ -73,6 +73,7 @@ type PolicyConfig struct {
 	Schedule            *string  `yaml:"schedule,omitempty"`
 	Defaults            Defaults `yaml:"defaults"`
 	Timeout             int      `yaml:"timeout"`
+	SNMPTimeout         int      `yaml:"snmp_timeout"`
 	Retries             int      `yaml:"retries"`
 	LookupExtensionsDir string   `yaml:"lookup_extensions_dir,omitempty"`
 }
