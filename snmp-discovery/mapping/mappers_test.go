@@ -834,7 +834,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 					OID:    "1.3.6.1.2.1.2.2.1.5.1",
 					Index:  "1",
 					Parent: "1.3.6.1.2.1.2.2.1.5",
-					Value:  "2147483648",
+					Value:  "2147483648000",
 					Type:   mapping.Integer,
 				},
 			},

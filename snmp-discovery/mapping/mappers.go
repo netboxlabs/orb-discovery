@@ -278,13 +278,13 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 						m.logger.Warn("Error converting speed to int", "error", err, "value", value.Value)
 						continue
 					}
+					bitsPerSecond := int64(speed)
+					kiloBitsPerSecond := bitsPerSecond / 1000
 					// Check if speed is within valid range (1 to 2147483647 inclusive)
-					if speed < minInterfaceSpeed || speed > maxInterfaceSpeed {
+					if kiloBitsPerSecond < minInterfaceSpeed || kiloBitsPerSecond > maxInterfaceSpeed {
 						m.logger.Warn("Interface speed is outside valid range (1-2147483647)", "speed", speed, "value", value.Value, "mappingID", propertyMappingEntry.OID, "interfaceIndex", objectID)
 						continue
 					}
-					bitsPerSecond := int64(speed)
-					kiloBitsPerSecond := bitsPerSecond / 1000
 					interfaceEntity.Speed = &kiloBitsPerSecond
 					fieldFound = true
 				case "mtu":
