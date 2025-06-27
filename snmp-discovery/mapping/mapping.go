@@ -356,7 +356,8 @@ func (m *ObjectIDMapper) ObjectIDs() map[string]int {
 				if childEntry.IdentifierSize == 0 {
 					objectIDs[childEntry.OID] = 1
 				} else {
-					objectIDs[childEntry.OID] = entry.IdentifierSize
+					// Use the child's IdentifierSize if it is non-zero; otherwise, use the parent's IdentifierSize.
+					objectIDs[childEntry.OID] = childEntry.IdentifierSize
 				}
 			}
 		} else {
