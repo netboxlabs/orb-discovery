@@ -289,9 +289,9 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 
 	currentDevice := m.registry.GetOrCreateEntity(DeviceEntityType, CurrentDeviceIndex).(*diode.Device)
 
-	assignedInterfaceIndices := *m.getAssignedInterfaces(uniqueEntities)
+	assignedInterfaceIndices := m.getAssignedInterfaces(uniqueEntities)
 
-	// Build final entity list, excluding assigned interfaces to sending duplciates for ingestion
+	// Build final entity list, excluding assigned interfaces to sending duplcates for ingestion
 	entities := make([]diode.Entity, 0, len(uniqueEntities))
 	for entity := range uniqueEntities {
 		if diodeInterface, ok := entity.(*diode.Interface); ok {
@@ -310,7 +310,7 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 	return entities
 }
 
-func (*ObjectIDMapper) getAssignedInterfaces(uniqueEntities map[diode.Entity]bool) *map[diode.Entity]bool {
+func (*ObjectIDMapper) getAssignedInterfaces(uniqueEntities map[diode.Entity]bool) map[diode.Entity]bool {
 	assignedInterfaceIndices := make(map[diode.Entity]bool)
 	for entity := range uniqueEntities {
 		if ipAddress, ok := entity.(*diode.IPAddress); ok {
@@ -321,7 +321,7 @@ func (*ObjectIDMapper) getAssignedInterfaces(uniqueEntities map[diode.Entity]boo
 			}
 		}
 	}
-	return &assignedInterfaceIndices
+	return assignedInterfaceIndices
 }
 
 func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[ObjectIDIndex]*ObjectIDIndexDetails {
