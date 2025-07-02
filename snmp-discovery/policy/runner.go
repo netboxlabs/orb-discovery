@@ -142,7 +142,7 @@ func (r *Runner) logEntitiesForIngestion(entities []diode.Entity) {
 }
 
 func (r *Runner) queryTargets(expandedTargets []config.Target) []diode.Entity {
-	mappingConfig := mapping.NewMappingConfig(r.mappingConfig.Entries, r.logger, r.manufacturers, r.deviceLookup)
+	mappingConfig := mapping.NewConfig(r.mappingConfig.Entries, r.logger, r.manufacturers, r.deviceLookup)
 	objectIDs := mappingConfig.ObjectIDs()
 	r.logger.Info("Querying targets", slog.Any("targetCount", len(expandedTargets)), slog.Any("objectCount", len(objectIDs)))
 
