@@ -137,7 +137,7 @@ func (r *Runner) run() {
 
 func (r *Runner) logEntitiesForIngestion(entities []diode.Entity) {
 	for _, entity := range entities {
-		r.logger.Info("Entity for ingestion", slog.Any("entity", entity.ConvertToProtoMessage()))
+		r.logger.Debug("Entity for ingestion", slog.Any("entity", entity.ConvertToProtoMessage()))
 	}
 }
 
