@@ -27,7 +27,13 @@ def sample_config():
 def sample_scopes():
     """Fixture for a sample list of Napalm objects."""
     return [
-        Napalm(driver="ios", hostname="router1", username="admin", password="password")
+        Napalm(
+            driver="ios",
+            hostname="router1",
+            username="admin",
+            password="password",
+            override_defaults=Defaults(role="Router", site="New York/NY"),
+        ),
     ]
 
 
@@ -38,9 +44,10 @@ def test_initial_status(policy_runner):
 
 def test_setup_policy_runner_with_cron(policy_runner, sample_config, sample_scopes):
     """Test setting up the PolicyRunner with a cron schedule."""
-    with patch.object(policy_runner.scheduler, "start") as mock_start, patch.object(
-        policy_runner.scheduler, "add_job"
-    ) as mock_add_job:
+    with (
+        patch.object(policy_runner.scheduler, "start") as mock_start,
+        patch.object(policy_runner.scheduler, "add_job") as mock_add_job,
+    ):
 
         policy_runner.setup("policy1", sample_config, sample_scopes)
 
@@ -48,14 +55,17 @@ def test_setup_policy_runner_with_cron(policy_runner, sample_config, sample_scop
         mock_start.assert_called_once()
         mock_add_job.assert_called()
         assert policy_runner.status == Status.RUNNING
+        assert policy_runner.config.defaults.role == "Router"
+        assert policy_runner.config.defaults.site == "New York/NY"
 
 
 def test_setup_policy_runner_with_one_time_run(policy_runner, sample_scopes):
     """Test setting up the PolicyRunner with a one-time schedule."""
     one_time_config = Config()
-    with patch.object(policy_runner.scheduler, "start") as mock_start, patch.object(
-        policy_runner.scheduler, "add_job"
-    ) as mock_add_job:
+    with (
+        patch.object(policy_runner.scheduler, "start") as mock_start,
+        patch.object(policy_runner.scheduler, "add_job") as mock_add_job,
+    ):
 
         policy_runner.setup("policy1", one_time_config, sample_scopes)
 
@@ -69,10 +79,11 @@ def test_setup_policy_runner_with_one_time_run(policy_runner, sample_scopes):
 def test_setup_with_unsupported_driver_raises_error(policy_runner, sample_scopes):
     """Test setup raises error if driver is unsupported."""
     sample_scopes[0].driver = "unsupported_driver"
-    with patch(
-        "device_discovery.policy.runner.supported_drivers", ["ios"]
-    ), pytest.raises(
-        Exception, match="specified driver 'unsupported_driver' was not found"
+    with (
+        patch("device_discovery.policy.runner.supported_drivers", ["ios"]),
+        pytest.raises(
+            Exception, match="specified driver 'unsupported_driver' was not found"
+        ),
     ):
         policy_runner.setup("policy1", Config(), sample_scopes)
     assert policy_runner.status == Status.NEW
@@ -81,13 +92,13 @@ def test_setup_with_unsupported_driver_raises_error(policy_runner, sample_scopes
 def test_run_device_with_discovered_driver(policy_runner, sample_scopes, sample_config):
     """Test running a device where the driver needs discovery."""
     sample_scopes[0].driver = None  # Force driver discovery
-    with patch(
-        "device_discovery.policy.runner.discover_device_driver", return_value="ios"
-    ) as mock_discover, patch(
-        "device_discovery.policy.runner.get_network_driver"
-    ) as mock_get_driver, patch(
-        "device_discovery.client.Client.ingest"
-    ) as mock_ingest:
+    with (
+        patch(
+            "device_discovery.policy.runner.discover_device_driver", return_value="ios"
+        ) as mock_discover,
+        patch("device_discovery.policy.runner.get_network_driver") as mock_get_driver,
+        patch("device_discovery.client.Client.ingest") as mock_ingest,
+    ):
 
         # Mock the network driver instance
         mock_driver_instance = MagicMock()
@@ -114,11 +125,12 @@ def test_run_device_with_discovered_driver(policy_runner, sample_scopes, sample_
 def test_run_discovered_driver_error(policy_runner, sample_scopes, sample_config):
     """Test running a device where the driver discovery fails."""
     sample_scopes[0].driver = None  # Force driver discovery
-    with patch(
-        "device_discovery.policy.runner.discover_device_driver", return_value=None
-    ) as mock_discover, patch(
-        "device_discovery.policy.runner.logger.error"
-    ) as mock_logger_error:
+    with (
+        patch(
+            "device_discovery.policy.runner.discover_device_driver", return_value=None
+        ) as mock_discover,
+        patch("device_discovery.policy.runner.logger.error") as mock_logger_error,
+    ):
 
         # Run the device with an error to check error handling
         policy_runner.run("test_id", sample_scopes[0], sample_config)
@@ -130,10 +142,13 @@ def test_run_discovered_driver_error(policy_runner, sample_scopes, sample_config
 
 def test_run_device_with_error_in_job(policy_runner, sample_scopes, sample_config):
     """Test run handles an error during device interaction gracefully."""
-    with patch(
-        "device_discovery.policy.runner.get_network_driver",
-        side_effect=Exception("Connection error"),
-    ), patch("device_discovery.policy.runner.logger.error") as mock_logger_error:
+    with (
+        patch(
+            "device_discovery.policy.runner.get_network_driver",
+            side_effect=Exception("Connection error"),
+        ),
+        patch("device_discovery.policy.runner.logger.error") as mock_logger_error,
+    ):
 
         # Run the device with an error to check error handling
         policy_runner.run("test_id", sample_scopes[0], sample_config)
@@ -176,14 +191,12 @@ def test_metrics_during_policy_lifecycle(policy_runner, sample_config, sample_sc
     def mock_get_metric(name):
         return mock_metrics.get(name)
 
-    with patch(
-        "device_discovery.policy.runner.get_metric", side_effect=mock_get_metric
-    ), patch.object(policy_runner.scheduler, "start"), patch.object(
-        policy_runner.scheduler, "add_job"
-    ), patch(
-        "device_discovery.policy.runner.get_network_driver"
-    ), patch(
-        "device_discovery.client.Client.ingest"
+    with (
+        patch("device_discovery.policy.runner.get_metric", side_effect=mock_get_metric),
+        patch.object(policy_runner.scheduler, "start"),
+        patch.object(policy_runner.scheduler, "add_job"),
+        patch("device_discovery.policy.runner.get_network_driver"),
+        patch("device_discovery.client.Client.ingest"),
     ):
 
         # Test setup - should increment active_policies
@@ -238,15 +251,16 @@ def test_metrics_during_failed_discovery(policy_runner, sample_config):
     def mock_get_metric(name):
         return mock_metrics.get(name)
 
-    with patch(
-        "device_discovery.policy.runner.get_metric", side_effect=mock_get_metric
-    ), patch(
-        "device_discovery.policy.runner.discover_device_driver", return_value="ios"
-    ), patch(
-        "device_discovery.policy.runner.get_network_driver",
-        side_effect=Exception("Connection error"),
-    ), patch.object(
-        policy_runner.scheduler, "remove_job"
+    with (
+        patch("device_discovery.policy.runner.get_metric", side_effect=mock_get_metric),
+        patch(
+            "device_discovery.policy.runner.discover_device_driver", return_value="ios"
+        ),
+        patch(
+            "device_discovery.policy.runner.get_network_driver",
+            side_effect=Exception("Connection error"),
+        ),
+        patch.object(policy_runner.scheduler, "remove_job"),
     ):
 
         # Run the device with discovery that will fail
