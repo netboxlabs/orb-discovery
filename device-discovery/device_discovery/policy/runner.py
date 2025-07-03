@@ -22,25 +22,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def merge_defaults(base: Defaults, override: Defaults | None) -> Defaults:
-    """Merge base defaults with override defaults."""
-    if override is None:
-        return base
-
-    def _merge_dict(a: dict, b: dict) -> dict:
-        for k, v in b.items():
-            if isinstance(v, dict) and isinstance(a.get(k), dict):
-                a[k] = _merge_dict(a[k], v)
-            else:
-                a[k] = v
-        return a
-
-    base_dict = base.model_dump()
-    override_dict = override.model_dump(exclude_none=True)
-    merged = _merge_dict(base_dict, override_dict)
-    return Defaults.model_validate(merged)
-
-
 class PolicyRunner:
     """Policy Runner class."""
 
@@ -95,11 +76,14 @@ class PolicyRunner:
 
             id = str(uuid.uuid4())
             self.scopes[id] = scope
-            merged_defaults = merge_defaults(
-                self.config.defaults, scope.override_defaults
-            )
+
+            config = self.config
+            if scope.override_defaults is not None:
+                config.defaults = config.defaults.model_copy(
+                    update=scope.override_defaults.model_dump(exclude_none=True)
+                )
             self.scheduler.add_job(
-                self.run, id=id, trigger=trigger, args=[id, scope, merged_defaults, self.config]
+                self.run, id=id, trigger=trigger, args=[id, scope, config]
             )
             if set_telemetry:
                 set_telemetry = False
