@@ -95,11 +95,11 @@ class PolicyRunner:
 
             id = str(uuid.uuid4())
             self.scopes[id] = scope
-            self.config.defaults = merge_defaults(
+            merged_defaults = merge_defaults(
                 self.config.defaults, scope.override_defaults
             )
             self.scheduler.add_job(
-                self.run, id=id, trigger=trigger, args=[id, scope, self.config]
+                self.run, id=id, trigger=trigger, args=[id, scope, merged_defaults, self.config]
             )
             if set_telemetry:
                 set_telemetry = False
