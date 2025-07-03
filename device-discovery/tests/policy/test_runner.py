@@ -53,10 +53,18 @@ def test_setup_policy_runner_with_cron(policy_runner, sample_config, sample_scop
 
         # Ensure scheduler starts and job is added
         mock_start.assert_called_once()
-        mock_add_job.assert_called()
+
+        assert mock_add_job.call_count == 2
+        call_args = mock_add_job.call_args_list[0]  # First call
+        passed_config = call_args[1]["args"][2]
+
+        assert passed_config.defaults.site == "New York/NY"
+        assert passed_config.defaults.role == "Router"
+
+        # default was not modified, only inside the scope
         assert policy_runner.status == Status.RUNNING
-        assert policy_runner.config.defaults.role == "Router"
-        assert policy_runner.config.defaults.site == "New York/NY"
+        assert policy_runner.config.defaults.role == "undefined"
+        assert policy_runner.config.defaults.site == "New York"
 
 
 def test_setup_policy_runner_with_one_time_run(policy_runner, sample_scopes):
