@@ -267,11 +267,6 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 				".1.3.6.1.2.1.4.20.1.2.192.168.1.2": mapping.Value{Value: "999", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 4},
 			},
 			expected: []diode.Entity{
-				&diode.Interface{
-					Name:   diode.String("GigabitEthernet1/0/1"),
-					Type:   diode.String("other"),
-					Device: &diode.Device{},
-				},
 				&diode.IPAddress{
 					Address: diode.String("192.168.1.2/32"),
 					AssignedObject: &diode.Interface{
@@ -346,17 +341,12 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mapper := mapping.NewObjectIDMapper(
-				tt.mapping,
-				slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false})),
-				&FakeManufacturers{},
-				&FakeDeviceLookup{},
-				&config.Defaults{
-					Interface: config.InterfaceDefaults{
-						Type: "other",
-					},
+			mappingConfig := mapping.NewConfig(tt.mapping, slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false})), &FakeManufacturers{}, &FakeDeviceLookup{})
+			mapper := mapping.NewObjectIDMapper(mappingConfig, slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false})), &config.Defaults{
+				Interface: config.InterfaceDefaults{
+					Type: "other",
 				},
-			)
+			})
 			entities := mapper.MapObjectIDsToEntity(tt.objectIDs)
 
 			assert.ElementsMatch(t, tt.expected, entities)
@@ -385,7 +375,7 @@ func TestObjectIDs(t *testing.T) {
 			},
 		},
 		{
-			name: "Duplicate OID",
+			name: "Child OIDs from parent mapping",
 			mapping: []config.MappingEntry{
 				{
 					OID:    ".1.3.6.1.2.1.2.2.1",
@@ -406,21 +396,16 @@ func TestObjectIDs(t *testing.T) {
 				},
 			},
 			expectedOIDs: map[string]int{
-				".1.3.6.1.2.1.2.2.1": 1,
+				".1.3.6.1.2.1.2.2.1.2": 1,
+				".1.3.6.1.2.1.2.2.1.5": 1,
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mapper := mapping.NewObjectIDMapper(
-				tt.mapping,
-				slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false})),
-				&FakeManufacturers{},
-				&FakeDeviceLookup{},
-				&config.Defaults{},
-			)
-			objectIDs := mapper.ObjectIDs()
+			mappingConfig := mapping.NewConfig(tt.mapping, slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false})), &FakeManufacturers{}, &FakeDeviceLookup{})
+			objectIDs := mappingConfig.ObjectIDs()
 
 			assert.Equal(t, tt.expectedOIDs, objectIDs)
 		})
