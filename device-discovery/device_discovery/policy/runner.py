@@ -77,7 +77,7 @@ class PolicyRunner:
             id = str(uuid.uuid4())
             self.scopes[id] = scope
 
-            config = self.config.model_copy()
+            config = self.config.model_copy(deep=True)
             if scope.override_defaults is not None:
                 config.defaults = config.defaults.model_copy(
                     update=scope.override_defaults.model_dump(exclude_none=True)
