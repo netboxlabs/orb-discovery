@@ -67,7 +67,7 @@ policies:
       authentication:
         protocol_version: "v2c"
         community: "public"
-        # For SNMPv3, use these fields instead (all support env vars):
+        # For SNMPv3, use these fields instead:
         # security_level: "authPriv"
         # username: "${SNMP_USERNAME}"
         # auth_protocol: "SHA"
