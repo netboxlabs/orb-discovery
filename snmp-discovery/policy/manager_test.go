@@ -317,6 +317,59 @@ func TestManagerParsePolicies(t *testing.T) {
 		// Check policy2 (without env var)
 		assert.Equal(t, "public", policies["policy2"].Scope.Authentication.Community)
 	})
+
+	t.Run("Environment Variable Resolution - Missing Environment Variable", func(t *testing.T) {
+		// Ensure the environment variable is not set
+		err := os.Unsetenv("MISSING_SNMP_COMMUNITY")
+		require.NoError(t, err)
+
+		yamlData := []byte(`
+        policies:
+          policy1:
+            config:
+              lookup_extensions_dir: /tmp/extensions
+            scope:
+              targets:
+                - host: 192.168.1.1
+              authentication:
+                protocol_version: SNMPv2c
+                community: ${MISSING_SNMP_COMMUNITY}
+       `)
+
+		_, err = manager.ParsePolicies(yamlData)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "policy1 : failed to resolve environment variables")
+		assert.Contains(t, err.Error(), "failed to resolve community environment variable")
+		assert.Contains(t, err.Error(), "environment variable MISSING_SNMP_COMMUNITY is not set")
+	})
+
+	t.Run("Environment Variable Resolution - Missing Username Environment Variable", func(t *testing.T) {
+		// Ensure the environment variable is not set
+		err := os.Unsetenv("MISSING_SNMP_USERNAME")
+		require.NoError(t, err)
+
+		yamlData := []byte(`
+        policies:
+          policy1:
+            config:
+              lookup_extensions_dir: /tmp/extensions
+            scope:
+              targets:
+                - host: 192.168.1.1
+              authentication:
+                protocol_version: SNMPv3
+                security_level: authNoPriv
+                username: ${MISSING_SNMP_USERNAME}
+                auth_protocol: SHA
+                auth_passphrase: test-pass
+       `)
+
+		_, err = manager.ParsePolicies(yamlData)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "policy1 : failed to resolve environment variables")
+		assert.Contains(t, err.Error(), "failed to resolve username environment variable")
+		assert.Contains(t, err.Error(), "environment variable MISSING_SNMP_USERNAME is not set")
+	})
 }
 
 func TestManagerPolicyLifecycle(t *testing.T) {

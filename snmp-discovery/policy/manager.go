@@ -72,7 +72,9 @@ func (m *Manager) ParsePolicies(data []byte) (map[string]config.Policy, error) {
 		// Create a new policy with updated mappings
 		updatedPolicy := payload.Policies[name]
 		m.applyDefaults(&updatedPolicy)
-		m.resolveAuthenticationEnvVars(&updatedPolicy)
+		if err := m.resolveAuthenticationEnvVars(&updatedPolicy); err != nil {
+			return nil, fmt.Errorf("%s : failed to resolve environment variables : %w", name, err)
+		}
 		payload.Policies[name] = updatedPolicy
 	}
 
@@ -217,20 +219,33 @@ func (m *Manager) GetCapabilities() []string {
 }
 
 // resolveAuthenticationEnvVars resolves environment variables in authentication configuration
-func (m *Manager) resolveAuthenticationEnvVars(policy *config.Policy) {
+func (m *Manager) resolveAuthenticationEnvVars(policy *config.Policy) error {
 	auth := &policy.Scope.Authentication
 
 	// Resolve environment variables for authentication fields
-	if resolved, err := utils.ResolveEnv(auth.Community); err == nil {
-		auth.Community = resolved
+	resolved, err := utils.ResolveEnv(auth.Community)
+	if err != nil {
+		return fmt.Errorf("failed to resolve community environment variable: %w", err)
 	}
-	if resolved, err := utils.ResolveEnv(auth.Username); err == nil {
-		auth.Username = resolved
+	auth.Community = resolved
+
+	resolved, err = utils.ResolveEnv(auth.Username)
+	if err != nil {
+		return fmt.Errorf("failed to resolve username environment variable: %w", err)
 	}
-	if resolved, err := utils.ResolveEnv(auth.AuthPassphrase); err == nil {
-		auth.AuthPassphrase = resolved
+	auth.Username = resolved
+
+	resolved, err = utils.ResolveEnv(auth.AuthPassphrase)
+	if err != nil {
+		return fmt.Errorf("failed to resolve auth_passphrase environment variable: %w", err)
 	}
-	if resolved, err := utils.ResolveEnv(auth.PrivPassphrase); err == nil {
-		auth.PrivPassphrase = resolved
+	auth.AuthPassphrase = resolved
+
+	resolved, err = utils.ResolveEnv(auth.PrivPassphrase)
+	if err != nil {
+		return fmt.Errorf("failed to resolve priv_passphrase environment variable: %w", err)
 	}
+	auth.PrivPassphrase = resolved
+
+	return nil
 }
