@@ -14,6 +14,7 @@ import (
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/snmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // MockRunner mocks the Runner
@@ -142,8 +143,9 @@ func TestManagerParsePolicies(t *testing.T) {
 
 	t.Run("Environment Variable Resolution - Community", func(t *testing.T) {
 		// Set test environment variable
-		os.Setenv("SNMP_COMMUNITY", "test-community")
-		defer os.Unsetenv("SNMP_COMMUNITY")
+		err := os.Setenv("SNMP_COMMUNITY", "test-community")
+		require.NoError(t, err)
+		defer func() { _ = os.Unsetenv("SNMP_COMMUNITY") }()
 
 		yamlData := []byte(`
         policies:
@@ -166,11 +168,13 @@ func TestManagerParsePolicies(t *testing.T) {
 
 	t.Run("Environment Variable Resolution - Username", func(t *testing.T) {
 		// Set test environment variables
-		os.Setenv("SNMP_USERNAME", "test-user")
-		os.Setenv("SNMP_AUTH_PASS", "test-auth-pass")
+		err := os.Setenv("SNMP_USERNAME", "test-user")
+		require.NoError(t, err)
+		err = os.Setenv("SNMP_AUTH_PASS", "test-auth-pass")
+		require.NoError(t, err)
 		defer func() {
-			os.Unsetenv("SNMP_USERNAME")
-			os.Unsetenv("SNMP_AUTH_PASS")
+			_ = os.Unsetenv("SNMP_USERNAME")
+			_ = os.Unsetenv("SNMP_AUTH_PASS")
 		}()
 
 		yamlData := []byte(`
@@ -198,15 +202,19 @@ func TestManagerParsePolicies(t *testing.T) {
 
 	t.Run("Environment Variable Resolution - All Auth Fields", func(t *testing.T) {
 		// Set test environment variables
-		os.Setenv("SNMP_COMMUNITY", "test-community")
-		os.Setenv("SNMP_USERNAME", "test-user")
-		os.Setenv("SNMP_AUTH_PASS", "test-auth-pass")
-		os.Setenv("SNMP_PRIV_PASS", "test-priv-pass")
+		err := os.Setenv("SNMP_COMMUNITY", "test-community")
+		require.NoError(t, err)
+		err = os.Setenv("SNMP_USERNAME", "test-user")
+		require.NoError(t, err)
+		err = os.Setenv("SNMP_AUTH_PASS", "test-auth-pass")
+		require.NoError(t, err)
+		err = os.Setenv("SNMP_PRIV_PASS", "test-priv-pass")
+		require.NoError(t, err)
 		defer func() {
-			os.Unsetenv("SNMP_COMMUNITY")
-			os.Unsetenv("SNMP_USERNAME")
-			os.Unsetenv("SNMP_AUTH_PASS")
-			os.Unsetenv("SNMP_PRIV_PASS")
+			_ = os.Unsetenv("SNMP_COMMUNITY")
+			_ = os.Unsetenv("SNMP_USERNAME")
+			_ = os.Unsetenv("SNMP_AUTH_PASS")
+			_ = os.Unsetenv("SNMP_PRIV_PASS")
 		}()
 
 		yamlData := []byte(`
@@ -272,8 +280,9 @@ func TestManagerParsePolicies(t *testing.T) {
 
 	t.Run("Environment Variable Resolution - Mixed Values", func(t *testing.T) {
 		// Set test environment variable
-		os.Setenv("SNMP_COMMUNITY", "test-community")
-		defer os.Unsetenv("SNMP_COMMUNITY")
+		err := os.Setenv("SNMP_COMMUNITY", "test-community")
+		require.NoError(t, err)
+		defer func() { _ = os.Unsetenv("SNMP_COMMUNITY") }()
 
 		yamlData := []byte(`
         policies:

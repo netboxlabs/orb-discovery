@@ -6,6 +6,7 @@ import (
 
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResolveEnv(t *testing.T) {
@@ -16,9 +17,9 @@ func TestResolveEnv(t *testing.T) {
 	})
 
 	t.Run("Environment variable substitution - set", func(t *testing.T) {
-		// Set test environment variable
-		os.Setenv("TEST_VAR", "test-value")
-		defer os.Unsetenv("TEST_VAR")
+		err := os.Setenv("TEST_VAR", "test-value")
+		require.NoError(t, err)
+		defer func() { _ = os.Unsetenv("TEST_VAR") }()
 
 		result, err := utils.ResolveEnv("${TEST_VAR}")
 		assert.NoError(t, err)
@@ -26,8 +27,8 @@ func TestResolveEnv(t *testing.T) {
 	})
 
 	t.Run("Environment variable substitution - not set", func(t *testing.T) {
-		// Ensure the environment variable is not set
-		os.Unsetenv("NONEXISTENT_VAR")
+		err := os.Unsetenv("NONEXISTENT_VAR")
+		require.NoError(t, err)
 
 		result, err := utils.ResolveEnv("${NONEXISTENT_VAR}")
 		assert.Error(t, err)
@@ -54,8 +55,9 @@ func TestResolveEnv(t *testing.T) {
 	})
 
 	t.Run("Mixed content with environment variable", func(t *testing.T) {
-		os.Setenv("TEST_VAR", "test-value")
-		defer os.Unsetenv("TEST_VAR")
+		err := os.Setenv("TEST_VAR", "test-value")
+		require.NoError(t, err)
+		defer func() { _ = os.Unsetenv("TEST_VAR") }()
 
 		result, err := utils.ResolveEnv("prefix-${TEST_VAR}-suffix")
 		assert.NoError(t, err)
@@ -63,11 +65,13 @@ func TestResolveEnv(t *testing.T) {
 	})
 
 	t.Run("Multiple environment variables in same string", func(t *testing.T) {
-		os.Setenv("VAR1", "value1")
-		os.Setenv("VAR2", "value2")
+		err := os.Setenv("VAR1", "value1")
+		require.NoError(t, err)
+		err = os.Setenv("VAR2", "value2")
+		require.NoError(t, err)
 		defer func() {
-			os.Unsetenv("VAR1")
-			os.Unsetenv("VAR2")
+			_ = os.Unsetenv("VAR1")
+			_ = os.Unsetenv("VAR2")
 		}()
 
 		// Current implementation only handles single environment variables
@@ -79,8 +83,9 @@ func TestResolveEnv(t *testing.T) {
 	})
 
 	t.Run("Environment variable with special characters", func(t *testing.T) {
-		os.Setenv("TEST_VAR_123", "test-value-123")
-		defer os.Unsetenv("TEST_VAR_123")
+		err := os.Setenv("TEST_VAR_123", "test-value-123")
+		require.NoError(t, err)
+		defer func() { _ = os.Unsetenv("TEST_VAR_123") }()
 
 		result, err := utils.ResolveEnv("${TEST_VAR_123}")
 		assert.NoError(t, err)
@@ -107,9 +112,9 @@ func TestResolveEnvOrExit(t *testing.T) {
 	})
 
 	t.Run("Environment variable substitution - set", func(t *testing.T) {
-		// Set test environment variable
-		os.Setenv("TEST_VAR", "test-value")
-		defer os.Unsetenv("TEST_VAR")
+		err := os.Setenv("TEST_VAR", "test-value")
+		require.NoError(t, err)
+		defer func() { _ = os.Unsetenv("TEST_VAR") }()
 
 		result := utils.ResolveEnvOrExit("${TEST_VAR}")
 		assert.Equal(t, "test-value", result)
@@ -117,5 +122,4 @@ func TestResolveEnvOrExit(t *testing.T) {
 
 	// Note: Testing the case where environment variable is not set is not practical
 	// because ResolveEnvOrExit calls os.Exit(1), which terminates the test process.
-	// This behavior is expected and documented.
 }
