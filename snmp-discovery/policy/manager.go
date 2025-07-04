@@ -221,31 +221,23 @@ func (m *Manager) GetCapabilities() []string {
 // resolveAuthenticationEnvVars resolves environment variables in authentication configuration
 func (m *Manager) resolveAuthenticationEnvVars(policy *config.Policy) error {
 	auth := &policy.Scope.Authentication
-
-	// Resolve environment variables for authentication fields
-	resolved, err := utils.ResolveEnv(auth.Community)
-	if err != nil {
-		return fmt.Errorf("failed to resolve community environment variable: %w", err)
+	fields := []struct {
+		field *string
+		label string
+	}{
+		{&auth.Community, "community"},
+		{&auth.Username, "username"},
+		{&auth.AuthPassphrase, "auth_passphrase"},
+		{&auth.PrivPassphrase, "priv_passphrase"},
 	}
-	auth.Community = resolved
-
-	resolved, err = utils.ResolveEnv(auth.Username)
-	if err != nil {
-		return fmt.Errorf("failed to resolve username environment variable: %w", err)
+	// Iterate over the fields and resolve environment variables
+	for _, f := range fields {
+		resolved, err := utils.ResolveEnv(*f.field)
+		if err != nil {
+			return fmt.Errorf("failed to resolve %s environment variable: %w", f.label, err)
+		}
+		*f.field = resolved
 	}
-	auth.Username = resolved
-
-	resolved, err = utils.ResolveEnv(auth.AuthPassphrase)
-	if err != nil {
-		return fmt.Errorf("failed to resolve auth_passphrase environment variable: %w", err)
-	}
-	auth.AuthPassphrase = resolved
-
-	resolved, err = utils.ResolveEnv(auth.PrivPassphrase)
-	if err != nil {
-		return fmt.Errorf("failed to resolve priv_passphrase environment variable: %w", err)
-	}
-	auth.PrivPassphrase = resolved
 
 	return nil
 }
