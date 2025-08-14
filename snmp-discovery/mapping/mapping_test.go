@@ -468,6 +468,16 @@ func TestObjectIDIndex_HasParent(t *testing.T) {
 	}
 }
 
+func extractIdentifierSize(mappingEntry config.MappingEntry) int {
+	if mappingEntry.MappingEntries[0].IdentifierSize != 0 {
+		return mappingEntry.MappingEntries[0].IdentifierSize
+	}
+	if mappingEntry.IdentifierSize == 0 {
+		return 1 // Default value when parent is 0
+	}
+	return mappingEntry.IdentifierSize
+}
+
 func TestIPAddressIdentifierSizeInheritance(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -600,15 +610,7 @@ func TestIPAddressIdentifierSizeInheritance(t *testing.T) {
 			// Additional verification: check that ObjectIDs() returns correct identifier sizes
 			objectIDs := mappingConfig.ObjectIDs()
 			for oid, expectedSize := range map[string]int{
-				".1.3.6.1.2.1.4.20.1.1": func() int {
-					if tt.mapping[0].MappingEntries[0].IdentifierSize != 0 {
-						return tt.mapping[0].MappingEntries[0].IdentifierSize
-					}
-					if tt.mapping[0].IdentifierSize == 0 {
-						return 1 // Default value when parent is 0
-					}
-					return tt.mapping[0].IdentifierSize
-				}(),
+				".1.3.6.1.2.1.4.20.1.1": extractIdentifierSize(tt.mapping[0]),
 			} {
 				if actualSize, exists := objectIDs[oid]; exists {
 					assert.Equal(t, expectedSize, actualSize,
