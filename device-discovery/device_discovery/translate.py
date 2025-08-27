@@ -302,7 +302,7 @@ def translate_data(data: dict) -> Iterable[Entity]:
         else:
 
             device_info["platform"] = (
-                f"{data.get('driver').upper()} {device_info.get('os_version')}"
+                f"{data.get('driver', '').upper()} {device_info.get('os_version')}"
             )
         device = translate_device(device_info, defaults)
         entities.append(Entity(device=device))
