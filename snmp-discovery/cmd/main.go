@@ -12,10 +12,10 @@ import (
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/data"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/env"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/metrics"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/policy"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/server"
-	env "github.com/netboxlabs/orb-discovery/snmp-discovery/utils"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/version"
 )
 
