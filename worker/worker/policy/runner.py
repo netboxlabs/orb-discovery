@@ -21,6 +21,8 @@ from worker.models import DiodeConfig, Policy, Status
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+TARGET_CHUNK_SIZE = 3.5
+
 
 class PolicyRunner:
     """Policy Runner class."""
@@ -188,7 +190,7 @@ class PolicyRunner:
 
         # Estimate total size and calculate approximate entities per chunk
         total_size = self._estimate_message_size(entities)
-        target_bytes = 3.5 * 1024 * 1024
+        target_bytes = TARGET_CHUNK_SIZE * 1024 * 1024
 
         if total_size <= target_bytes:
             # Single chunk if within limit
