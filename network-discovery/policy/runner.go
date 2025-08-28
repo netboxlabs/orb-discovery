@@ -180,6 +180,18 @@ func (r *Runner) run() {
 		options = append(options, nmap.WithMostCommonPorts(*r.scope.TopPorts))
 	}
 
+	if r.scope.ICMPEcho != nil && *r.scope.ICMPEcho {
+		options = append(options, nmap.WithICMPEchoDiscovery())
+	}
+
+	if r.scope.ICMPTimestamp != nil && *r.scope.ICMPTimestamp {
+		options = append(options, nmap.WithICMPTimestampDiscovery())
+	}
+
+	if r.scope.ICMPNetMask != nil && *r.scope.ICMPNetMask {
+		options = append(options, nmap.WithICMPNetMaskDiscovery())
+	}
+
 	hasOtherScans := false
 	selectedTCPScan := ""
 	if len(r.scope.ScanTypes) > 0 {
@@ -358,9 +370,9 @@ func (r *Runner) run() {
 		if host.Hostnames != nil {
 			var fallbackHostname string
 			for _, hostname := range host.Hostnames {
-				fallbackHostname = hostname.Name
+				fallbackHostname = strings.ToLower(hostname.Name)
 				if hostname.Type == "PTR" {
-					ip.DnsName = diode.String(hostname.Name)
+					ip.DnsName = diode.String(strings.ToLower(hostname.Name))
 					break
 				}
 			}
