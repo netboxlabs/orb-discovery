@@ -124,13 +124,13 @@ class PolicyRunner:
 
             for chunk_num, entity_chunk in enumerate(self._create_message_chunks(entities), 1):
                 chunk_size_mb = self._estimate_message_size(entity_chunk) / (1024 * 1024)
-                logger.info(
+                logger.debug(
                     f"Ingesting chunk {chunk_num} with {len(entity_chunk)} entities (~{chunk_size_mb:.2f} MB)"
                 )
                 response = client.ingest(entities=entity_chunk)
                 if response.errors:
                     raise RuntimeError(f"Chunk {chunk_num} ingestion failed: {response.errors}")
-                logger.info(f"Chunk {chunk_num} ingested successfully")
+                logger.debug(f"Chunk {chunk_num} ingested successfully")
 
             logger.info(f"Policy {self.name}: Successfully ingested {len(entities)} entities in {entity_chunk} chunks")
             run_success = get_metric("backend_execution_success")
