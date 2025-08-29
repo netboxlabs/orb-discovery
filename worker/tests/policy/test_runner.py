@@ -489,7 +489,7 @@ def test_run_with_multiple_chunks(policy_runner, sample_policy, mock_diode_clien
         return_value=1024
     ):
         
-        with caplog.at_level("INFO"):
+        with caplog.at_level("DEBUG"):
             policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
         # Should call chunking method
