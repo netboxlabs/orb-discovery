@@ -15,7 +15,7 @@ from napalm import get_network_driver
 from device_discovery.client import Client
 from device_discovery.discovery import discover_device_driver, supported_drivers
 from device_discovery.metrics import get_metric
-from device_discovery.policy.models import Config, Defaults, Napalm, Status
+from device_discovery.policy.models import Config, Defaults, Napalm, Status, Options
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -48,9 +48,7 @@ class PolicyRunner:
         self.config = config
 
         if self.config is None:
-            self.config = Config(defaults=Defaults())
-        elif self.config.defaults is None:
-            self.config.defaults = Defaults()
+            self.config = Config(defaults=Defaults(), options=Options())
 
         self.scheduler.start()
         set_telemetry = True

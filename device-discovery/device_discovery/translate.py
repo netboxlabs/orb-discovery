@@ -291,7 +291,11 @@ def translate_data(data: dict) -> Iterable[Entity]:
     entities = []
 
     defaults = data.get("defaults", Defaults())
+    if defaults is None:
+        defaults = Defaults()
     options = data.get("options", Options())
+    if options is None:
+        options = Options()
 
     device_info = data.get("device", {})
     interfaces = data.get("interface", {})
@@ -300,7 +304,6 @@ def translate_data(data: dict) -> Iterable[Entity]:
         if options.platform_omit_version:
             device_info["platform"] = data.get("driver")
         else:
-
             device_info["platform"] = (
                 f"{data.get('driver', '').upper()} {device_info.get('os_version')}"
             )
