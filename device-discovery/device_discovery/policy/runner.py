@@ -49,6 +49,10 @@ class PolicyRunner:
 
         if self.config is None:
             self.config = Config(defaults=Defaults(), options=Options())
+        if self.config.defaults is None:
+            self.config.defaults = Defaults()
+        if self.config.options is None:
+            self.config.options = Options()
 
         self.scheduler.start()
         set_telemetry = True
