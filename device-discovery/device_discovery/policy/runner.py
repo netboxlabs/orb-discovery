@@ -47,12 +47,9 @@ class PolicyRunner:
         self.name = name.replace("\r\n", "").replace("\n", "")
         self.config = config
 
-        if self.config is None:
-            self.config = Config(defaults=Defaults(), options=Options())
-        if self.config.defaults is None:
-            self.config.defaults = Defaults()
-        if self.config.options is None:
-            self.config.options = Options()
+        self.config = self.config or Config(defaults=Defaults(), options=Options())
+        self.config.defaults = self.config.defaults or Defaults()
+        self.config.options = self.config.options or Options()
 
         self.scheduler.start()
         set_telemetry = True
