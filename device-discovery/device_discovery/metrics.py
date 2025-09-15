@@ -138,10 +138,7 @@ def setup_metrics_export(endpoint: str | None, export_period_seconds: int) -> No
 
     try:
         # Set up the exporter with the provided endpoint and timeouts
-        insecure = None
-        if endpoint.startswith("grpc://"):
-            insecure = True
-
+        insecure = True if endpoint.startswith("grpc://") else None
         exporter = OTLPMetricExporter(endpoint=endpoint, timeout=10, insecure=insecure)
         logger.info(f"OTLP metrics exporter configured with endpoint: {endpoint}")
 
