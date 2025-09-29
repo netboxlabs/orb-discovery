@@ -73,9 +73,9 @@ class MockBackend(Backend):
             )
 
             entities.append(Entity(device=device))
-        cache = kwargs.get("cache", {})
+        #cache = kwargs.get("cache", {})
 
         logger.info(f"Policy '{policy_name}' config: {config}")
         logger.info(f"Policy '{policy_name}' scope: {scope}")
-        logger.info(f"Policy '{policy_name}' cache keys: {list(cache.keys())}")
+        #logger.info(f"Policy '{policy_name}' cache keys: {list(cache.keys())}")
         return entities

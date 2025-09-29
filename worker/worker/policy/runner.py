@@ -131,6 +131,7 @@ class PolicyRunner:
             client: Diode client.
             backend: Backend class.
             policy: Policy configuration.
+            **backend_kwargs: Additional keyword arguments for the backend.
 
         """
         policy_executions = get_metric("policy_executions")
