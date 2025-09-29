@@ -111,6 +111,14 @@ def test_setup_policy_runner_with_cron(
         mock_start.assert_called_once()
         mock_add_job.assert_called_once()
         mock_load_class.assert_called_once()
+        mock_load_class.return_value.assert_called_once_with()
+        job_kwargs = mock_add_job.call_args[1]["kwargs"]
+        assert job_kwargs["schedule"] == "0 * * * *"
+        assert "cache" in job_kwargs
+        assert job_kwargs["cache"] is policy_runner.cache
+        schedule_now_callable = job_kwargs["schedule_now"]
+        assert schedule_now_callable.__self__ is policy_runner
+        assert schedule_now_callable.__func__ is PolicyRunner.schedule_now
         mock_diode_client.assert_called_once()
         assert policy_runner.status == Status.RUNNING
 
@@ -133,6 +141,13 @@ def test_setup_policy_runner_with_one_time_run(
         # Verify that DateTrigger is used for one-time scheduling
         trigger = mock_add_job.call_args[1]["trigger"]
         mock_load_class.assert_called_once()
+        mock_load_class.return_value.assert_called_once_with()
+        job_kwargs = mock_add_job.call_args[1]["kwargs"]
+        assert set(job_kwargs.keys()) == {"cache", "schedule_now"}
+        assert job_kwargs["cache"] is policy_runner.cache
+        schedule_now_callable = job_kwargs["schedule_now"]
+        assert schedule_now_callable.__self__ is policy_runner
+        assert schedule_now_callable.__func__ is PolicyRunner.schedule_now
         mock_diode_client.assert_called_once()
         assert isinstance(trigger, DateTrigger)
         assert mock_start.called
@@ -156,12 +171,88 @@ def test_setup_policy_runner_dry_run(
         mock_start.assert_called_once()
         mock_add_job.assert_called_once()
         mock_load_class.assert_called_once()
+        mock_load_class.return_value.assert_called_once_with()
+        job_kwargs = mock_add_job.call_args[1]["kwargs"]
+        assert job_kwargs["schedule"] == "0 * * * *"
+        assert job_kwargs["cache"] is policy_runner.cache
+        schedule_now_callable = job_kwargs["schedule_now"]
+        assert schedule_now_callable.__self__ is policy_runner
+        assert schedule_now_callable.__func__ is PolicyRunner.schedule_now
         mock_diode_dry_run_client.assert_called_once()
         assert policy_runner.status == Status.RUNNING
+
+
+def test_setup_uses_backend_cache_factory(
+    policy_runner, sample_diode_config, sample_policy, mock_diode_client
+):
+    """Ensure PolicyRunner uses backend cache factory when available."""
+    backend_instance = MagicMock()
+    backend_instance.setup.return_value = Metadata(
+        name="my_backend",
+        app_name="app",
+        app_version="1.0",
+    )
+    backend_instance.create_cache.return_value = {"token": "value"}
+
+    backend_class = MagicMock(return_value=backend_instance)
+
+    with patch("worker.policy.runner.load_class", return_value=backend_class), patch.object(
+        policy_runner.scheduler, "start"
+    ), patch.object(policy_runner.scheduler, "add_job") as mock_add_job:
+        policy_runner.setup("policy1", sample_diode_config, sample_policy)
+
+    backend_instance.create_cache.assert_called_once()
+    assert policy_runner.cache == {"token": "value"}
+    job_kwargs = mock_add_job.call_args[1]["kwargs"]
+    assert job_kwargs["cache"] == {"token": "value"}
+    schedule_now_callable = job_kwargs["schedule_now"]
+    assert schedule_now_callable.__self__ is policy_runner
+    assert schedule_now_callable.__func__ is PolicyRunner.schedule_now
+
+
+def test_schedule_now_adds_job(
+    policy_runner,
+    sample_diode_config,
+    sample_policy,
+    mock_diode_client,
+):
+    """Ensure schedule_now queues an immediate job with merged kwargs."""
+    backend_instance = MagicMock()
+    backend_instance.setup.return_value = Metadata(
+        name="backend",
+        app_name="app",
+        app_version="1.0",
+    )
+
+    backend_class = MagicMock(return_value=backend_instance)
+
+    with patch("worker.policy.runner.load_class", return_value=backend_class), patch.object(
+        policy_runner.scheduler, "start"
+    ), patch.object(policy_runner.scheduler, "add_job"):
+        policy_runner.setup("policy1", sample_diode_config, sample_policy)
+
+    with patch.object(policy_runner.scheduler, "add_job") as mock_add_job:
+        policy_runner.schedule_now({"custom": "value"})
+
+    mock_add_job.assert_called_once()
+    call_args, call_kwargs = mock_add_job.call_args
+    run_callable = call_args[0]
+    assert run_callable.__self__ is policy_runner
+    assert run_callable.__func__ is PolicyRunner.run
+    scheduled_trigger = call_kwargs["trigger"]
+    assert isinstance(scheduled_trigger, DateTrigger)
+    scheduled_kwargs = call_kwargs["kwargs"]
+    assert scheduled_kwargs["custom"] == "value"
+    assert scheduled_kwargs["cache"] is policy_runner.cache
+    schedule_now_callable = scheduled_kwargs["schedule_now"]
+    assert schedule_now_callable.__self__ is policy_runner
+    assert schedule_now_callable.__func__ is PolicyRunner.schedule_now
+
 
 def test_run_success(policy_runner, sample_policy, mock_diode_client, mock_backend):
     """Test the run function for a successful execution."""
     policy_runner.name = "test_policy"
+    policy_runner.cache = {}
 
     # Create mock entities
     entities = []
@@ -177,12 +268,39 @@ def test_run_success(policy_runner, sample_policy, mock_diode_client, mock_backe
     policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
     # Assertions
-    mock_backend.run.assert_called_once_with(policy_runner.name, sample_policy)
+    mock_backend.run.assert_called_once_with(
+        policy_runner.name, sample_policy, cache=policy_runner.cache
+    )
     # Should call ingest once for the single chunk
     mock_diode_client.ingest.assert_called_once()
     # Check that entities were passed correctly
     call_args = mock_diode_client.ingest.call_args[1]['entities']
     assert len(call_args) == 3
+
+
+def test_run_forwards_backend_kwargs(policy_runner, sample_policy, mock_diode_client, mock_backend):
+    """Ensure PolicyRunner forwards keyword arguments to the backend run method."""
+    policy_runner.name = "test_policy"
+    mock_backend.run.return_value = []
+    mock_diode_client.ingest.return_value.errors = []
+    mock_cache = {}
+
+    policy_runner.run(
+        mock_diode_client,
+        mock_backend,
+        sample_policy,
+        schedule="0 * * * *",
+        custom="value",
+        cache=mock_cache,
+    )
+
+    mock_backend.run.assert_called_once_with(
+        policy_runner.name,
+        sample_policy,
+        schedule="0 * * * *",
+        custom="value",
+        cache=mock_cache,
+    )
 
 
 def test_run_ingestion_errors(
@@ -194,6 +312,7 @@ def test_run_ingestion_errors(
 ):
     """Test the run function when ingestion has errors."""
     policy_runner.name = "test_policy"
+    policy_runner.cache = {}
 
     # Create mock entities
     entities = []
@@ -212,7 +331,9 @@ def test_run_ingestion_errors(
         policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
     # Assertions
-    mock_backend.run.assert_called_once_with(policy_runner.name, sample_policy)
+    mock_backend.run.assert_called_once_with(
+        policy_runner.name, sample_policy, cache=policy_runner.cache
+    )
     mock_diode_client.ingest.assert_called_once()
     assert (
         "Policy test_policy: Chunk 1 ingestion failed: ['error1', 'error2']"
@@ -229,6 +350,7 @@ def test_run_backend_exception(
 ):
     """Test the run function when an exception is raised by the backend."""
     policy_runner.name = "test_policy"
+    policy_runner.cache = {}
 
     # Simulate backend throwing an exception
     mock_backend.run.side_effect = Exception("Backend error")
@@ -238,19 +360,23 @@ def test_run_backend_exception(
         policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
     # Assertions
-    mock_backend.run.assert_called_once_with(policy_runner.name, sample_policy)
+    mock_backend.run.assert_called_once_with(
+        policy_runner.name, sample_policy, cache=policy_runner.cache
+    )
     mock_diode_client.ingest.assert_not_called()  # Client ingestion should not be called
     assert "Policy test_policy: Backend error" in caplog.text
 
 
 def test_stop_policy_runner(policy_runner):
     """Test stopping the PolicyRunner."""
+    policy_runner.cache = {}
     with patch.object(policy_runner.scheduler, "shutdown") as mock_shutdown:
         policy_runner.stop()
 
         # Ensure scheduler shutdown is called and status is updated
         mock_shutdown.assert_called_once()
         assert policy_runner.status == Status.FINISHED
+        assert policy_runner.cache is None
 
 
 def test_metrics_during_policy_lifecycle(
@@ -279,6 +405,8 @@ def test_metrics_during_policy_lifecycle(
         app_name="test_app",
         app_version="1.0",
     )
+    policy_runner.cache = {}
+    policy_runner.cache = {}
 
     # Create mock entities
     entities = []
@@ -299,7 +427,9 @@ def test_metrics_during_policy_lifecycle(
 
         policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
-        mock_backend.run.assert_called_once_with(policy_runner.name, sample_policy)
+        mock_backend.run.assert_called_once_with(
+            policy_runner.name, sample_policy, cache=policy_runner.cache
+        )
         mock_diode_client.ingest.assert_called_once()
 
         mock_policy_executions.add.assert_called_once_with(1, {"policy": "test_policy"})

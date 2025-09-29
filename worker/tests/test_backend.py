@@ -36,6 +36,19 @@ def test_backend_run_not_implemented():
         list(backend.run("mock", mock_policy))
 
 
+def test_backend_run_accepts_kwargs():
+    """Test that Backend subclasses can accept keyword arguments in run."""
+
+    class DummyBackend(Backend):
+        def run(self, policy_name, policy, **kwargs):
+            return kwargs
+
+    backend = DummyBackend()
+    mock_policy = MagicMock(spec=Policy)
+    result = backend.run("mock", mock_policy, foo="bar", answer=42)
+    assert result == {"foo": "bar", "answer": 42}
+
+
 def test_load_class_valid_backend_class(mock_import_module):
     """Test that load_class successfully loads a valid Backend class."""
     mock_module_name = "worker.test_module"

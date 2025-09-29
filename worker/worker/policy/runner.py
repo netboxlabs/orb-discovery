@@ -5,6 +5,7 @@
 import logging
 import time
 from datetime import datetime, timedelta
+from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -33,6 +34,9 @@ class PolicyRunner:
         self.policy = None
         self.status = Status.NEW
         self.scheduler = BackgroundScheduler()
+        self.cache: Any = None
+        self._job_args: tuple[Any, ...] = ()
+        self._job_kwargs: dict[str, Any] = {}
 
     def setup(self, name: str, diode_config: DiodeConfig, policy: Policy):
         """
@@ -51,6 +55,10 @@ class PolicyRunner:
         )
         backend_class = load_class(policy.config.package)
         backend = backend_class()
+        backend_kwargs = policy.config.model_dump(
+            exclude={"package"}, exclude_none=True
+        )
+        cache_config = backend_kwargs.pop("cache", None)
 
         metadata = backend.setup()
         app_name = (
@@ -72,8 +80,15 @@ class PolicyRunner:
                 client_secret=diode_config.client_secret,
             )
 
+        self.cache = self._create_cache(backend, cache_config)
+        backend_kwargs["cache"] = self.cache
+        backend_kwargs["schedule_now"] = self.schedule_now
+
         self.metadata = metadata
         self.policy = policy
+
+        self._job_args = (client, backend, self.policy)
+        self._job_kwargs = dict(backend_kwargs)
 
         self.scheduler.start()
 
@@ -91,7 +106,8 @@ class PolicyRunner:
         self.scheduler.add_job(
             self.run,
             trigger=trigger,
-            args=[client, backend, self.policy],
+            args=self._job_args,
+            kwargs=self._job_kwargs,
         )
 
         self.status = Status.RUNNING
@@ -101,7 +117,11 @@ class PolicyRunner:
             active_policies.add(1, {"policy": self.name})
 
     def run(
-        self, client: DiodeClient | DiodeDryRunClient, backend: Backend, policy: Policy
+        self,
+        client: DiodeClient | DiodeDryRunClient,
+        backend: Backend,
+        policy: Policy,
+        **backend_kwargs,
     ):
         """
         Run the custom backend code for the specified scope.
@@ -118,8 +138,11 @@ class PolicyRunner:
             policy_executions.add(1, {"policy": self.name})
 
         exec_start_time = time.perf_counter()
+        if "cache" not in backend_kwargs and self.cache is not None:
+            backend_kwargs["cache"] = self.cache
+
         try:
-            entities = backend.run(self.name, policy)
+            entities = backend.run(self.name, policy, **backend_kwargs)
 
             for chunk_num, entity_chunk in enumerate(self._create_message_chunks(entities), 1):
                 chunk_size_mb = self._estimate_message_size(entity_chunk) / (1024 * 1024)
@@ -174,9 +197,29 @@ class PolicyRunner:
         """Stop the policy runner."""
         self.scheduler.shutdown()
         self.status = Status.FINISHED
+        self.cache = None
+        self._job_args = ()
+        self._job_kwargs = {}
         active_policies = get_metric("active_policies")
         if active_policies:
             active_policies.add(-1, {"policy": self.name})
+
+    def schedule_now(self, extra_kwargs: dict[str, Any] | None = None) -> None:
+        """Schedule the backend to run immediately, merging any extra kwargs."""
+        if not self._job_args:
+            raise RuntimeError("PolicyRunner is not initialized; cannot schedule now")
+
+        job_kwargs = dict(self._job_kwargs)
+        if extra_kwargs:
+            job_kwargs.update(extra_kwargs)
+
+        immediate_trigger = DateTrigger(run_date=datetime.now())
+        self.scheduler.add_job(
+            self.run,
+            trigger=immediate_trigger,
+            args=self._job_args,
+            kwargs=job_kwargs,
+        )
 
     def _create_message_chunks(self, entities: list[ingester_pb2.Entity]) -> list[list[ingester_pb2.Entity]]:
         """Create 3.5MB chunks from entities, always returning at least one chunk."""
@@ -208,3 +251,14 @@ class PolicyRunner:
         request = ingester_pb2.IngestRequest()
         request.entities.extend(entities)
         return request.ByteSize()
+
+    def _create_cache(self, backend: Backend, cache_config: Any) -> Any:
+        """Create a cache object that backends can reuse across runs."""
+        cache_factory = getattr(backend, "create_cache", None)
+        if callable(cache_factory):
+            cache = cache_factory(cache_config)
+            if cache is not None:
+                return cache
+        if cache_config is not None:
+            return cache_config
+        return {}

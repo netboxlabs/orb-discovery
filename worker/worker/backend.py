@@ -25,7 +25,7 @@ class Backend:
         """
         raise NotImplementedError("The 'setup' method must be implemented.")
 
-    def run(self, policy_name: str, policy: Policy) -> Iterable[Entity]:
+    def run(self, policy_name: str, policy: Policy, **kwargs) -> Iterable[Entity]:
         """
         Run the backend.
 
@@ -33,6 +33,7 @@ class Backend:
         ----
             policy_name (str): The name of the policy.
             policy (Policy): The policy to run.
+            **kwargs: Additional parameters provided by the runner.
 
         Returns:
         -------
