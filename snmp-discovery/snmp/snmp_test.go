@@ -342,7 +342,58 @@ func TestNewClient(t *testing.T) {
 			},
 			expectError: false,
 		},
-
+		{
+			name: "Creates SNMPv3 client successfully with MD5/AES192",
+			auth: &config.Authentication{
+				ProtocolVersion: snmp.ProtocolVersion3,
+				Username:        "testuser",
+				AuthProtocol:    "MD5",
+				AuthPassphrase:  "testpass",
+				PrivProtocol:    "AES192",
+				PrivPassphrase:  "testpass",
+				SecurityLevel:   "authPriv",
+			},
+			expectError: false,
+		},
+		{
+			name: "Creates SNMPv3 client successfully with MD5/AES256",
+			auth: &config.Authentication{
+				ProtocolVersion: snmp.ProtocolVersion3,
+				Username:        "testuser",
+				AuthProtocol:    "MD5",
+				AuthPassphrase:  "testpass",
+				PrivProtocol:    "AES256",
+				PrivPassphrase:  "testpass",
+				SecurityLevel:   "authPriv",
+			},
+			expectError: false,
+		},
+		{
+			name: "Creates SNMPv3 client successfully with MD5/AES192C",
+			auth: &config.Authentication{
+				ProtocolVersion: snmp.ProtocolVersion3,
+				Username:        "testuser",
+				AuthProtocol:    "MD5",
+				AuthPassphrase:  "testpass",
+				PrivProtocol:    "AES192C",
+				PrivPassphrase:  "testpass",
+				SecurityLevel:   "authPriv",
+			},
+			expectError: false,
+		},
+		{
+			name: "Creates SNMPv3 client successfully with MD5/AES256C",
+			auth: &config.Authentication{
+				ProtocolVersion: snmp.ProtocolVersion3,
+				Username:        "testuser",
+				AuthProtocol:    "MD5",
+				AuthPassphrase:  "testpass",
+				PrivProtocol:    "AES256C",
+				PrivPassphrase:  "testpass",
+				SecurityLevel:   "authPriv",
+			},
+			expectError: false,
+		},
 		{
 			name: "Invalid SNMPv3 auth protocol",
 			auth: &config.Authentication{
