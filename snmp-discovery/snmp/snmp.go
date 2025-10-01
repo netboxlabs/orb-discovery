@@ -232,6 +232,14 @@ func getAuthProtocol(authProtocol string) (gosnmp.SnmpV3AuthProtocol, error) {
 		return gosnmp.MD5, nil
 	case "SHA":
 		return gosnmp.SHA, nil
+	case "SHA224":
+		return gosnmp.SHA224, nil
+	case "SHA256":
+		return gosnmp.SHA256, nil
+	case "SHA384":
+		return gosnmp.SHA384, nil
+	case "SHA512":
+		return gosnmp.SHA512, nil
 	}
 	return gosnmp.NoAuth, fmt.Errorf("unsupported authentication protocol: %s", authProtocol)
 }
