@@ -132,7 +132,14 @@ func main() {
 		}
 	}()
 
-	server.Start()
+	serverErrCh := server.Start()
+
+	go func() {
+		if err, ok := <-serverErrCh; ok && err != nil {
+			logger.Error("network-discovery server encountered an error", "error", err)
+			cancelFunc()
+		}
+	}()
 
 	<-done
 }
