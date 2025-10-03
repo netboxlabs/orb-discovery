@@ -123,6 +123,10 @@ func main() {
 			case <-sigs:
 				logger.Warn("stop signal received, stopping network-discovery")
 				server.Stop()
+				// Shutdown metrics
+				if err := metrics.Shutdown(ctx); err != nil {
+					logger.Error("failed to shutdown metrics", "error", err)
+				}
 				cancelFunc()
 			case <-rootCtx.Done():
 				logger.Warn("main context cancelled")
@@ -137,6 +141,10 @@ func main() {
 	go func() {
 		if err, ok := <-serverErrCh; ok && err != nil {
 			logger.Error("network-discovery server encountered an error", "error", err)
+			server.Stop()
+			if shutdownErr := metrics.Shutdown(ctx); shutdownErr != nil {
+				logger.Error("failed to shutdown metrics", "error", shutdownErr)
+			}
 			cancelFunc()
 		}
 	}()
