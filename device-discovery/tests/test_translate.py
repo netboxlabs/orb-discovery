@@ -333,6 +333,8 @@ def test_translate_data_creates_missing_subinterface_with_parent(
 
     assert subinterface.parent.name == "ethernet-1/1"
     assert subinterface.parent.name == parent_interface.name
+    assert subinterface.type == "virtual"
+    assert parent_interface.type == "other"
     assert ip_entity.address == "10.0.0.1/30"
     assert ip_entity.assigned_object_interface.name == "ethernet-1/1.0"
 

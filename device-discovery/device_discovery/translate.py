@@ -125,6 +125,10 @@ def translate_interface(
         else None
     )
 
+    interface_type = defaults.if_type
+    if parent is not None:
+        interface_type = "virtual"
+
     interface = Interface(
         device=device,
         name=if_name,
@@ -133,7 +137,7 @@ def translate_interface(
         description=description,
         parent=parent,
         tags=tags,
-        type=defaults.if_type,
+        type=interface_type,
     )
 
     # Convert napalm interface speed from Mbps to Netbox Kbps
