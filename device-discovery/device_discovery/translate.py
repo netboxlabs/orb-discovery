@@ -144,10 +144,8 @@ def translate_interface(
             interface.speed = speed_kbps
 
     mtu = interface_info.get("mtu")
-    if mtu is not None:
-        mtu = int(mtu)
-        if mtu > 0 and not int32_overflows(mtu):
-            interface.mtu = mtu
+    if mtu is not None and mtu > 0 and not int32_overflows(mtu):
+        interface.mtu = mtu
 
     return interface
 
@@ -239,6 +237,7 @@ def translate_interface_ips(
 
     return ip_entities
 
+
 def translate_vlan(vid: str, vlan_name: str, defaults: Defaults) -> VLAN | None:
     """
     Translate VLAN information for a given VLAN ID.
@@ -315,7 +314,9 @@ def build_interface_entities(
             return None
         return interface_entities.get(parent_name)
 
-    for if_name, interface_info in sorted(interfaces.items(), key=lambda item: interface_sort_key(item[0])):
+    for if_name, interface_info in sorted(
+        interfaces.items(), key=lambda item: interface_sort_key(item[0])
+    ):
         parent = resolve_parent(if_name)
         interface = translate_interface(
             device, if_name, interface_info, defaults, parent=parent
