@@ -5,7 +5,7 @@
 import logging
 import threading
 
-from netboxlabs.diode.sdk import DiodeClient, DiodeDryRunClient
+from netboxlabs.diode.sdk import DiodeClient, DiodeDryRunClient, DiodeOTLPClient
 
 from device_discovery.translate import translate_data
 from device_discovery.version import version_semver
@@ -82,13 +82,19 @@ class Client:
                     app_name=f"{prefix}/{APP_NAME}" if prefix else APP_NAME,
                     output_dir=dry_run_output_dir,
                 )
-            else:
+            elif client_id is not None and client_secret is not None:
                 self.diode_client = DiodeClient(
                     target=target,
                     app_name=f"{prefix}/{APP_NAME}" if prefix else APP_NAME,
                     app_version=APP_VERSION,
                     client_id=client_id,
                     client_secret=client_secret,
+                )
+            else:
+                self.diode_client = DiodeOTLPClient(
+                    target=target,
+                    app_name=f"{prefix}/{APP_NAME}" if prefix else APP_NAME,
+                    app_version=APP_VERSION,
                 )
 
     def ingest(self, hostname: str, data: dict):

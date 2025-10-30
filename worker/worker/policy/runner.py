@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
-from netboxlabs.diode.sdk import DiodeClient, DiodeDryRunClient
+from netboxlabs.diode.sdk import DiodeClient, DiodeDryRunClient, DiodeOTLPClient
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2
 
 from worker.backend import Backend, load_class
@@ -63,13 +63,19 @@ class PolicyRunner:
                 app_name=app_name,
                 output_dir=diode_config.dry_run_output_dir,
             )
-        else:
+        elif diode_config.client_id is not None and diode_config.client_secret is not None:
             client = DiodeClient(
                 target=diode_config.target,
                 app_name=app_name,
                 app_version=metadata.app_version,
                 client_id=diode_config.client_id,
                 client_secret=diode_config.client_secret,
+            )
+        else:
+            client = DiodeOTLPClient(
+                target=diode_config.target,
+                app_name=app_name,
+                app_version=metadata.app_version,
             )
 
         self.metadata = metadata
