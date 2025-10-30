@@ -71,6 +71,15 @@ def mock_diode_client():
         mock_diode_client.return_value = mock_instance
         yield mock_diode_client
 
+
+@pytest.fixture
+def mock_diode_otlp_client():
+    """Fixture to mock the DiodeOTLPClient constructor."""
+    with patch("worker.policy.runner.DiodeOTLPClient") as mock_diode_otlp_client:
+        mock_instance = MagicMock()
+        mock_diode_otlp_client.return_value = mock_instance
+        yield mock_diode_otlp_client
+
 @pytest.fixture
 def mock_diode_dry_run_client():
     """Fixture to mock the DiodeDryRunClient constructor."""
@@ -137,6 +146,28 @@ def test_setup_policy_runner_with_one_time_run(
         assert isinstance(trigger, DateTrigger)
         assert mock_start.called
         assert policy_runner.status == Status.RUNNING
+
+
+def test_setup_policy_runner_uses_otlp_client(
+    policy_runner,
+    sample_policy,
+    mock_load_class,
+    mock_diode_client,
+    mock_diode_otlp_client,
+):
+    """Ensure setup falls back to DiodeOTLPClient when credentials are missing."""
+    otlp_config = DiodeConfig(target="http://localhost:8080", prefix="test-prefix")
+    with patch.object(policy_runner.scheduler, "start") as mock_start, patch.object(
+        policy_runner.scheduler, "add_job"
+    ) as mock_add_job:
+        policy_runner.setup("policy1", otlp_config, sample_policy)
+
+        mock_start.assert_called_once()
+        mock_add_job.assert_called_once()
+
+    mock_load_class.assert_called_once()
+    assert not mock_diode_client.called
+    mock_diode_otlp_client.assert_called_once()
 
 def test_setup_policy_runner_dry_run(
     policy_runner,

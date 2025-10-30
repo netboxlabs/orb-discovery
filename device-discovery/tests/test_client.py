@@ -73,6 +73,13 @@ def mock_diode_client_class():
         yield mock
 
 
+@pytest.fixture
+def mock_diode_otlp_client_class():
+    """Mock the DiodeOTLPClient class."""
+    with patch("device_discovery.client.DiodeOTLPClient") as mock:
+        yield mock
+
+
 def test_init_client(mock_diode_client_class, mock_version_semver):
     """Test the initialization of the Diode client."""
     client = Client()
@@ -179,3 +186,18 @@ def test_client_dry_run_stdout(capsys, sample_data):
     captured = capsys.readouterr()
     assert sample_data["device"]["hostname"] in captured.out
     assert sample_data["interface"]["GigabitEthernet0/0"]["mac_address"] in captured.out
+
+
+def test_init_client_uses_otlp_when_credentials_missing(
+    mock_diode_client_class, mock_diode_otlp_client_class, mock_version_semver
+):
+    """Ensure init_client falls back to DiodeOTLPClient when credentials are not provided."""
+    client = Client()
+    client.init_client(prefix="prefix", target="https://example.com")
+
+    assert not mock_diode_client_class.called
+    mock_diode_otlp_client_class.assert_called_once_with(
+        target="https://example.com",
+        app_name="prefix/device-discovery",
+        app_version=mock_version_semver(),
+    )
