@@ -129,8 +129,9 @@ def translate_interface(
     if parent is not None:
         interface_type = "virtual"
         parent = Interface(
-            name=parent.name,
             device=device,
+            name=parent.name,
+            type=parent.type,
         )
 
     interface = Interface(
@@ -235,6 +236,7 @@ def translate_interface_ips(
                                 assigned_object_interface=Interface(
                                     device=interface.device,
                                     name=interface.name,
+                                    type=interface.type,
                                 ),
                                 role=ip_role,
                                 tenant=ip_tenant,
