@@ -93,7 +93,7 @@ def translate_interface(
     if_name: str,
     interface_info: dict,
     defaults: Defaults,
-    parent: str | None = None,
+    parent: Interface | None = None,
 ) -> Interface:
     """
     Translate interface information from NAPALM format to Diode SDK Interface entity.
@@ -104,7 +104,7 @@ def translate_interface(
         if_name (str): The name of the interface.
         interface_info (dict): Dictionary containing interface information.
         defaults (Defaults): Default configuration.
-        parent (str | None): Parent interface name, if any.
+        parent (Interface | None): Parent interface, if any.
 
     Returns:
     -------
@@ -128,6 +128,10 @@ def translate_interface(
     interface_type = defaults.if_type
     if parent is not None:
         interface_type = "virtual"
+        parent = Interface(
+            name=parent.name,
+            device=device,
+        )
 
     interface = Interface(
         device=device,
@@ -228,7 +232,10 @@ def translate_interface_ips(
                         Entity(
                             ip_address=IPAddress(
                                 address=ip_address,
-                                assigned_object_interface=interface.name,
+                                assigned_object_interface=Interface(
+                                    device=interface.device,
+                                    name=interface.name,
+                                ),
                                 role=ip_role,
                                 tenant=ip_tenant,
                                 vrf=ip_vrf,
@@ -312,12 +319,12 @@ def build_interface_entities(
         separator_score = name.count(".") + name.count(":")
         return (separator_score, name)
 
-    def resolve_parent(name: str) -> str | None:
+    def resolve_parent(name: str) -> Interface | None:
         parent_name = extract_parent_interface_name(name)
         if parent_name is None:
             return None
         if parent_name in defined_interface_names or parent_name in interface_entities:
-            return parent_name
+            return interface_entities.get(parent_name)
         return None
 
     for if_name, interface_info in sorted(
