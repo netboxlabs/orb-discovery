@@ -16,7 +16,11 @@ from worker.policy.runner import PolicyRunner
 @pytest.fixture
 def policy_runner():
     """Fixture to create a PolicyRunner instance."""
-    return PolicyRunner()
+    runner = PolicyRunner()
+    runner.metadata = Metadata(
+        name="test_backend", app_name="test_app", app_version="1.0"
+    )
+    return runner
 
 
 @pytest.fixture
@@ -214,6 +218,29 @@ def test_run_success(policy_runner, sample_policy, mock_diode_client, mock_backe
     # Check that entities were passed correctly
     call_args = mock_diode_client.ingest.call_args[1]['entities']
     assert len(call_args) == 3
+
+
+def test_run_passes_metadata_to_ingest(
+    policy_runner, sample_policy, mock_diode_client, mock_backend
+):
+    """Ensure run forwards policy/backend metadata to the Diode client."""
+    policy_runner.name = "policy-meta"
+    policy_runner.metadata = Metadata(
+        name="custom_backend", app_name="custom", app_version="0.1"
+    )
+
+    entity = ingester_pb2.Entity()
+    entity.device.name = "device-1"
+    mock_backend.run.return_value = [entity]
+    mock_diode_client.ingest.return_value.errors = []
+
+    policy_runner.run(mock_diode_client, mock_backend, sample_policy)
+
+    _, kwargs = mock_diode_client.ingest.call_args
+    assert kwargs["metadata"] == {
+        "policy_name": "policy-meta",
+        "worker_backend": "custom_backend",
+    }
 
 
 def test_run_ingestion_errors(

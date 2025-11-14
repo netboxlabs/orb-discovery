@@ -126,13 +126,17 @@ class PolicyRunner:
         exec_start_time = time.perf_counter()
         try:
             entities = backend.run(self.name, policy)
+            metadata = {
+                "policy_name": self.name,
+                "worker_backend": self.metadata.name,
+            }
 
             for chunk_num, entity_chunk in enumerate(self._create_message_chunks(entities), 1):
                 chunk_size_mb = self._estimate_message_size(entity_chunk) / (1024 * 1024)
                 logger.debug(
                     f"Ingesting chunk {chunk_num} with {len(entity_chunk)} entities (~{chunk_size_mb:.2f} MB)"
                 )
-                response = client.ingest(entities=entity_chunk)
+                response = client.ingest(entities=entity_chunk, metadata=metadata)
                 if response.errors:
                     raise RuntimeError(f"Chunk {chunk_num} ingestion failed: {response.errors}")
                 logger.debug(f"Chunk {chunk_num} ingested successfully")
