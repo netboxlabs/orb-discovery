@@ -65,7 +65,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	if !*dryRun && (*diodeTarget == "" || *diodeClientID == "" || *diodeClientSecret == "") {
+	if !*dryRun && (*diodeTarget == "") {
 		fmt.Fprintf(os.Stderr, "Usage of network-discovery:\n")
 		flag.PrintDefaults()
 		os.Exit(1)
@@ -83,13 +83,19 @@ func main() {
 			producerName,
 			resolveEnv(*dryRunOutputDir),
 		)
-	} else {
+	} else if *diodeClientID != "" || *diodeClientSecret != "" {
 		client, err = diode.NewClient(
 			resolveEnv(*diodeTarget),
 			producerName,
 			version.GetBuildVersion(),
 			diode.WithClientID(resolveEnv(*diodeClientID)),
 			diode.WithClientSecret(resolveEnv(*diodeClientSecret)),
+		)
+	} else {
+		client, err = diode.NewOTLPClient(
+			resolveEnv(*diodeTarget),
+			producerName,
+			version.GetBuildVersion(),
 		)
 	}
 	if err != nil {

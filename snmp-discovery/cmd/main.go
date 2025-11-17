@@ -51,7 +51,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	if !*dryRun && (*diodeTarget == "" || *diodeClientID == "" || *diodeClientSecret == "") {
+	if !*dryRun && (*diodeTarget == "") {
 		fmt.Fprintf(os.Stderr, "Usage of snmp-discovery:\n")
 		flag.PrintDefaults()
 		os.Exit(1)
@@ -69,13 +69,19 @@ func main() {
 			producerName,
 			env.ResolveEnvOrExit(*dryRunOutputDir),
 		)
-	} else {
+	} else if *diodeClientID != "" || *diodeClientSecret != "" {
 		client, err = diode.NewClient(
 			env.ResolveEnvOrExit(*diodeTarget),
 			producerName,
 			version.GetBuildVersion(),
 			diode.WithClientID(env.ResolveEnvOrExit(*diodeClientID)),
 			diode.WithClientSecret(env.ResolveEnvOrExit(*diodeClientSecret)),
+		)
+	} else {
+		client, err = diode.NewOTLPClient(
+			env.ResolveEnvOrExit(*diodeTarget),
+			producerName,
+			version.GetBuildVersion(),
 		)
 	}
 	if err != nil {
