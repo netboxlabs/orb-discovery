@@ -75,7 +75,7 @@ func main() {
 	if *diodeAppNamePrefix != "" {
 		producerName = fmt.Sprintf("%s/%s", *diodeAppNamePrefix, AppName)
 	}
-
+	logger := config.NewLogger(*logLevel, *logFormat)
 	var client diode.Client
 	var err error
 	if *dryRun {
@@ -92,6 +92,7 @@ func main() {
 			diode.WithClientSecret(resolveEnv(*diodeClientSecret)),
 		)
 	} else {
+		logger.Debug("Initializing OTLP client")
 		client, err = diode.NewOTLPClient(
 			resolveEnv(*diodeTarget),
 			producerName,
@@ -104,7 +105,6 @@ func main() {
 	}
 
 	ctx := context.Background()
-	logger := config.NewLogger(*logLevel, *logFormat)
 
 	if otelEndpoint != nil && *otelEndpoint != "" {
 		if err := metrics.SetupMetricsExport(ctx, logger, *otelEndpoint, *otelExportPeriod); err != nil {
