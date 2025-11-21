@@ -92,6 +92,7 @@ class Client:
                     client_secret=client_secret,
                 )
             else:
+                logger.info("Initializing Diode OTLP client")
                 self.diode_client = DiodeOTLPClient(
                     target=target,
                     app_name=f"{prefix}/{APP_NAME}" if prefix else APP_NAME,

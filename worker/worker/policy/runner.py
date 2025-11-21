@@ -72,6 +72,7 @@ class PolicyRunner:
                 client_secret=diode_config.client_secret,
             )
         else:
+            logger.info("Initializing Diode OTLP client")
             client = DiodeOTLPClient(
                 target=diode_config.target,
                 app_name=app_name,
