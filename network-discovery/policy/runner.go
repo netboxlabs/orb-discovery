@@ -192,6 +192,10 @@ func (r *Runner) run() {
 		options = append(options, nmap.WithICMPNetMaskDiscovery())
 	}
 
+	if r.scope.SkipHostDiscovery != nil && *r.scope.SkipHostDiscovery {
+		options = append(options, nmap.WithSkipHostDiscovery())
+	}
+
 	hasOtherScans := false
 	selectedTCPScan := ""
 	if len(r.scope.ScanTypes) > 0 {

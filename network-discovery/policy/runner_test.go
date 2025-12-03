@@ -201,10 +201,11 @@ func TestRunnerWithOptions(t *testing.T) {
 			policy: config.Policy{
 				Config: config.PolicyConfig{},
 				Scope: config.Scope{
-					Targets:       []string{"localhost"},
-					ICMPEcho:      boolPtr(true),
-					ICMPTimestamp: boolPtr(true),
-					ICMPNetMask:   boolPtr(true),
+					Targets:           []string{"localhost"},
+					ICMPEcho:          boolPtr(true),
+					ICMPTimestamp:     boolPtr(true),
+					ICMPNetMask:       boolPtr(true),
+					SkipHostDiscovery: boolPtr(true),
 				},
 			},
 		},
