@@ -37,6 +37,7 @@ dependencies = [
     "opentelemetry-api~=1.32",
     "opentelemetry-sdk~=1.32",
     "opentelemetry-exporter-otlp~=1.32",
+    "ntc-templates~=8.1",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +54,7 @@ device-discovery = "device_discovery.main:main"
 packages = [
     "device_discovery",
     "device_discovery.policy",
+    "custom_napalm",
 ]
 package-data = {"device_discovery" = ["**/*", "policy/**"]}
 exclude-package-data = {device_discovery = ["tests/*"]}
