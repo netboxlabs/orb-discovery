@@ -3,15 +3,22 @@
 from napalm.ios.ios import IOSDriver as NapalmIOSDriver
 from ntc_templates.parse import parse_output
 
+
 class IOSDriver(NapalmIOSDriver):
-    """Extend the base IOS driver with a site-code helper."""
+    """Extend the base IOS driver with an inventory helper."""
 
-    def get_site_code(self) -> dict:
+    def get_inventory(self) -> dict:
         """
-        Return site code information from the running configuration if present.
+        Return parsed hardware inventory from the device.
 
-        Uses a simple CLI grep to extract a configured site code line.
+        Uses `show inventory` parsed via ntc-templates. Falls back to an
+        empty dict when the command or parser is unavailable.
         """
-        output = self._send_command("show inventory")
-        parsed_output = parse_output(platform="cisco_ios", command="show inventory", data=output)
-        return {"site_code": parsed_output} if parsed_output else {}
+        try:
+            output = self._send_command("show inventory")
+            parsed_output = parse_output(
+                platform="cisco_ios", command="show inventory", data=output
+            )
+            return {"items": parsed_output} if parsed_output else {}
+        except Exception:
+            return {}

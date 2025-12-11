@@ -148,7 +148,7 @@ def test_run_device_with_discovered_driver(policy_runner, sample_scopes, sample_
         mock_driver_instance.get_facts.return_value = {"model": "SampleModel"}
         mock_driver_instance.get_interfaces.return_value = {"eth0": "up"}
         mock_driver_instance.get_interfaces_ip.return_value = {"eth0": "192.168.1.1"}
-        mock_driver_instance.get_site_code.return_value = {"site_code": "NY1"}
+        mock_driver_instance.get_inventory.return_value = {"site_code": "NY1"}
 
         # Run the device with the setup runner
         policy_runner.run("test_id", sample_scopes[0], sample_config)
@@ -165,7 +165,7 @@ def test_run_device_with_discovered_driver(policy_runner, sample_scopes, sample_
         assert data["device"] == {"model": "SampleModel"}
         assert data["interface"] == {"eth0": "up"}
         assert data["interface_ip"] == {"eth0": "192.168.1.1"}
-        assert data["site_code"] == {"site_code": "NY1"}
+        assert data["inventory"] == {"site_code": "NY1"}
 
 
 def test_run_device_with_custom_method_error(
@@ -188,15 +188,16 @@ def test_run_device_with_custom_method_error(
         mock_driver_instance.get_facts.return_value = {"model": "SampleModel"}
         mock_driver_instance.get_interfaces.return_value = {"eth0": "up"}
         mock_driver_instance.get_interfaces_ip.return_value = {"eth0": "192.168.1.1"}
-        mock_driver_instance.get_site_code.side_effect = Exception("boom")
+        mock_driver_instance.get_inventory.side_effect = Exception("boom")
 
         policy_runner.run("test_id", sample_scopes[0], sample_config)
 
         mock_ingest.assert_called_once()
         _, data = mock_ingest.call_args[0]
-        assert "site_code" not in data
+        assert "inventory" not in data
         mock_warning.assert_any_call(
-            f"Policy {policy_runner.name}, Hostname {sample_scopes[0].hostname}: Error getting site code: boom. Continuing without site code data."
+            f"Policy {policy_runner.name}, Hostname {sample_scopes[0].hostname}: Error getting inventory: boom. "
+            "Continuing without custom inventory data."
         )
 
 

@@ -187,15 +187,18 @@ class PolicyRunner:
                 logger.warning(
                     f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting VLANs: {e}. Continuing without VLAN data."
                 )
-            custom_site_code = getattr(device, "get_site_code", None)
-            if callable(custom_site_code):
+            custom_inventory = getattr(device, "get_inventory", None)
+            if not callable(custom_inventory):
+                custom_inventory = getattr(device, "get_site_code", None)
+            if callable(custom_inventory):
                 try:
-                    site_code_data = custom_site_code()
-                    if site_code_data:
-                        data["site_code"] = site_code_data
+                    inventory_data = custom_inventory()
+                    if inventory_data:
+                        data["inventory"] = inventory_data
                 except Exception as e:
                     logger.warning(
-                        f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting site code: {e}. Continuing without site code data."
+                        f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting inventory: {e}."
+                        "Continuing without custom inventory data."
                     )
             metadata = {"policy_name": self.name, "hostname": sanitized_hostname}
             Client().ingest(metadata, data)
