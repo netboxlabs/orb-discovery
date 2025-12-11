@@ -196,7 +196,7 @@ def test_run_device_with_custom_method_error(
         _, data = mock_ingest.call_args[0]
         assert "inventory" not in data
         mock_warning.assert_any_call(
-            f"Policy {policy_runner.name}, Hostname {sample_scopes[0].hostname}: Error getting inventory: boom. "
+            f"Policy {policy_runner.name}, Hostname {sample_scopes[0].hostname}: Error getting inventory: boom."
             "Continuing without custom inventory data."
         )
 

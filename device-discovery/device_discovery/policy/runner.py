@@ -188,8 +188,6 @@ class PolicyRunner:
                     f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting VLANs: {e}. Continuing without VLAN data."
                 )
             custom_inventory = getattr(device, "get_inventory", None)
-            if not callable(custom_inventory):
-                custom_inventory = getattr(device, "get_site_code", None)
             if callable(custom_inventory):
                 try:
                     inventory_data = custom_inventory()
