@@ -97,9 +97,9 @@ func (m *Manager) GetCapabilities() []string {
 
 // Status represents the status of a policy with its jobs
 type Status struct {
-	Name   string  `json:"name"`
-	Status string  `json:"status"` // derived from latest job
-	Jobs   []*Job  `json:"jobs"`
+	Name   string `json:"name"`
+	Status string `json:"status"` // derived from latest job
+	Jobs   []*Job `json:"jobs"`
 }
 
 // GetPolicyStatuses returns all policies with their status and jobs
