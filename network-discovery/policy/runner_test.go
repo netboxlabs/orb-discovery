@@ -132,7 +132,7 @@ func TestRunnerRun(t *testing.T) {
 			if len(jobs) > 0 {
 				latestJob := jobs[len(jobs)-1]
 				assert.NotEmpty(t, latestJob.ID, "Job ID should be set")
-				if tt.mockError != nil || (tt.mockResponse.Errors != nil && len(tt.mockResponse.Errors) > 0) {
+				if tt.mockError != nil || len(tt.mockResponse.Errors) > 0 {
 					assert.Equal(t, policy.JobStatusFailed, latestJob.Status, "Job should be marked as failed")
 				} else {
 					assert.Equal(t, policy.JobStatusCompleted, latestJob.Status, "Job should be marked as completed")

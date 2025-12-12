@@ -157,7 +157,7 @@ func TestManagerGetPolicyStatuses(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Statuses should still include policy1 if it has jobs
-	statuses = manager.GetPolicyStatuses()
+	_ = manager.GetPolicyStatuses()
 	// If no jobs were created, statuses will be empty
 	// If jobs were created, statuses will include the policy
 	// This depends on whether the runner actually ran and created jobs
