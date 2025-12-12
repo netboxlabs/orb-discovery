@@ -262,19 +262,19 @@ func (m *Manager) resolveAuthenticationEnvVars(policy *config.Policy) error {
 	return nil
 }
 
-// PolicyStatus represents the status of a policy with its jobs
-type PolicyStatus struct {
-	Name   string  `json:"name"`
-	Status string  `json:"status"` // derived from latest job
-	Jobs   []*Job  `json:"jobs"`
+// Status represents the status of a policy with its jobs
+type Status struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // derived from latest job
+	Jobs   []*Job `json:"jobs"`
 }
 
 // GetPolicyStatuses returns all policies with their status and jobs
-func (m *Manager) GetPolicyStatuses() []PolicyStatus {
+func (m *Manager) GetPolicyStatuses() []Status {
 	allJobs := m.jobStore.GetAllPoliciesWithJobs()
-	
-	var statuses []PolicyStatus
-	
+
+	var statuses []Status
+
 	// Get statuses for all policies that have runners
 	for name := range m.policies {
 		jobs := m.jobStore.GetJobsForPolicy(name)
@@ -283,13 +283,13 @@ func (m *Manager) GetPolicyStatuses() []PolicyStatus {
 			latestJob := jobs[len(jobs)-1]
 			status = string(latestJob.Status)
 		}
-		statuses = append(statuses, PolicyStatus{
+		statuses = append(statuses, Status{
 			Name:   name,
 			Status: status,
 			Jobs:   jobs,
 		})
 	}
-	
+
 	// Also include policies that have jobs but no active runner
 	for name, jobs := range allJobs {
 		if !m.HasPolicy(name) {
@@ -298,13 +298,13 @@ func (m *Manager) GetPolicyStatuses() []PolicyStatus {
 				latestJob := jobs[len(jobs)-1]
 				status = string(latestJob.Status)
 			}
-			statuses = append(statuses, PolicyStatus{
+			statuses = append(statuses, Status{
 				Name:   name,
 				Status: status,
 				Jobs:   jobs,
 			})
 		}
 	}
-	
+
 	return statuses
 }

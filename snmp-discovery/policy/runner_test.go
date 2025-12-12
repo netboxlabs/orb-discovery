@@ -332,7 +332,7 @@ func TestRunnerIngestCalledWithCorrectValues(t *testing.T) {
 	// Stop the process
 	err = runner.Stop()
 	assert.NoError(t, err, "Runner.Stop should not return an error")
-	
+
 	// Verify job was created and completed
 	jobs := jobStore.GetJobsForPolicy("test-policy")
 	require.Len(t, jobs, 1, "Job should be created")
@@ -399,7 +399,7 @@ func TestRunnerWalkError(t *testing.T) {
 	// Stop the process
 	err = runner.Stop()
 	assert.NoError(t, err, "Runner.Stop should not return an error")
-	
+
 	// Verify job was created even when no entities are ingested
 	jobs := jobStore.GetJobsForPolicy("test-policy")
 	require.Len(t, jobs, 1, "Job should be created even when walk fails")

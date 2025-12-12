@@ -113,4 +113,3 @@ func (js *JobStore) GetAllPoliciesWithJobs() map[string][]*Job {
 	}
 	return result
 }
-

@@ -90,7 +90,6 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 
 // run runs the policy
 func (r *Runner) run() {
-
 	policyName := r.ctx.Value(policyKey).(string)
 
 	// Create job at start

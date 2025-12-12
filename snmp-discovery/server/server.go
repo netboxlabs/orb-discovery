@@ -32,7 +32,7 @@ type Capabilities struct {
 // StatusResponse represents the status response including policies
 type StatusResponse struct {
 	config.Status
-	Policies []policy.PolicyStatus `json:"policies"`
+	Policies []policy.Status `json:"policies"`
 }
 
 // Server represents the snmp-discovery server

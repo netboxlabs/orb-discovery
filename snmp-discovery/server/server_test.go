@@ -112,19 +112,19 @@ func TestServerGetStatusWithPolicies(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	bodyStr := w.Body.String()
-	
+
 	// Verify status fields
 	assert.Contains(t, bodyStr, `"version": "1.0.0"`)
 	assert.Contains(t, bodyStr, `"start_time":`)
 	assert.Contains(t, bodyStr, `"up_time_seconds":`)
 	assert.Contains(t, bodyStr, `"policies":`)
-	
+
 	// Verify policy structure
 	assert.Contains(t, bodyStr, `"test-policy"`)
 	assert.Contains(t, bodyStr, `"name":`)
 	assert.Contains(t, bodyStr, `"status":`)
 	assert.Contains(t, bodyStr, `"jobs":`)
-	
+
 	// Clean up
 	srv.Stop()
 }
