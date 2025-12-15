@@ -169,4 +169,3 @@ func TestJobStore_UpdateJob_NonExistent(t *testing.T) {
 	jobs := store.GetJobsForPolicy("non-existent-policy")
 	assert.Empty(t, jobs)
 }
-
