@@ -203,17 +203,17 @@ class PolicyRunner:
             metadata = {"policy_name": self.name, "hostname": sanitized_hostname}
             if job_id:
                 metadata["job_id"] = job_id
-            
+
             # Translate data to get entity count
             from device_discovery.translate import translate_data
             entities = list(translate_data(data))
             entity_count = len(entities)
-            
+
             Client().ingest(metadata, data)
             discovery_success = get_metric("discovery_success")
             if discovery_success:
                 discovery_success.add(1, {"policy": self.name})
-            
+
             return entity_count
 
     def run(self, id: str, scope: Napalm, config: Config):  # noqa: C901
