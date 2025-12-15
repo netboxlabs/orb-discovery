@@ -3,9 +3,12 @@
 """Async TCP port scanning helpers and hostname expansion."""
 
 import ipaddress
+import logging
 import socket
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = logging.getLogger(__name__)
 
 
 def expand_hostnames(hostname: str) -> tuple[list[str], bool]:
@@ -73,3 +76,38 @@ def has_reachable_port(hostname: str, ports: Iterable[int], timeout: float) -> b
             except Exception:
                 continue
     return False
+
+
+def find_reachable_hosts(
+    hostnames: Iterable[str], ports: Iterable[int], timeout: float
+) -> dict[str, bool]:
+    """
+    Return a mapping of hostname -> reachability using threaded port probes.
+
+    Each hostname is probed concurrently by calling has_reachable_port, which
+    itself uses a thread pool for per-host port probing.
+    """
+    host_list = list(hostnames)
+    port_list = list(ports or [])
+    if not host_list or not port_list:
+        return {hostname: False for hostname in host_list}
+
+    worker_count = min(len(host_list), 64)
+    results: dict[str, bool] = {}
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_to_host = {
+            executor.submit(has_reachable_port, hostname, port_list, timeout): hostname
+            for hostname in host_list
+        }
+        for future in as_completed(future_to_host):
+            hostname = future_to_host[future]
+            try:
+                results[hostname] = future.result()
+            except Exception as exc:
+                logger.warning(
+                    "Port scan failed for host %s with error: %s", hostname, exc
+                )
+                results[hostname] = False
+
+    return results

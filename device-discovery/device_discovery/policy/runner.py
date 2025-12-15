@@ -17,7 +17,10 @@ from device_discovery.client import Client
 from device_discovery.discovery import discover_device_driver, supported_drivers
 from device_discovery.metrics import get_metric
 from device_discovery.policy.models import Config, Defaults, Napalm, Options, Status
-from device_discovery.policy.portscan import expand_hostnames, has_reachable_port
+from device_discovery.policy.portscan import (
+    expand_hostnames,
+    find_reachable_hosts,
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -226,8 +229,13 @@ class PolicyRunner:
         options = config.options or Options()
         ports = options.port_scan_ports
         timeout = options.port_scan_timeout
+        if not hostnames:
+            return
+
+        results = find_reachable_hosts(hostnames, ports, timeout)
+
         for hostname in hostnames:
-            if has_reachable_port(hostname, ports, timeout):
+            if results.get(hostname):
                 logger.info(
                     f"Policy {self.name}, Hostname {hostname}: Reachable port found, scheduling discovery job"
                 )

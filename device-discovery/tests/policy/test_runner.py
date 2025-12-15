@@ -239,12 +239,13 @@ def test_run_scan_schedules_reachable_hosts(monkeypatch):
     )
     config = Config(options=Options(port_scan_ports=[1, 2], port_scan_timeout=0.1))
     trigger = MagicMock(spec=BaseTrigger)
+    reachability = {"host-a": True, "host-b": False}
 
     with (
         patch(
-            "device_discovery.policy.runner.has_reachable_port",
-            side_effect=[True, False],
-        ) as mock_reachable,
+            "device_discovery.policy.runner.find_reachable_hosts",
+            return_value=reachability,
+        ) as mock_reachable_hosts,
         patch("uuid.uuid4", side_effect=["job-1"]),
     ):
         runner.run_scan(["host-a", "host-b"], trigger, scope, config)
@@ -255,9 +256,7 @@ def test_run_scan_schedules_reachable_hosts(monkeypatch):
     assert scheduled_call[1]["args"][0] == "job-1"
     assert scheduled_call[1]["args"][1].hostname == "host-a"
     assert scheduled_call[1]["args"][2] == config
-    mock_reachable.assert_has_calls(
-        [call("host-a", [1, 2], 0.1), call("host-b", [1, 2], 0.1)]
-    )
+    mock_reachable_hosts.assert_called_once_with(["host-a", "host-b"], [1, 2], 0.1)
 
 
 def test_run_scan_uses_default_port_scan_options(monkeypatch):
@@ -272,12 +271,13 @@ def test_run_scan_uses_default_port_scan_options(monkeypatch):
     config = Config(options=None)
 
     with patch(
-        "device_discovery.policy.runner.has_reachable_port", return_value=False
-    ) as mock_reachable:
+        "device_discovery.policy.runner.find_reachable_hosts",
+        return_value={"host-a": False},
+    ) as mock_reachable_hosts:
         runner.run_scan(["host-a"], trigger, scope, config)
 
-    mock_reachable.assert_called_once()
-    _, ports, timeout = mock_reachable.call_args[0]
+    mock_reachable_hosts.assert_called_once()
+    _, ports, timeout = mock_reachable_hosts.call_args[0]
     assert ports == [22, 23, 80, 443, 830, 57400]
     assert timeout == 0.5
     runner.scheduler.add_job.assert_not_called()

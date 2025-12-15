@@ -75,3 +75,43 @@ def test_has_reachable_port_with_no_ports(monkeypatch):
 
     assert reachable is False
     mock_probe.assert_not_called()
+
+
+def test_find_reachable_hosts_returns_mapping(monkeypatch):
+    """Reachability results are returned per-host with shared port list."""
+    calls: list[tuple[str, tuple[int, ...], float]] = []
+
+    def fake_reachable(hostname, ports, timeout):
+        calls.append((hostname, tuple(ports), timeout))
+        return hostname == "host-a"
+
+    monkeypatch.setattr(portscan, "has_reachable_port", fake_reachable)
+
+    result = portscan.find_reachable_hosts(
+        ["host-a", "host-b"], ports=[22, 80], timeout=0.25
+    )
+
+    assert result == {"host-a": True, "host-b": False}
+    assert ("host-a", (22, 80), 0.25) in calls
+    assert ("host-b", (22, 80), 0.25) in calls
+
+
+def test_find_reachable_hosts_logs_exceptions(monkeypatch):
+    """Host errors are logged and treated as unreachable."""
+
+    def flaky_reachable(hostname, ports, timeout):
+        if hostname == "bad-host":
+            raise RuntimeError("boom")
+        return True
+
+    mock_logger = MagicMock()
+    monkeypatch.setattr(portscan, "has_reachable_port", flaky_reachable)
+    monkeypatch.setattr(portscan, "logger", mock_logger)
+
+    result = portscan.find_reachable_hosts(
+        ["bad-host", "good-host"], ports=[22], timeout=0.1
+    )
+
+    assert result["bad-host"] is False
+    assert result["good-host"] is True
+    mock_logger.warning.assert_called_once()
