@@ -128,7 +128,7 @@ func (r *Runner) run() {
 	if len(entities) == 0 {
 		r.logger.Info("No entities to ingest", slog.Any("policy", r.ctx.Value(policyKey)))
 		// Update job status to completed even if no entities
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil)
+		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil, 0)
 		return
 	}
 
@@ -140,14 +140,14 @@ func (r *Runner) run() {
 	}))
 	if err != nil {
 		r.logger.Error("error ingesting entities", slog.Any("error", err), slog.Any("policy", r.ctx.Value(policyKey)))
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err)
+		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err, len(entities))
 	} else if resp != nil && resp.Errors != nil {
 		ingestErr := fmt.Errorf("ingestion errors: %v", resp.Errors)
 		r.logger.Error("error ingesting entities", slog.Any("error", resp.Errors), slog.Any("policy", r.ctx.Value(policyKey)))
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, ingestErr)
+		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, ingestErr, len(entities))
 	} else {
 		r.logger.Info("entities ingested successfully", slog.Any("policy", r.ctx.Value(policyKey)))
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil)
+		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil, len(entities))
 	}
 }
 

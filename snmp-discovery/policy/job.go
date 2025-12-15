@@ -21,11 +21,12 @@ const (
 
 // Job represents a single job execution
 type Job struct {
-	ID        string    `json:"id"`
-	Status    JobStatus `json:"status"`
-	Reason    string    `json:"reason,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	Status      JobStatus `json:"status"`
+	Reason      string    `json:"reason,omitempty"`
+	EntityCount int       `json:"entity_count"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // JobStore manages jobs in memory
@@ -70,7 +71,7 @@ func (js *JobStore) CreateJob(policyName string) *Job {
 }
 
 // UpdateJob updates the status of a job
-func (js *JobStore) UpdateJob(policyName, jobID string, status JobStatus, err error) {
+func (js *JobStore) UpdateJob(policyName, jobID string, status JobStatus, err error, entityCount int) {
 	js.mu.Lock()
 	defer js.mu.Unlock()
 
@@ -78,6 +79,7 @@ func (js *JobStore) UpdateJob(policyName, jobID string, status JobStatus, err er
 	for _, job := range jobs {
 		if job.ID == jobID {
 			job.Status = status
+			job.EntityCount = entityCount
 			job.UpdatedAt = time.Now()
 			if err != nil {
 				job.Reason = err.Error()

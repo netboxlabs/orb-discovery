@@ -224,11 +224,13 @@ func TestRunnerRun(t *testing.T) {
 			require.Len(t, jobs, 1, "Job should be created")
 			if tt.expectSuccess {
 				assert.Equal(t, policy.JobStatusCompleted, jobs[0].Status, "Job should be completed on success")
+				assert.Equal(t, 1, jobs[0].EntityCount, "Job should have entity count set")
 				assert.NotNil(t, metrics.GetDiscoverySuccess())
 			}
 			if tt.expectFailure {
 				assert.Equal(t, policy.JobStatusFailed, jobs[0].Status, "Job should be failed on error")
 				assert.NotEmpty(t, jobs[0].Reason, "Job should have error message")
+				assert.Equal(t, 1, jobs[0].EntityCount, "Job should have entity count set even on failure")
 				assert.NotNil(t, metrics.GetDiscoveryFailure())
 			}
 			assert.NotNil(t, metrics.GetDiscoveryAttempts())
@@ -337,6 +339,7 @@ func TestRunnerIngestCalledWithCorrectValues(t *testing.T) {
 	jobs := jobStore.GetJobsForPolicy("test-policy")
 	require.Len(t, jobs, 1, "Job should be created")
 	assert.Equal(t, policy.JobStatusCompleted, jobs[0].Status, "Job should be completed")
+	assert.Equal(t, 1, jobs[0].EntityCount, "Job should have entity count set")
 }
 
 func TestRunnerWalkError(t *testing.T) {
@@ -404,4 +407,5 @@ func TestRunnerWalkError(t *testing.T) {
 	jobs := jobStore.GetJobsForPolicy("test-policy")
 	require.Len(t, jobs, 1, "Job should be created even when walk fails")
 	assert.Equal(t, policy.JobStatusCompleted, jobs[0].Status, "Job should be completed when no entities to ingest")
+	assert.Equal(t, 0, jobs[0].EntityCount, "Job should have zero entity count when no entities discovered")
 }
