@@ -88,7 +88,31 @@ docker run  -e DIODE_CLIENT_ID=${YOUR_CLIENT} -e DIODE_CLIENT_SECRET=${YOUR_SECR
 
 > | http code     | content-type                      | response                                                            |
 > |---------------|-----------------------------------|---------------------------------------------------------------------|
-> | `200`         | `application/json; charset=utf-8` |  `{"version": "0.1.0","up_time_seconds": 3678 }`                    |
+> | `200`         | `application/json; charset=utf-8` | Status response with version, uptime, and policies with jobs         |
+
+##### Example Response
+
+> ```json
+> {
+>   "version": "0.1.0",
+>   "up_time_seconds": 3678,
+>   "policies": [
+>     {
+>       "name": "discovery_1",
+>       "status": "completed",
+>       "jobs": [
+>         {
+>           "id": "550e8400-e29b-41d4-a716-446655440000",
+>           "status": "completed",
+>           "error": null,
+>           "created_at": "2024-01-01T12:00:00",
+>           "updated_at": "2024-01-01T12:01:00"
+>         }
+>       ]
+>     }
+>   ]
+> }
+> ```
 
 ##### Example cURL
 
