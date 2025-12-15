@@ -20,7 +20,8 @@ func TestJobStore_CreateJob(t *testing.T) {
 	// Verify job properties
 	assert.NotEmpty(t, job.ID)
 	assert.Equal(t, policy.JobStatusRunning, job.Status)
-	assert.Empty(t, job.Error)
+	assert.Empty(t, job.Reason)
+	assert.Equal(t, 0, job.EntityCount)
 	assert.False(t, job.CreatedAt.IsZero())
 	assert.False(t, job.UpdatedAt.IsZero())
 	assert.Equal(t, job.CreatedAt, job.UpdatedAt)
@@ -39,22 +40,26 @@ func TestJobStore_UpdateJob(t *testing.T) {
 	jobID := job.ID
 
 	// Update to completed
-	store.UpdateJob(policyName, jobID, policy.JobStatusCompleted, nil)
+	entityCount := 5
+	store.UpdateJob(policyName, jobID, policy.JobStatusCompleted, nil, entityCount)
 
 	jobs := store.GetJobsForPolicy(policyName)
 	require.Len(t, jobs, 1)
 	assert.Equal(t, policy.JobStatusCompleted, jobs[0].Status)
-	assert.Empty(t, jobs[0].Error)
+	assert.Empty(t, jobs[0].Reason)
+	assert.Equal(t, entityCount, jobs[0].EntityCount)
 	assert.True(t, jobs[0].UpdatedAt.After(jobs[0].CreatedAt))
 
 	// Update to failed with error
 	testError := errors.New("test error")
-	store.UpdateJob(policyName, jobID, policy.JobStatusFailed, testError)
+	entityCount = 10
+	store.UpdateJob(policyName, jobID, policy.JobStatusFailed, testError, entityCount)
 
 	jobs = store.GetJobsForPolicy(policyName)
 	require.Len(t, jobs, 1)
 	assert.Equal(t, policy.JobStatusFailed, jobs[0].Status)
-	assert.Equal(t, testError.Error(), jobs[0].Error)
+	assert.Equal(t, testError.Error(), jobs[0].Reason)
+	assert.Equal(t, entityCount, jobs[0].EntityCount)
 }
 
 func TestJobStore_MaxFiveJobs(t *testing.T) {
@@ -110,12 +115,13 @@ func TestJobStore_Concurrency(t *testing.T) {
 	// Test concurrent updates
 	if len(jobs) > 0 {
 		jobID := jobs[0].ID
+		entityCount := 3
 		wg = sync.WaitGroup{}
 		for i := 0; i < numGoroutines; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				store.UpdateJob(policyName, jobID, policy.JobStatusCompleted, nil)
+				store.UpdateJob(policyName, jobID, policy.JobStatusCompleted, nil, entityCount)
 			}()
 		}
 		wg.Wait()
@@ -126,6 +132,7 @@ func TestJobStore_Concurrency(t *testing.T) {
 		for _, job := range jobs {
 			if job.ID == jobID {
 				assert.Equal(t, policy.JobStatusCompleted, job.Status)
+				assert.Equal(t, entityCount, job.EntityCount)
 				found = true
 				break
 			}
@@ -163,7 +170,7 @@ func TestJobStore_UpdateJob_NonExistent(t *testing.T) {
 	store := policy.NewJobStore()
 
 	// Update a job that doesn't exist - should not panic
-	store.UpdateJob("non-existent-policy", "non-existent-id", policy.JobStatusFailed, errors.New("test"))
+	store.UpdateJob("non-existent-policy", "non-existent-id", policy.JobStatusFailed, errors.New("test"), 0)
 
 	// Verify no jobs were created
 	jobs := store.GetJobsForPolicy("non-existent-policy")

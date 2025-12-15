@@ -265,7 +265,7 @@ func (r *Runner) run() {
 	scanner, err := nmap.NewScanner(ctx, options...)
 	if err != nil {
 		r.logger.Error("error creating scanner", slog.Any("error", err), slog.String("policy", policyName))
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err)
+		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err, 0)
 		if rMetric := metrics.GetDiscoveryFailure(); rMetric != nil {
 			rMetric.Add(r.ctx, 1,
 				metric.WithAttributes(
@@ -282,7 +282,7 @@ func (r *Runner) run() {
 	}
 	if err != nil {
 		r.logger.Error("error running scanner", slog.Any("error", err), slog.String("policy", policyName))
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err)
+		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err, 0)
 		if rMetric := metrics.GetDiscoveryFailure(); rMetric != nil {
 			rMetric.Add(r.ctx, 1,
 				metric.WithAttributes(
@@ -314,7 +314,7 @@ func (r *Runner) run() {
 		r.logger.Warn("discovery complete: no hosts found", slog.Any("targets", r.scope.Targets),
 			slog.String("policy", policyName))
 		// Update job status to completed even if no hosts found
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil)
+		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil, 0)
 		return
 	}
 	r.logger.Info("discovery complete", slog.Int("hosts_found", len(result.Hosts)), slog.String("policy", policyName))
@@ -435,14 +435,14 @@ func (r *Runner) run() {
 	}))
 	if err != nil {
 		r.logger.Error("error ingesting entities", slog.Any("error", err), slog.String("policy", policyName))
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err)
+		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err, len(entities))
 	} else if resp != nil && resp.Errors != nil {
 		ingestErr := fmt.Errorf("ingestion errors: %v", resp.Errors)
 		r.logger.Error("error ingesting entities", slog.Any("error", resp.Errors), slog.String("policy", policyName))
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, ingestErr)
+		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, ingestErr, len(entities))
 	} else {
 		r.logger.Info("entities ingested successfully", slog.String("policy", policyName))
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil)
+		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil, len(entities))
 	}
 }
 
