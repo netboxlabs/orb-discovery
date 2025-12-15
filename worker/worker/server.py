@@ -120,13 +120,14 @@ def read_status():
 
     Returns
     -------
-        dict: The status of the server.
+        dict: The status of the server including policies with jobs.
 
     """
     time_diff = datetime.now() - start_time
     return {
         "version": version_semver(),
         "up_time_seconds": round(time_diff.total_seconds()),
+        "policies": manager.get_policy_statuses(),
     }
 
 

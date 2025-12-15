@@ -15,6 +15,7 @@ from netboxlabs.diode.sdk.diode.v1 import ingester_pb2
 from worker.backend import Backend, load_class
 from worker.metrics import get_metric
 from worker.models import DiodeConfig, Policy, Status
+from worker.policy.job import JobStatus, JobStore
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -33,8 +34,9 @@ class PolicyRunner:
         self.policy = None
         self.status = Status.NEW
         self.scheduler = BackgroundScheduler()
+        self.job_store: JobStore | None = None
 
-    def setup(self, name: str, diode_config: DiodeConfig, policy: Policy):
+    def setup(self, name: str, diode_config: DiodeConfig, policy: Policy, job_store: JobStore | None = None):
         """
         Set up the policy runner.
 
@@ -43,8 +45,10 @@ class PolicyRunner:
             name: Policy name.
             diode_config: Diode configuration data.
             policy: Policy configuration data.
+            job_store: Optional JobStore for tracking jobs.
 
         """
+        self.job_store = job_store
         self.name = name.replace("\r\n", "").replace("\n", "")
         policy.config.package = policy.config.package.replace("\r\n", "").replace(
             "\n", ""
@@ -120,17 +124,34 @@ class PolicyRunner:
             policy: Policy configuration.
 
         """
+        # Create job at start
+        job = None
+        if self.job_store:
+            job = self.job_store.create_job(self.name)
+
         policy_executions = get_metric("policy_executions")
         if policy_executions:
             policy_executions.add(1, {"policy": self.name})
 
         exec_start_time = time.perf_counter()
+        entity_count = 0
         try:
             entities = backend.run(self.name, policy)
             metadata = {
                 "policy_name": self.name,
                 "worker_backend": self.metadata.name,
             }
+            if job:
+                metadata["job_id"] = job.id
+
+            entity_count = len(entities)
+            if entity_count == 0:
+                logger.info(f"Policy {self.name}: No entities to ingest")
+                if self.job_store and job:
+                    self.job_store.update_job(
+                        self.name, job.id, JobStatus.COMPLETED, reason=None, entity_count=0
+                    )
+                return
 
             for chunk_num, entity_chunk in enumerate(self._create_message_chunks(entities), 1):
                 chunk_size_mb = self._estimate_message_size(entity_chunk) / (1024 * 1024)
@@ -142,7 +163,14 @@ class PolicyRunner:
                     raise RuntimeError(f"Chunk {chunk_num} ingestion failed: {response.errors}")
                 logger.debug(f"Chunk {chunk_num} ingested successfully")
 
-            logger.info(f"Policy {self.name}: Successfully ingested {len(entities)} entities in {chunk_num} chunks")
+            logger.info(f"Policy {self.name}: Successfully ingested {entity_count} entities in {chunk_num} chunks")
+            
+            # Update job status to completed on success
+            if self.job_store and job:
+                self.job_store.update_job(
+                    self.name, job.id, JobStatus.COMPLETED, reason=None, entity_count=entity_count
+                )
+
             run_success = get_metric("backend_execution_success")
             if run_success:
                 run_success.add(
@@ -156,6 +184,13 @@ class PolicyRunner:
                 )
         except Exception as e:
             logger.error(f"Policy {self.name}: {e}")
+            
+            # Update job status to failed
+            if self.job_store and job:
+                self.job_store.update_job(
+                    self.name, job.id, JobStatus.FAILED, reason=e, entity_count=entity_count
+                )
+
             run_failure = get_metric("backend_execution_failure")
             if run_failure:
                 run_failure.add(

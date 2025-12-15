@@ -154,8 +154,11 @@ def test_read_status(mock_version_semver):
         response = client.get("/api/v1/status")
         mock_version_semver.assert_called_once()
         assert response.status_code == 200
-        assert response.json()["version"] == "1.0.0"
-        assert "up_time_seconds" in response.json()
+        data = response.json()
+        assert data["version"] == "1.0.0"
+        assert "up_time_seconds" in data
+        assert "policies" in data
+        assert isinstance(data["policies"], list)
         assert mock_api_requests.add.call_count == 1
         assert mock_api_response_latency.record.call_count == 1
 
