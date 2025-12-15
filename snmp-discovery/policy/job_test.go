@@ -20,7 +20,7 @@ func TestJobStore_CreateJob(t *testing.T) {
 	// Verify job properties
 	assert.NotEmpty(t, job.ID)
 	assert.Equal(t, policy.JobStatusRunning, job.Status)
-	assert.Empty(t, job.Error)
+	assert.Empty(t, job.Reason)
 	assert.False(t, job.CreatedAt.IsZero())
 	assert.False(t, job.UpdatedAt.IsZero())
 	assert.Equal(t, job.CreatedAt, job.UpdatedAt)
@@ -44,7 +44,7 @@ func TestJobStore_UpdateJob(t *testing.T) {
 	jobs := store.GetJobsForPolicy(policyName)
 	require.Len(t, jobs, 1)
 	assert.Equal(t, policy.JobStatusCompleted, jobs[0].Status)
-	assert.Empty(t, jobs[0].Error)
+	assert.Empty(t, jobs[0].Reason)
 	assert.True(t, jobs[0].UpdatedAt.After(jobs[0].CreatedAt))
 
 	// Update to failed with error
@@ -54,7 +54,7 @@ func TestJobStore_UpdateJob(t *testing.T) {
 	jobs = store.GetJobsForPolicy(policyName)
 	require.Len(t, jobs, 1)
 	assert.Equal(t, policy.JobStatusFailed, jobs[0].Status)
-	assert.Equal(t, testError.Error(), jobs[0].Error)
+	assert.Equal(t, testError.Error(), jobs[0].Reason)
 }
 
 func TestJobStore_MaxFiveJobs(t *testing.T) {

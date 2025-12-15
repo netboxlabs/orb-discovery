@@ -23,7 +23,7 @@ const (
 type Job struct {
 	ID        string    `json:"id"`
 	Status    JobStatus `json:"status"`
-	Error     string    `json:"error,omitempty"`
+	Reason    string    `json:"reason,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -80,7 +80,7 @@ func (js *JobStore) UpdateJob(policyName, jobID string, status JobStatus, err er
 			job.Status = status
 			job.UpdatedAt = time.Now()
 			if err != nil {
-				job.Error = err.Error()
+				job.Reason = err.Error()
 			}
 			return
 		}

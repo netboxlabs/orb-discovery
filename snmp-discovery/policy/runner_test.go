@@ -228,7 +228,7 @@ func TestRunnerRun(t *testing.T) {
 			}
 			if tt.expectFailure {
 				assert.Equal(t, policy.JobStatusFailed, jobs[0].Status, "Job should be failed on error")
-				assert.NotEmpty(t, jobs[0].Error, "Job should have error message")
+				assert.NotEmpty(t, jobs[0].Reason, "Job should have error message")
 				assert.NotNil(t, metrics.GetDiscoveryFailure())
 			}
 			assert.NotNil(t, metrics.GetDiscoveryAttempts())
