@@ -162,8 +162,11 @@ def test_read_status(mock_version_semver):
     response = client.get("/api/v1/status")
     mock_version_semver.assert_called_once()
     assert response.status_code == 200
-    assert response.json()["version"] == "1.0.0"
-    assert "up_time_seconds" in response.json()
+    data = response.json()
+    assert data["version"] == "1.0.0"
+    assert "up_time_seconds" in data
+    assert "policies" in data
+    assert isinstance(data["policies"], list)
 
 
 def test_read_capabilities(mock_supported_drivers):
@@ -399,3 +402,44 @@ def test_delete_policy_error(mock_manager):
     response = client.delete("/api/v1/policies/policy1")
     assert response.status_code == 400
     assert response.json()["detail"] == "unexpected error"
+
+
+def test_read_status_with_policies(mock_version_semver):
+    """
+    Test the /api/v1/status endpoint includes policies with jobs.
+
+    Ensures that policies are included in the status response with their jobs.
+
+    Args:
+    ----
+        mock_version_semver: Mocked version_semver function.
+
+    """
+    # Mock get_policy_statuses to return sample data
+    mock_policies = [
+        {
+            "name": "test-policy",
+            "status": "completed",
+            "jobs": [
+                {
+                    "id": "job-1",
+                    "status": "completed",
+                    "error": None,
+                    "created_at": "2024-01-01T00:00:00",
+                    "updated_at": "2024-01-01T00:01:00",
+                }
+            ],
+        }
+    ]
+
+    with patch.object(manager, "get_policy_statuses", return_value=mock_policies):
+        response = client.get("/api/v1/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert "policies" in data
+        assert len(data["policies"]) == 1
+        assert data["policies"][0]["name"] == "test-policy"
+        assert data["policies"][0]["status"] == "completed"
+        assert len(data["policies"][0]["jobs"]) == 1
+        assert data["policies"][0]["jobs"][0]["id"] == "job-1"
+        assert data["policies"][0]["jobs"][0]["status"] == "completed"

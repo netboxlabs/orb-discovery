@@ -7,6 +7,7 @@ import os
 
 import yaml
 
+from device_discovery.policy.job import JobStore
 from device_discovery.policy.models import Policy, PolicyRequest
 from device_discovery.policy.runner import PolicyRunner
 
@@ -43,6 +44,7 @@ class PolicyManager:
     def __init__(self):
         """Initialize the PolicyManager instance with an empty list of policies."""
         self.runners = dict[str, PolicyRunner]()
+        self.job_store = JobStore()
 
     def start_policy(self, name: str, policy: Policy):
         """
@@ -58,7 +60,7 @@ class PolicyManager:
             raise ValueError(f"policy '{name}' already exists")
 
         runner = PolicyRunner()
-        runner.setup(name, policy.config, policy.scope)
+        runner.setup(name, policy.config, policy.scope, self.job_store)
         self.runners[name] = runner
 
     def parse_policy(self, config_data: bytes) -> PolicyRequest:
@@ -113,3 +115,66 @@ class PolicyManager:
             logger.info(f"Stopping policy '{name}'")
             runner.stop()
         self.runners = {}
+
+    def get_policy_statuses(self) -> list[dict]:
+        """
+        Get all policies with their status and jobs.
+
+        Returns:
+        -------
+            list[dict]: List of policy status dictionaries with name, status, and jobs.
+
+        """
+        all_jobs = self.job_store.get_all_policies_with_jobs()
+        statuses = []
+
+        # Get statuses for all policies that have runners
+        for name in self.runners:
+            jobs = self.job_store.get_jobs_for_policy(name)
+            status = "unknown"
+            if len(jobs) > 0:
+                latest_job = jobs[-1]
+                status = latest_job.status.value
+            statuses.append(
+                {
+                    "name": name,
+                    "status": status,
+                    "jobs": [
+                        {
+                            "id": job.id,
+                            "status": job.status.value,
+                            "error": job.error,
+                            "created_at": job.created_at.isoformat(),
+                            "updated_at": job.updated_at.isoformat(),
+                        }
+                        for job in jobs
+                    ],
+                }
+            )
+
+        # Also include policies that have jobs but no active runner
+        for name, jobs in all_jobs.items():
+            if name not in self.runners:
+                status = "unknown"
+                if len(jobs) > 0:
+                    latest_job = jobs[-1]
+                    status = latest_job.status.value
+                statuses.append(
+                    {
+                        "name": name,
+                        "status": status,
+                        "jobs": [
+                            {
+                                "id": job.id,
+                                "status": job.status.value,
+                                "error": job.error,
+                                "created_at": job.created_at.isoformat(),
+                                "updated_at": job.updated_at.isoformat(),
+                            }
+                            for job in jobs
+                        ],
+                    }
+                )
+
+        return statuses
+

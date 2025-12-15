@@ -15,6 +15,7 @@ from napalm import get_network_driver
 from device_discovery.client import Client
 from device_discovery.discovery import discover_device_driver, supported_drivers
 from device_discovery.metrics import get_metric
+from device_discovery.policy.job import JobStatus, JobStore
 from device_discovery.policy.models import Config, Defaults, Napalm, Options, Status
 
 # Set up logging
@@ -32,8 +33,9 @@ class PolicyRunner:
         self.config = None
         self.status = Status.NEW
         self.scheduler = BackgroundScheduler()
+        self.job_store: JobStore | None = None
 
-    def setup(self, name: str, config: Config, scopes: list[Napalm]):
+    def setup(self, name: str, config: Config, scopes: list[Napalm], job_store: JobStore | None = None):
         """
         Set up the policy runner.
 
@@ -42,8 +44,10 @@ class PolicyRunner:
             name: Policy name.
             config: Configuration data containing site information.
             scopes: scope data for the devices.
+            job_store: Optional JobStore for tracking jobs.
 
         """
+        self.job_store = job_store
         self.name = name.replace("\r\n", "").replace("\n", "")
         self.config = config
 
@@ -106,6 +110,10 @@ class PolicyRunner:
         policy_executions = get_metric("policy_executions")
         if policy_executions:
             policy_executions.add(1, {"policy": self.name})
+        
+        # Create a job for this policy execution cycle
+        if self.job_store:
+            self.job_store.create_job(self.name)
 
     def _discover_driver(self, scope: Napalm, sanitized_hostname: str) -> bool:
         """
@@ -135,7 +143,7 @@ class PolicyRunner:
         return True
 
     def _collect_device_data(
-        self, scope: Napalm, sanitized_hostname: str, config: Config
+        self, scope: Napalm, sanitized_hostname: str, config: Config, job_id: str | None = None
     ):
         """
         Connect to device and collect data.
@@ -145,6 +153,7 @@ class PolicyRunner:
             scope: Scope data for the device.
             sanitized_hostname: Sanitized hostname for logging.
             config: Configuration data containing site information.
+            job_id: Optional job ID to include in metadata.
 
         """
         np_driver = get_network_driver(scope.driver)
@@ -188,6 +197,8 @@ class PolicyRunner:
                     f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting VLANs: {e}. Continuing without VLAN data."
                 )
             metadata = {"policy_name": self.name, "hostname": sanitized_hostname}
+            if job_id:
+                metadata["job_id"] = job_id
             Client().ingest(metadata, data)
             discovery_success = get_metric("discovery_success")
             if discovery_success:
@@ -206,6 +217,15 @@ class PolicyRunner:
         """
         discovery_start_time = time.perf_counter()
         sanitized_hostname = scope.hostname.replace("\r\n", "").replace("\n", "")
+        
+        # Get the latest job for this policy to track execution
+        job_id = None
+        if self.job_store:
+            jobs = self.job_store.get_jobs_for_policy(self.name)
+            if jobs:
+                latest_job = jobs[-1]
+                if latest_job.status == JobStatus.RUNNING:
+                    job_id = latest_job.id
 
         # Try to discover driver if needed
         if not self._discover_driver(scope, sanitized_hostname):
@@ -214,6 +234,14 @@ class PolicyRunner:
             except Exception as e:
                 logger.error(
                     f"Policy {self.name}, Hostname {sanitized_hostname}: Error removing job: {e}"
+                )
+            # Update job status to failed if job tracking is enabled
+            if self.job_store and job_id:
+                self.job_store.update_job(
+                    self.name,
+                    job_id,
+                    JobStatus.FAILED,
+                    Exception(f"Failed to discover driver for {sanitized_hostname}"),
                 )
             return
 
@@ -227,7 +255,7 @@ class PolicyRunner:
                 discovery_attempts.add(1, {"policy": self.name})
 
             # Collect data from device
-            self._collect_device_data(scope, sanitized_hostname, config)
+            self._collect_device_data(scope, sanitized_hostname, config, job_id)
 
             # Record total discovery duration
             discovery_latency = get_metric("discovery_latency")
@@ -241,6 +269,10 @@ class PolicyRunner:
                         "driver": scope.driver,
                     },
                 )
+            
+            # Update job status to completed on success
+            if self.job_store and job_id:
+                self.job_store.update_job(self.name, job_id, JobStatus.COMPLETED, None)
 
         except Exception as e:
             discovery_failure = get_metric("discovery_failure")
@@ -262,6 +294,10 @@ class PolicyRunner:
                         "status": "failed",
                     },
                 )
+            
+            # Update job status to failed
+            if self.job_store and job_id:
+                self.job_store.update_job(self.name, job_id, JobStatus.FAILED, e)
 
     def stop(self):
         """Stop the policy runner."""

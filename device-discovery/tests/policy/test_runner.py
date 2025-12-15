@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from apscheduler.triggers.date import DateTrigger
 
+from device_discovery.policy.job import JobStatus, JobStore
 from device_discovery.policy.models import Config, Defaults, Napalm, Options, Status
 from device_discovery.policy.runner import PolicyRunner
 
@@ -319,3 +320,166 @@ def test_metrics_during_failed_discovery(policy_runner, sample_config):
         latency_kwargs = mock_discovery_latency.record.call_args[0][1]
         assert latency_args > 0.01
         assert latency_kwargs["status"] == "failed"
+
+
+def test_telemetry_creates_job(policy_runner):
+    """Test that telemetry creates a job when job_store is provided."""
+    job_store = JobStore()
+    policy_runner.name = "test_policy"
+    policy_runner.job_store = job_store
+
+    policy_runner.telemetry()
+
+    # Verify job was created
+    jobs = job_store.get_jobs_for_policy("test_policy")
+    assert len(jobs) == 1
+    assert jobs[0].status == JobStatus.RUNNING
+
+
+def test_telemetry_without_job_store(policy_runner):
+    """Test that telemetry works without job_store."""
+    policy_runner.name = "test_policy"
+    policy_runner.job_store = None
+
+    # Should not raise an error
+    policy_runner.telemetry()
+
+
+def test_run_updates_job_on_success(policy_runner, sample_scopes, sample_config):
+    """Test that run() updates job status to completed on success."""
+    job_store = JobStore()
+    policy_runner.name = "test_policy"
+    policy_runner.job_store = job_store
+
+    # Create a job first
+    job = job_store.create_job("test_policy")
+    job_id = job.id
+
+    with (
+        patch("device_discovery.policy.runner.get_network_driver") as mock_get_driver,
+        patch("device_discovery.client.Client.ingest") as mock_ingest,
+    ):
+        mock_driver_instance = MagicMock()
+        mock_get_driver.return_value.return_value.__enter__.return_value = (
+            mock_driver_instance
+        )
+        mock_driver_instance.get_facts.return_value = {"model": "SampleModel"}
+        mock_driver_instance.get_interfaces.return_value = {}
+        mock_driver_instance.get_interfaces_ip.return_value = {}
+
+        policy_runner.run("test_id", sample_scopes[0], sample_config)
+
+        # Verify job was updated to completed
+        jobs = job_store.get_jobs_for_policy("test_policy")
+        assert len(jobs) == 1
+        assert jobs[0].status == JobStatus.COMPLETED
+        assert jobs[0].error is None
+
+
+def test_run_updates_job_on_failure(policy_runner, sample_scopes, sample_config):
+    """Test that run() updates job status to failed on error."""
+    job_store = JobStore()
+    policy_runner.name = "test_policy"
+    policy_runner.job_store = job_store
+
+    # Create a job first
+    job = job_store.create_job("test_policy")
+    job_id = job.id
+
+    with (
+        patch("device_discovery.policy.runner.get_network_driver") as mock_get_driver,
+        patch("device_discovery.policy.runner.logger.error") as mock_logger_error,
+    ):
+        mock_get_driver.side_effect = Exception("Connection error")
+
+        policy_runner.run("test_id", sample_scopes[0], sample_config)
+
+        # Verify job was updated to failed
+        jobs = job_store.get_jobs_for_policy("test_policy")
+        assert len(jobs) == 1
+        assert jobs[0].status == JobStatus.FAILED
+        assert jobs[0].error == "Connection error"
+
+
+def test_run_includes_job_id_in_metadata(policy_runner, sample_scopes, sample_config):
+    """Test that run() includes job_id in ingestion metadata."""
+    job_store = JobStore()
+    policy_runner.name = "test_policy"
+    policy_runner.job_store = job_store
+
+    # Create a job first
+    job = job_store.create_job("test_policy")
+    job_id = job.id
+
+    with (
+        patch("device_discovery.policy.runner.get_network_driver") as mock_get_driver,
+        patch("device_discovery.client.Client.ingest") as mock_ingest,
+    ):
+        mock_driver_instance = MagicMock()
+        mock_get_driver.return_value.return_value.__enter__.return_value = (
+            mock_driver_instance
+        )
+        mock_driver_instance.get_facts.return_value = {"model": "SampleModel"}
+        mock_driver_instance.get_interfaces.return_value = {}
+        mock_driver_instance.get_interfaces_ip.return_value = {}
+
+        policy_runner.run("test_id", sample_scopes[0], sample_config)
+
+        # Verify job_id is included in metadata
+        mock_ingest.assert_called_once()
+        metadata_arg, _ = mock_ingest.call_args[0]
+        assert metadata_arg["job_id"] == job_id
+        assert metadata_arg["policy_name"] == "test_policy"
+        assert metadata_arg["hostname"] == sample_scopes[0].hostname
+
+
+def test_run_without_job_store(policy_runner, sample_scopes, sample_config):
+    """Test that run() works without job_store."""
+    policy_runner.name = "test_policy"
+    policy_runner.job_store = None
+
+    with (
+        patch("device_discovery.policy.runner.get_network_driver") as mock_get_driver,
+        patch("device_discovery.client.Client.ingest") as mock_ingest,
+    ):
+        mock_driver_instance = MagicMock()
+        mock_get_driver.return_value.return_value.__enter__.return_value = (
+            mock_driver_instance
+        )
+        mock_driver_instance.get_facts.return_value = {"model": "SampleModel"}
+        mock_driver_instance.get_interfaces.return_value = {}
+        mock_driver_instance.get_interfaces_ip.return_value = {}
+
+        # Should not raise an error
+        policy_runner.run("test_id", sample_scopes[0], sample_config)
+
+        # Verify metadata doesn't include job_id
+        mock_ingest.assert_called_once()
+        metadata_arg, _ = mock_ingest.call_args[0]
+        assert "job_id" not in metadata_arg
+
+
+def test_run_updates_job_on_driver_discovery_failure(policy_runner, sample_scopes, sample_config):
+    """Test that run() updates job status when driver discovery fails."""
+    job_store = JobStore()
+    policy_runner.name = "test_policy"
+    policy_runner.job_store = job_store
+    sample_scopes[0].driver = None  # Force driver discovery
+
+    # Create a job first
+    job = job_store.create_job("test_policy")
+    job_id = job.id
+
+    with (
+        patch(
+            "device_discovery.policy.runner.discover_device_driver", return_value=None
+        ),
+        patch.object(policy_runner.scheduler, "remove_job") as mock_remove_job,
+    ):
+        policy_runner.run("test_id", sample_scopes[0], sample_config)
+
+        # Verify job was updated to failed
+        jobs = job_store.get_jobs_for_policy("test_policy")
+        assert len(jobs) == 1
+        assert jobs[0].status == JobStatus.FAILED
+        assert "Failed to discover driver" in jobs[0].error
