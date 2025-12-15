@@ -372,7 +372,9 @@ def test_run_updates_job_on_success(policy_runner, sample_scopes, sample_config)
         jobs = job_store.get_jobs_for_policy("test_policy")
         assert len(jobs) == 1
         assert jobs[0].status == JobStatus.COMPLETED
-        assert jobs[0].error is None
+        assert jobs[0].reason is None
+        assert jobs[0].entity_count is not None
+        assert jobs[0].entity_count > 0
 
 
 def test_run_updates_job_on_failure(policy_runner, sample_scopes, sample_config):
@@ -395,7 +397,7 @@ def test_run_updates_job_on_failure(policy_runner, sample_scopes, sample_config)
         jobs = job_store.get_jobs_for_policy("test_policy")
         assert len(jobs) == 1
         assert jobs[0].status == JobStatus.FAILED
-        assert jobs[0].error == "Connection error"
+        assert jobs[0].reason == "Connection error"
 
 
 def test_run_includes_job_id_in_metadata(policy_runner, sample_scopes, sample_config):
@@ -477,4 +479,4 @@ def test_run_updates_job_on_driver_discovery_failure(policy_runner, sample_scope
         jobs = job_store.get_jobs_for_policy("test_policy")
         assert len(jobs) == 1
         assert jobs[0].status == JobStatus.FAILED
-        assert "Failed to discover driver" in jobs[0].error
+        assert "Failed to discover driver" in jobs[0].reason

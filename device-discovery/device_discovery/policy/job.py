@@ -23,7 +23,8 @@ class Job:
 
     id: str
     status: JobStatus
-    error: str | None = None
+    reason: str | None = None
+    entity_count: int | None = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
@@ -72,7 +73,12 @@ class JobStore:
             return job
 
     def update_job(
-        self, policy_name: str, job_id: str, status: JobStatus, error: Exception | None
+        self,
+        policy_name: str,
+        job_id: str,
+        status: JobStatus,
+        reason: Exception | str | None = None,
+        entity_count: int | None = None,
     ) -> None:
         """
         Update the status of a job.
@@ -82,7 +88,8 @@ class JobStore:
             policy_name: Name of the policy.
             job_id: ID of the job to update.
             status: New status for the job.
-            error: Optional error exception.
+            reason: Optional reason (exception or string).
+            entity_count: Optional entity count.
 
         """
         with self._lock:
@@ -91,8 +98,13 @@ class JobStore:
                 if job.id == job_id:
                     job.status = status
                     job.updated_at = datetime.now()
-                    if error is not None:
-                        job.error = str(error)
+                    if reason is not None:
+                        if isinstance(reason, Exception):
+                            job.reason = str(reason)
+                        else:
+                            job.reason = reason
+                    if entity_count is not None:
+                        job.entity_count = entity_count
                     return
 
     def get_jobs_for_policy(self, policy_name: str) -> list[Job]:

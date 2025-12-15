@@ -22,7 +22,8 @@ def test_job_store_create_job():
     assert job.id is not None
     assert len(job.id) > 0
     assert job.status == JobStatus.RUNNING
-    assert job.error is None
+    assert job.reason is None
+    assert job.entity_count is None
     assert job.created_at is not None
     assert job.updated_at is not None
     assert job.created_at == job.updated_at
@@ -34,30 +35,38 @@ def test_job_store_create_job():
 
 
 def test_job_store_update_job():
-    """Test updating job status and error."""
+    """Test updating job status, reason, and entity_count."""
     store = JobStore()
     policy_name = "test-policy"
 
     job = store.create_job(policy_name)
     job_id = job.id
 
-    # Update to completed
-    store.update_job(policy_name, job_id, JobStatus.COMPLETED, None)
+    # Update to completed with entity count
+    store.update_job(policy_name, job_id, JobStatus.COMPLETED, reason=None, entity_count=10)
 
     jobs = store.get_jobs_for_policy(policy_name)
     assert len(jobs) == 1
     assert jobs[0].status == JobStatus.COMPLETED
-    assert jobs[0].error is None
+    assert jobs[0].reason is None
+    assert jobs[0].entity_count == 10
     assert jobs[0].updated_at > jobs[0].created_at
 
-    # Update to failed with error
+    # Update to failed with reason
     test_error = Exception("test error")
-    store.update_job(policy_name, job_id, JobStatus.FAILED, test_error)
+    store.update_job(policy_name, job_id, JobStatus.FAILED, reason=test_error)
 
     jobs = store.get_jobs_for_policy(policy_name)
     assert len(jobs) == 1
     assert jobs[0].status == JobStatus.FAILED
-    assert jobs[0].error == "test error"
+    assert jobs[0].reason == "test error"
+    assert jobs[0].entity_count == 10  # Should still be set from previous update
+
+    # Update with string reason
+    store.update_job(policy_name, job_id, JobStatus.FAILED, reason="test reason string")
+    jobs = store.get_jobs_for_policy(policy_name)
+    assert len(jobs) == 1
+    assert jobs[0].reason == "test reason string"
 
 
 def test_job_store_max_five_jobs():
@@ -115,7 +124,7 @@ def test_job_store_concurrency():
         for _ in range(num_threads):
             thread = threading.Thread(
                 target=lambda: store.update_job(
-                    policy_name, job_id, JobStatus.COMPLETED, None
+                    policy_name, job_id, JobStatus.COMPLETED, reason=None
                 )
             )
             threads.append(thread)
@@ -168,7 +177,7 @@ def test_job_store_update_job_nonexistent():
 
     # Update a job that doesn't exist - should not raise
     store.update_job(
-        "non-existent-policy", "non-existent-id", JobStatus.FAILED, Exception("test")
+        "non-existent-policy", "non-existent-id", JobStatus.FAILED, reason=Exception("test")
     )
 
     # Verify no jobs were created
@@ -182,14 +191,16 @@ def test_job_dataclass():
     job = Job(
         id="test-id",
         status=JobStatus.RUNNING,
-        error=None,
+        reason=None,
+        entity_count=None,
         created_at=now,
         updated_at=now,
     )
 
     assert job.id == "test-id"
     assert job.status == JobStatus.RUNNING
-    assert job.error is None
+    assert job.reason is None
+    assert job.entity_count is None
     assert job.created_at == now
     assert job.updated_at == now
 

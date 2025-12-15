@@ -143,7 +143,8 @@ class PolicyManager:
                         {
                             "id": job.id,
                             "status": job.status.value,
-                            "error": job.error,
+                            "reason": job.reason,
+                            "entity_count": job.entity_count,
                             "created_at": job.created_at.isoformat(),
                             "updated_at": job.updated_at.isoformat(),
                         }
@@ -167,7 +168,8 @@ class PolicyManager:
                             {
                                 "id": job.id,
                                 "status": job.status.value,
-                                "error": job.error,
+                                "reason": job.reason,
+                                "entity_count": job.entity_count,
                                 "created_at": job.created_at.isoformat(),
                                 "updated_at": job.updated_at.isoformat(),
                             }

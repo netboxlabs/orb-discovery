@@ -144,7 +144,7 @@ class PolicyRunner:
 
     def _collect_device_data(
         self, scope: Napalm, sanitized_hostname: str, config: Config, job_id: str | None = None
-    ):
+    ) -> int:
         """
         Connect to device and collect data.
 
@@ -154,6 +154,10 @@ class PolicyRunner:
             sanitized_hostname: Sanitized hostname for logging.
             config: Configuration data containing site information.
             job_id: Optional job ID to include in metadata.
+
+        Returns:
+        -------
+            int: Number of entities ingested.
 
         """
         np_driver = get_network_driver(scope.driver)
@@ -199,10 +203,18 @@ class PolicyRunner:
             metadata = {"policy_name": self.name, "hostname": sanitized_hostname}
             if job_id:
                 metadata["job_id"] = job_id
+            
+            # Translate data to get entity count
+            from device_discovery.translate import translate_data
+            entities = list(translate_data(data))
+            entity_count = len(entities)
+            
             Client().ingest(metadata, data)
             discovery_success = get_metric("discovery_success")
             if discovery_success:
                 discovery_success.add(1, {"policy": self.name})
+            
+            return entity_count
 
     def run(self, id: str, scope: Napalm, config: Config):  # noqa: C901
         """
@@ -241,7 +253,7 @@ class PolicyRunner:
                     self.name,
                     job_id,
                     JobStatus.FAILED,
-                    Exception(f"Failed to discover driver for {sanitized_hostname}"),
+                    reason=f"Failed to discover driver for {sanitized_hostname}",
                 )
             return
 
@@ -255,7 +267,7 @@ class PolicyRunner:
                 discovery_attempts.add(1, {"policy": self.name})
 
             # Collect data from device
-            self._collect_device_data(scope, sanitized_hostname, config, job_id)
+            entity_count = self._collect_device_data(scope, sanitized_hostname, config, job_id)
 
             # Record total discovery duration
             discovery_latency = get_metric("discovery_latency")
@@ -272,7 +284,9 @@ class PolicyRunner:
 
             # Update job status to completed on success
             if self.job_store and job_id:
-                self.job_store.update_job(self.name, job_id, JobStatus.COMPLETED, None)
+                self.job_store.update_job(
+                    self.name, job_id, JobStatus.COMPLETED, reason=None, entity_count=entity_count
+                )
 
         except Exception as e:
             discovery_failure = get_metric("discovery_failure")
@@ -297,7 +311,7 @@ class PolicyRunner:
 
             # Update job status to failed
             if self.job_store and job_id:
-                self.job_store.update_job(self.name, job_id, JobStatus.FAILED, e)
+                self.job_store.update_job(self.name, job_id, JobStatus.FAILED, reason=e)
 
     def stop(self):
         """Stop the policy runner."""
