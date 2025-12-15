@@ -124,85 +124,108 @@ class PolicyRunner:
             policy: Policy configuration.
 
         """
-        # Create job at start
-        job = None
-        if self.job_store:
-            job = self.job_store.create_job(self.name)
-
-        policy_executions = get_metric("policy_executions")
-        if policy_executions:
-            policy_executions.add(1, {"policy": self.name})
+        job = self._create_job()
+        self._record_execution_metrics()
 
         exec_start_time = time.perf_counter()
         entity_count = 0
         try:
             entities = backend.run(self.name, policy)
-            metadata = {
-                "policy_name": self.name,
-                "worker_backend": self.metadata.name,
-            }
-            if job:
-                metadata["job_id"] = job.id
+            metadata = self._build_metadata(job)
 
             entity_count = len(entities)
             if entity_count == 0:
                 logger.info(f"Policy {self.name}: No entities to ingest")
-                if self.job_store and job:
-                    self.job_store.update_job(
-                        self.name, job.id, JobStatus.COMPLETED, reason=None, entity_count=0
-                    )
+                self._update_job_status(job, JobStatus.COMPLETED, None, 0)
                 return
 
-            for chunk_num, entity_chunk in enumerate(self._create_message_chunks(entities), 1):
-                chunk_size_mb = self._estimate_message_size(entity_chunk) / (1024 * 1024)
-                logger.debug(
-                    f"Ingesting chunk {chunk_num} with {len(entity_chunk)} entities (~{chunk_size_mb:.2f} MB)"
-                )
-                response = client.ingest(entities=entity_chunk, metadata=metadata)
-                if response.errors:
-                    raise RuntimeError(f"Chunk {chunk_num} ingestion failed: {response.errors}")
-                logger.debug(f"Chunk {chunk_num} ingested successfully")
-
+            chunk_num = self._ingest_entities(client, entities, metadata)
             logger.info(f"Policy {self.name}: Successfully ingested {entity_count} entities in {chunk_num} chunks")
-            
-            # Update job status to completed on success
-            if self.job_store and job:
-                self.job_store.update_job(
-                    self.name, job.id, JobStatus.COMPLETED, reason=None, entity_count=entity_count
-                )
 
-            run_success = get_metric("backend_execution_success")
-            if run_success:
-                run_success.add(
-                    1,
-                    {
-                        "policy": self.name,
-                        "backend": self.metadata.name,
-                        "app_name": self.metadata.app_name,
-                        "app_version": self.metadata.app_version,
-                    },
-                )
+            self._handle_success(job, entity_count)
         except Exception as e:
             logger.error(f"Policy {self.name}: {e}")
-            
-            # Update job status to failed
-            if self.job_store and job:
-                self.job_store.update_job(
-                    self.name, job.id, JobStatus.FAILED, reason=e, entity_count=entity_count
-                )
+            self._handle_failure(job, e, entity_count)
 
-            run_failure = get_metric("backend_execution_failure")
-            if run_failure:
-                run_failure.add(
-                    1,
-                    {
-                        "policy": self.name,
-                        "backend": self.metadata.name,
-                        "app_name": self.metadata.app_name,
-                        "app_version": self.metadata.app_version,
-                    },
-                )
+        self._record_latency_metric(exec_start_time)
 
+    def _create_job(self):
+        """Create a job if job_store is available."""
+        if self.job_store:
+            return self.job_store.create_job(self.name)
+        return None
+
+    def _record_execution_metrics(self):
+        """Record policy execution metrics."""
+        policy_executions = get_metric("policy_executions")
+        if policy_executions:
+            policy_executions.add(1, {"policy": self.name})
+
+    def _build_metadata(self, job):
+        """Build metadata dictionary for ingestion."""
+        metadata = {
+            "policy_name": self.name,
+            "worker_backend": self.metadata.name,
+        }
+        if job:
+            metadata["job_id"] = job.id
+        return metadata
+
+    def _update_job_status(self, job, status: JobStatus, reason, entity_count: int):
+        """Update job status if job_store and job are available."""
+        if self.job_store and job:
+            self.job_store.update_job(self.name, job.id, status, reason=reason, entity_count=entity_count)
+
+    def _ingest_entities(
+        self, client: DiodeClient | DiodeDryRunClient, entities: list[ingester_pb2.Entity], metadata: dict
+    ) -> int:
+        """Ingest entities in chunks and return the number of chunks."""
+        chunk_num = 0
+        for chunk_num, entity_chunk in enumerate(self._create_message_chunks(entities), 1):
+            chunk_size_mb = self._estimate_message_size(entity_chunk) / (1024 * 1024)
+            logger.debug(
+                f"Ingesting chunk {chunk_num} with {len(entity_chunk)} entities (~{chunk_size_mb:.2f} MB)"
+            )
+            response = client.ingest(entities=entity_chunk, metadata=metadata)
+            if response.errors:
+                raise RuntimeError(f"Chunk {chunk_num} ingestion failed: {response.errors}")
+            logger.debug(f"Chunk {chunk_num} ingested successfully")
+        return chunk_num
+
+    def _handle_success(self, job, entity_count: int):
+        """Handle successful execution by updating job status and recording success metrics."""
+        self._update_job_status(job, JobStatus.COMPLETED, None, entity_count)
+
+        run_success = get_metric("backend_execution_success")
+        if run_success:
+            run_success.add(
+                1,
+                {
+                    "policy": self.name,
+                    "backend": self.metadata.name,
+                    "app_name": self.metadata.app_name,
+                    "app_version": self.metadata.app_version,
+                },
+            )
+
+    def _handle_failure(self, job, error: Exception, entity_count: int):
+        """Handle failed execution by updating job status and recording failure metrics."""
+        self._update_job_status(job, JobStatus.FAILED, error, entity_count)
+
+        run_failure = get_metric("backend_execution_failure")
+        if run_failure:
+            run_failure.add(
+                1,
+                {
+                    "policy": self.name,
+                    "backend": self.metadata.name,
+                    "app_name": self.metadata.app_name,
+                    "app_version": self.metadata.app_version,
+                },
+            )
+
+    def _record_latency_metric(self, exec_start_time: float):
+        """Record backend execution latency metric."""
         backend_execution_latency = get_metric("backend_execution_latency")
         if backend_execution_latency:
             exec_duration = (time.perf_counter() - exec_start_time) * 1000
