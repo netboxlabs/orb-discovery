@@ -117,7 +117,7 @@ class JobStore:
         """
         Get all policies with their jobs.
 
-        Returns:
+        Returns
         -------
             dict[str, list[Job]]: Dictionary mapping policy names to their jobs.
 

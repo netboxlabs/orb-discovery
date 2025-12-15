@@ -352,12 +352,11 @@ def test_run_updates_job_on_success(policy_runner, sample_scopes, sample_config)
     policy_runner.job_store = job_store
 
     # Create a job first
-    job = job_store.create_job("test_policy")
-    job_id = job.id
+    job_store.create_job("test_policy")
 
     with (
         patch("device_discovery.policy.runner.get_network_driver") as mock_get_driver,
-        patch("device_discovery.client.Client.ingest") as mock_ingest,
+        patch("device_discovery.client.Client.ingest"),
     ):
         mock_driver_instance = MagicMock()
         mock_get_driver.return_value.return_value.__enter__.return_value = (
@@ -383,12 +382,10 @@ def test_run_updates_job_on_failure(policy_runner, sample_scopes, sample_config)
     policy_runner.job_store = job_store
 
     # Create a job first
-    job = job_store.create_job("test_policy")
-    job_id = job.id
+    job_store.create_job("test_policy")
 
     with (
         patch("device_discovery.policy.runner.get_network_driver") as mock_get_driver,
-        patch("device_discovery.policy.runner.logger.error") as mock_logger_error,
     ):
         mock_get_driver.side_effect = Exception("Connection error")
 
@@ -467,14 +464,12 @@ def test_run_updates_job_on_driver_discovery_failure(policy_runner, sample_scope
     sample_scopes[0].driver = None  # Force driver discovery
 
     # Create a job first
-    job = job_store.create_job("test_policy")
-    job_id = job.id
+    job_store.create_job("test_policy")
 
     with (
         patch(
             "device_discovery.policy.runner.discover_device_driver", return_value=None
         ),
-        patch.object(policy_runner.scheduler, "remove_job") as mock_remove_job,
     ):
         policy_runner.run("test_id", sample_scopes[0], sample_config)
 

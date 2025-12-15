@@ -110,7 +110,7 @@ class PolicyRunner:
         policy_executions = get_metric("policy_executions")
         if policy_executions:
             policy_executions.add(1, {"policy": self.name})
-        
+
         # Create a job for this policy execution cycle
         if self.job_store:
             self.job_store.create_job(self.name)
@@ -204,7 +204,7 @@ class PolicyRunner:
             if discovery_success:
                 discovery_success.add(1, {"policy": self.name})
 
-    def run(self, id: str, scope: Napalm, config: Config):
+    def run(self, id: str, scope: Napalm, config: Config):  # noqa: C901
         """
         Run the device driver code for a single scope item.
 
@@ -217,7 +217,7 @@ class PolicyRunner:
         """
         discovery_start_time = time.perf_counter()
         sanitized_hostname = scope.hostname.replace("\r\n", "").replace("\n", "")
-        
+
         # Get the latest job for this policy to track execution
         job_id = None
         if self.job_store:
@@ -269,7 +269,7 @@ class PolicyRunner:
                         "driver": scope.driver,
                     },
                 )
-            
+
             # Update job status to completed on success
             if self.job_store and job_id:
                 self.job_store.update_job(self.name, job_id, JobStatus.COMPLETED, None)
@@ -294,7 +294,7 @@ class PolicyRunner:
                         "status": "failed",
                     },
                 )
-            
+
             # Update job status to failed
             if self.job_store and job_id:
                 self.job_store.update_job(self.name, job_id, JobStatus.FAILED, e)

@@ -120,7 +120,7 @@ class PolicyManager:
         """
         Get all policies with their status and jobs.
 
-        Returns:
+        Returns
         -------
             list[dict]: List of policy status dictionaries with name, status, and jobs.
 

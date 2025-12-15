@@ -41,7 +41,7 @@ def test_start_policy(policy_manager, sample_policy):
 
         # Check that PolicyRunner.setup was called with correct arguments
         mock_runner.setup.assert_called_once_with(
-            "policy1", sample_policy.config, sample_policy.scope
+            "policy1", sample_policy.config, sample_policy.scope, policy_manager.job_store
         )
 
         # Ensure the policy runner was added to the manager's runners
