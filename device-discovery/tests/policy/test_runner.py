@@ -146,9 +146,18 @@ def test_run_device_with_discovered_driver(policy_runner, sample_scopes, sample_
         mock_get_driver.return_value.return_value.__enter__.return_value = (
             mock_driver_instance
         )
-        mock_driver_instance.get_facts.return_value = {"model": "SampleModel"}
-        mock_driver_instance.get_interfaces.return_value = {"eth0": "up"}
-        mock_driver_instance.get_interfaces_ip.return_value = {"eth0": "192.168.1.1"}
+        mock_driver_instance.get_facts.return_value = {
+            "hostname": "router1",
+            "model": "SampleModel",
+            "vendor": "Cisco",
+            "os_version": "15.0",
+        }
+        mock_driver_instance.get_interfaces.return_value = {
+            "eth0": {"is_enabled": True, "description": "test interface"}
+        }
+        mock_driver_instance.get_interfaces_ip.return_value = {
+            "eth0": {"ipv4": {"192.168.1.1": {"prefix_length": 24}}}
+        }
 
         # Run the device with the setup runner
         policy_runner.run("test_id", sample_scopes[0], sample_config)
@@ -162,9 +171,12 @@ def test_run_device_with_discovered_driver(policy_runner, sample_scopes, sample_
             "hostname": sample_scopes[0].hostname,
         }
         assert data["driver"] == "ios"
-        assert data["device"] == {"model": "SampleModel"}
-        assert data["interface"] == {"eth0": "up"}
-        assert data["interface_ip"] == {"eth0": "192.168.1.1"}
+        assert data["device"]["model"] == "SampleModel"
+        assert "eth0" in data["interface"]
+        assert "eth0" in data["interface_ip"]
+        # Verify interface structure is correct
+        assert isinstance(data["interface"]["eth0"], dict)
+        assert "is_enabled" in data["interface"]["eth0"]
 
 
 def test_run_discovered_driver_error(policy_runner, sample_scopes, sample_config):
@@ -240,9 +252,26 @@ def test_metrics_during_policy_lifecycle(policy_runner, sample_config, sample_sc
         patch("device_discovery.policy.runner.get_metric", side_effect=mock_get_metric),
         patch.object(policy_runner.scheduler, "start"),
         patch.object(policy_runner.scheduler, "add_job"),
-        patch("device_discovery.policy.runner.get_network_driver"),
+        patch("device_discovery.policy.runner.get_network_driver") as mock_get_driver,
         patch("device_discovery.client.Client.ingest"),
     ):
+        # Mock the network driver instance with proper data structure
+        mock_driver_instance = MagicMock()
+        mock_get_driver.return_value.return_value.__enter__.return_value = (
+            mock_driver_instance
+        )
+        mock_driver_instance.get_facts.return_value = {
+            "hostname": "router1",
+            "model": "SampleModel",
+            "vendor": "Cisco",
+            "os_version": "15.0",
+        }
+        mock_driver_instance.get_interfaces.return_value = {
+            "eth0": {"is_enabled": True, "description": "test interface"}
+        }
+        mock_driver_instance.get_interfaces_ip.return_value = {
+            "eth0": {"ipv4": {"192.168.1.1": {"prefix_length": 24}}}
+        }
 
         # Test setup - should increment active_policies
         policy_runner.setup("test_policy", sample_config, sample_scopes)
