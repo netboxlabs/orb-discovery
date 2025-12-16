@@ -114,7 +114,7 @@ def find_reachable_hosts(
     host_list = list(hostnames)
     port_list = list(ports or [])
     if not host_list or not port_list:
-        return {hostname: False for hostname in host_list}
+        return dict.fromkeys(host_list, False)
 
     worker_count = min(len(host_list), 64)
     results: dict[str, bool] = {}
