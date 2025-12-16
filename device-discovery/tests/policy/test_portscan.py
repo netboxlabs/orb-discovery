@@ -34,6 +34,37 @@ def test_expand_hostnames_invalid_range_returns_original():
     assert hosts == ["router-alpha-beta"]
 
 
+def test_expand_hostnames_partial_ipv4_range_last_octet():
+    """Support shorthand last-octet ranges like 192.168.1.10-20."""
+    hosts, parsed = portscan.expand_hostnames("192.168.1.10-20")
+
+    assert parsed is True
+    assert hosts == [
+        "192.168.1.10",
+        "192.168.1.11",
+        "192.168.1.12",
+        "192.168.1.13",
+        "192.168.1.14",
+        "192.168.1.15",
+        "192.168.1.16",
+        "192.168.1.17",
+        "192.168.1.18",
+        "192.168.1.19",
+        "192.168.1.20",
+    ]
+
+
+def test_expand_hostnames_masked_range_uses_ip_portion():
+    """Range endpoints can include masks; the IP portion defines bounds."""
+    hosts, parsed = portscan.expand_hostnames("192.168.3.22/28-192.168.4.22/28")
+
+    assert parsed is True
+    assert hosts[0] == "192.168.3.22"
+    assert hosts[-1] == "192.168.4.22"
+    # Inclusive count between the two addresses
+    assert len(hosts) == 257
+
+
 def test_has_reachable_port_returns_true_for_any_reachable(monkeypatch):
     """Should return True when any probed port is reachable."""
     calls: list[tuple[str, int, float]] = []

@@ -11,16 +11,40 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 logger = logging.getLogger(__name__)
 
 
+def _parse_range_endpoint(token: str, base: ipaddress._BaseAddress | None = None):
+    """Parse an IP/range endpoint, allowing partial IPv4 octet when base is given."""
+    token = token.strip()
+    try:
+        return ipaddress.ip_address(token)
+    except ValueError:
+        pass
+
+    try:
+        return ipaddress.ip_interface(token).ip
+    except ValueError:
+        pass
+
+    if base and isinstance(base, ipaddress.IPv4Address) and token.isdigit():
+        last_octet = int(token)
+        if 0 <= last_octet <= 255:
+            octets = str(base).split(".")
+            octets[-1] = str(last_octet)
+            try:
+                return ipaddress.ip_address(".".join(octets))
+            except ValueError:
+                return None
+    return None
+
+
 def expand_hostnames(hostname: str) -> tuple[list[str], bool]:
     """Expand hostname into a list of addresses; return parsed_as_range flag."""
     sanitized_hostname = hostname.strip()
 
     if "-" in sanitized_hostname:
-        try:
-            start, end = sanitized_hostname.split("-", 1)
-            start_ip = ipaddress.ip_address(start.strip())
-            end_ip = ipaddress.ip_address(end.strip())
-        except ValueError:
+        start_part, end_part = sanitized_hostname.split("-", 1)
+        start_ip = _parse_range_endpoint(start_part)
+        end_ip = _parse_range_endpoint(end_part, base=start_ip)
+        if not start_ip or not end_ip or start_ip.version != end_ip.version:
             return [sanitized_hostname], False
 
         start_int, end_int = sorted((int(start_ip), int(end_ip)))
