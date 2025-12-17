@@ -287,6 +287,7 @@ func (r *Runner) run() {
 				slog.Duration("timeout", r.timeout),
 				slog.String("policy", policyName),
 			)
+			err = fmt.Errorf("nmap scan timed out after %s: %w", r.timeout, err)
 		}
 		r.logger.Error("error running scanner", slog.Any("error", err), slog.String("policy", policyName))
 		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err, 0)
