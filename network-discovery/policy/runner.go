@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -281,6 +282,12 @@ func (r *Runner) run() {
 		r.logger.Warn("run finished with warnings", slog.String("warnings", fmt.Sprintf("%v", *warnings)))
 	}
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+			r.logger.Warn("nmap scan timed out; consider increasing policy timeout",
+				slog.Duration("timeout", r.timeout),
+				slog.String("policy", policyName),
+			)
+		}
 		r.logger.Error("error running scanner", slog.Any("error", err), slog.String("policy", policyName))
 		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err, 0)
 		if rMetric := metrics.GetDiscoveryFailure(); rMetric != nil {
