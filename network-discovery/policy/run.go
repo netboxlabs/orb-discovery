@@ -115,4 +115,3 @@ func (rs *RunStore) GetAllPoliciesWithRuns() map[string][]*Run {
 	}
 	return result
 }
-

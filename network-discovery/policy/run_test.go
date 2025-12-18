@@ -176,4 +176,3 @@ func TestRunStore_UpdateRun_NonExistent(t *testing.T) {
 	runs := store.GetRunsForPolicy("non-existent-policy")
 	assert.Empty(t, runs)
 }
-
