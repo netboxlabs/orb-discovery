@@ -43,11 +43,11 @@ type Runner struct {
 	manufacturers data.ManufacturerRetriever
 	mappingConfig *config.Mapping
 	deviceLookup  data.DeviceRetriever
-	jobStore      *JobStore
+	runStore      *RunStore
 }
 
 // NewRunner returns a new policy runner
-func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client, ClientFactory snmp.ClientFactory, mappingConfig *config.Mapping, manufacturers data.ManufacturerRetriever, deviceLookup data.DeviceRetriever, jobStore *JobStore) (*Runner, error) {
+func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client, ClientFactory snmp.ClientFactory, mappingConfig *config.Mapping, manufacturers data.ManufacturerRetriever, deviceLookup data.DeviceRetriever, runStore *RunStore) (*Runner, error) {
 	s, err := gocron.NewScheduler()
 	if err != nil {
 		return nil, err
@@ -61,7 +61,7 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 		manufacturers: manufacturers,
 		mappingConfig: mappingConfig,
 		deviceLookup:  deviceLookup,
-		jobStore:      jobStore,
+		runStore:      runStore,
 	}
 
 	runner.timeout = time.Duration(policy.Config.Timeout) * time.Second
@@ -100,8 +100,8 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 func (r *Runner) run(target config.Target) {
 	policyName := r.ctx.Value(policyKey).(string)
 
-	// Create job at start
-	job := r.jobStore.CreateJob(policyName)
+	// Create run at start
+	run := r.runStore.CreateRun(policyName)
 
 	// Track policy execution
 	if rMetric := metrics.GetPolicyExecutions(); rMetric != nil {
@@ -130,8 +130,8 @@ func (r *Runner) run(target config.Target) {
 
 	if len(entities) == 0 {
 		r.logger.Info("No entities to ingest", "policy", policyName)
-		// Update job status to completed even if no entities
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil, 0)
+		// Update run status to completed even if no entities
+		r.runStore.UpdateRun(policyName, run.ID, RunStatusCompleted, nil, 0)
 		return
 	}
 
@@ -139,18 +139,18 @@ func (r *Runner) run(target config.Target) {
 
 	resp, err := r.client.Ingest(ctx, entities, diode.WithIngestMetadata(diode.Metadata{
 		"policy_name": policyName,
-		"job_id":      job.ID,
+		"run_id":      run.ID,
 	}))
 	if err != nil {
 		r.logger.Error("error ingesting entities", "error", err, "policy", policyName)
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err, len(entities))
+		r.runStore.UpdateRun(policyName, run.ID, RunStatusFailed, err, len(entities))
 	} else if resp != nil && resp.Errors != nil {
 		ingestErr := fmt.Errorf("ingestion errors: %v", resp.Errors)
 		r.logger.Error("error ingesting entities", "error", resp.Errors, "policy", policyName)
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, ingestErr, len(entities))
+		r.runStore.UpdateRun(policyName, run.ID, RunStatusFailed, ingestErr, len(entities))
 	} else {
 		r.logger.Info("entities ingested successfully", "policy", policyName)
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil, len(entities))
+		r.runStore.UpdateRun(policyName, run.ID, RunStatusCompleted, nil, len(entities))
 	}
 }
 
