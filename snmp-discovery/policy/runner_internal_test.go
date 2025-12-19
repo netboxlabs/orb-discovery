@@ -172,7 +172,7 @@ func TestRunScanSchedulesResponsiveTargets(t *testing.T) {
 
 	runner := &Runner{
 		scheduler: scheduler,
-		ctx:       context.Background(),
+		ctx:       context.WithValue(context.Background(), policyKey, "test-policy"),
 		timeout:   5 * time.Second,
 		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}

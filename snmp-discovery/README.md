@@ -61,8 +61,8 @@ policies:
       lookup_extensions_dir: "/opt/orb/snmp-extensions" # (Optional) Specifies an override for the directory containing device data yaml files (see below). Defaults to `/etc/snmp-discovery/lookup-extensions
     scope:
       targets:
-        - host: "192.168.1.1"
-        - host: "192.168.1.254"
+        - host: "192.168.1.1/24" #subnet support
+        - host: "192.168.2.1-20" # range support
         - host: "10.0.0.1"
           port: 162  # Non-standard SNMP port
       authentication:
