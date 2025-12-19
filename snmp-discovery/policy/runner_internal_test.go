@@ -92,8 +92,9 @@ func TestProbeTargetSuccess(t *testing.T) {
 	var gotTimeout time.Duration
 
 	runner := &Runner{
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		scope:  config.Scope{Authentication: config.Authentication{Community: "public"}},
+		logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		scope:            config.Scope{Authentication: config.Authentication{Community: "public"}},
+		snmpProbeTimeout: 2 * time.Second,
 		ClientFactory: func(host string, port uint16, _ int, timeout time.Duration, _ *config.Authentication, _ *slog.Logger) (snmp.Walker, error) {
 			gotHost = host
 			gotPort = port
@@ -111,7 +112,7 @@ func TestProbeTargetSuccess(t *testing.T) {
 	assert.Equal(t, 0, walker.walkIdentifier)
 	assert.Equal(t, "127.0.0.1", gotHost)
 	assert.Equal(t, uint16(161), gotPort)
-	assert.Equal(t, 1*time.Second, gotTimeout)
+	assert.Equal(t, 2*time.Second, gotTimeout)
 }
 
 func TestProbeTargetFailurePaths(t *testing.T) {

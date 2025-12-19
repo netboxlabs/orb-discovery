@@ -24,28 +24,30 @@ type contextKey string
 
 // Define the policy key
 const (
-	policyKey           contextKey = "policy"
-	defaultTimeout                 = 2 * time.Minute
-	defaultSNMPTimeout             = 5 * time.Second
-	defaultSNMPProbeOID            = "1.3.6.1.2.1.1" // SNMPv2-MIB::system
+	policyKey               contextKey = "policy"
+	defaultTimeout                     = 2 * time.Minute
+	defaultSNMPTimeout                 = 5 * time.Second
+	defaultSNMPProbeTimeout            = 1 * time.Second
+	defaultSNMPProbeOID                = "1.3.6.1.2.1.1" // SNMPv2-MIB::system
 )
 
 // Runner represents the policy runner
 type Runner struct {
-	scheduler     gocron.Scheduler
-	ctx           context.Context
-	tasks         []gocron.Task
-	client        diode.Client
-	logger        *slog.Logger
-	timeout       time.Duration
-	snmpTimeout   time.Duration
-	scope         config.Scope
-	config        config.PolicyConfig
-	ClientFactory snmp.ClientFactory
-	manufacturers data.ManufacturerRetriever
-	mappingConfig *config.Mapping
-	deviceLookup  data.DeviceRetriever
-	jobStore      *JobStore
+	scheduler        gocron.Scheduler
+	ctx              context.Context
+	tasks            []gocron.Task
+	client           diode.Client
+	logger           *slog.Logger
+	timeout          time.Duration
+	snmpTimeout      time.Duration
+	snmpProbeTimeout time.Duration
+	scope            config.Scope
+	config           config.PolicyConfig
+	ClientFactory    snmp.ClientFactory
+	manufacturers    data.ManufacturerRetriever
+	mappingConfig    *config.Mapping
+	deviceLookup     data.DeviceRetriever
+	jobStore         *JobStore
 }
 
 // NewRunner returns a new policy runner
@@ -73,6 +75,10 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 	runner.snmpTimeout = time.Duration(policy.Config.SNMPTimeout) * time.Second
 	if runner.snmpTimeout == 0 {
 		runner.snmpTimeout = defaultSNMPTimeout
+	}
+	runner.snmpProbeTimeout = time.Duration(policy.Config.SNMPProbeTimeout) * time.Second
+	if runner.snmpProbeTimeout == 0 {
+		runner.snmpProbeTimeout = defaultSNMPProbeTimeout
 	}
 	runner.ctx = context.WithValue(ctx, policyKey, name)
 	runner.scope = policy.Scope
@@ -184,7 +190,7 @@ func (r *Runner) probeTarget(ctx context.Context, target config.Target) bool {
 	default:
 	}
 
-	snmpClient, err := r.ClientFactory(target.Host, target.Port, 0, 1*time.Second, &r.scope.Authentication, r.logger)
+	snmpClient, err := r.ClientFactory(target.Host, target.Port, 0, r.snmpProbeTimeout, &r.scope.Authentication, r.logger)
 	if err != nil {
 		return false
 	}
