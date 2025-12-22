@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -45,7 +46,7 @@ type Runner struct {
 	scope     config.Scope
 	config    config.PolicyConfig
 	targets   []targetInfo
-	jobStore  *JobStore
+	runStore  *RunStore
 }
 
 // parseTargets parses the target specifications and returns targetInfo slice
@@ -91,7 +92,7 @@ func (r *Runner) getIPWithMask(ipStr string, defaultMask string) string {
 }
 
 // NewRunner returns a new policy runner
-func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client, jobStore *JobStore) (*Runner, error) {
+func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client, runStore *RunStore) (*Runner, error) {
 	s, err := gocron.NewScheduler()
 	if err != nil {
 		return nil, err
@@ -101,7 +102,7 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 		scheduler: s,
 		client:    client,
 		logger:    logger,
-		jobStore:  jobStore,
+		runStore:  runStore,
 	}
 
 	runner.task = gocron.NewTask(runner.run)
@@ -131,8 +132,8 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 func (r *Runner) run() {
 	policyName := r.ctx.Value(policyKey).(string)
 
-	// Create job at start
-	job := r.jobStore.CreateJob(policyName)
+	// Create run at start
+	run := r.runStore.CreateRun(policyName)
 
 	if rMetric := metrics.GetPolicyExecutions(); rMetric != nil {
 		rMetric.Add(r.ctx, 1,
@@ -265,7 +266,7 @@ func (r *Runner) run() {
 	scanner, err := nmap.NewScanner(ctx, options...)
 	if err != nil {
 		r.logger.Error("error creating scanner", slog.Any("error", err), slog.String("policy", policyName))
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err, 0)
+		r.runStore.UpdateRun(policyName, run.ID, RunStatusFailed, err, 0)
 		if rMetric := metrics.GetDiscoveryFailure(); rMetric != nil {
 			rMetric.Add(r.ctx, 1,
 				metric.WithAttributes(
@@ -281,8 +282,15 @@ func (r *Runner) run() {
 		r.logger.Warn("run finished with warnings", slog.String("warnings", fmt.Sprintf("%v", *warnings)))
 	}
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+			r.logger.Warn("nmap scan timed out; consider increasing policy timeout",
+				slog.Duration("timeout", r.timeout),
+				slog.String("policy", policyName),
+			)
+			err = fmt.Errorf("nmap scan timed out after %s: %w", r.timeout, err)
+		}
 		r.logger.Error("error running scanner", slog.Any("error", err), slog.String("policy", policyName))
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err, 0)
+		r.runStore.UpdateRun(policyName, run.ID, RunStatusFailed, err, 0)
 		if rMetric := metrics.GetDiscoveryFailure(); rMetric != nil {
 			rMetric.Add(r.ctx, 1,
 				metric.WithAttributes(
@@ -313,8 +321,8 @@ func (r *Runner) run() {
 	if len(result.Hosts) == 0 {
 		r.logger.Warn("discovery complete: no hosts found", slog.Any("targets", r.scope.Targets),
 			slog.String("policy", policyName))
-		// Update job status to completed even if no hosts found
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil, 0)
+		// Update run status to completed even if no hosts found
+		r.runStore.UpdateRun(policyName, run.ID, RunStatusCompleted, nil, 0)
 		return
 	}
 	r.logger.Info("discovery complete", slog.Int("hosts_found", len(result.Hosts)), slog.String("policy", policyName))
@@ -431,18 +439,18 @@ func (r *Runner) run() {
 
 	resp, err := r.client.Ingest(r.ctx, entities, diode.WithIngestMetadata(diode.Metadata{
 		"policy_name": policyName,
-		"job_id":      job.ID,
+		"run_id":      run.ID,
 	}))
 	if err != nil {
 		r.logger.Error("error ingesting entities", slog.Any("error", err), slog.String("policy", policyName))
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err, len(entities))
+		r.runStore.UpdateRun(policyName, run.ID, RunStatusFailed, err, len(entities))
 	} else if resp != nil && resp.Errors != nil {
 		ingestErr := fmt.Errorf("ingestion errors: %v", resp.Errors)
 		r.logger.Error("error ingesting entities", slog.Any("error", resp.Errors), slog.String("policy", policyName))
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, ingestErr, len(entities))
+		r.runStore.UpdateRun(policyName, run.ID, RunStatusFailed, ingestErr, len(entities))
 	} else {
 		r.logger.Info("entities ingested successfully", slog.String("policy", policyName))
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil, len(entities))
+		r.runStore.UpdateRun(policyName, run.ID, RunStatusCompleted, nil, len(entities))
 	}
 }
 
