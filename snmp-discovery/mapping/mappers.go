@@ -291,6 +291,10 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 						m.logger.Warn("Error converting speed to int", "error", err, "value", value.Value)
 						continue
 					}
+					if speed == 0 {
+						m.logger.Debug("Speed is zero, skipping", "value", value.Value)
+						continue
+					}
 					bitsPerSecond := int64(speed)
 					kiloBitsPerSecond := bitsPerSecond / 1000
 					// Check if speed is within valid range (1 to 2147483647 inclusive)
@@ -308,6 +312,10 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					mtu, err := strconv.ParseInt(value.Value, 10, 64)
 					if err != nil {
 						m.logger.Warn("Error converting mtu to int64", "error", err, "value", value.Value)
+						continue
+					}
+					if mtu == 0 {
+						m.logger.Debug("mtu is zero, skipping", "value", value.Value)
 						continue
 					}
 					// Check if MTU is within valid range (1 to 2147483647 inclusive) and not overflowing int32
