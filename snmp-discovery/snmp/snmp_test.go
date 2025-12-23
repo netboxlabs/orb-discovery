@@ -499,7 +499,7 @@ func TestNewClientSecurityLevelMsgFlags(t *testing.T) {
 			typed, ok := client.(*snmp.Client)
 			assert.True(t, ok)
 			if ok {
-				assert.Equal(t, tc.expectedFlag, typed.GoSNMP.MsgFlags)
+				assert.Equal(t, tc.expectedFlag, typed.MsgFlags)
 			}
 		})
 	}
