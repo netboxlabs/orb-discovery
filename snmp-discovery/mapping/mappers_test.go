@@ -1306,7 +1306,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 	}
 }
 
-func TestInterfaceMapper_Map_SkipsZeroSpeedAndMtu(t *testing.T) {
+func TestInterfaceMapper_Map_ZeroSpeedAndMtu(t *testing.T) {
 	logger := slog.Default()
 
 	tests := []struct {
@@ -1316,7 +1316,7 @@ func TestInterfaceMapper_Map_SkipsZeroSpeedAndMtu(t *testing.T) {
 		assertFn     func(t *testing.T, iface *diode.Interface)
 	}{
 		{
-			name: "speed value of zero is ignored",
+			name: "speed value of zero is accepted",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.2.2.1.2.1": {
 					OID:    "1.3.6.1.2.1.2.2.1.2.1",
@@ -1352,7 +1352,8 @@ func TestInterfaceMapper_Map_SkipsZeroSpeedAndMtu(t *testing.T) {
 			},
 			assertFn: func(t *testing.T, iface *diode.Interface) {
 				assert.Equal(t, mapping.StringPtr("eth0"), iface.Name)
-				assert.Nil(t, iface.Speed)
+				zero := int64(0)
+				assert.Equal(t, &zero, iface.Speed)
 			},
 		},
 		{

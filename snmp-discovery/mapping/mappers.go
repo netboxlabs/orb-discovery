@@ -16,7 +16,7 @@ import (
 
 // Interface speed constants
 const (
-	minInterfaceSpeed = 1
+	minInterfaceSpeed = 0
 	maxInterfaceSpeed = 2147483647
 )
 
@@ -289,10 +289,6 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					speed, err := strconv.Atoi(value.Value)
 					if err != nil {
 						m.logger.Warn("Error converting speed to int", "error", err, "value", value.Value)
-						continue
-					}
-					if speed == 0 {
-						m.logger.Debug("Speed is zero, skipping", "value", value.Value)
 						continue
 					}
 					bitsPerSecond := int64(speed)
