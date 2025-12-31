@@ -273,6 +273,9 @@ func (r *Runner) logEntitiesForIngestion(entities []diode.Entity) {
 func (r *Runner) queryTarget(target config.Target) []diode.Entity {
 	mappingConfig := mapping.NewConfig(r.mappingConfig.Entries, r.logger, r.manufacturers, r.deviceLookup)
 	objectIDs := mappingConfig.ObjectIDs()
+	for oid, size := range mapping.StackDetectionOIDs() {
+		objectIDs[oid] = size
+	}
 	r.logger.Info("Querying target", "target", target, "objectCount", len(objectIDs))
 
 	entities := make([]diode.Entity, 0)

@@ -46,7 +46,10 @@ type MockHost struct {
 
 func (m *MockHost) Walk(objectID string, identifierSize int) (map[string]snmp.PDU, error) {
 	args := m.Called(objectID, identifierSize)
-	return args.Get(0).(map[string]snmp.PDU), args.Error(1)
+	if result := args.Get(0); result != nil {
+		return result.(map[string]snmp.PDU), args.Error(1)
+	}
+	return nil, args.Error(1)
 }
 
 func (m *MockHost) Connect() error {

@@ -78,6 +78,14 @@ func (r *EntityRegistry) GetOrCreateEntity(entityType EntityType, index ObjectID
 	return r.entities[entityType][index]
 }
 
+func (r *EntityRegistry) getEntityIndexMap(entityType EntityType) map[diode.Entity]ObjectIDIndex {
+	indices := make(map[diode.Entity]ObjectIDIndex)
+	for index, entity := range r.entities[entityType] {
+		indices[entity] = index
+	}
+	return indices
+}
+
 func createEntity(entityType EntityType) (diode.Entity, error) {
 	switch entityType {
 	case "ipAddress":
@@ -293,7 +301,9 @@ func NewObjectIDIndexDetails(index string) *ObjectIDIndexDetails {
 
 // MapObjectIDsToEntity maps ObjectIDs to entities
 func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diode.Entity {
-	objectIDIndexMap := m.groupByObjectIDIndex(objectIDs)
+	stackDetector := NewStackDetector(m.logger)
+	filteredObjectIDs := stackDetector.Filter(objectIDs)
+	objectIDIndexMap := m.groupByObjectIDIndex(filteredObjectIDs)
 	uniqueEntities := make(map[diode.Entity]bool)
 	for index, value := range objectIDIndexMap {
 		m.logger.Debug("Mapping objectIDIndex", "objectIDIndex", index, "values", value.Values)
@@ -303,12 +313,43 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 			continue
 		}
 		newEntity := entry.MapToEntity(value.Values, m.registry, m.defaults, m.logger)
+		if newEntity == nil {
+			continue
+		}
 		uniqueEntities[newEntity] = true
 	}
 
 	currentDevice := m.registry.GetOrCreateEntity(DeviceEntityType, CurrentDeviceIndex).(*diode.Device)
+	stackInfo := stackDetector.BuildStackInfo(m.registry, currentDevice, m.defaults)
+	if stackInfo.Active {
+		delete(uniqueEntities, currentDevice)
+		if stackInfo.VirtualChassis != nil {
+			uniqueEntities[stackInfo.VirtualChassis] = true
+		}
+		for _, device := range stackInfo.MemberDevices {
+			uniqueEntities[device] = true
+		}
+	}
+
+	moduleInfo := stackDetector.BuildModuleInfo(currentDevice, stackInfo.MemberDevices)
+	if moduleInfo.Active {
+		for _, moduleType := range moduleInfo.ModuleTypes {
+			uniqueEntities[moduleType] = true
+		}
+		for _, moduleBay := range moduleInfo.ModuleBays {
+			uniqueEntities[moduleBay] = true
+		}
+		for _, module := range moduleInfo.Modules {
+			uniqueEntities[module] = true
+		}
+	}
 
 	assignedInterfaceIndices := m.getAssignedInterfaces(uniqueEntities)
+	interfaceIndices := m.registry.getEntityIndexMap(InterfaceEntityType)
+	defaultDevice := currentDevice
+	if stackInfo.Active && stackInfo.MasterDevice != nil {
+		defaultDevice = stackInfo.MasterDevice
+	}
 
 	// Build final entity list, excluding assigned interfaces to sending duplcates for ingestion
 	entities := make([]diode.Entity, 0, len(uniqueEntities))
@@ -318,7 +359,16 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 			if assignedInterfaceIndices[diodeInterface] {
 				isAssigned = true
 			}
-			diodeInterface.Device = currentDevice
+			diodeInterface.Device = defaultDevice
+			if stackInfo.Active {
+				if interfaceIndex, ok := interfaceIndices[diodeInterface]; ok {
+					if memberIndex, found := stackInfo.InterfaceToMember[string(interfaceIndex)]; found {
+						if memberDevice, ok := stackInfo.MemberDevices[memberIndex]; ok {
+							diodeInterface.Device = memberDevice
+						}
+					}
+				}
+			}
 			if !isAssigned {
 				entities = append(entities, entity)
 			}
