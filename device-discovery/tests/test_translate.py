@@ -4,9 +4,15 @@
 
 import pytest
 
+from device_discovery.interface import (
+    match_interface_type,
+    translate_interface,
+    translate_interface_ips,
+)
 from device_discovery.policy.models import (
     Defaults,
     DeviceParameters,
+    InterfacePattern,
     IpamParameters,
     ObjectParameters,
     Options,
@@ -16,8 +22,6 @@ from device_discovery.policy.models import (
 from device_discovery.translate import (
     translate_data,
     translate_device,
-    translate_interface,
-    translate_interface_ips,
     translate_vlan,
 )
 
@@ -515,3 +519,314 @@ def test_translate_vlan_with_tenant_parameters(
     assert vlan.tenant.name == "Tenant With Group"
     assert vlan.tenant.group.name == "Tenant Group"
     assert vlan.description == "Tenant VLAN"
+
+
+# Unit Tests for Pattern Matching Function
+
+
+def test_match_interface_type_no_patterns():
+    """Test pattern matching with no patterns configured."""
+    result = match_interface_type("GigabitEthernet0/0", None)
+    assert result is None
+
+    result = match_interface_type("GigabitEthernet0/0", [])
+    assert result is None
+
+
+def test_match_interface_type_single_match():
+    """Test pattern matching with single pattern."""
+    patterns = [InterfacePattern(match="Gi.*", type="1000base-t")]
+    result = match_interface_type("GigabitEthernet0/0", patterns)
+    assert result == "1000base-t"
+
+    result = match_interface_type("Gi0/0/0", patterns)
+    assert result == "1000base-t"
+
+
+def test_match_interface_type_no_match():
+    """Test pattern matching when no pattern matches."""
+    patterns = [InterfacePattern(match="Te.*", type="10gbase-x-sfpp")]
+    result = match_interface_type("GigabitEthernet0/0", patterns)
+    assert result is None
+
+
+def test_match_interface_type_most_specific_wins():
+    """Test that most specific (longest) match wins."""
+    patterns = [
+        InterfacePattern(match="^Gi", type="short-match"),
+        InterfacePattern(match="^GigabitEthernet", type="long-match"),
+        InterfacePattern(match="^Ten", type="10gbase-x-sfpp"),
+    ]
+    # "GigabitEthernet" matches longer (15 chars) than "Gi" (2 chars)
+    result = match_interface_type("GigabitEthernet0/0", patterns)
+    assert result == "long-match"
+
+    # Only "Ten" matches at the start
+    result = match_interface_type("TenGigabitEthernet1/0/1", patterns)
+    assert result == "10gbase-x-sfpp"
+
+
+def test_match_interface_type_first_pattern_wins_on_tie():
+    """Test that first pattern wins when match lengths are equal."""
+    patterns = [
+        InterfacePattern(match="Ethernet.*", type="first-type"),
+        InterfacePattern(match="Eth.*", type="second-type"),
+    ]
+    # Both could match "Ethernet0/0" but with different lengths
+    # "Ethernet.*" is more specific
+    result = match_interface_type("Ethernet0/0", patterns)
+    assert result == "first-type"
+
+
+def test_match_interface_type_multiple_patterns():
+    """Test pattern matching with multiple different patterns."""
+    patterns = [
+        InterfacePattern(match="Gi.*", type="1000base-t"),
+        InterfacePattern(match="Te.*", type="10gbase-x-sfpp"),
+        InterfacePattern(match="Fa.*", type="100base-tx"),
+        InterfacePattern(match="ethernet-.*", type="1000base-t"),
+    ]
+    assert match_interface_type("GigabitEthernet0/0", patterns) == "1000base-t"
+    assert match_interface_type("TenGigabitEthernet1/0/1", patterns) == "10gbase-x-sfpp"
+    assert match_interface_type("FastEthernet0/0", patterns) == "100base-tx"
+    assert match_interface_type("ethernet-1/1", patterns) == "1000base-t"
+    assert match_interface_type("Loopback0", patterns) is None
+
+
+def test_match_interface_type_case_sensitive():
+    """Test that pattern matching is case-sensitive by default."""
+    patterns = [InterfacePattern(match="gi.*", type="1000base-t")]
+    result = match_interface_type("GigabitEthernet0/0", patterns)
+    assert result is None
+
+    result = match_interface_type("gigabit0/0", patterns)
+    assert result == "1000base-t"
+
+
+def test_match_interface_type_anchored_patterns():
+    """Test patterns with anchors (^ and $)."""
+    patterns = [
+        InterfacePattern(match="^Gi0/0/0$", type="specific-interface"),
+        InterfacePattern(match="Gi.*", type="generic-type"),
+    ]
+    # Exact match should win (it's more specific - matches entire string)
+    result = match_interface_type("Gi0/0/0", patterns)
+    assert result == "specific-interface"
+
+    # Other interfaces match generic pattern
+    result = match_interface_type("Gi0/0/1", patterns)
+    assert result == "generic-type"
+
+
+# Integration Tests for Interface Translation with Patterns
+
+
+def test_translate_interface_with_pattern_matching(
+    sample_device_info, sample_interface_info, sample_defaults
+):
+    """Test interface translation with pattern-based type assignment."""
+    # Configure patterns
+    sample_defaults.interface_patterns = [
+        InterfacePattern(match="GigabitEthernet.*", type="1000base-t"),
+        InterfacePattern(match="Te.*", type="10gbase-x-sfpp"),
+    ]
+
+    device = translate_device(sample_device_info, sample_defaults)
+    interface = translate_interface(
+        device,
+        "GigabitEthernet0/0",
+        sample_interface_info["GigabitEthernet0/0"],
+        sample_defaults,
+    )
+
+    assert interface.type == "1000base-t"
+    assert interface.name == "GigabitEthernet0/0"
+
+
+def test_translate_interface_pattern_no_match_uses_default(
+    sample_device_info, sample_interface_info, sample_defaults
+):
+    """Test that default if_type is used when no pattern matches."""
+    sample_defaults.interface_patterns = [
+        InterfacePattern(match="Te.*", type="10gbase-x-sfpp"),
+    ]
+    sample_defaults.if_type = "other"
+
+    device = translate_device(sample_device_info, sample_defaults)
+    interface = translate_interface(
+        device,
+        "GigabitEthernet0/0",
+        sample_interface_info["GigabitEthernet0/0"],
+        sample_defaults,
+    )
+
+    # No pattern matches, should use default
+    assert interface.type == "other"
+
+
+def test_translate_interface_subinterface_ignores_patterns(
+    sample_device_info, sample_interface_info, sample_defaults
+):
+    """Test that subinterfaces always get 'virtual' type regardless of patterns."""
+    sample_defaults.interface_patterns = [
+        InterfacePattern(match=".*", type="should-not-match"),
+    ]
+
+    device = translate_device(sample_device_info, sample_defaults)
+
+    # Create parent interface
+    parent = translate_interface(
+        device,
+        "GigabitEthernet0/0",
+        sample_interface_info["GigabitEthernet0/0"],
+        sample_defaults,
+    )
+
+    # Create subinterface with parent
+    subinterface = translate_interface(
+        device,
+        "GigabitEthernet0/0.100",
+        {},
+        sample_defaults,
+        parent=parent,
+    )
+
+    # Subinterface should be "virtual" despite pattern matching everything
+    assert subinterface.type == "virtual"
+    assert parent.type == "should-not-match"  # Parent uses pattern
+
+
+def test_translate_interface_most_specific_pattern_wins(
+    sample_device_info, sample_interface_info, sample_defaults
+):
+    """Test that most specific pattern match wins."""
+    sample_defaults.interface_patterns = [
+        InterfacePattern(match="Gi", type="generic"),
+        InterfacePattern(match="GigabitEthernet0/0", type="specific"),
+    ]
+
+    device = translate_device(sample_device_info, sample_defaults)
+
+    # Should match the more specific pattern (15 chars vs 2 chars)
+    interface = translate_interface(
+        device,
+        "GigabitEthernet0/0/1",
+        sample_interface_info["GigabitEthernet0/0/1"],
+        sample_defaults,
+    )
+    assert interface.type == "specific"
+
+    # Should match only generic pattern
+    interface2 = translate_interface(
+        device,
+        "GigabitEthernet1/0",
+        sample_interface_info["GigabitEthernet0/0"],
+        sample_defaults,
+    )
+    assert interface2.type == "generic"
+
+
+def test_translate_interface_backward_compatible(
+    sample_device_info, sample_interface_info, sample_defaults
+):
+    """Test that interface translation works without patterns (backward compatibility)."""
+    # No patterns configured (None)
+    sample_defaults.interface_patterns = None
+    sample_defaults.if_type = "other"
+
+    device = translate_device(sample_device_info, sample_defaults)
+    interface = translate_interface(
+        device,
+        "GigabitEthernet0/0",
+        sample_interface_info["GigabitEthernet0/0"],
+        sample_defaults,
+    )
+
+    # Should use default if_type
+    assert interface.type == "other"
+
+
+def test_translate_data_with_interface_patterns(
+    sample_device_info, sample_interface_info, sample_interfaces_ip
+):
+    """Test full data translation with interface patterns."""
+    defaults = Defaults(
+        site="New York",
+        if_type="other",
+        interface_patterns=[
+            InterfacePattern(match="GigabitEthernet.*", type="1000base-t"),
+        ],
+    )
+
+    data = {
+        "device": sample_device_info,
+        "interface": sample_interface_info,
+        "interface_ip": sample_interfaces_ip,
+        "driver": "ios",
+        "defaults": defaults,
+    }
+
+    entities = list(translate_data(data))
+
+    # Find interface entities
+    interface_entities = [
+        e for e in entities if e.WhichOneof("entity") == "interface"
+    ]
+
+    # Both GigabitEthernet interfaces should match the pattern
+    for interface_entity in interface_entities:
+        if interface_entity.interface.name.startswith("GigabitEthernet"):
+            assert interface_entity.interface.type == "1000base-t"
+
+
+# Model Validation Tests
+
+
+def test_interface_pattern_valid_regex():
+    """Test InterfacePattern accepts valid regex patterns."""
+    valid_patterns = [
+        "Gi.*",
+        "Te.*",
+        "^GigabitEthernet0/0$",
+        "ethernet-[0-9]+/[0-9]+",
+        ".*",
+    ]
+
+    for pattern_str in valid_patterns:
+        pattern = InterfacePattern(match=pattern_str, type="test-type")
+        assert pattern.match == pattern_str
+
+
+def test_interface_pattern_invalid_regex():
+    """Test InterfacePattern rejects invalid regex patterns."""
+    invalid_patterns = [
+        "Gi[.*",  # Unclosed bracket
+        "(?P<incomplete",  # Incomplete group
+        "(?P<>invalid)",  # Empty group name
+    ]
+
+    for pattern_str in invalid_patterns:
+        with pytest.raises(ValueError, match="Invalid regex pattern"):
+            InterfacePattern(match=pattern_str, type="test-type")
+
+
+def test_defaults_with_interface_patterns():
+    """Test Defaults model with interface_patterns field."""
+    defaults = Defaults(
+        site="Test Site",
+        if_type="other",
+        interface_patterns=[
+            InterfacePattern(match="Gi.*", type="1000base-t"),
+            InterfacePattern(match="Te.*", type="10gbase-x-sfpp"),
+        ],
+    )
+
+    assert len(defaults.interface_patterns) == 2
+    assert defaults.interface_patterns[0].match == "Gi.*"
+    assert defaults.interface_patterns[1].type == "10gbase-x-sfpp"
+
+
+def test_defaults_without_interface_patterns():
+    """Test Defaults model works without interface_patterns (backward compatibility)."""
+    defaults = Defaults(site="Test Site", if_type="other")
+    assert defaults.interface_patterns is None
