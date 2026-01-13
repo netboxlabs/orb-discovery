@@ -193,14 +193,32 @@ func maskToPrefixSize(maskStr string) (int, error) {
 
 // InterfaceMapper is a struct that maps interfaces to entities
 type InterfaceMapper struct {
-	logger *slog.Logger
+	logger           *slog.Logger
+	patternMatcher   *PatternMatcher
+	userPatternCount int
 }
 
 // NewInterfaceMapper creates a new InterfaceMapper
-func NewInterfaceMapper(logger *slog.Logger) *InterfaceMapper {
-	return &InterfaceMapper{
-		logger: logger,
+func NewInterfaceMapper(logger *slog.Logger, patterns []config.InterfacePattern) (*InterfaceMapper, error) {
+	var patternMatcher *PatternMatcher
+	var userPatternCount int
+
+	if len(patterns) > 0 {
+		userPatternCount = len(patterns)
+		mergedPatterns := MergePatterns(patterns, true)
+
+		var err error
+		patternMatcher, err = NewPatternMatcher(mergedPatterns, logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create pattern matcher: %w", err)
+		}
 	}
+
+	return &InterfaceMapper{
+		logger:           logger,
+		patternMatcher:   patternMatcher,
+		userPatternCount: userPatternCount,
+	}, nil
 }
 
 // applyDefaults applies default values to an interface entity
@@ -278,7 +296,20 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					if defaults != nil && defaults.Interface.Type != "" {
 						defaultType = defaults.Interface.Type
 					}
-					interfaceType := GetNetboxType(value.Value, defaultType, interfaceEntity.Speed)
+
+					var interfaceName string
+					if interfaceEntity.Name != nil {
+						interfaceName = *interfaceEntity.Name
+					}
+
+					interfaceType := ResolveInterfaceType(
+						interfaceName,
+						value.Value,
+						interfaceEntity.Speed,
+						defaultType,
+						m.patternMatcher,
+						m.userPatternCount,
+					)
 					interfaceEntity.Type = &interfaceType
 					fieldFound = true
 				case "speed":
