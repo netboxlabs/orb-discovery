@@ -91,19 +91,23 @@ def merge_interface_patterns(
 
 def match_interface_type(
     interface_name: str,
-    patterns: list | None
+    patterns: list | None,
+    user_pattern_count: int = 0
 ) -> str | None:
     """
-    Match interface name against patterns and return the most specific type.
+    Match interface name against patterns with priority-aware matching.
 
-    Implements "most specific match wins" by finding the pattern that produces
-    the longest match. If multiple patterns match with equal length, the first
-    in the list wins.
+    When both user and built-in patterns are present, user patterns ALWAYS
+    take priority. The "most specific match wins" rule (longest match) only
+    applies within the same priority level:
+    1. First, check all user patterns - if any match, return most specific
+    2. Only if no user pattern matches, check built-in patterns
 
     Args:
     ----
         interface_name: The name of the interface to match.
         patterns: List of InterfacePattern objects to match against.
+        user_pattern_count: Number of user patterns at the start of the list.
 
     Returns:
     -------
@@ -113,27 +117,42 @@ def match_interface_type(
     if not patterns:
         return None
 
-    best_match_length = 0
-    best_match_type = None
+    # Separate user patterns from built-in patterns
+    user_patterns = patterns[:user_pattern_count] if user_pattern_count > 0 else []
+    builtin_patterns = patterns[user_pattern_count:] if user_pattern_count > 0 else patterns
 
-    for pattern in patterns:
-        try:
-            compiled_pattern = re.compile(pattern.match)
-            match = compiled_pattern.search(interface_name)
+    def find_best_match(pattern_list):
+        """Find the most specific (longest) match in a pattern list."""
+        best_match_length = 0
+        best_match_type = None
 
-            if match:
-                match_length = len(match.group(0))
-                if match_length > best_match_length:
-                    best_match_length = match_length
-                    best_match_type = pattern.type
+        for pattern in pattern_list:
+            try:
+                compiled_pattern = re.compile(pattern.match)
+                match = compiled_pattern.search(interface_name)
 
-        except re.error as e:
-            logger.warning(
-                f"Error compiling pattern '{pattern.match}': {e}. Skipping pattern."
-            )
-            continue
+                if match:
+                    match_length = len(match.group(0))
+                    if match_length > best_match_length:
+                        best_match_length = match_length
+                        best_match_type = pattern.type
 
-    return best_match_type
+            except re.error as e:
+                logger.warning(
+                    f"Error compiling pattern '{pattern.match}': {e}. Skipping pattern."
+                )
+                continue
+
+        return best_match_type
+
+    # Priority 1: Check user patterns first
+    if user_patterns:
+        user_match = find_best_match(user_patterns)
+        if user_match:
+            return user_match
+
+    # Priority 2: Check built-in patterns only if no user pattern matched
+    return find_best_match(builtin_patterns)
 
 
 def int32_overflows(number: int) -> bool:
@@ -214,7 +233,9 @@ def translate_interface(
         user_patterns = getattr(defaults, 'interface_patterns', None)
         merged_patterns = merge_interface_patterns(user_patterns, include_defaults=True)
 
-        matched_type = match_interface_type(if_name, merged_patterns)
+        # Count user patterns to maintain priority during matching
+        user_pattern_count = len(user_patterns) if user_patterns else 0
+        matched_type = match_interface_type(if_name, merged_patterns, user_pattern_count)
         if matched_type:
             interface_type = matched_type
         else:
