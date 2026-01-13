@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2024 NetBox Labs Inc
+# Copyright 2026 NetBox Labs Inc
 """Interface translation utilities for device discovery."""
 
 import ipaddress
@@ -9,9 +9,84 @@ from collections.abc import Iterable
 
 from netboxlabs.diode.sdk.ingester import Device, Entity, Interface, IPAddress, Prefix
 
+from device_discovery.defaults import DEFAULT_INTERFACE_PATTERNS
 from device_discovery.policy.models import Defaults
 
 logger = logging.getLogger(__name__)
+
+
+def detect_type_by_speed(speed_mbps: float) -> str:
+    """
+    Determine interface type based on speed.
+
+    Uses speed ranges from SNMP discovery reference implementation.
+    Speed in Mbps (from NAPALM).
+
+    Args:
+    ----
+        speed_mbps: Interface speed in Mbps
+
+    Returns:
+    -------
+        NetBox interface type string
+
+    """
+    # Speed thresholds and their corresponding interface types (ordered by speed)
+    speed_thresholds = [
+        (100, "100base-tx"),
+        (1000, "1000base-t"),
+        (2500, "2.5gbase-t"),
+        (5000, "5gbase-t"),
+        (10000, "10gbase-x-sfpp"),
+        (25000, "25gbase-x-sfp28"),
+        (40000, "40gbase-x-qsfpp"),
+        (50000, "50gbase-x-sfp56"),
+        (100000, "100gbase-x-qsfp28"),
+        (200000, "200gbase-x-qsfp56"),
+        (400000, "400gbase-x-qsfp112"),
+    ]
+
+    for threshold, interface_type in speed_thresholds:
+        if speed_mbps <= threshold:
+            return interface_type
+
+    # Default to highest speed for anything above 400G
+    return "800gbase-x-qsfp-dd"
+
+
+def merge_interface_patterns(
+    user_patterns: list | None,
+    include_defaults: bool = True
+) -> list:
+    """
+    Merge user-defined patterns with built-in defaults.
+
+    User patterns have priority and are checked first.
+    Built-in patterns serve as intelligent fallback.
+
+    Args:
+    ----
+        user_patterns: Patterns from policy configuration (or None)
+        include_defaults: Whether to include built-in patterns (default: True)
+
+    Returns:
+    -------
+        Merged list of patterns with user patterns first
+
+    """
+    if not include_defaults:
+        return user_patterns or []
+
+    merged = []
+
+    # User patterns first (highest priority)
+    if user_patterns:
+        merged.extend(user_patterns)
+
+    # Built-in patterns as fallback
+    merged.extend(DEFAULT_INTERFACE_PATTERNS)
+
+    return merged
 
 
 def match_interface_type(
@@ -116,14 +191,17 @@ def translate_interface(
         else None
     )
 
-    # Determine interface type with priority order:
+    # Determine interface type with five-tier priority:
     # 1. Subinterface (has parent) -> "virtual"
-    # 2. Pattern match -> matched type
-    # 3. Fallback -> defaults.if_type
+    # 2. User-defined pattern match -> matched type
+    # 3. Built-in pattern match -> matched type
+    # 4. Speed-based detection -> type from speed
+    # 5. Fallback -> defaults.if_type
     interface_type = defaults.if_type
+    is_subinterface = parent is not None
 
-    if parent is not None:
-        # Subinterfaces always get "virtual" type regardless of patterns
+    if is_subinterface:
+        # Tier 1: Subinterfaces always get "virtual" type (structural)
         interface_type = "virtual"
         parent = Interface(
             device=device,
@@ -131,13 +209,20 @@ def translate_interface(
             type=parent.type,
         )
     else:
-        # For physical interfaces, try pattern matching first
+        # Tier 2 & 3: Try pattern matching (user + built-in merged)
         # Use getattr for backward compatibility with SimpleNamespace in tests
-        interface_patterns = getattr(defaults, 'interface_patterns', None)
-        matched_type = match_interface_type(if_name, interface_patterns)
+        user_patterns = getattr(defaults, 'interface_patterns', None)
+        merged_patterns = merge_interface_patterns(user_patterns, include_defaults=True)
+
+        matched_type = match_interface_type(if_name, merged_patterns)
         if matched_type:
             interface_type = matched_type
-        # If no pattern matches, interface_type already has defaults.if_type
+        else:
+            # Tier 4: Speed-based detection fallback
+            speed = interface_info.get("speed")
+            if speed and speed > 0:
+                interface_type = detect_type_by_speed(speed)
+            # Else: Tier 5 - interface_type already has defaults.if_type fallback
 
     interface = Interface(
         device=device,
