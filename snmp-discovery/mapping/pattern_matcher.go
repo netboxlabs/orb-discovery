@@ -1,4 +1,3 @@
-// Copyright 2024 NetBox Labs Inc
 package mapping
 
 import (
