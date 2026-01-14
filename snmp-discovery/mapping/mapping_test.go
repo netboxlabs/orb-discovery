@@ -74,14 +74,12 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 			},
 			expected: []diode.Entity{
 				&diode.Interface{
-					Speed: &[]int64{1000000}[0],
-					Name:  diode.String("GigabitEthernet1/0/1"),
-					PrimaryMacAddress: &diode.MACAddress{
-						MacAddress: &[]string{"00:00:00:00:00:00"}[0],
-					},
-					Enabled: &[]bool{true}[0],
-					Type:    diode.String("other"),
-					Device:  &diode.Device{},
+					Speed:             &[]int64{1000000}[0],
+					Name:              diode.String("GigabitEthernet1/0/1"),
+					PrimaryMacAddress: nil, // all-zeros MAC address should be ignored
+					Enabled:           &[]bool{true}[0],
+					Type:              diode.String("other"),
+					Device:            &diode.Device{},
 				},
 				&diode.Interface{
 					Speed: &[]int64{1000000}[0],
@@ -153,14 +151,12 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 			},
 			expected: []diode.Entity{
 				&diode.Interface{
-					Speed: &[]int64{1000000}[0],
-					Name:  diode.String("GigabitEthernet1/0/1"),
-					PrimaryMacAddress: &diode.MACAddress{
-						MacAddress: diode.String("00:00:00:00:00:00"),
-					},
-					Enabled: &[]bool{true}[0],
-					Type:    diode.String("other"),
-					Device:  &diode.Device{},
+					Speed:             &[]int64{1000000}[0],
+					Name:              diode.String("GigabitEthernet1/0/1"),
+					PrimaryMacAddress: nil, // all-zeros MAC address should be ignored
+					Enabled:           &[]bool{true}[0],
+					Type:              diode.String("other"),
+					Device:            &diode.Device{},
 				},
 				&diode.IPAddress{
 					Address: diode.String("192.168.1.2/32"),
@@ -252,7 +248,7 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 						{
 							OID:    ".1.3.6.1.2.1.4.20.1.2",
 							Entity: "ipAddress",
-							Field:  "assigned_object",
+							Field:  "assignedObject",
 							Relationship: config.Relationship{
 								Type:  "interface",
 								Field: "_id",
@@ -506,7 +502,7 @@ func TestIPAddressIdentifierSizeInheritance(t *testing.T) {
 						{
 							OID:    ".1.3.6.1.2.1.4.20.1.3",
 							Entity: "ipAddress",
-							Field:  "address_prefixSize",
+							Field:  "addressPrefixSize",
 							// No IdentifierSize specified - should inherit from parent
 						},
 					},
@@ -559,10 +555,10 @@ func TestIPAddressIdentifierSizeInheritance(t *testing.T) {
 			},
 			expected: []diode.Entity{
 				&diode.IPAddress{
-					Address: diode.String("1.2/32"), // Uses child's identifier size of 2
+					Address: nil, // Invalid IP format "1.2" is rejected by validation
 				},
 			},
-			description: "This test verifies that child mappings can override parent identifier size when explicitly specified",
+			description: "This test verifies that child mappings can override parent identifier size, but invalid IPs are still rejected",
 		},
 		{
 			name: "Zero identifier size on parent defaults correctly",
@@ -591,10 +587,10 @@ func TestIPAddressIdentifierSizeInheritance(t *testing.T) {
 			},
 			expected: []diode.Entity{
 				&diode.IPAddress{
-					Address: diode.String("/32"), // When identifier size is 0, no index is captured
+					Address: nil, // Invalid IP format (incomplete) is rejected by validation
 				},
 			},
-			description: "This test verifies behavior when parent has zero identifier size",
+			description: "This test verifies behavior when parent has zero identifier size - invalid IPs are rejected",
 		},
 	}
 
@@ -649,7 +645,7 @@ func TestObjectIDsMethodWithIdentifierSizeInheritance(t *testing.T) {
 						{
 							OID:    ".1.3.6.1.2.1.4.20.1.3",
 							Entity: "ipAddress",
-							Field:  "address_prefixSize",
+							Field:  "addressPrefixSize",
 							// Should inherit IdentifierSize 4 from parent
 						},
 					},
