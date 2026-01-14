@@ -229,7 +229,7 @@ func TestIPAddressMapper_Map(t *testing.T) {
 					{
 						OID:    "1.3.6.1.2.1.4.20.1.2",
 						Entity: "ipAddress",
-						Field:  "assigned_object",
+						Field:  "assignedObject",
 						Relationship: config.Relationship{
 							Type: "interface",
 						},
@@ -2431,7 +2431,7 @@ func TestMaskToPrefixSize(t *testing.T) {
 					{
 						OID:    "test",
 						Entity: "ipAddress",
-						Field:  "address_prefixSize",
+						Field:  "addressPrefixSize",
 					},
 				},
 			}
@@ -2439,22 +2439,13 @@ func TestMaskToPrefixSize(t *testing.T) {
 			entityRegistry := mapping.NewEntityRegistry(slog.Default())
 			result := mapper.Map(values, mappingEntry, entityRegistry, nil)
 
-			if tt.expectError {
-				// For error cases, we expect the function to skip the invalid mask
-				// and return an entity with no address set (since no valid fields were found)
-				assert.NotNil(t, result)
-				ipAddress, ok := result.(*diode.IPAddress)
-				assert.True(t, ok)
-				// The address should be nil since the invalid mask was skipped
-				assert.Nil(t, ipAddress.Address)
-			} else {
-				// For valid cases, we expect the function to work correctly
-				assert.NotNil(t, result)
-				ipAddress, ok := result.(*diode.IPAddress)
-				assert.True(t, ok)
-				// The address should be just the prefix since there's no address field
-				assert.Equal(t, fmt.Sprintf("/%d", tt.expected), *ipAddress.Address)
-			}
+			// All cases with prefix-only (no IP address) should result in nil address
+			// because validation now requires a complete IP/CIDR format
+			assert.NotNil(t, result)
+			ipAddress, ok := result.(*diode.IPAddress)
+			assert.True(t, ok)
+			// The address should be nil since prefix-only is not a valid IP/CIDR
+			assert.Nil(t, ipAddress.Address)
 		})
 	}
 }
@@ -2471,7 +2462,7 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 		expectError    bool
 	}{
 		{
-			name: "address_prefixSize with existing address",
+			name: "addressPrefixSize with existing address",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
 					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
@@ -2501,7 +2492,7 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 					{
 						OID:    "1.3.6.1.2.1.4.20.1.3",
 						Entity: "ipAddress",
-						Field:  "address_prefixSize",
+						Field:  "addressPrefixSize",
 					},
 				},
 			},
@@ -2512,7 +2503,7 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "address_prefixSize without existing address",
+			name: "addressPrefixSize without existing address - now extracts IP from index",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.4.20.1.3.192.168.1.1": {
 					OID:    "1.3.6.1.2.1.4.20.1.3.192.168.1.1",
@@ -2530,18 +2521,18 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 					{
 						OID:    "1.3.6.1.2.1.4.20.1.3",
 						Entity: "ipAddress",
-						Field:  "address_prefixSize",
+						Field:  "addressPrefixSize",
 					},
 				},
 			},
 			defaults: nil,
 			expectedEntity: &diode.IPAddress{
-				Address: mapping.StringPtr("/24"),
+				Address: mapping.StringPtr("192.168.1.1/24"), // Now extracts IP from index
 			},
 			expectError: false,
 		},
 		{
-			name: "address_prefixSize with address that already has prefix",
+			name: "addressPrefixSize with address that already has prefix",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
 					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
@@ -2571,7 +2562,7 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 					{
 						OID:    "1.3.6.1.2.1.4.20.1.3",
 						Entity: "ipAddress",
-						Field:  "address_prefixSize",
+						Field:  "addressPrefixSize",
 					},
 				},
 			},
@@ -2582,7 +2573,7 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "address_prefixSize with address that has no prefix",
+			name: "addressPrefixSize with address that has no prefix",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
 					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
@@ -2612,7 +2603,7 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 					{
 						OID:    "1.3.6.1.2.1.4.20.1.3",
 						Entity: "ipAddress",
-						Field:  "address_prefixSize",
+						Field:  "addressPrefixSize",
 					},
 				},
 			},
@@ -2623,7 +2614,7 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "address_prefixSize with invalid mask - should skip",
+			name: "addressPrefixSize with invalid mask - should skip",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
 					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
@@ -2653,7 +2644,7 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 					{
 						OID:    "1.3.6.1.2.1.4.20.1.3",
 						Entity: "ipAddress",
-						Field:  "address_prefixSize",
+						Field:  "addressPrefixSize",
 					},
 				},
 			},
@@ -2664,7 +2655,7 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "address_prefixSize with different subnet masks",
+			name: "addressPrefixSize with different subnet masks",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.4.20.1.1.10.0.0.1": {
 					OID:    "1.3.6.1.2.1.4.20.1.1.10.0.0.1",
@@ -2694,7 +2685,7 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 					{
 						OID:    "1.3.6.1.2.1.4.20.1.3",
 						Entity: "ipAddress",
-						Field:  "address_prefixSize",
+						Field:  "addressPrefixSize",
 					},
 				},
 			},
@@ -2705,7 +2696,7 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "address_prefixSize with /30 subnet",
+			name: "addressPrefixSize with /30 subnet",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.4.20.1.1.172.16.1.1": {
 					OID:    "1.3.6.1.2.1.4.20.1.1.172.16.1.1",
@@ -2735,7 +2726,7 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 					{
 						OID:    "1.3.6.1.2.1.4.20.1.3",
 						Entity: "ipAddress",
-						Field:  "address_prefixSize",
+						Field:  "addressPrefixSize",
 					},
 				},
 			},
@@ -2760,7 +2751,375 @@ func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {
 				assert.NotNil(t, result)
 				ipAddress, ok := result.(*diode.IPAddress)
 				assert.True(t, ok)
+				if tt.expectedEntity.Address != nil && ipAddress.Address != nil {
+					t.Logf("Expected: %s, Got: %s", *tt.expectedEntity.Address, *ipAddress.Address)
+				}
 				assert.Equal(t, tt.expectedEntity.Address, ipAddress.Address)
+			}
+		})
+	}
+}
+
+func Test_validateIPv4CIDR(t *testing.T) {
+	tests := []struct {
+		name     string
+		cidr     string
+		expected bool
+	}{
+		{
+			name:     "valid CIDR /24",
+			cidr:     "192.168.1.1/24",
+			expected: true,
+		},
+		{
+			name:     "valid CIDR /8",
+			cidr:     "10.0.0.1/8",
+			expected: true,
+		},
+		{
+			name:     "valid CIDR /32",
+			cidr:     "127.0.0.1/32",
+			expected: true,
+		},
+		{
+			name:     "valid CIDR /0",
+			cidr:     "0.0.0.0/0",
+			expected: true,
+		},
+		{
+			name:     "invalid prefix too high",
+			cidr:     "192.168.1.1/33",
+			expected: false,
+		},
+		{
+			name:     "invalid IP octet",
+			cidr:     "256.1.1.1/24",
+			expected: false,
+		},
+		{
+			name:     "invalid IP format",
+			cidr:     "999.999.999.999/24",
+			expected: false,
+		},
+		{
+			name:     "missing prefix",
+			cidr:     "192.168.1.1",
+			expected: false,
+		},
+		{
+			name:     "only prefix",
+			cidr:     "/24",
+			expected: false,
+		},
+		{
+			name:     "IPv6 CIDR (should reject)",
+			cidr:     "fe80::1/64",
+			expected: false,
+		},
+		{
+			name:     "malformed CIDR",
+			cidr:     "192.168.1.1/abc",
+			expected: false,
+		},
+		{
+			name:     "incomplete IP",
+			cidr:     "192.168.1/24",
+			expected: false,
+		},
+		{
+			name:     "too many octets",
+			cidr:     "192.168.1.1.1/24",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mapping.ValidateIPv4CIDR(tt.cidr)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIPAddressMapper_Map_ValueFieldExtraction(t *testing.T) {
+	logger := slog.Default()
+
+	tests := []struct {
+		name           string
+		values         map[mapping.ObjectIDIndex]*mapping.ObjectIDValue
+		mappingEntry   *mapping.Entry
+		expectedEntity *diode.IPAddress
+	}{
+		{
+			name: "IP in value field with correct type",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
+					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
+					Index:  "192.168.1.1",
+					Parent: "1.3.6.1.2.1.4.20.1.1",
+					Value:  "192.168.1.1",
+					Type:   0x40, // IPAddress type
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.4.20.1",
+				Entity: "ipAddress",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.1",
+						Entity: "ipAddress",
+						Field:  "address",
+					},
+				},
+			},
+			expectedEntity: &diode.IPAddress{
+				Address: mapping.StringPtr("192.168.1.1/32"),
+			},
+		},
+		{
+			name: "IP in value field with wrong type (OctetString)",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.4.20.1.1.10.110.18.4": {
+					OID:    "1.3.6.1.2.1.4.20.1.1.10.110.18.4",
+					Index:  "10.110.18.4",
+					Parent: "1.3.6.1.2.1.4.20.1.1",
+					Value:  "10.110.18.4",
+					Type:   0x04, // OctetString type
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.4.20.1",
+				Entity: "ipAddress",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.1",
+						Entity: "ipAddress",
+						Field:  "address",
+					},
+				},
+			},
+			expectedEntity: &diode.IPAddress{
+				Address: mapping.StringPtr("10.110.18.4/32"),
+			},
+		},
+		{
+			name: "fallback to index when value is invalid",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.4.20.1.1.10.0.0.1": {
+					OID:    "1.3.6.1.2.1.4.20.1.1.10.0.0.1",
+					Index:  "10.0.0.1",
+					Parent: "1.3.6.1.2.1.4.20.1.1",
+					Value:  "invalid.ip",
+					Type:   0x40,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.4.20.1",
+				Entity: "ipAddress",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.1",
+						Entity: "ipAddress",
+						Field:  "address",
+					},
+				},
+			},
+			expectedEntity: &diode.IPAddress{
+				Address: mapping.StringPtr("10.0.0.1/32"),
+			},
+		},
+		{
+			name: "value field IP with netmask",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
+					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
+					Index:  "192.168.1.1",
+					Parent: "1.3.6.1.2.1.4.20.1.1",
+					Value:  "192.168.1.1",
+					Type:   0x40,
+				},
+				"1.3.6.1.2.1.4.20.1.3.192.168.1.1": {
+					OID:    "1.3.6.1.2.1.4.20.1.3.192.168.1.1",
+					Index:  "192.168.1.1",
+					Parent: "1.3.6.1.2.1.4.20.1.3",
+					Value:  "255.255.255.0",
+					Type:   0x40,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.4.20.1",
+				Entity: "ipAddress",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.1",
+						Entity: "ipAddress",
+						Field:  "address",
+					},
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.3",
+						Entity: "ipAddress",
+						Field:  "addressPrefixSize",
+					},
+				},
+			},
+			expectedEntity: &diode.IPAddress{
+				Address: mapping.StringPtr("192.168.1.1/24"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mapper := mapping.NewIPAddressMapper(logger)
+			entityRegistry := mapping.NewEntityRegistry(logger)
+
+			result := mapper.Map(tt.values, tt.mappingEntry, entityRegistry, nil)
+
+			assert.NotNil(t, result)
+			ipAddress, ok := result.(*diode.IPAddress)
+			assert.True(t, ok)
+			assert.Equal(t, tt.expectedEntity.Address, ipAddress.Address)
+		})
+	}
+}
+
+func TestIPAddressMapper_Map_InvalidCases(t *testing.T) {
+	logger := slog.Default()
+
+	tests := []struct {
+		name            string
+		values          map[mapping.ObjectIDIndex]*mapping.ObjectIDValue
+		mappingEntry    *mapping.Entry
+		expectEmpty     bool
+		expectedAddress *string
+	}{
+		{
+			name: "both value and index invalid",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.4.20.1.1.999.999.999.999": {
+					OID:    "1.3.6.1.2.1.4.20.1.1.999.999.999.999",
+					Index:  "999.999.999.999",
+					Parent: "1.3.6.1.2.1.4.20.1.1",
+					Value:  "invalid",
+					Type:   0x40,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.4.20.1",
+				Entity: "ipAddress",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.1",
+						Entity: "ipAddress",
+						Field:  "address",
+					},
+				},
+			},
+			expectEmpty: true,
+		},
+		{
+			name: "incomplete IP with only 3 octets",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.4.20.1.1.192.168.1": {
+					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1",
+					Index:  "192.168.1",
+					Parent: "1.3.6.1.2.1.4.20.1.1",
+					Value:  "192.168.1",
+					Type:   0x40,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.4.20.1",
+				Entity: "ipAddress",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.1",
+						Entity: "ipAddress",
+						Field:  "address",
+					},
+				},
+			},
+			expectEmpty: true,
+		},
+		{
+			name: "malformed IP address 256.1.1.1",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.4.20.1.1.256.1.1.1": {
+					OID:    "1.3.6.1.2.1.4.20.1.1.256.1.1.1",
+					Index:  "256.1.1.1",
+					Parent: "1.3.6.1.2.1.4.20.1.1",
+					Value:  "256.1.1.1",
+					Type:   0x40,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.4.20.1",
+				Entity: "ipAddress",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.1",
+						Entity: "ipAddress",
+						Field:  "address",
+					},
+				},
+			},
+			expectEmpty: true,
+		},
+		{
+			name: "only prefix without IP - now extracts IP from index",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.4.20.1.3.192.168.1.1": {
+					OID:    "1.3.6.1.2.1.4.20.1.3.192.168.1.1",
+					Index:  "192.168.1.1",
+					Parent: "1.3.6.1.2.1.4.20.1.3",
+					Value:  "255.255.255.0",
+					Type:   0x40,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.4.20.1",
+				Entity: "ipAddress",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.3",
+						Entity: "ipAddress",
+						Field:  "addressPrefixSize",
+					},
+				},
+			},
+			expectEmpty:     false, // Changed: now extracts IP from addressPrefixSize field's index
+			expectedAddress: mapping.StringPtr("192.168.1.1/24"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mapper := mapping.NewIPAddressMapper(logger)
+			entityRegistry := mapping.NewEntityRegistry(logger)
+
+			result := mapper.Map(tt.values, tt.mappingEntry, entityRegistry, nil)
+
+			assert.NotNil(t, result)
+			ipAddress, ok := result.(*diode.IPAddress)
+			assert.True(t, ok)
+
+			if tt.expectEmpty {
+				// Empty entity should have nil or empty address
+				assert.True(t, ipAddress.Address == nil || *ipAddress.Address == "")
+			} else if tt.expectedAddress != nil {
+				// Check the expected address
+				if ipAddress.Address != nil {
+					t.Logf("Expected: %s, Got: %s", *tt.expectedAddress, *ipAddress.Address)
+				}
+				assert.Equal(t, tt.expectedAddress, ipAddress.Address)
 			}
 		})
 	}
