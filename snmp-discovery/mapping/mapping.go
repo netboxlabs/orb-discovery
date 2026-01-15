@@ -60,16 +60,7 @@ func NewEntityRegistry(logger *slog.Logger) *EntityRegistry {
 	}
 }
 
-// GetEntity returns an entity from the EntityRegistry if it exists, or nil if it doesn't
-func (r *EntityRegistry) GetEntity(entityType EntityType, index ObjectIDIndex) diode.Entity {
-	if r.entities[entityType] == nil {
-		return nil
-	}
-	return r.entities[entityType][index]
-}
-
 // GetInterfaceByName searches for an interface entity by its name field
-// This is less efficient than GetEntity but necessary for parent interface resolution
 func (r *EntityRegistry) GetInterfaceByName(interfaceName string) *diode.Interface {
 	if r.entities[InterfaceEntityType] == nil {
 		return nil
