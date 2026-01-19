@@ -50,6 +50,12 @@ type InterfaceDefaults struct {
 	Type        string   `yaml:"if_type,omitempty"`
 }
 
+// InterfacePattern represents a regex pattern for interface type matching
+type InterfacePattern struct {
+	Match string `yaml:"match"` // Regex pattern for interface name
+	Type  string `yaml:"type"`  // NetBox interface type to assign
+}
+
 // DeviceDefaults represents default values for a specific entity type
 type DeviceDefaults struct {
 	Description string   `yaml:"description,omitempty"`
@@ -59,13 +65,14 @@ type DeviceDefaults struct {
 
 // Defaults represents the supported default values for a policy
 type Defaults struct {
-	Tags      []string          `yaml:"tags,omitempty"`
-	Site      string            `yaml:"site,omitempty"`
-	Location  string            `yaml:"location,omitempty"`
-	Role      string            `yaml:"role,omitempty"`
-	IPAddress IPAddressDefaults `yaml:"ip_address,omitempty"`
-	Interface InterfaceDefaults `yaml:"interface,omitempty"`
-	Device    DeviceDefaults    `yaml:"device,omitempty"`
+	Tags              []string           `yaml:"tags,omitempty"`
+	Site              string             `yaml:"site,omitempty"`
+	Location          string             `yaml:"location,omitempty"`
+	Role              string             `yaml:"role,omitempty"`
+	IPAddress         IPAddressDefaults  `yaml:"ip_address,omitempty"`
+	Interface         InterfaceDefaults  `yaml:"interface,omitempty"`
+	Device            DeviceDefaults     `yaml:"device,omitempty"`
+	InterfacePatterns []InterfacePattern `yaml:"interface_patterns,omitempty"`
 }
 
 // PolicyConfig represents the configuration of a policy
@@ -74,6 +81,7 @@ type PolicyConfig struct {
 	Defaults            Defaults `yaml:"defaults"`
 	Timeout             int      `yaml:"timeout"`
 	SNMPTimeout         int      `yaml:"snmp_timeout"`
+	SNMPProbeTimeout    int      `yaml:"snmp_probe_timeout"`
 	Retries             int      `yaml:"retries"`
 	LookupExtensionsDir string   `yaml:"lookup_extensions_dir,omitempty"`
 }

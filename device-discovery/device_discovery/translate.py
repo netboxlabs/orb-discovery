@@ -2,40 +2,42 @@
 # Copyright 2024 NetBox Labs Inc
 """Translate from NAPALM output format to Diode SDK entities."""
 
-import ipaddress
 from collections.abc import Iterable
 
+from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
 from netboxlabs.diode.sdk.ingester import (
     VLAN,
     Device,
     DeviceType,
     Entity,
-    Interface,
-    IPAddress,
     Location,
     Platform,
-    Prefix,
+    Tenant,
+    TenantGroup,
 )
 
-from device_discovery.policy.models import Defaults, Options
+from device_discovery.interface import build_interface_entities
+from device_discovery.policy.models import Defaults, Options, TenantParameters
 
 
-def int32_overflows(number: int) -> bool:
-    """
-    Check if an integer is overflowing the int32 range.
+def translate_tenant(
+    tenant: str | TenantParameters | pb.Tenant | None,
+) -> pb.Tenant | None:
+    """Convert tenant input into a Diode Tenant message."""
+    if tenant is None or isinstance(tenant, pb.Tenant):
+        return tenant
 
-    Args:
-    ----
-        number (int): The integer to check.
+    if isinstance(tenant, TenantParameters):
+        tenant_group = TenantGroup(name=tenant.group) if tenant.group else None
+        return Tenant(
+            name=tenant.name,
+            group=tenant_group,
+            comments=tenant.comments,
+            description=tenant.description,
+            tags=tenant.tags,
+        )
 
-    Returns:
-    -------
-        bool: True if the integer is overflowing the int32 range, False otherwise.
-
-    """
-    INT32_MIN = -2147483648
-    INT32_MAX = 2147483647
-    return not (INT32_MIN <= number <= INT32_MAX)
+    return Tenant(name=tenant)
 
 
 def translate_device(device_info: dict, defaults: Defaults) -> Device:
@@ -98,174 +100,11 @@ def translate_device(device_info: dict, defaults: Defaults) -> Device:
         site=defaults.site,
         tags=tags,
         location=location,
-        tenant=defaults.tenant,
+        tenant=translate_tenant(defaults.tenant),
         description=description,
         comments=comments,
     )
     return device
-
-
-def translate_interface(
-    device: Device,
-    if_name: str,
-    interface_info: dict,
-    defaults: Defaults,
-    parent: Interface | None = None,
-) -> Interface:
-    """
-    Translate interface information from NAPALM format to Diode SDK Interface entity.
-
-    Args:
-    ----
-        device (Device): The device to which the interface belongs.
-        if_name (str): The name of the interface.
-        interface_info (dict): Dictionary containing interface information.
-        defaults (Defaults): Default configuration.
-        parent (Interface | None): Parent interface, if any.
-
-    Returns:
-    -------
-        Interface: Translated Interface entity.
-
-    """
-    tags = list(defaults.tags) if defaults.tags else []
-    description = None
-
-    if defaults.interface:
-        tags.extend(defaults.interface.tags or [])
-        description = defaults.interface.description
-
-    description = interface_info.get("description", description)
-    mac_address = (
-        interface_info.get("mac_address")
-        if interface_info.get("mac_address") != ""
-        else None
-    )
-
-    interface_type = defaults.if_type
-    if parent is not None:
-        interface_type = "virtual"
-        parent = Interface(
-            device=device,
-            name=parent.name,
-            type=parent.type,
-        )
-
-    interface = Interface(
-        device=device,
-        name=if_name,
-        enabled=interface_info.get("is_enabled"),
-        primary_mac_address=mac_address,
-        description=description,
-        parent=parent,
-        tags=tags,
-        type=interface_type,
-    )
-
-    # Convert napalm interface speed from Mbps to Netbox Kbps
-    speed = interface_info.get("speed")
-    if speed is not None:
-        speed_kbps = int(speed) * 1000
-        if speed_kbps > 0 and not int32_overflows(speed_kbps):
-            interface.speed = speed_kbps
-
-    mtu = interface_info.get("mtu")
-    if mtu is not None and mtu > 0 and not int32_overflows(mtu):
-        interface.mtu = mtu
-
-    return interface
-
-
-def translate_interface_ips(
-    interface: Interface, interfaces_ip: dict, defaults: Defaults
-) -> Iterable[Entity]:
-    """
-    Translate IP address and Prefixes information for an interface.
-
-    Args:
-    ----
-        interface (Interface): The interface entity.
-        if_name (str): The name of the interface.
-        interfaces_ip (dict): Dictionary containing interface IP information.
-        defaults (Defaults): Default configuration.
-
-    Returns:
-    -------
-        Iterable[Entity]: Iterable of translated IP address and Prefixes entities.
-
-    """
-    tags = defaults.tags if defaults.tags else []
-    ip_tags = list(tags)
-    ip_comments = None
-    ip_description = None
-    ip_role = None
-    ip_tenant = None
-    ip_vrf = None
-
-    prefix_tags = list(tags)
-    prefix_comments = None
-    prefix_description = None
-    prefix_role = None
-    prefix_tenant = None
-    prefix_vrf = None
-
-    if defaults.ipaddress:
-        ip_tags.extend(defaults.ipaddress.tags or [])
-        ip_comments = defaults.ipaddress.comments
-        ip_description = defaults.ipaddress.description
-        ip_role = defaults.ipaddress.role
-        ip_tenant = defaults.ipaddress.tenant
-        ip_vrf = defaults.ipaddress.vrf
-
-    if defaults.prefix:
-        prefix_tags.extend(defaults.prefix.tags or [])
-        prefix_comments = defaults.prefix.comments
-        prefix_description = defaults.prefix.description
-        prefix_role = defaults.prefix.role
-        prefix_tenant = defaults.prefix.tenant
-        prefix_vrf = defaults.prefix.vrf
-
-    ip_entities = []
-
-    for if_ip_name, ip_info in interfaces_ip.items():
-        if interface.name == if_ip_name:
-            for ip_version, default_prefix in (("ipv4", 32), ("ipv6", 128)):
-                for ip, details in ip_info.get(ip_version, {}).items():
-                    ip_address = f"{ip}/{details.get('prefix_length', default_prefix)}"
-                    network = ipaddress.ip_network(ip_address, strict=False)
-                    ip_entities.append(
-                        Entity(
-                            prefix=Prefix(
-                                prefix=str(network),
-                                vrf=prefix_vrf,
-                                role=prefix_role,
-                                tenant=prefix_tenant,
-                                tags=prefix_tags,
-                                comments=prefix_comments,
-                                description=prefix_description,
-                            )
-                        )
-                    )
-                    ip_entities.append(
-                        Entity(
-                            ip_address=IPAddress(
-                                address=ip_address,
-                                assigned_object_interface=Interface(
-                                    device=interface.device,
-                                    name=interface.name,
-                                    type=interface.type,
-                                ),
-                                role=ip_role,
-                                tenant=ip_tenant,
-                                vrf=ip_vrf,
-                                tags=ip_tags,
-                                comments=ip_comments,
-                                description=ip_description,
-                            )
-                        )
-                    )
-
-    return ip_entities
 
 
 def translate_vlan(vid: str, vlan_name: str, defaults: Defaults) -> VLAN | None:
@@ -295,7 +134,7 @@ def translate_vlan(vid: str, vlan_name: str, defaults: Defaults) -> VLAN | None:
         comments = defaults.vlan.comments
         description = defaults.vlan.description
         group = defaults.vlan.group
-        tenant = defaults.vlan.tenant
+        tenant = translate_tenant(defaults.vlan.tenant)
         role = defaults.vlan.role
 
     clean_name = " ".join(vlan_name.strip().split())
@@ -313,71 +152,17 @@ def translate_vlan(vid: str, vlan_name: str, defaults: Defaults) -> VLAN | None:
     return vlan
 
 
-def extract_parent_interface_name(interface_name: str) -> str | None:
-    """Return the parent interface name if the supplied name represents a subinterface."""
-    for separator in (".", ":"):
-        if separator in interface_name:
-            parent, child = interface_name.rsplit(separator, 1)
-            if parent and child:
-                return parent
-    return None
-
-
-def build_interface_entities(
-    device: Device,
-    interfaces: dict,
-    interfaces_ip: dict,
-    defaults: Defaults,
-) -> list[Entity]:
-    """Create interface entities from interface definitions and IP data."""
-    interface_entities: dict[str, Interface] = {}
-    entities: list[Entity] = []
-    defined_interface_names = set(interfaces.keys())
-
-    def interface_sort_key(name: str) -> tuple[int, str]:
-        separator_score = name.count(".") + name.count(":")
-        return (separator_score, name)
-
-    def resolve_parent(name: str) -> Interface | None:
-        parent_name = extract_parent_interface_name(name)
-        if not parent_name or parent_name not in defined_interface_names:
-            return None
-        return interface_entities.get(parent_name)
-
-    for if_name, interface_info in sorted(
-        interfaces.items(), key=lambda item: interface_sort_key(item[0])
-    ):
-        parent = resolve_parent(if_name)
-        interface = translate_interface(
-            device, if_name, interface_info, defaults, parent=parent
-        )
-        interface_entities[if_name] = interface
-        entities.append(Entity(interface=interface))
-        entities.extend(translate_interface_ips(interface, interfaces_ip, defaults))
-
-    for if_name in sorted(interfaces_ip.keys(), key=interface_sort_key):
-        if if_name in interface_entities:
-            continue
-        parent = resolve_parent(if_name)
-        interface = translate_interface(device, if_name, {}, defaults, parent=parent)
-        interface_entities[if_name] = interface
-        entities.append(Entity(interface=interface))
-        entities.extend(translate_interface_ips(interface, interfaces_ip, defaults))
-
-    return entities
-
-
 def translate_data(data: dict) -> Iterable[Entity]:
     """
     Translate data from NAPALM format to Diode SDK entities.
 
     Args:
     ----
-        data (dict): Dictionary containing data to be translated.
+        data (dict): Dictionary containing device, interface and VLAN data from NAPALM.
 
     Returns:
     -------
-        Iterable[Entity]: Iterable of translated entities.
+        Iterable[Entity]: Iterable of translated Diode SDK entities.
 
     """
     entities = []
@@ -395,6 +180,8 @@ def translate_data(data: dict) -> Iterable[Entity]:
             device_info["platform"] = (
                 f"{data.get('driver', '').upper()} {device_info.get('os_version')}"
             )
+            if len(device_info["platform"]) > 100:
+                device_info["platform"] = device_info.get('os_version')[:100]
         device = translate_device(device_info, defaults)
         entities.append(Entity(device=device))
 

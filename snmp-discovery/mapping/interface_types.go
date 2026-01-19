@@ -1,5 +1,27 @@
 package mapping
 
+import "strings"
+
+// ExtractParentInterfaceName returns the parent interface name if the supplied name
+// represents a subinterface, or an empty string if it's not a subinterface.
+// Subinterfaces are identified by the presence of dot (.) or colon (:) separators.
+// Examples: "eth0.100" -> "eth0", "GigabitEthernet0/0.100" -> "GigabitEthernet0/0",
+// "ge-0/0/0:0" -> "ge-0/0/0", "eth0" -> ""
+func ExtractParentInterfaceName(interfaceName string) string {
+	separators := []string{".", ":"}
+	for _, separator := range separators {
+		if idx := strings.LastIndex(interfaceName, separator); idx > 0 {
+			parent := interfaceName[:idx]
+			child := interfaceName[idx+1:]
+			// Both parent and child parts must be non-empty
+			if parent != "" && child != "" {
+				return parent
+			}
+		}
+	}
+	return ""
+}
+
 // InterfaceTypeMap maps SNMP ifType integer values to NetBox interface type strings
 var InterfaceTypeMap = map[string]string{
 	// Virtual Interfaces
@@ -149,34 +171,126 @@ func isEthernetInterfaceType(ifType string) bool {
 }
 
 func getEthernetInterfaceType(speed *int64) string {
-	if *speed <= 100000 {
+	speedMbps := *speed / 1000
+
+	// 10 Mbps Ethernet
+	if speedMbps <= 10 {
+		return "10base-t"
+	}
+	// 100 Mbps FastEthernet
+	if speedMbps <= 100 {
 		return "100base-tx"
 	}
-	if *speed <= 1000000 {
+	// 1 Gbps GigabitEthernet
+	if speedMbps <= 1000 {
 		return "1000base-t"
 	}
-	if *speed <= 10000000 {
+	// 2.5 Gbps Ethernet
+	if speedMbps <= 2500 {
+		return "2.5gbase-t"
+	}
+	// 5 Gbps Ethernet
+	if speedMbps <= 5000 {
+		return "5gbase-t"
+	}
+	// 10 Gbps Ethernet
+	if speedMbps <= 10000 {
 		return "10gbase-t"
 	}
-	if *speed <= 25000000 {
+	// 25 Gbps Ethernet
+	if speedMbps <= 25000 {
 		return "25gbase-t"
 	}
-	return "100gbase-x"
+	// 40 Gbps Ethernet
+	if speedMbps <= 40000 {
+		return "40gbase-x-qsfpp"
+	}
+	// 50 Gbps Ethernet
+	if speedMbps <= 50000 {
+		return "50gbase-x-sfp56"
+	}
+	// 100 Gbps Ethernet
+	if speedMbps <= 100000 {
+		return "100gbase-x-qsfp28"
+	}
+	// 200 Gbps Ethernet
+	if speedMbps <= 200000 {
+		return "200gbase-x-qsfp56"
+	}
+	// 400 Gbps Ethernet
+	if speedMbps <= 400000 {
+		return "400gbase-x-qsfpdd"
+	}
+	// 800 Gbps Ethernet
+	if speedMbps <= 800000 {
+		return "800gbase-x-qsfpdd"
+	}
+	return ""
 }
 
-// GetNetboxType maps an SNMP ifType integer to a NetBox interface type
-func GetNetboxType(ifType, defaultInterfaceType string, speed *int64) string {
+// ResolveInterfaceType determines interface type using 6-tier priority system:
+// 0. Subinterface detection (highest priority - structural)
+// 1. User-defined patterns
+// 2. SNMP ifType mapping
+// 3. Built-in patterns
+// 4. Speed-based detection (for Ethernet)
+// 5. Default fallback
+func ResolveInterfaceType(
+	interfaceName string,
+	ifType string,
+	speed *int64,
+	defaultInterfaceType string,
+	patternMatcher *PatternMatcher,
+	userPatternCount int,
+) string {
+	// Tier 0: Subinterface detection (highest priority - structural)
+	// Subinterfaces are always virtual regardless of other attributes
+	if ExtractParentInterfaceName(interfaceName) != "" {
+		return "virtual"
+	}
+
+	// Tier 1: User-defined patterns (highest priority for non-subinterfaces)
+	if patternMatcher != nil && userPatternCount > 0 {
+		if matchedType := patternMatcher.MatchInterfaceType(interfaceName, userPatternCount); matchedType != "" {
+			return matchedType
+		}
+	}
+
+	// Tier 2: SNMP ifType mapping (protocol-specific intelligence)
 	if isEthernetInterfaceType(ifType) {
 		if speed != nil && *speed > 0 {
-			return getEthernetInterfaceType(speed)
+			if eType := getEthernetInterfaceType(speed); eType != "" {
+				return eType
+			}
 		}
-		return "other"
 	}
 	if netboxType, found := InterfaceTypeMap[ifType]; found {
 		return netboxType
 	}
+
+	// Tier 3: Built-in patterns (vendor defaults)
+	if patternMatcher != nil {
+		// Match only built-in patterns by passing empty string to check all patterns after user patterns
+		allPatterns := patternMatcher.compiledPatterns
+		if len(allPatterns) > userPatternCount {
+			builtinPatterns := allPatterns[userPatternCount:]
+			if matchedType := patternMatcher.findBestMatch(interfaceName, builtinPatterns); matchedType != "" {
+				return matchedType
+			}
+		}
+	}
+
+	// Tier 4: Speed-based detection (already checked in Tier 2 for Ethernet)
+
+	// Tier 5: Default fallback
 	if defaultInterfaceType != "" {
 		return defaultInterfaceType
 	}
 	return "other"
+}
+
+// GetNetboxType maps an SNMP ifType integer to a NetBox interface type
+// Maintained for backward compatibility - wraps ResolveInterfaceType
+func GetNetboxType(ifType, defaultInterfaceType string, speed *int64) string {
+	return ResolveInterfaceType("", ifType, speed, defaultInterfaceType, nil, 0)
 }

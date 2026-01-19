@@ -40,6 +40,7 @@ policies:
       schedule: "0 */6 * * *" # Cron expression - every 6 hours
       timeout: 300 # Timeout for policy in seconds (default 2 minutes)
       snmp_timeout: 300 # Timeout for SNMP operations in seconds (default 5 seconds)
+      snmp_probe_timeout: 1 # Timeout for SNMP probe operations in seconds (default 1 second)
       retries: 3 # Number of retries
       defaults:
         tags: ["snmp-discovery", "orb"]
@@ -57,11 +58,18 @@ policies:
         device:
           description: "SNMP discovered device"
           comments: "Automatically discovered via SNMP"
+        interface_patterns:  # (Optional) Custom interface type patterns
+          - match: "^mgmt-"
+            type: "1000base-t"
+          - match: "^uplink-"
+            type: "100gbase-x-qsfp28"
+          - match: "^Po\\d+"
+            type: "lag"
       lookup_extensions_dir: "/opt/orb/snmp-extensions" # (Optional) Specifies an override for the directory containing device data yaml files (see below). Defaults to `/etc/snmp-discovery/lookup-extensions
     scope:
       targets:
-        - host: "192.168.1.1"
-        - host: "192.168.1.254"
+        - host: "192.168.1.1/24" # subnet support
+        - host: "192.168.2.1-20" # range support
         - host: "10.0.0.1"
           port: 162  # Non-standard SNMP port
       authentication:
@@ -112,6 +120,177 @@ If the referenced environment variable is not set, the service will exit with an
         priv_protocol: "AES" 
         priv_passphrase: "secure-priv-pass"
 ```
+
+### Interface Type Pattern Matching
+
+SNMP discovery supports flexible interface type detection through a six-tier priority system that intelligently combines SNMP protocol data with pattern matching:
+
+#### Priority System
+
+0. **Subinterface detection** (highest priority - structural) - Automatic detection of logical interfaces
+1. **User-defined patterns** - Your custom pattern rules
+2. **SNMP ifType mapping** - Protocol-specific intelligence from SNMP data
+3. **Built-in patterns** - 46 vendor-agnostic patterns included by default
+4. **Speed-based detection** - Automatic detection for Ethernet interfaces based on speed
+5. **Default fallback** - Configured `if_type` or "other"
+
+This priority order ensures that structural relationships (subinterfaces) are always detected first, followed by user intent, while still leveraging SNMP protocol data and providing intelligent fallbacks.
+
+#### Configuration
+
+Interface patterns are defined at the `defaults` level (not under `defaults.interface`). Patterns use Go regex syntax (RE2):
+
+```yaml
+defaults:
+  interface:
+    if_type: "other"  # Fallback type for unmatched interfaces
+  interface_patterns:  # At defaults level
+    - match: "^mgmt-"
+      type: "1000base-t"
+    - match: "^uplink-"
+      type: "100gbase-x-qsfp28"
+    - match: "^Po\\d+"
+      type: "lag"
+```
+
+#### Pattern Rules
+
+- **User patterns always win**: Your patterns override even SNMP ifType data
+- **Most specific match wins**: Within each priority tier, the longest matching pattern is used
+- **Case-sensitive**: Patterns are matched case-sensitively
+- **Regex syntax**: Uses Go's RE2 regex engine (see [syntax reference](https://github.com/google/re2/wiki/Syntax))
+- **Invalid patterns**: Will cause the policy to fail at load time with a clear error message
+
+#### Built-in Patterns
+
+The following vendor patterns are included automatically and cover 80-90% of common deployments:
+
+**Cisco IOS/IOS-XE:**
+- `HundredGig*`, `FortyGig*`, `TenGig*`, `GigabitEthernet*`, `FastEthernet*`
+- `TwentyFiveGig*`, `FiveGig*`, `TwoGig*`
+
+**Juniper JunOS:**
+- `ge-*`, `xe-*`, `et-*` (Gigabit, 10G, 40G/100G Ethernet)
+- `ae*`, `lo*` (Aggregated Ethernet, Loopback)
+
+**Cross-Vendor:**
+- LAG: `Port-channel*`, `Bundle-Ether*`, `ae*`
+- Virtual: `Loopback*`, `Vlan*`, `Tunnel*`, `irb`
+- Management: `Management*`, `mgmt*`, `fxp*`, `em*`
+
+**Linux/Cumulus:**
+- `eth*`, `ens*`, `enp*`, `swp*`
+
+See [interface_patterns.go](mapping/interface_patterns.go) for the complete list.
+
+#### Examples
+
+**Override management interface detection:**
+```yaml
+defaults:
+  interface_patterns:
+    - match: "^mgmt-eth"
+      type: "1000base-t"
+```
+
+**Identify uplink interfaces:**
+```yaml
+defaults:
+  interface_patterns:
+    - match: "^(uplink|trunk)-"
+      type: "100gbase-x-qsfp28"
+```
+
+**Custom naming convention:**
+```yaml
+defaults:
+  interface_patterns:
+    - match: "^CORE-"
+      type: "100gbase-x-qsfp28"
+    - match: "^ACCESS-"
+      type: "1000base-t"
+    - match: "^MGMT-"
+      type: "1000base-t"
+```
+
+#### How It Works
+
+For each interface, the system evaluates in order:
+
+0. **Check for subinterface**: If the interface name contains `.` or `:` separators, classify as "virtual" immediately (see [Subinterface Detection](#subinterface-detection))
+1. **Check user patterns**: If any user pattern matches, use that type immediately
+2. **Check SNMP ifType**: If SNMP reports a known interface type (e.g., LAG, virtual), use it
+   - For Ethernet interfaces, if speed is available, use speed-based detection
+3. **Check built-in patterns**: Fall back to vendor patterns if no SNMP match
+4. **Use speed if Ethernet**: For unknown Ethernet types, infer from interface speed
+5. **Use default**: Fall back to `defaults.interface.if_type` or "other"
+
+This ensures maximum flexibility while maintaining intelligent defaults.
+
+### Subinterface Detection
+
+SNMP discovery automatically detects and handles subinterfaces (also known as logical interfaces, VLAN interfaces, or sub-interfaces) across all major network vendors.
+
+#### How It Works
+
+Subinterfaces are identified by the presence of specific separators in the interface name:
+- **Dot (`.`)** separator - Common for Cisco, Juniper, Arista, Nokia
+- **Colon (`:`)** separator - Legacy Juniper style
+
+When a subinterface is detected:
+1. **Type is set to "virtual"** - Regardless of SNMP ifType or speed
+2. **Parent interface is tracked** - The parent-child relationship is maintained
+3. **Works across all vendors** - No vendor-specific configuration needed
+
+#### Supported Formats
+
+**Cisco IOS/IOS-XE:**
+```
+GigabitEthernet0/0.100      → Parent: GigabitEthernet0/0
+TenGigabitEthernet1/1/1.200 → Parent: TenGigabitEthernet1/1/1
+Port-channel1.100           → Parent: Port-channel1
+```
+
+**Juniper JunOS:**
+```
+ge-0/0/0.0    → Parent: ge-0/0/0
+xe-1/2/3.100  → Parent: xe-1/2/3
+ae0.100       → Parent: ae0
+ge-0/0/0:0    → Parent: ge-0/0/0  (legacy colon style)
+```
+
+**Arista EOS:**
+```
+Ethernet1/1.100 → Parent: Ethernet1/1
+```
+
+**Nokia SROS:**
+```
+1/1/1.100 → Parent: 1/1/1
+```
+
+**Generic/Linux:**
+```
+eth0.100   → Parent: eth0
+eth0:1     → Parent: eth0  (legacy alias style)
+```
+
+#### Priority System
+
+Subinterface detection operates at **Tier 0** (highest priority) in the interface type resolution system:
+
+0. **Subinterface detection** ← Always evaluated first
+1. User-defined patterns
+2. SNMP ifType mapping
+3. Built-in patterns
+4. Speed-based detection
+5. Default fallback
+
+This means subinterfaces **always** receive the "virtual" type, even if:
+- SNMP reports a different ifType
+- A user pattern would match the interface name
+- Speed-based detection would assign a different type
+
 
 ### Device Model Lookup
 The `lookup_extensions_dir` specifies a directory containing device data YAML files that map SNMP device OIDs to human-readable device names. This allows snmp-discovery to provide meaningful device identification instead of raw OID values. This only needs to be set if additional or modified files are being provided instead of the ones that are included with orb-discovery and orb-agent.
@@ -180,7 +359,6 @@ Be **AWARE** that executing a policy with only targets defined will use default 
 - **Protocol Version**: v2c (if not specified)
 - **Community**: "public" (if not specified for v1/v2c)
 - **Port**: 161 (standard SNMP port, if not specified)
-- **Security Level**: noAuthNoPriv (if not specified for v3)
 
 Always ensure proper authentication is configured for production environments to avoid security risks.
 

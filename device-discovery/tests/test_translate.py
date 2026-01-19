@@ -4,19 +4,22 @@
 
 import pytest
 
+from device_discovery.interface import (
+    translate_interface,
+    translate_interface_ips,
+)
 from device_discovery.policy.models import (
     Defaults,
     DeviceParameters,
     IpamParameters,
     ObjectParameters,
     Options,
+    TenantParameters,
     VlanParameters,
 )
 from device_discovery.translate import (
     translate_data,
     translate_device,
-    translate_interface,
-    translate_interface_ips,
     translate_vlan,
 )
 
@@ -94,6 +97,18 @@ def sample_defaults():
 
 
 @pytest.fixture
+def sample_tenant_parameters():
+    """Sample tenant parameters for testing."""
+    return TenantParameters(
+        name="Tenant With Group",
+        group="Tenant Group",
+        description="Tenant description",
+        comments="Tenant comments",
+        tags=["tenant-tag"],
+    )
+
+
+@pytest.fixture
 def sample_override_defaults(sample_defaults):
     """Sample defaults with device overrides."""
     sample_defaults.device.model = "Catalyst"
@@ -121,6 +136,20 @@ def test_translate_device_with_overrides(sample_device_info, sample_override_def
     device = translate_device(sample_device_info, sample_override_defaults)
     assert device.device_type.model == "Catalyst"
     assert device.device_type.manufacturer.name == "Cisco"
+
+
+def test_translate_device_with_tenant_parameters(
+    sample_device_info, sample_defaults, sample_tenant_parameters
+):
+    """Ensure tenant parameters translate into Tenant entities."""
+    sample_defaults.tenant = sample_tenant_parameters
+    device = translate_device(sample_device_info, sample_defaults)
+
+    assert device.tenant.name == "Tenant With Group"
+    assert device.tenant.group.name == "Tenant Group"
+    assert device.tenant.description == "Tenant description"
+    assert device.tenant.comments == "Tenant comments"
+    assert len(device.tenant.tags) == 1
 
 
 def test_translate_device_serial_list(sample_device_info, sample_defaults):
@@ -211,6 +240,36 @@ def test_translate_interface_ips(
     assert len(ip_entities[1].ip_address.tags) == 3
 
 
+def test_translate_interface_ips_with_tenant_parameters(
+    sample_device_info,
+    sample_interface_info,
+    sample_interfaces_ip,
+    sample_defaults,
+    sample_tenant_parameters,
+):
+    """Ensure interface IP translation supports tenant parameters."""
+    sample_defaults.ipaddress.tenant = sample_tenant_parameters
+    sample_defaults.prefix.tenant = TenantParameters(
+        name="Prefix Tenant", group="Prefix Group"
+    )
+    device = translate_device(sample_device_info, sample_defaults)
+    interface = translate_interface(
+        device,
+        "GigabitEthernet0/0/1",
+        sample_interface_info["GigabitEthernet0/0/1"],
+        sample_defaults,
+    )
+    ip_entities = list(
+        translate_interface_ips(interface, sample_interfaces_ip, sample_defaults)
+    )
+
+    assert len(ip_entities) == 2
+    assert ip_entities[0].prefix.tenant.name == "Prefix Tenant"
+    assert ip_entities[0].prefix.tenant.group.name == "Prefix Group"
+    assert ip_entities[1].ip_address.tenant.name == "Tenant With Group"
+    assert ip_entities[1].ip_address.tenant.group.name == "Tenant Group"
+
+
 def test_translate_data(
     sample_device_info, sample_interface_info, sample_interfaces_ip, sample_defaults
 ):
@@ -245,6 +304,26 @@ def test_translate_data(
     entities = list(translate_data(data))
     assert entities[0].device.platform.name == "custom"
     assert entities[0].device.role.name == "switch"
+
+
+def test_translate_data_truncates_platform(sample_device_info, sample_defaults):
+    """Ensure overly long platform strings are truncated to 100 characters."""
+    long_os_version = "v" * 150
+    device_info = sample_device_info.copy()
+    device_info["os_version"] = long_os_version
+    data = {
+        "device": device_info,
+        "interface": {},
+        "interface_ip": {},
+        "driver": "ios",
+        "defaults": sample_defaults,
+    }
+
+    entities = list(translate_data(data))
+
+    assert len(entities) == 1
+    assert entities[0].device.platform.name == long_os_version[:100]
+    assert len(entities[0].device.platform.name) == 100
 
 
 def test_translate_data_creates_missing_interface(sample_device_info, sample_defaults):
@@ -344,7 +423,8 @@ def test_translate_data_creates_missing_subinterface_with_parent(
     assert subinterface.parent.name == "ethernet-1/1"
     assert subinterface.parent.name == parent_interface.name
     assert subinterface.type == "virtual"
-    assert parent_interface.type == "other"
+    # Parent interface now matches built-in Nokia pattern (ethernet-\d+/\d+)
+    assert parent_interface.type == "1000base-t"
     assert ip_entity.address == "10.0.0.1/30"
     assert ip_entity.assigned_object_interface.name == "ethernet-1/1.0"
 
@@ -424,3 +504,84 @@ def test_translate_vlan_with_defaults(sample_defaults):
     assert vlan.tenant.name == "Default Tenant"
     assert vlan.role.name == "Default Role"
     assert len(vlan.tags) == 3
+
+
+def test_translate_vlan_with_tenant_parameters(
+    sample_defaults, sample_tenant_parameters
+):
+    """Ensure VLAN translation supports tenant parameter objects."""
+    sample_defaults.vlan = VlanParameters(
+        tenant=sample_tenant_parameters, description="Tenant VLAN"
+    )
+    vlan = translate_vlan("201", "Tenant VLAN", sample_defaults)
+
+    assert vlan.vid == 201
+    assert vlan.tenant.name == "Tenant With Group"
+    assert vlan.tenant.group.name == "Tenant Group"
+    assert vlan.description == "Tenant VLAN"
+
+
+def test_translate_data_with_interface_patterns(
+    sample_device_info, sample_interface_info, sample_interfaces_ip
+):
+    """Test full data translation with interface patterns."""
+    from device_discovery.policy.models import InterfacePattern
+
+    defaults = Defaults(
+        site="New York",
+        if_type="other",
+        interface_patterns=[
+            InterfacePattern(match="GigabitEthernet.*", type="1000base-t"),
+        ],
+    )
+
+    data = {
+        "device": sample_device_info,
+        "interface": sample_interface_info,
+        "interface_ip": sample_interfaces_ip,
+        "driver": "ios",
+        "defaults": defaults,
+    }
+
+    entities = list(translate_data(data))
+
+    # Find interface entities
+    interface_entities = [
+        e for e in entities if e.WhichOneof("entity") == "interface"
+    ]
+
+    # Both GigabitEthernet interfaces should match the pattern
+    for interface_entity in interface_entities:
+        if interface_entity.interface.name.startswith("GigabitEthernet"):
+            assert interface_entity.interface.type == "1000base-t"
+
+
+def test_translate_data_with_builtin_patterns(
+    sample_device_info, sample_interface_info, sample_interfaces_ip
+):
+    """Test full data translation with built-in patterns (zero configuration)."""
+    defaults = Defaults(
+        site="New York",
+        if_type="other",
+        # No interface_patterns specified - should use built-ins
+    )
+
+    data = {
+        "device": sample_device_info,
+        "interface": sample_interface_info,
+        "interface_ip": sample_interfaces_ip,
+        "driver": "ios",
+        "defaults": defaults,
+    }
+
+    entities = list(translate_data(data))
+
+    # Find interface entities
+    interface_entities = [
+        e for e in entities if e.WhichOneof("entity") == "interface"
+    ]
+
+    # Both GigabitEthernet interfaces should match built-in pattern
+    for interface_entity in interface_entities:
+        if interface_entity.interface.name.startswith("GigabitEthernet"):
+            assert interface_entity.interface.type == "1000base-t"

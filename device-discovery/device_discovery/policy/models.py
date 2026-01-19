@@ -2,6 +2,7 @@
 # Copyright 2024 NetBox Labs Inc
 """Device Discovery Policy Models."""
 
+import re
 from enum import Enum
 from typing import Any
 
@@ -16,6 +17,38 @@ class Status(Enum):
     RUNNING = "running"
     FINISHED = "finished"
     FAILED = "failed"
+
+
+class InterfacePattern(BaseModel):
+    """Model for interface type pattern matching."""
+
+    match: str = Field(description="Regular expression pattern to match interface names")
+    type: str = Field(description="Interface type to assign when pattern matches")
+
+    @field_validator("match")
+    @classmethod
+    def validate_regex(cls, value: str) -> str:
+        """
+        Validate the regex pattern at configuration load time.
+
+        Args:
+        ----
+            value: The regex pattern string.
+
+        Raises:
+        ------
+            ValueError: If the regex pattern is invalid.
+
+        Returns:
+        -------
+            str: The validated regex pattern.
+
+        """
+        try:
+            re.compile(value)
+        except re.error as e:
+            raise ValueError(f"Invalid regex pattern: {e}")
+        return value
 
 
 class ObjectParameters(BaseModel):
@@ -39,12 +72,17 @@ class DeviceParameters(ObjectParameters):
         default=None, description="Device platform override, optional"
     )
 
+class TenantParameters(ObjectParameters):
+    """Model for Tenant parameters."""
+
+    name : str
+    group: str | None = Field(default=None, description="Tenant group, optional")
 
 class VlanParameters(ObjectParameters):
     """Model for VLAN parameters."""
 
     group: str | None = Field(default=None, description="VLAN group, optional")
-    tenant: str | None = Field(default=None, description="VLAN tenant, optional")
+    tenant: str | TenantParameters | None = Field(default=None, description="VLAN tenant, optional")
     role: str | None = Field(default=None, description="VLAN role, optional")
 
 
@@ -52,7 +90,7 @@ class IpamParameters(ObjectParameters):
     """Model for IPAM parameters."""
 
     role: str | None = Field(default=None, description="IPAM role, optional")
-    tenant: str | None = Field(default=None, description="IPAM tenant, optional")
+    tenant: str | TenantParameters | None = Field(default=None, description="IPAM tenant, optional")
     vrf: str | None = Field(default=None, description="IPAM VRF, optional")
 
 
@@ -64,8 +102,12 @@ class Defaults(BaseModel):
         default="undefined", description="Device Role name, optional"
     )
     if_type: str | None = Field(default="other", description="Interface type, optional")
+    interface_patterns: list[InterfacePattern] | None = Field(
+        default=None,
+        description="Interface type patterns for name-based matching, optional"
+    )
     location: str | None = Field(default=None, description="Location name, optional")
-    tenant: str | None = Field(default=None, description="Tenant name, optional")
+    tenant: str | TenantParameters | None = Field(default=None, description="Tenant, optional")
     tags: list[str] | None = Field(default=None, description="Tags, optional")
     device: DeviceParameters | None = Field(
         default=None, description="Device parameters, optional"
@@ -89,6 +131,14 @@ class Options(BaseModel):
 
     platform_omit_version: bool | None = Field(
         default=False, description="Omit platform version, optional"
+    )
+    port_scan_ports: list[int] | None = Field(
+        default=[22, 23, 80, 443, 830, 57400],
+        description="TCP ports to probe before discovery (e.g. [22,23,80,443])",
+    )
+    port_scan_timeout: float | None = Field(
+        default=0.5,
+        description="TCP port probe timeout in seconds",
     )
 
 
