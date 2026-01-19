@@ -14,6 +14,7 @@ from netboxlabs.diode.sdk.ingester import (
     Platform,
     Tenant,
     TenantGroup,
+    VirtualChassis,
 )
 
 from device_discovery.interface import build_interface_entities
@@ -152,6 +153,115 @@ def translate_vlan(vid: str, vlan_name: str, defaults: Defaults) -> VLAN | None:
     return vlan
 
 
+def translate_virtual_chassis(
+    stack_info: dict, device_info: dict, defaults: Defaults
+) -> tuple[VirtualChassis, list[Device]]:
+    """
+    Create VirtualChassis and member Device entities from stack information.
+
+    Args:
+    ----
+        stack_info: Stack data from get_stack_info()
+        device_info: Device facts from NAPALM
+        defaults: Default configuration
+
+    Returns:
+    -------
+        Tuple of (VirtualChassis entity, list of Device entities for members)
+
+    """
+    hostname = device_info.get("hostname", "unknown")
+    members_data = stack_info.get("members", [])
+    master_number = stack_info.get("master_number", 1)
+
+    # Extract base stack name (remove trailing numbers if present)
+    # e.g., "core-switch-1" -> "core-switch", "access-sw2" -> "access-sw"
+    import re
+    base_name = re.sub(r'-?\d+$', '', hostname)
+    if not base_name:
+        base_name = hostname
+
+    # Create VirtualChassis entity (will set master later)
+    tags = list(defaults.tags) if defaults.tags else []
+
+    # Create Device entities for each stack member
+    stack_members = []
+    master_device_ref = None
+
+    for member in members_data:
+        switch_number = member.get("switch_number", 1)
+        role = member.get("role", "Member")
+        priority = member.get("priority", 1)
+        state = member.get("state", "Unknown")
+        serial = member.get("serial")
+        model = member.get("model") or device_info.get("model")
+        manufacturer = device_info.get("vendor")
+        platform = device_info.get("platform")
+
+        # Override from defaults if provided
+        if defaults.device:
+            model = defaults.device.model or model
+            manufacturer = defaults.device.manufacturer or manufacturer
+            platform = defaults.device.platform or platform
+
+        # Build member device name
+        member_name = f"{base_name}-sw{switch_number}"
+
+        # Build comments with role and priority info
+        comments = f"Stack {role}, Priority: {priority}, State: {state}"
+        if defaults.device and defaults.device.comments:
+            comments = f"{defaults.device.comments}\n{comments}"
+
+        location = None
+        if defaults.location:
+            location = Location(name=defaults.location, site=defaults.site)
+
+        description = None
+        if defaults.device:
+            description = defaults.device.description
+
+        member_tags = list(tags)
+        if defaults.device and defaults.device.tags:
+            member_tags.extend(defaults.device.tags)
+
+        # Create Device entity for this member
+        member_device = Device(
+            name=member_name,
+            device_type=DeviceType(model=model, manufacturer=manufacturer),
+            platform=Platform(name=platform, manufacturer=manufacturer),
+            role=defaults.role,
+            serial=serial,
+            status="active",
+            site=defaults.site,
+            tags=member_tags,
+            location=location,
+            tenant=translate_tenant(defaults.tenant),
+            description=description,
+            comments=comments,
+            virtual_chassis=VirtualChassis(name=base_name),
+            vc_position=switch_number,
+        )
+
+        stack_members.append(member_device)
+
+        # Track master device reference
+        if switch_number == master_number:
+            master_device_ref = Device(
+                name=member_name,
+                device_type=DeviceType(model=model, manufacturer=manufacturer),
+                role=defaults.role,
+            )
+
+    # Create VirtualChassis with master reference
+    virtual_chassis = VirtualChassis(
+        name=base_name,
+        master=master_device_ref,
+        tags=tags,
+    )
+
+    return virtual_chassis, stack_members
+
+
 def translate_data(data: dict) -> Iterable[Entity]:
     """
     Translate data from NAPALM format to Diode SDK entities.
@@ -182,11 +292,39 @@ def translate_data(data: dict) -> Iterable[Entity]:
             )
             if len(device_info["platform"]) > 100:
                 device_info["platform"] = device_info.get('os_version')[:100]
-        device = translate_device(device_info, defaults)
-        entities.append(Entity(device=device))
 
+        # Check if this is a stacked switch
+        stack_info = data.get("stack_info")
+        member_devices_dict = None
+        device = None
+
+        if stack_info and stack_info.get("is_stack"):
+            # Create VirtualChassis and member devices
+            virtual_chassis, stack_members = translate_virtual_chassis(
+                stack_info, device_info, defaults
+            )
+            entities.append(Entity(virtual_chassis=virtual_chassis))
+
+            # Add all member devices
+            for member_device in stack_members:
+                entities.append(Entity(device=member_device))
+
+            # Build member device lookup dict
+            member_devices_dict = {
+                member.get("switch_number"): device_entity
+                for member, device_entity in zip(stack_info["members"], stack_members)
+            }
+
+            # Use first member as primary device for interface building fallback
+            device = stack_members[0]
+        else:
+            # Non-stacked device - existing logic
+            device = translate_device(device_info, defaults)
+            entities.append(Entity(device=device))
+
+        # Build interfaces with member awareness
         interface_related_entities = build_interface_entities(
-            device, interfaces, interfaces_ip, defaults
+            device, interfaces, interfaces_ip, defaults, member_devices=member_devices_dict
         )
         entities.extend(interface_related_entities)
 

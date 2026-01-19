@@ -206,16 +206,16 @@ class PolicyRunner:
                 logger.warning(
                     f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting VLANs: {e}. Continuing without VLAN data."
                 )
-            custom_inventory = getattr(device, "get_inventory", None)
-            if callable(custom_inventory):
+            custom_stack_info = getattr(device, "get_stack_info", None)
+            if callable(custom_stack_info):
                 try:
-                    inventory_data = custom_inventory()
-                    if inventory_data:
-                        data["inventory"] = inventory_data
+                    stack_data = custom_stack_info()
+                    if stack_data:
+                        data["stack_info"] = stack_data
                 except Exception as e:
                     logger.warning(
-                        f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting inventory: {e}."
-                        "Continuing without custom inventory data."
+                        f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting stack info: {e}. "
+                        "Continuing without stack data."
                     )
             metadata = {"policy_name": self.name, "hostname": sanitized_hostname}
             Client().ingest(metadata, data)

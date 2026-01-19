@@ -364,6 +364,61 @@ def translate_interface_ips(
     return ip_entities
 
 
+def extract_interface_member_number(interface_name: str) -> int | None:
+    """
+    Extract stack member number from interface name.
+
+    Supports Cisco, Aruba, and Juniper interface naming conventions.
+
+    Examples
+    --------
+    Cisco:
+    - GigabitEthernet1/0/1 → 1
+    - TenGigabitEthernet2/1/1 → 2
+    - Gi3/0/24 → 3
+
+    Aruba:
+    - 1/1/1 → 1
+    - 2/1/5 → 2
+
+    Juniper:
+    - ge-1/0/0 → 1
+    - xe-2/1/0 → 2
+    - et-3/0/0 → 3
+
+    Virtual interfaces (Port-channel, Vlan, Loopback) → None
+
+    Returns
+    -------
+    Member number (1-based) or None if not a member interface.
+
+    """
+    # Cisco: InterfaceType<member>/<module>/<port>
+    cisco_pattern = (
+        r"^(?:GigabitEthernet|TenGigabitEthernet|FastEthernet|"
+        r"FortyGigabitEthernet|TwentyFiveGigE|HundredGigE|"
+        r"Gi|Te|Fa|Fo|Twe|Hu)(\d+)/\d+/\d+"
+    )
+    match = re.match(cisco_pattern, interface_name)
+    if match:
+        return int(match.group(1))
+
+    # Aruba: <member>/<module>/<port> (numeric only)
+    aruba_pattern = r"^(\d+)/\d+/\d+$"
+    match = re.match(aruba_pattern, interface_name)
+    if match:
+        return int(match.group(1))
+
+    # Juniper: <type>-<fpc>/<pic>/<port>
+    # fpc = flexible PIC concentrator (member in VSF/VC)
+    juniper_pattern = r"^(?:ge|xe|et|ae|me|fxp|em)-(\d+)/\d+/\d+"
+    match = re.match(juniper_pattern, interface_name)
+    if match:
+        return int(match.group(1))
+
+    return None
+
+
 def extract_parent_interface_name(interface_name: str) -> str | None:
     """Return the parent interface name if the supplied name represents a subinterface."""
     for separator in (".", ":"):
@@ -379,8 +434,24 @@ def build_interface_entities(
     interfaces: dict,
     interfaces_ip: dict,
     defaults: Defaults,
+    member_devices: dict[int, Device] | None = None,
 ) -> list[Entity]:
-    """Create interface entities from interface definitions and IP data."""
+    """
+    Create interface entities from interface definitions and IP data.
+
+    Args:
+    ----
+        device: Default device for interfaces without member association
+        interfaces: Interface data from NAPALM
+        interfaces_ip: IP address data from NAPALM
+        defaults: Default configuration
+        member_devices: Optional dict mapping member numbers to Device entities
+
+    Returns:
+    -------
+        List of Entity objects containing interfaces and IP addresses
+
+    """
     interface_entities: dict[str, Interface] = {}
     entities: list[Entity] = []
     defined_interface_names = set(interfaces.keys())
@@ -395,12 +466,21 @@ def build_interface_entities(
             return None
         return interface_entities.get(parent_name)
 
+    def get_device_for_interface(if_name: str) -> Device:
+        """Determine which device this interface belongs to based on member number."""
+        if member_devices:
+            member_num = extract_interface_member_number(if_name)
+            if member_num is not None and member_num in member_devices:
+                return member_devices[member_num]
+        return device
+
     for if_name, interface_info in sorted(
         interfaces.items(), key=lambda item: interface_sort_key(item[0])
     ):
         parent = resolve_parent(if_name)
+        interface_device = get_device_for_interface(if_name)
         interface = translate_interface(
-            device, if_name, interface_info, defaults, parent=parent
+            interface_device, if_name, interface_info, defaults, parent=parent
         )
         interface_entities[if_name] = interface
         entities.append(Entity(interface=interface))
@@ -410,7 +490,8 @@ def build_interface_entities(
         if if_name in interface_entities:
             continue
         parent = resolve_parent(if_name)
-        interface = translate_interface(device, if_name, {}, defaults, parent=parent)
+        interface_device = get_device_for_interface(if_name)
+        interface = translate_interface(interface_device, if_name, {}, defaults, parent=parent)
         interface_entities[if_name] = interface
         entities.append(Entity(interface=interface))
         entities.extend(translate_interface_ips(interface, interfaces_ip, defaults))
