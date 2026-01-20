@@ -104,6 +104,156 @@ authentication:
 ```
 
 If the referenced environment variable is not set, the service will exit with an error.
+
+### Per-Target Authentication
+
+SNMP discovery supports both policy-level and per-target authentication, allowing you to use different credentials for different network devices.
+
+#### How It Works
+
+- **Target-level authentication**: Specify credentials directly on individual targets
+- **Policy-level authentication**: Define fallback credentials at the scope level
+- **Automatic fallback**: If a target doesn't have authentication, it uses the policy-level credentials
+
+#### Example Configuration
+
+```yaml
+policies:
+  mixed_credentials:
+    config:
+      defaults:
+        site: "datacenter-01"
+    scope:
+      targets:
+        # Target with its own SNMPv2c credentials
+        - host: "192.168.1.1"
+          port: 161
+          authentication:
+            protocol_version: "SNMPv2c"
+            community: "switch-community"
+
+        # Target with its own SNMPv3 credentials
+        - host: "core-router.example.com"
+          port: 161
+          authentication:
+            protocol_version: "SNMPv3"
+            security_level: "authPriv"
+            username: "router-user"
+            auth_protocol: "SHA"
+            auth_passphrase: "${ROUTER_AUTH_PASS}"
+            priv_protocol: "AES"
+            priv_passphrase: "${ROUTER_PRIV_PASS}"
+
+        # Target without auth - uses policy-level fallback
+        - host: "192.168.1.100"
+          port: 161
+
+      # Policy-level authentication (fallback)
+      authentication:
+        protocol_version: "SNMPv2c"
+        community: "public"
+```
+
+#### Configuration Options
+
+You can configure authentication in three ways:
+
+1. **Policy-level only** (traditional approach):
+```yaml
+scope:
+  targets:
+    - host: "192.168.1.1"
+    - host: "192.168.1.2"
+  authentication:
+    protocol_version: "SNMPv2c"
+    community: "public"
+```
+
+2. **Per-target only** (no fallback):
+```yaml
+scope:
+  targets:
+    - host: "192.168.1.1"
+      authentication:
+        protocol_version: "SNMPv2c"
+        community: "device1-community"
+    - host: "192.168.1.2"
+      authentication:
+        protocol_version: "SNMPv3"
+        security_level: "authPriv"
+        username: "admin"
+        auth_protocol: "SHA"
+        auth_passphrase: "auth-pass"
+        priv_protocol: "AES"
+        priv_passphrase: "priv-pass"
+```
+
+3. **Mixed configuration** (some targets with auth, others using fallback):
+```yaml
+scope:
+  targets:
+    - host: "192.168.1.1"
+      authentication:
+        protocol_version: "SNMPv3"
+        security_level: "authPriv"
+        username: "secure-device"
+        auth_protocol: "SHA"
+        auth_passphrase: "device1-auth"
+        priv_protocol: "AES"
+        priv_passphrase: "device1-priv"
+    - host: "192.168.1.2"  # Uses policy-level auth
+  authentication:
+    protocol_version: "SNMPv2c"
+    community: "public"
+```
+
+#### Environment Variables
+
+Target-level authentication supports the same environment variable substitution as policy-level authentication:
+
+```yaml
+targets:
+  - host: "secure-device.example.com"
+    authentication:
+      protocol_version: "SNMPv3"
+      security_level: "authPriv"
+      username: "${DEVICE_USERNAME}"
+      auth_protocol: "SHA"
+      auth_passphrase: "${DEVICE_AUTH_PASS}"
+      priv_protocol: "AES"
+      priv_passphrase: "${DEVICE_PRIV_PASS}"
+```
+
+#### Subnet and Range Expansion
+
+When using CIDR notation or ranges with per-target authentication, the authentication is applied to all expanded IP addresses:
+
+```yaml
+targets:
+  # All IPs in this subnet will use these credentials
+  - host: "192.168.1.0/24"
+    authentication:
+      protocol_version: "SNMPv2c"
+      community: "subnet-community"
+
+  # All IPs in this range will use these credentials
+  - host: "10.0.0.1-50"
+    authentication:
+      protocol_version: "SNMPv3"
+      security_level: "authNoPriv"
+      username: "range-user"
+      auth_protocol: "SHA"
+      auth_passphrase: "range-pass"
+```
+
+#### Security Best Practices
+
+- Use SNMPv3 with `authPriv` security level for production environments
+- Store sensitive credentials in environment variables instead of hardcoding them
+- Use per-target authentication to limit the blast radius of compromised credentials
+- Regularly rotate SNMP credentials
+- Avoid using SNMPv1/v2c with "public" or "private" community strings
+
   discover_once: # will run only once
     scope:
       targets:
