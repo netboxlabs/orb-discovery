@@ -177,18 +177,6 @@ func (m *Manager) validateAuthentication(auth *config.Authentication, context st
 // validatePolicy validates the policy
 func (m *Manager) validatePolicy(policy config.Policy) error {
 	hasPolicyAuth := policy.Scope.Authentication.ProtocolVersion != ""
-	hasTargetAuth := false
-
-	// Validate each target's authentication if present
-	for i, target := range policy.Scope.Targets {
-		if target.Authentication != nil {
-			hasTargetAuth = true
-			context := fmt.Sprintf("target[%d] (%s)", i, target.Host)
-			if err := m.validateAuthentication(target.Authentication, context); err != nil {
-				return err
-			}
-		}
-	}
 
 	// Validate policy-level auth if present
 	if hasPolicyAuth {
@@ -197,9 +185,18 @@ func (m *Manager) validatePolicy(policy config.Policy) error {
 		}
 	}
 
-	// Require at least one authentication source
-	if !hasPolicyAuth && !hasTargetAuth {
-		return fmt.Errorf("no authentication configured: must have policy-level or per-target authentication")
+	// Validate each target's authentication
+	for _, target := range policy.Scope.Targets {
+		if target.Authentication != nil {
+			// Target has its own auth - validate it
+			context := fmt.Sprintf("target %s", target.Host)
+			if err := m.validateAuthentication(target.Authentication, context); err != nil {
+				return err
+			}
+		} else if !hasPolicyAuth {
+			// Target has no auth and there's no policy-level fallback
+			return fmt.Errorf("target %s: no authentication configured and no policy-level fallback available", target.Host)
+		}
 	}
 
 	return nil
@@ -307,7 +304,7 @@ func (m *Manager) resolveAuthenticationEnvVars(policy *config.Policy) error {
 	// Resolve target-level authentication
 	for i := range policy.Scope.Targets {
 		if policy.Scope.Targets[i].Authentication != nil {
-			context := fmt.Sprintf("target[%d] (%s)", i, policy.Scope.Targets[i].Host)
+			context := fmt.Sprintf("target %s", policy.Scope.Targets[i].Host)
 			if err := m.resolveAuthenticationEnvVarsForAuth(policy.Scope.Targets[i].Authentication, context); err != nil {
 				return err
 			}

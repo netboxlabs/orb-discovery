@@ -317,7 +317,7 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
                     - host: 192.168.31.1
             `),
 			returnCode:    http.StatusBadRequest,
-			returnMessage: `test-policy-invalid : invalid policy : no authentication configured`,
+			returnMessage: `test-policy-invalid : invalid policy : target 192.168.31.1: no authentication configured and no policy-level fallback available`,
 		},
 		{
 			desc:        "unsupported protocol version",
