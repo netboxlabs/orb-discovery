@@ -120,9 +120,9 @@ func TestMergeDefaults(t *testing.T) {
 		assert.Equal(t, "loopback", result.IPAddress.Role)
 		assert.Equal(t, "override-tenant", result.IPAddress.Tenant)
 		assert.Equal(t, []string{"override"}, result.IPAddress.Tags)
-		assert.Equal(t, "default-vrf", result.IPAddress.Vrf)             // Not overridden
-		assert.Equal(t, "Policy IP", result.IPAddress.Description)       // Not overridden
-		assert.Equal(t, "Policy Comments", result.IPAddress.Comments)    // Not overridden
+		assert.Equal(t, "default-vrf", result.IPAddress.Vrf)          // Not overridden
+		assert.Equal(t, "Policy IP", result.IPAddress.Description)    // Not overridden
+		assert.Equal(t, "Policy Comments", result.IPAddress.Comments) // Not overridden
 	})
 
 	t.Run("Override InterfacePatterns replaces entire array", func(t *testing.T) {
@@ -207,7 +207,7 @@ func TestMergeDefaults(t *testing.T) {
 		}
 
 		overrideDefaults := &Defaults{
-			Site: "",      // Empty string should not override
+			Site: "",       // Empty string should not override
 			Role: "router", // Non-empty should override
 		}
 
@@ -226,7 +226,7 @@ func TestMergeDefaults(t *testing.T) {
 		}
 
 		overrideDefaults := &Defaults{
-			Tags:              []string{}, // Empty array should not override
+			Tags:              []string{},           // Empty array should not override
 			InterfacePatterns: []InterfacePattern{}, // Empty array should not override
 		}
 
