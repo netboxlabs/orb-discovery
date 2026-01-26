@@ -15,7 +15,7 @@ func TestRunStore_CreateRun(t *testing.T) {
 	store := policy.NewRunStore()
 	policyName := "test-policy"
 
-	run := store.CreateRun(policyName)
+	run := store.CreateRun(policyName, []string{})
 
 	// Verify run properties
 	assert.NotEmpty(t, run.ID)
@@ -38,7 +38,7 @@ func TestRunStore_UpdateRun(t *testing.T) {
 	store := policy.NewRunStore()
 	policyName := "test-policy"
 
-	run := store.CreateRun(policyName)
+	run := store.CreateRun(policyName, []string{})
 	runID := run.ID
 
 	// Update to completed
@@ -71,7 +71,7 @@ func TestRunStore_MaxFiveRuns(t *testing.T) {
 	// Create 7 runs
 	var runIDs []string
 	for i := 0; i < 7; i++ {
-		run := store.CreateRun(policyName)
+		run := store.CreateRun(policyName, []string{})
 		runIDs = append(runIDs, run.ID)
 		time.Sleep(10 * time.Millisecond) // Small delay to ensure different timestamps
 	}
@@ -103,7 +103,7 @@ func TestRunStore_Concurrency(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < runsPerGoroutine; j++ {
-				store.CreateRun(policyName)
+				store.CreateRun(policyName, []string{})
 			}
 		}()
 	}
@@ -150,9 +150,9 @@ func TestRunStore_GetAllPoliciesWithRuns(t *testing.T) {
 	policy1 := "policy-1"
 	policy2 := "policy-2"
 
-	store.CreateRun(policy1)
-	store.CreateRun(policy1)
-	store.CreateRun(policy2)
+	store.CreateRun(policy1, []string{})
+	store.CreateRun(policy1, []string{})
+	store.CreateRun(policy2, []string{})
 
 	allRuns := store.GetAllPoliciesWithRuns()
 
@@ -185,4 +185,38 @@ func TestRunStore_UpdateRun_NonExistent(t *testing.T) {
 	// Verify no runs were created
 	runs := store.GetRunsForPolicy("non-existent-policy")
 	assert.Empty(t, runs)
+}
+
+func TestRunStore_CreateRun_WithTargets(t *testing.T) {
+	store := policy.NewRunStore()
+	policyName := "test-policy"
+	targets := []string{"192.168.1.0/24", "10.0.0.1", "172.16.0.0/16"}
+
+	run := store.CreateRun(policyName, targets)
+
+	// Verify targets are stored in metadata
+	assert.NotEmpty(t, run.Metadata)
+	assert.Contains(t, run.Metadata, "targets")
+
+	// Verify targets JSON is valid and matches input
+	targetsJSON := run.Metadata["targets"]
+	assert.NotEmpty(t, targetsJSON)
+	assert.Contains(t, targetsJSON, "192.168.1.0/24")
+	assert.Contains(t, targetsJSON, "10.0.0.1")
+	assert.Contains(t, targetsJSON, "172.16.0.0/16")
+
+	// Verify run is stored
+	runs := store.GetRunsForPolicy(policyName)
+	require.Len(t, runs, 1)
+	assert.Equal(t, run.Metadata["targets"], runs[0].Metadata["targets"])
+}
+
+func TestRunStore_CreateRun_WithEmptyTargets(t *testing.T) {
+	store := policy.NewRunStore()
+	policyName := "test-policy"
+
+	run := store.CreateRun(policyName, []string{})
+
+	// Verify metadata is empty when no targets provided
+	assert.Empty(t, run.Metadata)
 }
