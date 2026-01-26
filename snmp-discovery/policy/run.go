@@ -62,6 +62,30 @@ func normalizeTarget(target string) string {
 	return target
 }
 
+// copyRun creates a deep copy of a Run to avoid race conditions
+func copyRun(r *Run) *Run {
+	if r == nil {
+		return nil
+	}
+
+	// Copy metadata map
+	metadataCopy := make(map[string]string)
+	for k, v := range r.Metadata {
+		metadataCopy[k] = v
+	}
+
+	return &Run{
+		ID:          r.ID,
+		PolicyID:    r.PolicyID,
+		Status:      r.Status,
+		Reason:      r.Reason,
+		EntityCount: r.EntityCount,
+		Metadata:    metadataCopy,
+		CreatedAt:   r.CreatedAt,
+		UpdatedAt:   r.UpdatedAt,
+	}
+}
+
 // CreateRun creates a new run for the given policy and target, and returns it
 func (rs *RunStore) CreateRun(policyName string, target string, parentTarget string) *Run {
 	rs.mu.Lock()
@@ -145,9 +169,11 @@ func (rs *RunStore) GetRunsForTarget(policyName string, target string) []*Run {
 	normalizedTarget := normalizeTarget(target)
 
 	runs := rs.runs[policyName][normalizedTarget]
-	// Return a copy to avoid race conditions
+	// Return deep copies to avoid race conditions
 	result := make([]*Run, len(runs))
-	copy(result, runs)
+	for i, run := range runs {
+		result[i] = copyRun(run)
+	}
 	return result
 }
 
@@ -160,10 +186,12 @@ func (rs *RunStore) GetRunsForPolicy(policyName string) []*Run {
 		return nil
 	}
 
-	// Aggregate runs from all targets into a flat list
+	// Aggregate runs from all targets into a flat list (deep copy to avoid race conditions)
 	var result []*Run
 	for _, targetRuns := range rs.runs[policyName] {
-		result = append(result, targetRuns...)
+		for _, run := range targetRuns {
+			result = append(result, copyRun(run))
+		}
 	}
 
 	// Sort by CreatedAt descending (newest first)
@@ -181,10 +209,12 @@ func (rs *RunStore) GetAllPoliciesWithRuns() map[string][]*Run {
 
 	result := make(map[string][]*Run)
 	for policyName, targets := range rs.runs {
-		// Flatten all targets' runs into a single array
+		// Flatten all targets' runs into a single array (deep copy to avoid race conditions)
 		var runs []*Run
 		for _, targetRuns := range targets {
-			runs = append(runs, targetRuns...)
+			for _, run := range targetRuns {
+				runs = append(runs, copyRun(run))
+			}
 		}
 
 		// Sort runs for consistent ordering (newest first)

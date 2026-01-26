@@ -172,6 +172,14 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 		responsive = append(responsive, target)
 		r.logger.Debug("SNMP probe succeeded", "host", target.Host, "port", target.Port, "policy", policyName)
 	}
+
+	// Check if context was canceled or timed out
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		r.logger.Warn("SNMP probe scan interrupted", "policy", policyName, "error", ctxErr, "responsiveTargetCount", len(responsive))
+		r.runStore.UpdateRun(policyName, originalTarget, scanRun.ID, RunStatusFailed, ctxErr, len(responsive))
+		return
+	}
+
 	var err error
 	for _, target := range responsive {
 		task := gocron.NewTask(r.runWithMetadata, target, originalTarget)
