@@ -31,6 +31,12 @@ const (
 	defaultSNMPProbeOID                = "1.3.6.1.2.1.1" // SNMPv2-MIB::system
 )
 
+// expandedTargetGroup represents a group of expanded targets with their original target string
+type expandedTargetGroup struct {
+	originalTarget string          // Original target string (e.g., "192.168.1.0/24")
+	targets        []config.Target // Expanded targets
+}
+
 // Runner represents the policy runner
 type Runner struct {
 	scheduler        gocron.Scheduler
@@ -47,11 +53,11 @@ type Runner struct {
 	manufacturers    data.ManufacturerRetriever
 	mappingConfig    *config.Mapping
 	deviceLookup     data.DeviceRetriever
-	jobStore         *JobStore
+	runStore         *RunStore
 }
 
 // NewRunner returns a new policy runner
-func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client, ClientFactory snmp.ClientFactory, mappingConfig *config.Mapping, manufacturers data.ManufacturerRetriever, deviceLookup data.DeviceRetriever, jobStore *JobStore) (*Runner, error) {
+func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client, ClientFactory snmp.ClientFactory, mappingConfig *config.Mapping, manufacturers data.ManufacturerRetriever, deviceLookup data.DeviceRetriever, runStore *RunStore) (*Runner, error) {
 	s, err := gocron.NewScheduler()
 	if err != nil {
 		return nil, err
@@ -65,7 +71,7 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 		manufacturers: manufacturers,
 		mappingConfig: mappingConfig,
 		deviceLookup:  deviceLookup,
-		jobStore:      jobStore,
+		runStore:      runStore,
 	}
 
 	runner.timeout = time.Duration(policy.Config.Timeout) * time.Second
@@ -84,12 +90,12 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 	runner.scope = policy.Scope
 	runner.config = policy.Config
 
-	expandedTargets := runner.expandTargetRanges(runner.scope.Targets)
+	expandedTargetGroups := runner.expandTargetRanges(runner.scope.Targets)
 
-	for _, targets := range expandedTargets {
-		if len(targets) == 1 {
+	for _, group := range expandedTargetGroups {
+		if len(group.targets) == 1 {
 			// Create scan task for single target
-			task := gocron.NewTask(runner.run, targets[0])
+			task := gocron.NewTask(runner.run, group.targets[0])
 			if policy.Config.Schedule != nil {
 				_, err = runner.scheduler.NewJob(gocron.CronJob(*policy.Config.Schedule, false), task,
 					gocron.WithSingletonMode(gocron.LimitModeReschedule))
@@ -104,8 +110,8 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 			runner.tasks = append(runner.tasks, task)
 			continue
 		}
-		// Create scan task for multiple targets
-		task := gocron.NewTask(runner.runScan, targets)
+		// Create scan task for multiple targets with original target
+		task := gocron.NewTask(runner.runScanWithOriginal, group.targets, group.originalTarget)
 		_, err = runner.scheduler.NewJob(gocron.OneTimeJob(
 			gocron.OneTimeJobStartDateTime(time.Now().Add(1*time.Second))), task,
 			gocron.WithSingletonMode(gocron.LimitModeReschedule))
@@ -117,9 +123,13 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 	return runner, nil
 }
 
-func (r *Runner) runScan(targets []config.Target) {
+func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget string) {
 	policyName := r.ctx.Value(policyKey).(string)
-	r.logger.Info("Starting SNMP probe scan", "policy", policyName, "targetCount", len(targets))
+
+	// Create run for the scan operation
+	scanRun := r.runStore.CreateRun(policyName, originalTarget, "")
+
+	r.logger.Info("Starting SNMP probe scan", "policy", policyName, "target", originalTarget, "targetCount", len(targets))
 	workerCount := min(256, len(targets))
 
 	ctx, cancel := context.WithTimeout(r.ctx, r.timeout)
@@ -164,7 +174,7 @@ func (r *Runner) runScan(targets []config.Target) {
 	}
 	var err error
 	for _, target := range responsive {
-		task := gocron.NewTask(r.run, target)
+		task := gocron.NewTask(r.runWithMetadata, target, originalTarget)
 		if r.config.Schedule != nil {
 			_, err = r.scheduler.NewJob(gocron.CronJob(*r.config.Schedule, false), task,
 				gocron.WithSingletonMode(gocron.LimitModeReschedule))
@@ -180,6 +190,9 @@ func (r *Runner) runScan(targets []config.Target) {
 		}
 		r.tasks = append(r.tasks, task)
 	}
+
+	// Update scan run status
+	r.runStore.UpdateRun(policyName, originalTarget, scanRun.ID, RunStatusCompleted, nil, len(responsive))
 	r.logger.Info("SNMP probe scan complete", "policy", policyName, "responsiveTargetCount", len(responsive))
 }
 
@@ -232,12 +245,18 @@ func (r *Runner) probeTarget(ctx context.Context, target config.Target) bool {
 	return err == nil
 }
 
-// run runs the policy
+// run runs the policy for a single target (no parent)
 func (r *Runner) run(target config.Target) {
-	policyName := r.ctx.Value(policyKey).(string)
+	r.runWithMetadata(target, "")
+}
 
-	// Create job at start
-	job := r.jobStore.CreateJob(policyName)
+// runWithMetadata runs the policy with metadata tracking
+func (r *Runner) runWithMetadata(target config.Target, parentTarget string) {
+	policyName := r.ctx.Value(policyKey).(string)
+	targetHost := target.Host
+
+	// Create run at start
+	run := r.runStore.CreateRun(policyName, targetHost, parentTarget)
 
 	// Track policy execution
 	if rMetric := metrics.GetPolicyExecutions(); rMetric != nil {
@@ -266,8 +285,8 @@ func (r *Runner) run(target config.Target) {
 
 	if len(entities) == 0 {
 		r.logger.Info("No entities to ingest", "host", target.Host, "policy", policyName)
-		// Update job status to completed even if no entities
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil, 0)
+		// Update run status to completed even if no entities
+		r.runStore.UpdateRun(policyName, targetHost, run.ID, RunStatusCompleted, nil, 0)
 		return
 	}
 
@@ -275,18 +294,18 @@ func (r *Runner) run(target config.Target) {
 
 	resp, err := r.client.Ingest(ctx, entities, diode.WithIngestMetadata(diode.Metadata{
 		"policy_name": policyName,
-		"job_id":      job.ID,
+		"run_id":      run.ID,
 	}))
 	if err != nil {
 		r.logger.Error("error ingesting entities", "host", target.Host, "error", err, "policy", policyName)
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, err, len(entities))
+		r.runStore.UpdateRun(policyName, targetHost, run.ID, RunStatusFailed, err, len(entities))
 	} else if resp != nil && resp.Errors != nil {
 		ingestErr := fmt.Errorf("ingestion errors: %v", resp.Errors)
 		r.logger.Error("error ingesting entities", "host", target.Host, "error", resp.Errors, "policy", policyName)
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusFailed, ingestErr, len(entities))
+		r.runStore.UpdateRun(policyName, targetHost, run.ID, RunStatusFailed, ingestErr, len(entities))
 	} else {
 		r.logger.Info("entities ingested successfully", "host", target.Host, "policy", policyName)
-		r.jobStore.UpdateJob(policyName, job.ID, JobStatusCompleted, nil, len(entities))
+		r.runStore.UpdateRun(policyName, targetHost, run.ID, RunStatusCompleted, nil, len(entities))
 	}
 }
 
@@ -366,9 +385,10 @@ func (r *Runner) queryTarget(target config.Target) []diode.Entity {
 	return entities
 }
 
-func (r *Runner) expandTargetRanges(configuredTargets []config.Target) [][]config.Target {
-	expandedMatrix := make([][]config.Target, 0, len(configuredTargets))
+func (r *Runner) expandTargetRanges(configuredTargets []config.Target) []expandedTargetGroup {
+	expandedGroups := make([]expandedTargetGroup, 0, len(configuredTargets))
 	for _, target := range configuredTargets {
+		originalHost := target.Host // Preserve original target string
 		ips, err := targets.Expand(target.Host)
 		if err != nil {
 			r.logger.Warn("Error expanding target host", "host", target.Host, "error", err)
@@ -384,9 +404,12 @@ func (r *Runner) expandTargetRanges(configuredTargets []config.Target) [][]confi
 				OverrideDefaults: target.OverrideDefaults,
 			}
 		}
-		expandedMatrix = append(expandedMatrix, expandedTargets)
+		expandedGroups = append(expandedGroups, expandedTargetGroup{
+			originalTarget: originalHost,
+			targets:        expandedTargets,
+		})
 	}
-	return expandedMatrix
+	return expandedGroups
 }
 
 // Start starts the policy runner
