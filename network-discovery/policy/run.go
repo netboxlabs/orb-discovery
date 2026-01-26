@@ -54,11 +54,12 @@ func (rs *RunStore) CreateRun(policyName string, targets []string) *Run {
 
 	now := time.Now()
 
-	// Create metadata with targets
-	metadata := make(map[string]string)
+	// Create metadata with targets if provided
+	var metadata map[string]string
 	if len(targets) > 0 {
 		targetsJSON, err := json.Marshal(targets)
 		if err == nil {
+			metadata = make(map[string]string)
 			metadata["targets"] = string(targetsJSON)
 		}
 	}

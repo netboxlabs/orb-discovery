@@ -1,6 +1,7 @@
 package policy_test
 
 import (
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -198,12 +199,14 @@ func TestRunStore_CreateRun_WithTargets(t *testing.T) {
 	assert.NotEmpty(t, run.Metadata)
 	assert.Contains(t, run.Metadata, "targets")
 
-	// Verify targets JSON is valid and matches input
+	// Verify targets JSON is valid by unmarshaling it
 	targetsJSON := run.Metadata["targets"]
 	assert.NotEmpty(t, targetsJSON)
-	assert.Contains(t, targetsJSON, "192.168.1.0/24")
-	assert.Contains(t, targetsJSON, "10.0.0.1")
-	assert.Contains(t, targetsJSON, "172.16.0.0/16")
+
+	var unmarshaledTargets []string
+	err := json.Unmarshal([]byte(targetsJSON), &unmarshaledTargets)
+	require.NoError(t, err, "targets JSON should be valid and unmarshalable")
+	assert.Equal(t, targets, unmarshaledTargets, "unmarshaled targets should match original targets")
 
 	// Verify run is stored
 	runs := store.GetRunsForPolicy(policyName)
@@ -217,6 +220,22 @@ func TestRunStore_CreateRun_WithEmptyTargets(t *testing.T) {
 
 	run := store.CreateRun(policyName, []string{})
 
-	// Verify metadata is empty when no targets provided
-	assert.Empty(t, run.Metadata)
+	// Verify metadata is nil (not empty map) when no targets provided
+	// This ensures proper omitempty behavior in JSON serialization
+	assert.Nil(t, run.Metadata)
+}
+
+func TestRunStore_CreateRun_WithNilTargets(t *testing.T) {
+	store := policy.NewRunStore()
+	policyName := "test-policy"
+
+	run := store.CreateRun(policyName, nil)
+
+	// Verify metadata is nil when nil targets provided
+	assert.Nil(t, run.Metadata)
+
+	// Verify JSON serialization omits metadata field
+	jsonData, err := json.Marshal(run)
+	require.NoError(t, err)
+	assert.NotContains(t, string(jsonData), "metadata", "metadata field should be omitted from JSON when nil")
 }
