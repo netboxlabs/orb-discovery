@@ -321,18 +321,14 @@ type Status struct {
 	Runs   []*Run `json:"runs"`
 }
 
-// findLatestRun returns the most recent run based on CreatedAt timestamp
+// findLatestRun returns the most recent run from a sorted list
+// Note: GetRunsForPolicy returns runs sorted by CreatedAt descending (newest first)
 func findLatestRun(runs []*Run) *Run {
 	if len(runs) == 0 {
 		return nil
 	}
-	latest := runs[0]
-	for _, run := range runs[1:] {
-		if run.CreatedAt.After(latest.CreatedAt) {
-			latest = run
-		}
-	}
-	return latest
+	// Runs are already sorted newest first by GetRunsForPolicy
+	return runs[0]
 }
 
 // GetPolicyStatuses returns all policies with their status and runs

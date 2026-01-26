@@ -68,10 +68,13 @@ func copyRun(r *Run) *Run {
 		return nil
 	}
 
-	// Copy metadata map
-	metadataCopy := make(map[string]string)
-	for k, v := range r.Metadata {
-		metadataCopy[k] = v
+	// Copy metadata map, preserving nil vs empty map semantics
+	var metadataCopy map[string]string
+	if r.Metadata != nil {
+		metadataCopy = make(map[string]string)
+		for k, v := range r.Metadata {
+			metadataCopy[k] = v
+		}
 	}
 
 	return &Run{
@@ -127,7 +130,8 @@ func (rs *RunStore) CreateRun(policyName string, target string, parentTarget str
 	}
 
 	rs.runs[policyName][normalizedTarget] = runs
-	return run
+	// Return a deep copy to prevent race conditions
+	return copyRun(run)
 }
 
 // UpdateRun updates the status of a run
@@ -150,6 +154,8 @@ func (rs *RunStore) UpdateRun(policyName, target, runID string, status RunStatus
 			run.UpdatedAt = time.Now()
 			if err != nil {
 				run.Reason = err.Error()
+			} else {
+				run.Reason = "" // Clear reason when no error
 			}
 			return
 		}
