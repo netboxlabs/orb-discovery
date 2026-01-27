@@ -11,6 +11,7 @@ from device_discovery.policy.models import Run, RunStatus
 # Maximum number of runs to keep per target
 MAX_RUNS_PER_TARGET = 3
 
+
 class RunStore:
     """
     Thread-safe store for managing policy run history.
