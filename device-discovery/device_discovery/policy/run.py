@@ -4,36 +4,12 @@
 
 import ipaddress
 import threading
-import uuid
 from datetime import datetime
-from enum import Enum
 
-from pydantic import BaseModel, Field
+from device_discovery.policy.models import Run, RunStatus
 
 # Maximum number of runs to keep per target
 MAX_RUNS_PER_TARGET = 3
-
-
-class RunStatus(str, Enum):
-    """Run status enumeration."""
-
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-class Run(BaseModel):
-    """Model for a single run execution."""
-
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    policy_id: str
-    status: RunStatus
-    reason: str = ""
-    entity_count: int = 0
-    metadata: dict[str, str] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
-
 
 class RunStore:
     """

@@ -3,13 +3,13 @@
 """Device Discovery Policy Models."""
 
 import re
+import uuid
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
 from croniter import CroniterBadCronError, croniter
 from pydantic import BaseModel, Field, field_validator
-
-from device_discovery.policy.run import Run
 
 
 class Status(Enum):
@@ -215,6 +215,27 @@ class PolicyRequest(BaseModel):
     """Model for a policy request."""
 
     policies: dict[str, Policy]
+
+
+class RunStatus(str, Enum):
+    """Run status enumeration."""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class Run(BaseModel):
+    """Model for a single run execution."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    policy_id: str
+    status: RunStatus
+    reason: str = ""
+    entity_count: int = 0
+    metadata: dict[str, str] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
 
 
 class PolicyStatus(BaseModel):

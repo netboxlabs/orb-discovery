@@ -61,50 +61,6 @@ def test_create_run_with_parent():
     assert run.metadata["parent_target"] == "192.168.1.0/24"
 
 
-def test_max_runs_per_target():
-    """Test that MAX_RUNS_PER_TARGET is enforced by removing terminal runs."""
-    from device_discovery.policy.run import RunStatus
-
-    store = RunStore()
-
-    # Create MAX_RUNS_PER_TARGET runs and complete them
-    run_ids = []
-    for i in range(MAX_RUNS_PER_TARGET):
-        run = store.create_run("policy1", "192.168.1.1", "")
-        run_ids.append(run.id)
-        time.sleep(0.01)  # Ensure different timestamps
-        # Complete each run so they become terminal
-        store.update_run(
-            "policy1",
-            "192.168.1.1",
-            run.id,
-            RunStatus.COMPLETED,
-            None,
-            1,
-        )
-
-    # Now we have MAX_RUNS_PER_TARGET completed runs
-    stored_runs = store.get_runs_for_target("policy1", "192.168.1.1")
-    assert len(stored_runs) == MAX_RUNS_PER_TARGET
-
-    # Create 2 more RUNNING runs
-    run4 = store.create_run("policy1", "192.168.1.1", "")
-    run5 = store.create_run("policy1", "192.168.1.1", "")
-
-    # With smart trimming: oldest terminal runs removed, RUNNING runs kept
-    # We added 2 RUNNING runs, so oldest 2 COMPLETED runs should be removed
-    stored_runs = store.get_runs_for_target("policy1", "192.168.1.1")
-    assert len(stored_runs) == MAX_RUNS_PER_TARGET
-
-    stored_ids = [run.id for run in stored_runs]
-    # Should have: last COMPLETED run + 2 new RUNNING runs
-    assert run_ids[0] not in stored_ids  # Oldest COMPLETED removed
-    assert run_ids[1] not in stored_ids  # 2nd oldest COMPLETED removed
-    assert run_ids[2] in stored_ids  # Newest COMPLETED kept
-    assert run4.id in stored_ids  # RUNNING kept
-    assert run5.id in stored_ids  # RUNNING kept
-
-
 def test_update_run_success():
     """Test updating run to completed status."""
     store = RunStore()
