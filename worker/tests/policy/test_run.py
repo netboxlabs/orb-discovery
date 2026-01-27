@@ -8,7 +8,7 @@ from datetime import datetime
 
 import pytest
 
-from worker.policy.run import MAX_RUNS_PER_POLICY, Run, RunStatus, RunStore
+from worker.policy.run import MAX_RUNS_PER_POLICY, RunStatus, RunStore
 
 
 @pytest.fixture
