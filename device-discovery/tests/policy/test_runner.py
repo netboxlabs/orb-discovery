@@ -426,3 +426,34 @@ def test_metrics_during_failed_discovery(policy_runner, sample_config, run_store
         latency_kwargs = mock_discovery_latency.record.call_args[0][1]
         assert latency_args > 0.01
         assert latency_kwargs["status"] == "failed"
+
+
+def test_run_scan_handles_port_scan_failure(policy_runner, sample_config, run_store):
+    """Test that scan runs are marked as FAILED when port scanning fails."""
+    scope = Napalm(
+        driver=None,
+        hostname="seed-host",
+        username="admin",
+        password="password",
+    )
+    trigger = MagicMock(spec=BaseTrigger)
+
+    with (
+        patch(
+            "device_discovery.policy.runner.find_reachable_hosts",
+            side_effect=Exception("Port scan timeout"),
+        ),
+        patch("uuid.uuid4", side_effect=["scan-run-id"]),
+    ):
+        policy_runner.run_store = run_store
+        policy_runner.name = "test_policy"
+
+        # Run scan which will fail
+        policy_runner.run_scan(["10.0.0.1", "10.0.0.2"], trigger, scope, sample_config)
+
+        # Verify scan run was created and marked as FAILED
+        runs = run_store.get_runs_for_target("test_policy", "seed-host")
+        assert len(runs) == 1
+        assert runs[0].status.value == "failed"
+        assert runs[0].entity_count == 0
+        assert "Port scan timeout" in runs[0].reason

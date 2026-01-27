@@ -246,27 +246,28 @@ class PolicyRunner:
             parent_target="",
         )
 
-        results = find_reachable_hosts(hostnames, ports, timeout)
-        reachable_count = sum(1 for v in results.values() if v)
+        try:
+            results = find_reachable_hosts(hostnames, ports, timeout)
+            reachable_count = sum(1 for v in results.values() if v)
 
-        # UPDATE SCAN RUN
-        self.run_store.update_run(
-            policy_name=self.name,
-            target=original_hostname,
-            run_id=scan_run.id,
-            status=RunStatus.COMPLETED,
-            error=None,
-            entity_count=reachable_count,
-        )
+            # UPDATE SCAN RUN
+            self.run_store.update_run(
+                policy_name=self.name,
+                target=original_hostname,
+                run_id=scan_run.id,
+                status=RunStatus.COMPLETED,
+                error=None,
+                entity_count=reachable_count,
+            )
 
-        for hostname in hostnames:
-            if results.get(hostname):
-                logger.info(
-                    f"Policy {self.name}, Hostname {hostname}: Reachable port found, scheduling discovery job"
-                )
-                id = str(uuid.uuid4())
-                self.scopes[id] = scope.model_copy(update={"hostname": hostname})
-                self.scheduler.add_job(
+            for hostname in hostnames:
+                if results.get(hostname):
+                    logger.info(
+                        f"Policy {self.name}, Hostname {hostname}: Reachable port found, scheduling discovery job"
+                    )
+                    id = str(uuid.uuid4())
+                    self.scopes[id] = scope.model_copy(update={"hostname": hostname})
+                    self.scheduler.add_job(
                     self.run_with_parent,
                     id=id,
                     trigger=trigger,
@@ -277,6 +278,17 @@ class PolicyRunner:
                 logger.info(
                     f"Policy {self.name}, Hostname {hostname}: No reachable port found, skipping discovery job"
                 )
+        except Exception as e:
+            logger.error(f"Policy {self.name}, Error during port scan for {original_hostname}: {e}")
+            # UPDATE SCAN RUN AS FAILED
+            self.run_store.update_run(
+                policy_name=self.name,
+                target=original_hostname,
+                run_id=scan_run.id,
+                status=RunStatus.FAILED,
+                error=e,
+                entity_count=0,
+            )
 
     def run(self, id: str, scope: Napalm, config: Config):
         """

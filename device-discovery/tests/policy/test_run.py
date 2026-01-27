@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2024 NetBox Labs Inc
+# Copyright 2026 NetBox Labs Inc
 """Tests for RunStore."""
 
 import threading
@@ -62,24 +62,47 @@ def test_create_run_with_parent():
 
 
 def test_max_runs_per_target():
-    """Test that only MAX_RUNS_PER_TARGET runs are kept per target."""
+    """Test that MAX_RUNS_PER_TARGET is enforced by removing terminal runs."""
+    from device_discovery.policy.run import RunStatus
+
     store = RunStore()
 
-    # Create more than MAX_RUNS_PER_TARGET runs for same target
+    # Create MAX_RUNS_PER_TARGET runs and complete them
     run_ids = []
-    for i in range(MAX_RUNS_PER_TARGET + 2):
+    for i in range(MAX_RUNS_PER_TARGET):
         run = store.create_run("policy1", "192.168.1.1", "")
         run_ids.append(run.id)
         time.sleep(0.01)  # Ensure different timestamps
+        # Complete each run so they become terminal
+        store.update_run(
+            "policy1",
+            "192.168.1.1",
+            run.id,
+            RunStatus.COMPLETED,
+            None,
+            1,
+        )
 
-    # Should only have last MAX_RUNS_PER_TARGET runs
+    # Now we have MAX_RUNS_PER_TARGET completed runs
     stored_runs = store.get_runs_for_target("policy1", "192.168.1.1")
     assert len(stored_runs) == MAX_RUNS_PER_TARGET
 
-    # Verify it's the last MAX_RUNS_PER_TARGET runs
+    # Create 2 more RUNNING runs
+    run4 = store.create_run("policy1", "192.168.1.1", "")
+    run5 = store.create_run("policy1", "192.168.1.1", "")
+
+    # With smart trimming: oldest terminal runs removed, RUNNING runs kept
+    # We added 2 RUNNING runs, so oldest 2 COMPLETED runs should be removed
+    stored_runs = store.get_runs_for_target("policy1", "192.168.1.1")
+    assert len(stored_runs) == MAX_RUNS_PER_TARGET
+
     stored_ids = [run.id for run in stored_runs]
-    expected_ids = run_ids[-MAX_RUNS_PER_TARGET:]
-    assert stored_ids == expected_ids
+    # Should have: last COMPLETED run + 2 new RUNNING runs
+    assert run_ids[0] not in stored_ids  # Oldest COMPLETED removed
+    assert run_ids[1] not in stored_ids  # 2nd oldest COMPLETED removed
+    assert run_ids[2] in stored_ids  # Newest COMPLETED kept
+    assert run4.id in stored_ids  # RUNNING kept
+    assert run5.id in stored_ids  # RUNNING kept
 
 
 def test_update_run_success():
@@ -351,3 +374,80 @@ def test_metadata_preserved():
     # Verify metadata contains original (not normalized)
     retrieved = store.get_runs_for_target("policy1", "router1.example.com")[0]
     assert retrieved.metadata["target"] == "Router1.Example.COM"
+
+
+def test_overlapping_runs_no_eviction():
+    """Test that RUNNING runs are never evicted even when exceeding MAX_RUNS_PER_TARGET."""
+    from device_discovery.policy.run import RunStatus
+
+    store = RunStore()
+
+    # Create 4 RUNNING runs for the same target (exceeds MAX_RUNS_PER_TARGET=3)
+    run1 = store.create_run("policy1", "192.168.1.1", "")
+    run2 = store.create_run("policy1", "192.168.1.1", "")
+    run3 = store.create_run("policy1", "192.168.1.1", "")
+    run4 = store.create_run("policy1", "192.168.1.1", "")
+
+    # Verify all 4 RUNNING runs are kept (overflow allowed)
+    runs = store.get_runs_for_target("policy1", "192.168.1.1")
+    assert len(runs) == 4
+    assert all(r.status == RunStatus.RUNNING for r in runs)
+    assert {r.id for r in runs} == {run1.id, run2.id, run3.id, run4.id}
+
+    # Complete the first run
+    store.update_run(
+        "policy1",
+        "192.168.1.1",
+        run1.id,
+        RunStatus.COMPLETED,
+        None,
+        1,
+    )
+
+    # Verify run1 is now COMPLETED
+    runs = store.get_runs_for_target("policy1", "192.168.1.1")
+    completed_runs = [r for r in runs if r.status == RunStatus.COMPLETED]
+    assert len(completed_runs) == 1
+    assert completed_runs[0].id == run1.id
+
+    # Create a 5th run - this should trigger trimming
+    run5 = store.create_run("policy1", "192.168.1.1", "")
+
+    # Verify:
+    # - run1 (COMPLETED) was removed (oldest terminal run)
+    # - run2, run3, run4 (RUNNING) are still present
+    # - run5 (RUNNING) was added
+    # - Total is MAX_RUNS_PER_TARGET + 1 = 4 (3 old RUNNING + 1 new RUNNING)
+    runs = store.get_runs_for_target("policy1", "192.168.1.1")
+    run_ids = {r.id for r in runs}
+
+    assert run1.id not in run_ids  # Oldest terminal run removed
+    assert run2.id in run_ids  # RUNNING runs preserved
+    assert run3.id in run_ids
+    assert run4.id in run_ids
+    assert run5.id in run_ids
+
+    # Complete run2 and run3
+    store.update_run("policy1", "192.168.1.1", run2.id, RunStatus.COMPLETED, None, 1)
+    store.update_run("policy1", "192.168.1.1", run3.id, RunStatus.FAILED, Exception("error"), 0)
+
+    # Now we have: run2 (COMPLETED), run3 (FAILED), run4 (RUNNING), run5 (RUNNING) = 4 runs
+
+    # Create a 6th run - should remove both terminal runs to get back to MAX
+    run6 = store.create_run("policy1", "192.168.1.1", "")
+
+    # Verify: run2 and run3 (both terminal) were removed
+    # We had 4 runs + 1 new = 5 total, needed to remove 2 to get back to MAX (3)
+    # We had 2 terminal runs available, so both were removed
+    runs = store.get_runs_for_target("policy1", "192.168.1.1")
+    run_ids = {r.id for r in runs}
+
+    assert run2.id not in run_ids  # Terminal run removed
+    assert run3.id not in run_ids  # Terminal run removed
+    assert run4.id in run_ids  # RUNNING kept
+    assert run5.id in run_ids  # RUNNING kept
+    assert run6.id in run_ids  # New run added
+
+    # Verify we're back to MAX_RUNS_PER_TARGET = 3
+    assert len(runs) == 3
+    assert all(r.status == RunStatus.RUNNING for r in runs)

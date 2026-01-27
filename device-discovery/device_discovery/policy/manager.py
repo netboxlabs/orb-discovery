@@ -132,7 +132,7 @@ class PolicyManager:
 
         # Get statuses for active runners
         for name, runner in self.runners.items():
-            runs = self.run_store.get_runs_for_policy(name)
+            runs = all_runs.get(name, [])
 
             # Derive status from latest run, or use runner status if no runs
             if runs:
