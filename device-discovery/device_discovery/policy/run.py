@@ -95,41 +95,6 @@ class RunStore:
         """
         return run.model_copy(deep=True)
 
-    def _trim_runs(self, runs: list[Run]) -> None:
-        """
-        Trim runs list to MAX_RUNS_PER_TARGET, preferring to remove terminal runs.
-
-        Never removes RUNNING runs to prevent losing status updates when
-        overlapping executions occur (e.g., rapid schedules or slow discoveries).
-
-        Args:
-        ----
-            runs: List of runs to trim (modified in place).
-
-        """
-        if len(runs) <= MAX_RUNS_PER_TARGET:
-            return
-
-        # Find terminal runs (COMPLETED or FAILED)
-        terminal_indices = [
-            i
-            for i, r in enumerate(runs)
-            if r.status in (RunStatus.COMPLETED, RunStatus.FAILED)
-        ]
-
-        # Calculate how many to remove
-        excess = len(runs) - MAX_RUNS_PER_TARGET
-
-        # Remove as many oldest terminal runs as possible (up to excess)
-        # Even if we can't remove enough to fully meet MAX_RUNS_PER_TARGET,
-        # we should still remove what we can to gradually reduce overflow
-        num_to_remove = min(len(terminal_indices), excess)
-        if num_to_remove > 0:
-            to_remove = terminal_indices[:num_to_remove]
-            for i in reversed(to_remove):  # reverse to maintain indices
-                del runs[i]
-        # else: No terminal runs available, allow overflow to protect RUNNING runs
-
     def create_run(self, policy_name: str, target: str, parent_target: str = "") -> Run:
         """
         Create a new run for the given policy and target.
@@ -171,8 +136,9 @@ class RunStore:
             runs = self._runs[policy_name][normalized_target]
             runs.append(run)
 
-            # Trim runs list, preferring to keep RUNNING runs
-            self._trim_runs(runs)
+            # Keep only the last MAX_RUNS_PER_TARGET runs
+            if len(runs) > MAX_RUNS_PER_TARGET:
+                runs[:] = runs[-MAX_RUNS_PER_TARGET:]
 
             return self._copy_run(run)
 

@@ -142,3 +142,213 @@ def test_stop_all_policies(policy_manager):
 
     # Ensure runners dictionary is emptied
     assert policy_manager.runners == {}
+
+
+def test_get_policy_statuses_empty(policy_manager):
+    """Test getting policy statuses when no policies exist."""
+    statuses = policy_manager.get_policy_statuses()
+    assert statuses == []
+
+
+def test_get_policy_statuses_active_policy_with_runs(policy_manager):
+    """Test getting status for an active policy with run history."""
+    from datetime import datetime
+
+    from device_discovery.policy.models import Status
+    from device_discovery.policy.run import Run, RunStatus
+
+    # Create mock runner
+    mock_runner = MagicMock()
+    mock_runner.status = Status.RUNNING
+    policy_manager.runners["policy1"] = mock_runner
+
+    # Add runs to the run store
+    run1 = Run(
+        policy_id="policy1",
+        status=RunStatus.COMPLETED,
+        entity_count=10,
+        created_at=datetime(2026, 1, 27, 10, 0, 0),
+    )
+    run2 = Run(
+        policy_id="policy1",
+        status=RunStatus.RUNNING,
+        entity_count=0,
+        created_at=datetime(2026, 1, 27, 11, 0, 0),
+    )
+
+    # Mock the run store to return runs (sorted newest first)
+    policy_manager.run_store.get_all_policies_with_runs = MagicMock(
+        return_value={"policy1": [run2, run1]}
+    )
+
+    statuses = policy_manager.get_policy_statuses()
+
+    assert len(statuses) == 1
+    assert statuses[0].name == "policy1"
+    assert statuses[0].status == "running"  # From latest run (run2)
+    assert len(statuses[0].runs) == 2
+    assert statuses[0].runs[0].id == run2.id
+    assert statuses[0].runs[1].id == run1.id
+
+
+def test_get_policy_statuses_active_policy_without_runs(policy_manager):
+    """Test getting status for an active policy with no run history."""
+    from device_discovery.policy.models import Status
+
+    # Create mock runner
+    mock_runner = MagicMock()
+    mock_runner.status = Status.NEW
+    policy_manager.runners["policy1"] = mock_runner
+
+    # Mock the run store to return no runs
+    policy_manager.run_store.get_all_policies_with_runs = MagicMock(return_value={})
+
+    statuses = policy_manager.get_policy_statuses()
+
+    assert len(statuses) == 1
+    assert statuses[0].name == "policy1"
+    assert statuses[0].status == "new"  # From runner.status since no runs
+    assert statuses[0].runs == []
+
+
+def test_get_policy_statuses_historical_policy_no_active_runner(policy_manager):
+    """Test getting status for a policy with historical runs but no active runner."""
+    from datetime import datetime
+
+    from device_discovery.policy.run import Run, RunStatus
+
+    # No active runners
+    assert len(policy_manager.runners) == 0
+
+    # Add runs to the run store for a policy that's not running
+    run1 = Run(
+        policy_id="old_policy",
+        status=RunStatus.COMPLETED,
+        entity_count=5,
+        created_at=datetime(2026, 1, 26, 10, 0, 0),
+    )
+    run2 = Run(
+        policy_id="old_policy",
+        status=RunStatus.FAILED,
+        reason="Connection timeout",
+        created_at=datetime(2026, 1, 27, 10, 0, 0),
+    )
+
+    # Mock the run store to return runs (sorted newest first)
+    policy_manager.run_store.get_all_policies_with_runs = MagicMock(
+        return_value={"old_policy": [run2, run1]}
+    )
+
+    statuses = policy_manager.get_policy_statuses()
+
+    assert len(statuses) == 1
+    assert statuses[0].name == "old_policy"
+    assert statuses[0].status == "failed"  # From latest run (run2)
+    assert len(statuses[0].runs) == 2
+    assert statuses[0].runs[0].id == run2.id
+    assert statuses[0].runs[1].id == run1.id
+
+
+def test_get_policy_statuses_mixed_active_and_historical(policy_manager):
+    """Test getting statuses with both active policies and historical runs."""
+    from datetime import datetime
+
+    from device_discovery.policy.models import Status
+    from device_discovery.policy.run import Run, RunStatus
+
+    # Create active runner
+    mock_runner = MagicMock()
+    mock_runner.status = Status.RUNNING
+    policy_manager.runners["active_policy"] = mock_runner
+
+    # Create runs for both active and historical policies
+    active_run = Run(
+        policy_id="active_policy",
+        status=RunStatus.COMPLETED,
+        entity_count=15,
+        created_at=datetime(2026, 1, 27, 12, 0, 0),
+    )
+    historical_run1 = Run(
+        policy_id="historical_policy",
+        status=RunStatus.COMPLETED,
+        entity_count=8,
+        created_at=datetime(2026, 1, 26, 10, 0, 0),
+    )
+    historical_run2 = Run(
+        policy_id="historical_policy",
+        status=RunStatus.COMPLETED,
+        entity_count=12,
+        created_at=datetime(2026, 1, 27, 9, 0, 0),
+    )
+
+    # Mock the run store
+    policy_manager.run_store.get_all_policies_with_runs = MagicMock(
+        return_value={
+            "active_policy": [active_run],
+            "historical_policy": [historical_run2, historical_run1],
+        }
+    )
+
+    statuses = policy_manager.get_policy_statuses()
+
+    assert len(statuses) == 2
+
+    # Find statuses by name (order not guaranteed)
+    active_status = next(s for s in statuses if s.name == "active_policy")
+    historical_status = next(s for s in statuses if s.name == "historical_policy")
+
+    # Verify active policy status
+    assert active_status.status == "completed"
+    assert len(active_status.runs) == 1
+    assert active_status.runs[0].id == active_run.id
+
+    # Verify historical policy status
+    assert historical_status.status == "completed"
+    assert len(historical_status.runs) == 2
+    assert historical_status.runs[0].id == historical_run2.id
+
+
+def test_get_policy_statuses_multiple_active_policies(policy_manager):
+    """Test getting statuses for multiple active policies with different states."""
+    from datetime import datetime
+
+    from device_discovery.policy.models import Status
+    from device_discovery.policy.run import Run, RunStatus
+
+    # Create multiple active runners
+    mock_runner1 = MagicMock()
+    mock_runner1.status = Status.RUNNING
+    policy_manager.runners["policy1"] = mock_runner1
+
+    mock_runner2 = MagicMock()
+    mock_runner2.status = Status.NEW
+    policy_manager.runners["policy2"] = mock_runner2
+
+    # Create runs only for policy1
+    run1 = Run(
+        policy_id="policy1",
+        status=RunStatus.FAILED,
+        reason="Network error",
+        created_at=datetime(2026, 1, 27, 10, 0, 0),
+    )
+
+    # Mock the run store
+    policy_manager.run_store.get_all_policies_with_runs = MagicMock(
+        return_value={"policy1": [run1]}
+    )
+
+    statuses = policy_manager.get_policy_statuses()
+
+    assert len(statuses) == 2
+
+    # Find statuses by name
+    status1 = next(s for s in statuses if s.name == "policy1")
+    status2 = next(s for s in statuses if s.name == "policy2")
+
+    # policy1 has runs, status from latest run
+    assert status1.status == "failed"
+    assert len(status1.runs) == 1
+
+    # policy2 has no runs, status from runner
+    assert status2.status == "new"
+    assert status2.runs == []
