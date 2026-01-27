@@ -40,7 +40,9 @@ class PolicyRunner:
         self.scheduler = BackgroundScheduler()
         self.run_store = None
 
-    def setup(self, name: str, config: Config, scopes: list[Napalm], run_store: RunStore):
+    def setup(
+        self, name: str, config: Config, scopes: list[Napalm], run_store: RunStore
+    ):
         """
         Set up the policy runner.
 
@@ -268,18 +270,20 @@ class PolicyRunner:
                     id = str(uuid.uuid4())
                     self.scopes[id] = scope.model_copy(update={"hostname": hostname})
                     self.scheduler.add_job(
-                    self.run_with_parent,
-                    id=id,
-                    trigger=trigger,
-                    args=[id, self.scopes[id], config, original_hostname],
-                    misfire_grace_time=None,
-                )
-            else:
-                logger.info(
-                    f"Policy {self.name}, Hostname {hostname}: No reachable port found, skipping discovery job"
-                )
+                        self.run_with_parent,
+                        id=id,
+                        trigger=trigger,
+                        args=[id, self.scopes[id], config, original_hostname],
+                        misfire_grace_time=None,
+                    )
+                else:
+                    logger.info(
+                        f"Policy {self.name}, Hostname {hostname}: No reachable port found, skipping discovery job"
+                    )
         except Exception as e:
-            logger.error(f"Policy {self.name}, Error during port scan for {original_hostname}: {e}")
+            logger.error(
+                f"Policy {self.name}, Error during port scan for {original_hostname}: {e}"
+            )
             # UPDATE SCAN RUN AS FAILED
             self.run_store.update_run(
                 policy_name=self.name,
@@ -396,7 +400,9 @@ class PolicyRunner:
                     },
                 )
 
-    def run_with_parent(self, id: str, scope: Napalm, config: Config, parent_target: str):
+    def run_with_parent(
+        self, id: str, scope: Napalm, config: Config, parent_target: str
+    ):
         """
         Run the device driver code for a single scope item with parent tracking.
 

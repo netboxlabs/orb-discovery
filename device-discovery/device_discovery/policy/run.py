@@ -112,7 +112,8 @@ class RunStore:
 
         # Find terminal runs (COMPLETED or FAILED)
         terminal_indices = [
-            i for i, r in enumerate(runs)
+            i
+            for i, r in enumerate(runs)
             if r.status in (RunStatus.COMPLETED, RunStatus.FAILED)
         ]
 
@@ -129,9 +130,7 @@ class RunStore:
                 del runs[i]
         # else: No terminal runs available, allow overflow to protect RUNNING runs
 
-    def create_run(
-        self, policy_name: str, target: str, parent_target: str = ""
-    ) -> Run:
+    def create_run(self, policy_name: str, target: str, parent_target: str = "") -> Run:
         """
         Create a new run for the given policy and target.
 

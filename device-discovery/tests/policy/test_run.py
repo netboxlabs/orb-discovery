@@ -429,7 +429,9 @@ def test_overlapping_runs_no_eviction():
 
     # Complete run2 and run3
     store.update_run("policy1", "192.168.1.1", run2.id, RunStatus.COMPLETED, None, 1)
-    store.update_run("policy1", "192.168.1.1", run3.id, RunStatus.FAILED, Exception("error"), 0)
+    store.update_run(
+        "policy1", "192.168.1.1", run3.id, RunStatus.FAILED, Exception("error"), 0
+    )
 
     # Now we have: run2 (COMPLETED), run3 (FAILED), run4 (RUNNING), run5 (RUNNING) = 4 runs
 

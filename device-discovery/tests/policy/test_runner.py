@@ -51,7 +51,9 @@ def test_initial_status(policy_runner):
     assert policy_runner.status == Status.NEW
 
 
-def test_setup_policy_runner_with_cron(policy_runner, sample_config, sample_scopes, run_store):
+def test_setup_policy_runner_with_cron(
+    policy_runner, sample_config, sample_scopes, run_store
+):
     """Test setting up the PolicyRunner with a cron schedule."""
     with (
         patch.object(policy_runner.scheduler, "start") as mock_start,
@@ -125,7 +127,9 @@ def test_setup_policy_runner_with_none_config(policy_runner, sample_scopes, run_
         assert policy_runner.status == Status.RUNNING
 
 
-def test_setup_policy_runner_expands_hostname_ranges(policy_runner, sample_config, run_store):
+def test_setup_policy_runner_expands_hostname_ranges(
+    policy_runner, sample_config, run_store
+):
     """Ranges schedule a port scan job instead of direct discovery."""
     ranged_scope = Napalm(
         driver="ios",
@@ -153,7 +157,9 @@ def test_setup_policy_runner_expands_hostname_ranges(policy_runner, sample_confi
     assert copied_config.defaults.role == "Router"
 
 
-def test_setup_with_unsupported_driver_raises_error(policy_runner, sample_scopes, run_store):
+def test_setup_with_unsupported_driver_raises_error(
+    policy_runner, sample_scopes, run_store
+):
     """Test setup raises error if driver is unsupported."""
     sample_scopes[0].driver = "unsupported_driver"
     with (
@@ -166,7 +172,9 @@ def test_setup_with_unsupported_driver_raises_error(policy_runner, sample_scopes
     assert policy_runner.status == Status.NEW
 
 
-def test_run_device_with_discovered_driver(policy_runner, sample_scopes, sample_config, run_store):
+def test_run_device_with_discovered_driver(
+    policy_runner, sample_scopes, sample_config, run_store
+):
     """Test running a device where the driver needs discovery."""
     sample_scopes[0].driver = None  # Force driver discovery
     with (
@@ -207,7 +215,9 @@ def test_run_device_with_discovered_driver(policy_runner, sample_scopes, sample_
         assert data["interface_ip"] == {"eth0": "192.168.1.1"}
 
 
-def test_run_discovered_driver_error(policy_runner, sample_scopes, sample_config, run_store):
+def test_run_discovered_driver_error(
+    policy_runner, sample_scopes, sample_config, run_store
+):
     """Test running a device where the driver discovery fails."""
     sample_scopes[0].driver = None  # Force driver discovery
     with (
@@ -228,7 +238,9 @@ def test_run_discovered_driver_error(policy_runner, sample_scopes, sample_config
         assert policy_runner.status == Status.FAILED
 
 
-def test_run_device_with_error_in_job(policy_runner, sample_scopes, sample_config, run_store):
+def test_run_device_with_error_in_job(
+    policy_runner, sample_scopes, sample_config, run_store
+):
     """Test run handles an error during device interaction gracefully."""
     with (
         patch(
@@ -264,7 +276,9 @@ def test_run_scan_schedules_reachable_hosts(monkeypatch):
             "device_discovery.policy.runner.find_reachable_hosts",
             return_value=reachability,
         ) as mock_reachable_hosts,
-        patch("uuid.uuid4", side_effect=["scan-run-id", "job-1"]),  # scan run ID + job ID
+        patch(
+            "uuid.uuid4", side_effect=["scan-run-id", "job-1"]
+        ),  # scan run ID + job ID
     ):
         runner.run_scan(["host-a", "host-b"], trigger, scope, config)
 
@@ -313,7 +327,9 @@ def test_stop_policy_runner(policy_runner):
         assert policy_runner.status == Status.FINISHED
 
 
-def test_metrics_during_policy_lifecycle(policy_runner, sample_config, sample_scopes, run_store):
+def test_metrics_during_policy_lifecycle(
+    policy_runner, sample_config, sample_scopes, run_store
+):
     """Test that metrics are properly updated during the policy lifecycle."""
     # Create mock metrics
     mock_active_policies = MagicMock()

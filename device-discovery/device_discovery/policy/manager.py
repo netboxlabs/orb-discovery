@@ -38,6 +38,7 @@ def resolve_env_vars(config):
         return os.getenv(env_var, config)
     return config
 
+
 class PolicyManager:
     """Policy Manager class."""
 
