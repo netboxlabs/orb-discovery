@@ -9,6 +9,8 @@ from typing import Any
 from croniter import CroniterBadCronError, croniter
 from pydantic import BaseModel, Field, field_validator
 
+from device_discovery.policy.run import Run, RunStatus
+
 
 class Status(Enum):
     """Enumeration for status."""
@@ -203,3 +205,11 @@ class PolicyRequest(BaseModel):
     """Model for a policy request."""
 
     policies: dict[str, Policy]
+
+
+class PolicyStatus(BaseModel):
+    """Status response for a policy with run history."""
+
+    name: str
+    status: str  # Derived from latest run
+    runs: list[Run]
