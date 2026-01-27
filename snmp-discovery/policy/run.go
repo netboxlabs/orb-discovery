@@ -1,8 +1,10 @@
 package policy
 
 import (
+	"fmt"
 	"net/netip"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -48,18 +50,19 @@ func NewRunStore() *RunStore {
 	}
 }
 
-// normalizeTarget normalizes target strings to canonical form
-func normalizeTarget(target string) string {
+// normalizeTarget normalizes target strings to canonical form and includes port
+// Returns format "host:port" (e.g., "192.168.1.10:161")
+func normalizeTarget(host string, port uint16) string {
+	normalizedHost := host
 	// Try to parse as IP address
-	if addr, err := netip.ParseAddr(target); err == nil {
-		return addr.String()
+	if addr, err := netip.ParseAddr(host); err == nil {
+		normalizedHost = addr.String()
+	} else if prefix, err := netip.ParsePrefix(host); err == nil {
+		// Try to parse as IP prefix (CIDR)
+		normalizedHost = prefix.String()
 	}
-	// Try to parse as IP prefix (CIDR)
-	if prefix, err := netip.ParsePrefix(target); err == nil {
-		return prefix.String()
-	}
-	// Return as-is for hostnames or other formats
-	return target
+	// Return composite identifier "host:port"
+	return fmt.Sprintf("%s:%d", normalizedHost, port)
 }
 
 // copyRun creates a deep copy of a Run to avoid race conditions
@@ -90,18 +93,19 @@ func copyRun(r *Run) *Run {
 }
 
 // CreateRun creates a new run for the given policy and target, and returns it
-func (rs *RunStore) CreateRun(policyName string, target string, parentTarget string) *Run {
+func (rs *RunStore) CreateRun(policyName string, target string, port uint16, parentTarget string) *Run {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 
 	now := time.Now()
 
-	// Normalize target for consistent storage
-	normalizedTarget := normalizeTarget(target)
+	// Normalize target for consistent storage (includes port)
+	normalizedTarget := normalizeTarget(target, port)
 
-	// Create metadata with target information
+	// Create metadata with target and port information
 	metadata := make(map[string]string)
-	metadata["target"] = target // Store original, not normalized
+	metadata["target"] = target // Store original host, not normalized
+	metadata["port"] = strconv.FormatUint(uint64(port), 10)
 	if parentTarget != "" {
 		metadata["parent_target"] = parentTarget
 	}
@@ -135,7 +139,7 @@ func (rs *RunStore) CreateRun(policyName string, target string, parentTarget str
 }
 
 // UpdateRun updates the status of a run
-func (rs *RunStore) UpdateRun(policyName, target, runID string, status RunStatus, err error, entityCount int) {
+func (rs *RunStore) UpdateRun(policyName, target string, port uint16, runID string, status RunStatus, err error, entityCount int) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 
@@ -143,8 +147,8 @@ func (rs *RunStore) UpdateRun(policyName, target, runID string, status RunStatus
 		return
 	}
 
-	// Normalize target for lookup
-	normalizedTarget := normalizeTarget(target)
+	// Normalize target for lookup (includes port)
+	normalizedTarget := normalizeTarget(target, port)
 
 	runs := rs.runs[policyName][normalizedTarget]
 	for _, run := range runs {
@@ -163,7 +167,7 @@ func (rs *RunStore) UpdateRun(policyName, target, runID string, status RunStatus
 }
 
 // GetRunsForTarget returns all runs for a given policy and target
-func (rs *RunStore) GetRunsForTarget(policyName string, target string) []*Run {
+func (rs *RunStore) GetRunsForTarget(policyName string, target string, port uint16) []*Run {
 	rs.mu.RLock()
 	defer rs.mu.RUnlock()
 
@@ -171,8 +175,8 @@ func (rs *RunStore) GetRunsForTarget(policyName string, target string) []*Run {
 		return nil
 	}
 
-	// Normalize target for lookup
-	normalizedTarget := normalizeTarget(target)
+	// Normalize target for lookup (includes port)
+	normalizedTarget := normalizeTarget(target, port)
 
 	runs := rs.runs[policyName][normalizedTarget]
 	// Return deep copies to avoid race conditions

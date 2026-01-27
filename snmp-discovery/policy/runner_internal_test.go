@@ -201,8 +201,9 @@ func TestRunScanSchedulesResponsiveTargets(t *testing.T) {
 	assert.Len(t, runner.scheduler.Jobs(), 2)
 
 	// Verify scan run was created
-	runs := runStore.GetRunsForTarget("test-policy", "192.168.1.0/24")
+	runs := runStore.GetRunsForTarget("test-policy", "192.168.1.0/24", 161)
 	require.Len(t, runs, 1, "Scan run should be created")
 	assert.Equal(t, "192.168.1.0/24", runs[0].Metadata["target"])
+	assert.Equal(t, "161", runs[0].Metadata["port"])
 	assert.Equal(t, RunStatusCompleted, runs[0].Status)
 }

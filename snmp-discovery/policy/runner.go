@@ -126,8 +126,14 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget string) {
 	policyName := r.ctx.Value(policyKey).(string)
 
-	// Create run for the scan operation
-	scanRun := r.runStore.CreateRun(policyName, originalTarget, "")
+	// All expanded targets have the same port, get it from the first target
+	port := uint16(161) // default
+	if len(targets) > 0 {
+		port = targets[0].Port
+	}
+
+	// Create run for the scan operation (includes port)
+	scanRun := r.runStore.CreateRun(policyName, originalTarget, port, "")
 
 	r.logger.Info("Starting SNMP probe scan", "policy", policyName, "target", originalTarget, "targetCount", len(targets))
 	workerCount := min(256, len(targets))
@@ -176,7 +182,7 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 	// Check if context was canceled or timed out
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		r.logger.Warn("SNMP probe scan interrupted", "policy", policyName, "error", ctxErr, "responsiveTargetCount", len(responsive))
-		r.runStore.UpdateRun(policyName, originalTarget, scanRun.ID, RunStatusFailed, ctxErr, len(responsive))
+		r.runStore.UpdateRun(policyName, originalTarget, port, scanRun.ID, RunStatusFailed, ctxErr, len(responsive))
 		return
 	}
 
@@ -200,7 +206,7 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 	}
 
 	// Update scan run status
-	r.runStore.UpdateRun(policyName, originalTarget, scanRun.ID, RunStatusCompleted, nil, len(responsive))
+	r.runStore.UpdateRun(policyName, originalTarget, port, scanRun.ID, RunStatusCompleted, nil, len(responsive))
 	r.logger.Info("SNMP probe scan complete", "policy", policyName, "responsiveTargetCount", len(responsive))
 }
 
@@ -262,9 +268,10 @@ func (r *Runner) run(target config.Target) {
 func (r *Runner) runWithMetadata(target config.Target, parentTarget string) {
 	policyName := r.ctx.Value(policyKey).(string)
 	targetHost := target.Host
+	targetPort := target.Port
 
-	// Create run at start
-	run := r.runStore.CreateRun(policyName, targetHost, parentTarget)
+	// Create run at start (includes port)
+	run := r.runStore.CreateRun(policyName, targetHost, targetPort, parentTarget)
 
 	// Track policy execution
 	if rMetric := metrics.GetPolicyExecutions(); rMetric != nil {
@@ -294,7 +301,7 @@ func (r *Runner) runWithMetadata(target config.Target, parentTarget string) {
 	if len(entities) == 0 {
 		r.logger.Info("No entities to ingest", "host", target.Host, "policy", policyName)
 		// Update run status to completed even if no entities
-		r.runStore.UpdateRun(policyName, targetHost, run.ID, RunStatusCompleted, nil, 0)
+		r.runStore.UpdateRun(policyName, targetHost, targetPort, run.ID, RunStatusCompleted, nil, 0)
 		return
 	}
 
@@ -306,14 +313,14 @@ func (r *Runner) runWithMetadata(target config.Target, parentTarget string) {
 	}))
 	if err != nil {
 		r.logger.Error("error ingesting entities", "host", target.Host, "error", err, "policy", policyName)
-		r.runStore.UpdateRun(policyName, targetHost, run.ID, RunStatusFailed, err, len(entities))
+		r.runStore.UpdateRun(policyName, targetHost, targetPort, run.ID, RunStatusFailed, err, len(entities))
 	} else if resp != nil && resp.Errors != nil {
 		ingestErr := fmt.Errorf("ingestion errors: %v", resp.Errors)
 		r.logger.Error("error ingesting entities", "host", target.Host, "error", resp.Errors, "policy", policyName)
-		r.runStore.UpdateRun(policyName, targetHost, run.ID, RunStatusFailed, ingestErr, len(entities))
+		r.runStore.UpdateRun(policyName, targetHost, targetPort, run.ID, RunStatusFailed, ingestErr, len(entities))
 	} else {
 		r.logger.Info("entities ingested successfully", "host", target.Host, "policy", policyName)
-		r.runStore.UpdateRun(policyName, targetHost, run.ID, RunStatusCompleted, nil, len(entities))
+		r.runStore.UpdateRun(policyName, targetHost, targetPort, run.ID, RunStatusCompleted, nil, len(entities))
 	}
 }
 
