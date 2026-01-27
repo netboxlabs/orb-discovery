@@ -352,3 +352,43 @@ def test_get_policy_statuses_multiple_active_policies(policy_manager):
     # policy2 has no runs, status from runner
     assert status2.status == "new"
     assert status2.runs == []
+
+
+def test_get_policy_statuses_prefer_running_status(policy_manager):
+    """Test that RUNNING status is preferred when any run is still running."""
+    from datetime import datetime
+
+    from device_discovery.policy.models import Status
+    from device_discovery.policy.run import Run, RunStatus
+
+    # Create mock runner
+    mock_runner = MagicMock()
+    mock_runner.status = Status.RUNNING
+    policy_manager.runners["policy1"] = mock_runner
+
+    # Create runs: latest is completed, but one is still running
+    run1 = Run(
+        policy_id="policy1",
+        status=RunStatus.RUNNING,
+        entity_count=0,
+        created_at=datetime(2026, 1, 27, 10, 0, 0),
+    )
+    run2 = Run(
+        policy_id="policy1",
+        status=RunStatus.COMPLETED,
+        entity_count=15,
+        created_at=datetime(2026, 1, 27, 11, 0, 0),  # Latest run
+    )
+
+    # Mock the run store to return runs (sorted newest first)
+    policy_manager.run_store.get_all_policies_with_runs = MagicMock(
+        return_value={"policy1": [run2, run1]}
+    )
+
+    statuses = policy_manager.get_policy_statuses()
+
+    assert len(statuses) == 1
+    assert statuses[0].name == "policy1"
+    # Should be RUNNING even though latest run is COMPLETED
+    assert statuses[0].status == "running"
+    assert len(statuses[0].runs) == 2

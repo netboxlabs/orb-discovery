@@ -234,8 +234,8 @@ class Run(BaseModel):
     reason: str = ""
     entity_count: int = 0
     metadata: dict[str, str] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now())
+    updated_at: datetime = Field(default_factory=lambda: datetime.now())
 
 
 class PolicyStatus(BaseModel):

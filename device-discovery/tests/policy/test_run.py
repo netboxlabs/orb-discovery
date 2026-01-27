@@ -5,7 +5,7 @@
 import threading
 import time
 
-from device_discovery.policy.run import MAX_RUNS_PER_TARGET, Run, RunStatus, RunStore
+from device_discovery.policy.run import Run, RunStatus, RunStore
 
 
 def test_run_creation():

@@ -135,9 +135,13 @@ class PolicyManager:
         for name, runner in self.runners.items():
             runs = all_runs.get(name, [])
 
-            # Derive status from latest run, or use runner status if no runs
+            # Derive status: prefer RUNNING if any run is still running
             if runs:
-                latest_status = runs[0].status.value
+                # Check if any run is still running
+                if any(run.status.value == "running" for run in runs):
+                    latest_status = "running"
+                else:
+                    latest_status = runs[0].status.value
             else:
                 latest_status = runner.status.value
 
@@ -152,7 +156,11 @@ class PolicyManager:
         # Include policies with runs but no active runner
         for name, runs in all_runs.items():
             if name not in self.runners and runs:
-                latest_status = runs[0].status.value
+                # Check if any run is still running
+                if any(run.status.value == "running" for run in runs):
+                    latest_status = "running"
+                else:
+                    latest_status = runs[0].status.value
                 statuses.append(
                     PolicyStatus(
                         name=name,
