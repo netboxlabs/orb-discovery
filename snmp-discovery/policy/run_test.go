@@ -232,6 +232,8 @@ func TestRunStore_GetRunsForPolicy_Empty(t *testing.T) {
 
 	runs := store.GetRunsForPolicy("non-existent-policy")
 	assert.Empty(t, runs)
+	// Verify it returns empty slice, not nil, for consistent JSON serialization
+	assert.NotNil(t, runs, "Should return empty slice, not nil")
 }
 
 func TestRunStore_GetRunsForTarget_Empty(t *testing.T) {
@@ -239,6 +241,8 @@ func TestRunStore_GetRunsForTarget_Empty(t *testing.T) {
 
 	runs := store.GetRunsForTarget("non-existent-policy", "192.168.1.10", 161)
 	assert.Empty(t, runs)
+	// Verify it returns empty slice, not nil, for consistent JSON serialization
+	assert.NotNil(t, runs, "Should return empty slice, not nil")
 }
 
 func TestRunStore_Concurrency(t *testing.T) {
@@ -519,4 +523,27 @@ func TestRunStore_PortInMetadata(t *testing.T) {
 	// Verify port is stored as string, not concatenated with target
 	assert.NotContains(t, run.Metadata["target"], ":", "Target should not contain port")
 	assert.NotContains(t, run.Metadata["target"], "162", "Target should not contain port number")
+}
+
+func TestRunStore_EmptyRunsJSONSerialization(t *testing.T) {
+	store := policy.NewRunStore()
+
+	// Test GetRunsForPolicy with non-existent policy
+	runs := store.GetRunsForPolicy("non-existent")
+	assert.NotNil(t, runs, "Should return empty slice, not nil")
+	assert.Len(t, runs, 0, "Should be empty")
+
+	// Test GetRunsForTarget with non-existent policy
+	runs = store.GetRunsForTarget("non-existent", "192.168.1.1", 161)
+	assert.NotNil(t, runs, "Should return empty slice, not nil")
+	assert.Len(t, runs, 0, "Should be empty")
+
+	// Test GetAllPoliciesWithRuns - empty policies should have empty arrays
+	policyName := "empty-policy"
+	store.CreateRun(policyName, "192.168.1.1", 161, "")
+
+	// Clear all runs by getting and not adding any
+	allRuns := store.GetAllPoliciesWithRuns()
+	assert.Contains(t, allRuns, policyName)
+	assert.NotNil(t, allRuns[policyName], "Policy runs should be empty slice, not nil")
 }

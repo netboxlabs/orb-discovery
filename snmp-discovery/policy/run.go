@@ -172,7 +172,7 @@ func (rs *RunStore) GetRunsForTarget(policyName string, target string, port uint
 	defer rs.mu.RUnlock()
 
 	if rs.runs[policyName] == nil {
-		return nil
+		return []*Run{} // Return empty slice, not nil, for consistent JSON serialization
 	}
 
 	// Normalize target for lookup (includes port)
@@ -193,11 +193,11 @@ func (rs *RunStore) GetRunsForPolicy(policyName string) []*Run {
 	defer rs.mu.RUnlock()
 
 	if rs.runs[policyName] == nil {
-		return nil
+		return []*Run{} // Return empty slice, not nil, for consistent JSON serialization
 	}
 
 	// Aggregate runs from all targets into a flat list (deep copy to avoid race conditions)
-	var result []*Run
+	result := make([]*Run, 0) // Initialize as empty slice, not nil
 	for _, targetRuns := range rs.runs[policyName] {
 		for _, run := range targetRuns {
 			result = append(result, copyRun(run))
@@ -220,7 +220,7 @@ func (rs *RunStore) GetAllPoliciesWithRuns() map[string][]*Run {
 	result := make(map[string][]*Run)
 	for policyName, targets := range rs.runs {
 		// Flatten all targets' runs into a single array (deep copy to avoid race conditions)
-		var runs []*Run
+		runs := make([]*Run, 0) // Initialize as empty slice, not nil
 		for _, targetRuns := range targets {
 			for _, run := range targetRuns {
 				runs = append(runs, copyRun(run))
