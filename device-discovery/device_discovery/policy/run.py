@@ -2,14 +2,13 @@
 # Copyright 2024 NetBox Labs Inc
 """Device Discovery Run Store."""
 
-import copy
 import ipaddress
 import threading
 import uuid
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 # Maximum number of runs to keep per target
 MAX_RUNS_PER_TARGET = 3
@@ -25,10 +24,6 @@ class RunStatus(str, Enum):
 
 class Run(BaseModel):
     """Model for a single run execution."""
-
-    model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat()}
-    )
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     policy_id: str

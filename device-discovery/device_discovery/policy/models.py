@@ -9,7 +9,7 @@ from typing import Any
 from croniter import CroniterBadCronError, croniter
 from pydantic import BaseModel, Field, field_validator
 
-from device_discovery.policy.run import Run, RunStatus
+from device_discovery.policy.run import Run
 
 
 class Status(Enum):

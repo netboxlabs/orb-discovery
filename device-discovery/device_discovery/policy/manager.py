@@ -151,7 +151,7 @@ class PolicyManager:
         # Include policies with runs but no active runner
         for name, runs in all_runs.items():
             if name not in self.runners and runs:
-                latest_status = runs[0].status.value if runs else "unknown"
+                latest_status = runs[0].status.value
                 statuses.append(
                     PolicyStatus(
                         name=name,
