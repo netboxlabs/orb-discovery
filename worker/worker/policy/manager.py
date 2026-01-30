@@ -11,8 +11,6 @@ from worker.models import DiodeConfig, Policy, PolicyRequest
 from worker.policy.run import RunStore
 from worker.policy.runner import PolicyRunner
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -78,6 +76,7 @@ class PolicyManager:
             raise ValueError(f"policy '{name}' already exists")
 
         runner = PolicyRunner()
+        logger.debug(f"Starting policy '{name}' with package: {policy.config.package}")
         runner.setup(name, self.config, policy, self.run_store)
         self.loaded_modules.add(policy.config.package)
         self.runners[name] = runner
