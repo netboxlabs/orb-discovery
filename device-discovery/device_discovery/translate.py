@@ -3,7 +3,9 @@
 """Translate from NAPALM output format to Diode SDK entities."""
 
 from collections.abc import Iterable
+from typing import Any
 
+from google.protobuf.struct_pb2 import Struct
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
 from netboxlabs.diode.sdk.ingester import (
     VLAN,
@@ -18,6 +20,46 @@ from netboxlabs.diode.sdk.ingester import (
 
 from device_discovery.interface import build_interface_entities
 from device_discovery.policy.models import Defaults, Options, TenantParameters
+
+
+def convert_dict_to_struct(data: dict[str, Any] | None) -> Struct | None:
+    """Convert a dictionary to a protobuf Struct."""
+    if data is None:
+        return None
+    struct = Struct()
+    struct.update(data)
+    return struct
+
+
+# Check if DeviceConfig protobuf message is available in the SDK
+# TODO: Remove this check once pb.DeviceConfig is added to the Diode SDK
+_has_device_config = hasattr(pb, "DeviceConfig")
+
+
+if _has_device_config:
+
+    class DeviceConfig:
+        """wrapper for netboxlabs.diode.sdk.diode.v1.ingester_pb2.DeviceConfig."""
+
+        def __new__(
+            cls,
+            startup: bytes | None = None,
+            running: bytes | None = None,
+            candidate: bytes | None = None,
+            metadata: dict[str, Any] | None = None,
+        ):
+            """Create a new DeviceConfig."""
+            metadata = convert_dict_to_struct(metadata)
+            result = pb.DeviceConfig(
+                startup=startup,
+                running=running,
+                candidate=candidate,
+                metadata=metadata,
+            )
+            return result
+
+else:
+    DeviceConfig = None  # Placeholder until pb.DeviceConfig is available
 
 
 def translate_tenant(
@@ -40,7 +82,9 @@ def translate_tenant(
     return Tenant(name=tenant)
 
 
-def translate_device(device_info: dict, defaults: Defaults) -> Device:
+def translate_device(
+    device_info: dict, defaults: Defaults, config_info: dict | None = None
+) -> Device:
     """
     Translate device information from NAPALM format to Diode SDK Device entity.
 
@@ -48,6 +92,7 @@ def translate_device(device_info: dict, defaults: Defaults) -> Device:
     ----
         device_info (dict): Dictionary containing device information.
         defaults (Defaults): Default configuration.
+        config_info (dict | None): Dictionary containing configuration data from NAPALM.
 
     Returns:
     -------
@@ -90,20 +135,30 @@ def translate_device(device_info: dict, defaults: Defaults) -> Device:
     elif serial_number is not None and not isinstance(serial_number, str | bytes):
         serial_number = str(serial_number)
 
-    device = Device(
-        name=device_info.get("hostname"),
-        device_type=DeviceType(model=model, manufacturer=manufacturer),
-        platform=Platform(name=platform, manufacturer=manufacturer),
-        role=defaults.role,
-        serial=serial_number,
-        status="active",
-        site=defaults.site,
-        tags=tags,
-        location=location,
-        tenant=translate_tenant(defaults.tenant),
-        description=description,
-        comments=comments,
-    )
+    # Translate device configuration if available
+    device_config = translate_device_config(config_info) if config_info else None
+
+    # Build Device parameters
+    device_params = {
+        "name": device_info.get("hostname"),
+        "device_type": DeviceType(model=model, manufacturer=manufacturer),
+        "platform": Platform(name=platform, manufacturer=manufacturer),
+        "role": defaults.role,
+        "serial": serial_number,
+        "status": "active",
+        "site": defaults.site,
+        "tags": tags,
+        "location": location,
+        "tenant": translate_tenant(defaults.tenant),
+        "description": description,
+        "comments": comments,
+    }
+
+    # Add device_config if SDK supports it and config is available
+    if device_config is not None and _has_device_config:
+        device_params["device_config"] = device_config
+
+    device = Device(**device_params)
     return device
 
 
@@ -152,6 +207,53 @@ def translate_vlan(vid: str, vlan_name: str, defaults: Defaults) -> VLAN | None:
     return vlan
 
 
+def translate_device_config(config_info: dict):
+    """
+    Translate device configuration from NAPALM format to Diode SDK DeviceConfig entity.
+
+    Args:
+    ----
+        config_info (dict): Dictionary containing configuration data from NAPALM.
+
+    Returns:
+    -------
+        DeviceConfig | None: Translated DeviceConfig entity or None if no config data
+        or if DeviceConfig is not yet available in the SDK.
+
+    """
+    # Return None if DeviceConfig is not yet available in the SDK
+    if not _has_device_config:
+        return None
+
+    if not config_info:
+        return None
+
+    # Extract config components (NAPALM returns strings or None)
+    startup = config_info.get("startup")
+    running = config_info.get("running")
+    candidate = config_info.get("candidate")
+
+    # Convert strings to bytes if needed (DeviceConfig expects bytes)
+    if startup and isinstance(startup, str):
+        startup = startup.encode("utf-8")
+    if running and isinstance(running, str):
+        running = running.encode("utf-8")
+    if candidate and isinstance(candidate, str):
+        candidate = candidate.encode("utf-8")
+
+    # Skip if no actual config data present
+    if not any([startup, running, candidate]):
+        return None
+
+    # No metadata parameter - metadata will be passed at ingest level
+    return DeviceConfig(
+        startup=startup,
+        running=running,
+        candidate=candidate,
+        metadata=None,
+    )
+
+
 def translate_data(data: dict) -> Iterable[Entity]:
     """
     Translate data from NAPALM format to Diode SDK entities.
@@ -171,6 +273,7 @@ def translate_data(data: dict) -> Iterable[Entity]:
     options = data.get("options") or Options()
 
     device_info = data.get("device", {})
+    config_info = data.get("config") or {}
     interfaces = data.get("interface") or {}
     interfaces_ip = data.get("interface_ip") or {}
     if device_info:
@@ -181,8 +284,8 @@ def translate_data(data: dict) -> Iterable[Entity]:
                 f"{data.get('driver', '').upper()} {device_info.get('os_version')}"
             )
             if len(device_info["platform"]) > 100:
-                device_info["platform"] = device_info.get('os_version')[:100]
-        device = translate_device(device_info, defaults)
+                device_info["platform"] = device_info.get("os_version")[:100]
+        device = translate_device(device_info, defaults, config_info)
         entities.append(Entity(device=device))
 
         interface_related_entities = build_interface_entities(

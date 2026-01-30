@@ -207,6 +207,12 @@ class PolicyRunner:
                 "options": config.options,
             }
             try:
+                data["config"] = device.get_config()
+            except Exception as e:
+                logger.warning(
+                    f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting config: {e}. Continuing without config data."
+                )
+            try:
                 data["vlan"] = device.get_vlans()
             except Exception as e:
                 logger.warning(
