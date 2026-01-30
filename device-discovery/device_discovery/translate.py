@@ -83,7 +83,10 @@ def translate_tenant(
 
 
 def translate_device(
-    device_info: dict, defaults: Defaults, config_info: dict | None = None
+    device_info: dict,
+    defaults: Defaults,
+    config_info: dict | None = None,
+    options: Options | None = None,
 ) -> Device:
     """
     Translate device information from NAPALM format to Diode SDK Device entity.
@@ -93,6 +96,7 @@ def translate_device(
         device_info (dict): Dictionary containing device information.
         defaults (Defaults): Default configuration.
         config_info (dict | None): Dictionary containing configuration data from NAPALM.
+        options (Options | None): Discovery options.
 
     Returns:
     -------
@@ -136,7 +140,9 @@ def translate_device(
         serial_number = str(serial_number)
 
     # Translate device configuration if available
-    device_config = translate_device_config(config_info) if config_info else None
+    device_config = None
+    if config_info and options:
+        device_config = translate_device_config(config_info, options)
 
     # Build Device parameters
     device_params = {
@@ -207,13 +213,14 @@ def translate_vlan(vid: str, vlan_name: str, defaults: Defaults) -> VLAN | None:
     return vlan
 
 
-def translate_device_config(config_info: dict):
+def translate_device_config(config_info: dict, options: Options):
     """
     Translate device configuration from NAPALM format to Diode SDK DeviceConfig entity.
 
     Args:
     ----
         config_info (dict): Dictionary containing configuration data from NAPALM.
+        options (Options): Discovery options with config capture flags.
 
     Returns:
     -------
@@ -228,28 +235,35 @@ def translate_device_config(config_info: dict):
     if not config_info:
         return None
 
-    # Extract config components (NAPALM returns strings or None)
-    startup = config_info.get("startup")
-    running = config_info.get("running")
-    candidate = config_info.get("candidate")
+    # Check if any config capture is enabled
+    if not (options.capture_running_config or options.capture_startup_config):
+        return None
 
-    # Convert strings to bytes if needed (DeviceConfig expects bytes)
-    if startup and isinstance(startup, str):
-        startup = startup.encode("utf-8")
-    if running and isinstance(running, str):
-        running = running.encode("utf-8")
-    if candidate and isinstance(candidate, str):
-        candidate = candidate.encode("utf-8")
+    # Extract only the requested config components
+    startup = None
+    running = None
+
+    if options.capture_startup_config:
+        startup = config_info.get("startup")
+        # Convert strings to bytes if needed (DeviceConfig expects bytes)
+        if startup and isinstance(startup, str):
+            startup = startup.encode("utf-8")
+
+    if options.capture_running_config:
+        running = config_info.get("running")
+        # Convert strings to bytes if needed (DeviceConfig expects bytes)
+        if running and isinstance(running, str):
+            running = running.encode("utf-8")
 
     # Skip if no actual config data present
-    if not any([startup, running, candidate]):
+    if not any([startup, running]):
         return None
 
     # No metadata parameter - metadata will be passed at ingest level
     return DeviceConfig(
         startup=startup,
         running=running,
-        candidate=candidate,
+        candidate=None,  # Candidate not captured
         metadata=None,
     )
 
@@ -285,7 +299,7 @@ def translate_data(data: dict) -> Iterable[Entity]:
             )
             if len(device_info["platform"]) > 100:
                 device_info["platform"] = device_info.get("os_version")[:100]
-        device = translate_device(device_info, defaults, config_info)
+        device = translate_device(device_info, defaults, config_info, options)
         entities.append(Entity(device=device))
 
         interface_related_entities = build_interface_entities(

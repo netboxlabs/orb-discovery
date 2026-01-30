@@ -6,7 +6,13 @@ import logging
 import threading
 from typing import Any
 
-from netboxlabs.diode.sdk import DiodeClient, DiodeDryRunClient, DiodeOTLPClient
+from netboxlabs.diode.sdk import (
+    DiodeClient,
+    DiodeDryRunClient,
+    DiodeOTLPClient,
+    create_message_chunks,
+    estimate_message_size,
+)
 
 from device_discovery.translate import translate_data
 from device_discovery.version import version_semver
@@ -119,15 +125,50 @@ class Client:
         with self._lock:
             translated_entities = translate_data(data)
             request_metadata = metadata or {}
-            response = self.diode_client.ingest(
-                entities=translated_entities, metadata=request_metadata
-            )
 
-        hostname = request_metadata.get("hostname") or "unknown-host"
+            # Convert to list for size estimation and chunking
+            entities_list = list(translated_entities)
+            entity_count = len(entities_list)
 
-        if response.errors:
-            logger.error(
-                f"ERROR ingestion failed for {hostname} : {response.errors}"
-            )
-        else:
-            logger.info(f"Hostname {hostname}: Successful ingestion")
+            hostname = request_metadata.get("hostname") or "unknown-host"
+
+            # Check message size and chunk if needed
+            chunk_num = 1
+            size_bytes = estimate_message_size(entities_list)
+
+            if size_bytes > (3.0 * 1024 * 1024):  # 3MB threshold
+                chunks = create_message_chunks(entities_list)
+                chunk_num = len(chunks)
+                logger.info(
+                    f"Hostname {hostname}: Message size {size_bytes} bytes exceeds 3MB, "
+                    f"splitting into {chunk_num} chunks"
+                )
+
+                for i, chunk in enumerate(chunks, 1):
+                    response = self.diode_client.ingest(
+                        entities=chunk, metadata=request_metadata
+                    )
+                    if response.errors:
+                        logger.error(
+                            f"ERROR ingestion failed for {hostname} chunk {i}/{chunk_num}: "
+                            f"{response.errors}"
+                        )
+                        return  # Stop on first error
+
+                logger.info(
+                    f"Hostname {hostname}: Successfully ingested {entity_count} entities "
+                    f"in {chunk_num} chunks"
+                )
+            else:
+                response = self.diode_client.ingest(
+                    entities=entities_list, metadata=request_metadata
+                )
+
+                if response.errors:
+                    logger.error(
+                        f"ERROR ingestion failed for {hostname}: {response.errors}"
+                    )
+                else:
+                    logger.info(
+                        f"Hostname {hostname}: Successfully ingested {entity_count} entities"
+                    )

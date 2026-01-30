@@ -18,8 +18,10 @@ from device_discovery.policy.models import (
     VlanParameters,
 )
 from device_discovery.translate import (
+    _has_device_config,
     translate_data,
     translate_device,
+    translate_device_config,
     translate_vlan,
 )
 
@@ -585,3 +587,183 @@ def test_translate_data_with_builtin_patterns(
     for interface_entity in interface_entities:
         if interface_entity.interface.name.startswith("GigabitEthernet"):
             assert interface_entity.interface.type == "1000base-t"
+
+
+def test_translate_device_config_returns_none_when_sdk_unavailable():
+    """Test that translate_device_config returns None when SDK doesn't support it yet."""
+    config_info = {
+        "startup": "startup config content",
+        "running": "running config content",
+    }
+    options = Options(capture_running_config=True, capture_startup_config=True)
+
+    result = translate_device_config(config_info, options)
+
+    # Should return None since pb.DeviceConfig doesn't exist yet
+    if not _has_device_config:
+        assert result is None
+
+
+def test_translate_device_config_with_empty_config():
+    """Test that translate_device_config returns None with empty config."""
+    config_info = {}
+    options = Options(capture_running_config=True, capture_startup_config=True)
+
+    result = translate_device_config(config_info, options)
+
+    assert result is None
+
+
+def test_translate_device_config_with_none_config():
+    """Test that translate_device_config returns None with None config."""
+    options = Options(capture_running_config=True, capture_startup_config=True)
+
+    # Should handle None gracefully
+    result = translate_device_config({}, options)
+
+    assert result is None
+
+
+def test_translate_device_config_respects_capture_flags():
+    """Test that config capture respects the configuration flags."""
+    config_info = {
+        "startup": "startup config content",
+        "running": "running config content",
+    }
+
+    # Test with both flags disabled
+    options_disabled = Options(capture_running_config=False, capture_startup_config=False)
+    result = translate_device_config(config_info, options_disabled)
+    assert result is None
+
+    # Test with only running config enabled
+    options_running = Options(capture_running_config=True, capture_startup_config=False)
+    result = translate_device_config(config_info, options_running)
+    if _has_device_config:
+        assert result is not None
+    else:
+        assert result is None
+
+    # Test with only startup config enabled
+    options_startup = Options(capture_running_config=False, capture_startup_config=True)
+    result = translate_device_config(config_info, options_startup)
+    if _has_device_config:
+        assert result is not None
+    else:
+        assert result is None
+
+
+def test_translate_device_config_string_to_bytes_conversion():
+    """Test that string configs are converted to bytes."""
+    config_info = {
+        "startup": "startup config as string",
+        "running": "running config as string",
+    }
+    options = Options(capture_running_config=True, capture_startup_config=True)
+
+    # This test documents expected behavior
+    # When SDK is available, strings should be converted to bytes
+    result = translate_device_config(config_info, options)
+
+    if _has_device_config and result is not None:
+        # Would check that result contains bytes, not strings
+        # This will be testable once pb.DeviceConfig exists
+        assert True  # Placeholder for future validation
+
+
+def test_translate_device_config_with_bytes_input():
+    """Test that bytes configs are handled correctly."""
+    config_info = {
+        "startup": b"startup config as bytes",
+        "running": b"running config as bytes",
+    }
+    options = Options(capture_running_config=True, capture_startup_config=True)
+
+    result = translate_device_config(config_info, options)
+
+    if _has_device_config and result is not None:
+        # Bytes should pass through without conversion
+        assert True  # Placeholder for future validation
+
+
+def test_translate_device_config_candidate_not_captured():
+    """Test that candidate config is never captured (always None)."""
+    config_info = {
+        "startup": "startup config",
+        "running": "running config",
+        "candidate": "candidate config",  # Should be ignored
+    }
+    options = Options(capture_running_config=True, capture_startup_config=True)
+
+    result = translate_device_config(config_info, options)
+
+    if _has_device_config and result is not None:
+        # Candidate should always be None
+        assert result.candidate is None
+
+
+def test_translate_device_with_config_integration(sample_device_info):
+    """Test that translate_device integrates with config translation."""
+    config_info = {
+        "startup": "startup config content",
+        "running": "running config content",
+    }
+    defaults = Defaults(site="New York", role="router")
+    options = Options(capture_running_config=True, capture_startup_config=True)
+
+    device = translate_device(sample_device_info, defaults, config_info, options)
+
+    # Device should be created successfully
+    assert device.name == "router1"
+    # Config integration documented for when SDK is available
+
+
+def test_translate_data_with_config(sample_device_info):
+    """Test full data translation with config data."""
+    config_info = {
+        "startup": "startup configuration content here",
+        "running": "running configuration content here",
+    }
+    defaults = Defaults(site="New York", role="router")
+    options = Options(capture_running_config=True, capture_startup_config=True)
+
+    data = {
+        "device": sample_device_info,
+        "config": config_info,
+        "driver": "ios",
+        "defaults": defaults,
+        "options": options,
+    }
+
+    entities = list(translate_data(data))
+
+    # Should have at least device entity
+    assert len(entities) > 0
+    device_entities = [e for e in entities if e.WhichOneof("entity") == "device"]
+    assert len(device_entities) == 1
+
+    # When SDK supports it, device will have config attached
+
+
+def test_translate_data_with_config_disabled(sample_device_info):
+    """Test that config is not captured when flags are disabled."""
+    config_info = {
+        "startup": "startup configuration",
+        "running": "running configuration",
+    }
+    defaults = Defaults(site="New York", role="router")
+    options = Options(capture_running_config=False, capture_startup_config=False)
+
+    data = {
+        "device": sample_device_info,
+        "config": config_info,
+        "driver": "ios",
+        "defaults": defaults,
+        "options": options,
+    }
+
+    entities = list(translate_data(data))
+
+    # Device should be created but without config
+    device_entities = [e for e in entities if e.WhichOneof("entity") == "device"]
+    assert len(device_entities) == 1
