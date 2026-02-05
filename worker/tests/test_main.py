@@ -196,6 +196,7 @@ def test_main_with_debug_flag(mock_parse_args, mock_uvicorn_run, mock_diode_clie
     mock_parse_args.return_value.host = "0.0.0.0"
     mock_parse_args.return_value.port = 8071
     mock_parse_args.return_value.otel_endpoint = None
+    mock_parse_args.return_value.otel_export_period = None
 
     import logging
     with patch.object(sys, "exit", side_effect=Exception("Test Exit")):
@@ -221,6 +222,7 @@ def test_main_without_debug_flag(mock_parse_args, mock_uvicorn_run, mock_diode_c
     mock_parse_args.return_value.host = "0.0.0.0"
     mock_parse_args.return_value.port = 8071
     mock_parse_args.return_value.otel_endpoint = None
+    mock_parse_args.return_value.otel_export_period = None
 
     import logging
     with patch.object(sys, "exit", side_effect=Exception("Test Exit")):
