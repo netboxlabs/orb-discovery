@@ -548,9 +548,7 @@ def test_translate_data_with_interface_patterns(
     entities = list(translate_data(data))
 
     # Find interface entities
-    interface_entities = [
-        e for e in entities if e.WhichOneof("entity") == "interface"
-    ]
+    interface_entities = [e for e in entities if e.WhichOneof("entity") == "interface"]
 
     # Both GigabitEthernet interfaces should match the pattern
     for interface_entity in interface_entities:
@@ -579,9 +577,7 @@ def test_translate_data_with_builtin_patterns(
     entities = list(translate_data(data))
 
     # Find interface entities
-    interface_entities = [
-        e for e in entities if e.WhichOneof("entity") == "interface"
-    ]
+    interface_entities = [e for e in entities if e.WhichOneof("entity") == "interface"]
 
     # Both GigabitEthernet interfaces should match built-in pattern
     for interface_entity in interface_entities:
@@ -602,6 +598,8 @@ def test_translate_device_config_returns_none_when_sdk_unavailable():
     # Should return None since pb.DeviceConfig doesn't exist yet
     if not _has_device_config:
         assert result is None
+    else:
+        assert result is not None
 
 
 def test_translate_device_config_with_empty_config():
@@ -615,11 +613,12 @@ def test_translate_device_config_with_empty_config():
 
 
 def test_translate_device_config_with_none_config():
-    """Test that translate_device_config returns None with None config."""
+    """Test that translate_device_config handles None config_info gracefully."""
     options = Options(capture_running_config=True, capture_startup_config=True)
 
-    # Should handle None gracefully
-    result = translate_device_config({}, options)
+    # translate_device_config expects a dict, but should handle falsy values
+    # When called with empty dict from data.get("config") or {}, should return None
+    result = translate_device_config(None or {}, options)
 
     assert result is None
 
@@ -632,7 +631,9 @@ def test_translate_device_config_respects_capture_flags():
     }
 
     # Test with both flags disabled
-    options_disabled = Options(capture_running_config=False, capture_startup_config=False)
+    options_disabled = Options(
+        capture_running_config=False, capture_startup_config=False
+    )
     result = translate_device_config(config_info, options_disabled)
     assert result is None
 
@@ -661,14 +662,17 @@ def test_translate_device_config_string_to_bytes_conversion():
     }
     options = Options(capture_running_config=True, capture_startup_config=True)
 
-    # This test documents expected behavior
-    # When SDK is available, strings should be converted to bytes
     result = translate_device_config(config_info, options)
 
-    if _has_device_config and result is not None:
-        # Would check that result contains bytes, not strings
-        # This will be testable once pb.DeviceConfig exists
-        assert True  # Placeholder for future validation
+    if not _has_device_config:
+        pytest.skip("pb.DeviceConfig not yet available in SDK")
+
+    # When SDK is available, verify strings were converted to bytes
+    assert result is not None
+    assert isinstance(result.running, bytes)
+    assert isinstance(result.startup, bytes)
+    assert result.running == b"running config as string"
+    assert result.startup == b"startup config as string"
 
 
 def test_translate_device_config_with_bytes_input():
@@ -681,9 +685,15 @@ def test_translate_device_config_with_bytes_input():
 
     result = translate_device_config(config_info, options)
 
-    if _has_device_config and result is not None:
-        # Bytes should pass through without conversion
-        assert True  # Placeholder for future validation
+    if not _has_device_config:
+        pytest.skip("pb.DeviceConfig not yet available in SDK")
+
+    # Bytes should pass through without conversion
+    assert result is not None
+    assert isinstance(result.running, bytes)
+    assert isinstance(result.startup, bytes)
+    assert result.running == b"running config as bytes"
+    assert result.startup == b"startup config as bytes"
 
 
 def test_translate_device_config_candidate_not_captured():
@@ -737,8 +747,8 @@ def test_translate_data_with_config(sample_device_info):
 
     entities = list(translate_data(data))
 
-    # Should have at least device entity
-    assert len(entities) > 0
+    # Should have exactly one device entity (no interfaces/IPs in data)
+    assert len(entities) == 1
     device_entities = [e for e in entities if e.WhichOneof("entity") == "device"]
     assert len(device_entities) == 1
 

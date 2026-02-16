@@ -256,7 +256,7 @@ def translate_device_config(config_info: dict, options: Options):
             running = running.encode("utf-8")
 
     # Skip if no actual config data present
-    if not any([startup, running]):
+    if not (startup or running):
         return None
 
     # No metadata parameter - metadata will be passed at ingest level

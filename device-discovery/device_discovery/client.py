@@ -19,6 +19,7 @@ from device_discovery.version import version_semver
 
 APP_NAME = "device-discovery"
 APP_VERSION = version_semver()
+MAX_MESSAGE_SIZE_BYTES = 3 * 1024 * 1024  # 3MB threshold for chunking
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -127,6 +128,9 @@ class Client:
             request_metadata = metadata or {}
 
             # Convert to list for size estimation and chunking
+            # Note: This materializes the entire generator in memory, which may
+            # double memory usage for large datasets. However, both estimate_message_size()
+            # and create_message_chunks() require a list/sequence of entities.
             entities_list = list(translated_entities)
             entity_count = len(entities_list)
 
@@ -136,7 +140,7 @@ class Client:
             chunk_num = 1
             size_bytes = estimate_message_size(entities_list)
 
-            if size_bytes > (3.0 * 1024 * 1024):  # 3MB threshold
+            if size_bytes > MAX_MESSAGE_SIZE_BYTES:
                 chunks = create_message_chunks(entities_list)
                 chunk_num = len(chunks)
                 logger.info(
@@ -149,11 +153,12 @@ class Client:
                         entities=chunk, metadata=request_metadata
                     )
                     if response.errors:
-                        logger.error(
-                            f"ERROR ingestion failed for {hostname} chunk {i}/{chunk_num}: "
+                        error_msg = (
+                            f"Ingestion failed for {hostname} chunk {i}/{chunk_num}: "
                             f"{response.errors}"
                         )
-                        return  # Stop on first error
+                        logger.error(f"ERROR {error_msg}")
+                        raise RuntimeError(error_msg)
 
                 logger.info(
                     f"Hostname {hostname}: Successfully ingested {entity_count} entities "
@@ -165,10 +170,10 @@ class Client:
                 )
 
                 if response.errors:
-                    logger.error(
-                        f"ERROR ingestion failed for {hostname}: {response.errors}"
-                    )
-                else:
-                    logger.info(
-                        f"Hostname {hostname}: Successfully ingested {entity_count} entities"
-                    )
+                    error_msg = f"Ingestion failed for {hostname}: {response.errors}"
+                    logger.error(f"ERROR {error_msg}")
+                    raise RuntimeError(error_msg)
+
+                logger.info(
+                    f"Hostname {hostname}: Successfully ingested {entity_count} entities"
+                )
