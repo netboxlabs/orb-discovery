@@ -128,9 +128,6 @@ class Client:
             request_metadata = metadata or {}
 
             # Convert to list for size estimation and chunking
-            # Note: This materializes the entire generator in memory, which may
-            # double memory usage for large datasets. However, both estimate_message_size()
-            # and create_message_chunks() require a list/sequence of entities.
             entities_list = list(translated_entities)
             entity_count = len(entities_list)
 

@@ -612,15 +612,24 @@ def test_translate_device_config_with_empty_config():
     assert result is None
 
 
-def test_translate_device_config_with_none_config():
-    """Test that translate_device_config handles None config_info gracefully."""
+def test_translate_device_handles_none_config():
+    """Test that translate_device handles None config_info gracefully in the integration."""
+    device_info = {
+        "hostname": "test-router",
+        "model": "ISR4451",
+        "vendor": "Cisco",
+        "serial_number": "123456",
+        "platform": "ios",
+    }
+    defaults = Defaults(site="Test Site", role="router")
     options = Options(capture_running_config=True, capture_startup_config=True)
 
-    # translate_device_config expects a dict, but should handle falsy values
-    # When called with empty dict from data.get("config") or {}, should return None
-    result = translate_device_config(None or {}, options)
+    # translate_device should handle None config_info without error
+    # The 'if config_info and options' check will skip config translation
+    device = translate_device(device_info, defaults, None, options)
 
-    assert result is None
+    assert device is not None
+    assert device.name == "test-router"
 
 
 def test_translate_device_config_respects_capture_flags():
