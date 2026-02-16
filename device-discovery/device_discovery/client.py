@@ -134,7 +134,6 @@ class Client:
             hostname = request_metadata.get("hostname") or "unknown-host"
 
             # Check message size and chunk if needed
-            chunk_num = 1
             size_bytes = estimate_message_size(entities_list)
 
             if size_bytes > MAX_MESSAGE_SIZE_BYTES:

@@ -246,20 +246,23 @@ def translate_device_config(config_info: dict, options: Options):
     if options.capture_startup_config:
         startup = config_info.get("startup")
         # Convert strings to bytes if needed (DeviceConfig expects bytes)
-        if startup and isinstance(startup, str):
+        # Check isinstance first to handle empty strings correctly
+        if isinstance(startup, str):
             startup = startup.encode("utf-8")
 
     if options.capture_running_config:
         running = config_info.get("running")
         # Convert strings to bytes if needed (DeviceConfig expects bytes)
-        if running and isinstance(running, str):
+        # Check isinstance first to handle empty strings correctly
+        if isinstance(running, str):
             running = running.encode("utf-8")
 
     # Skip if no actual config data present
     if not (startup or running):
         return None
 
-    # No metadata parameter - metadata will be passed at ingest level
+    # Metadata is not captured for device configs - device association is via
+    # the Device entity's device_config field when SDK support is enabled
     return DeviceConfig(
         startup=startup,
         running=running,

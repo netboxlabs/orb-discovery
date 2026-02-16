@@ -705,6 +705,27 @@ def test_translate_device_config_with_bytes_input():
     assert result.startup == b"startup config as bytes"
 
 
+def test_translate_device_config_with_empty_string():
+    """Test that empty string configs are properly encoded to bytes."""
+    config_info = {
+        "startup": "",  # Empty string should be encoded to b""
+        "running": "running config content",
+    }
+    options = Options(capture_running_config=True, capture_startup_config=True)
+
+    result = translate_device_config(config_info, options)
+
+    if not _has_device_config:
+        pytest.skip("pb.DeviceConfig not yet available in SDK")
+
+    # Empty strings should be encoded to empty bytes
+    assert result is not None
+    assert isinstance(result.startup, bytes)
+    assert result.startup == b""
+    assert isinstance(result.running, bytes)
+    assert result.running == b"running config content"
+
+
 def test_translate_device_config_candidate_not_captured():
     """Test that candidate config is never captured (always None)."""
     config_info = {
