@@ -10,6 +10,7 @@ from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
 from netboxlabs.diode.sdk.ingester import (
     VLAN,
     Device,
+    DeviceConfig,
     DeviceType,
     Entity,
     Location,
@@ -29,37 +30,6 @@ def convert_dict_to_struct(data: dict[str, Any] | None) -> Struct | None:
     struct = Struct()
     struct.update(data)
     return struct
-
-
-# Check if DeviceConfig protobuf message is available in the SDK
-# TODO: Remove this check once pb.DeviceConfig is added to the Diode SDK
-_has_device_config = hasattr(pb, "DeviceConfig")
-
-
-if _has_device_config:
-
-    class DeviceConfig:
-        """wrapper for netboxlabs.diode.sdk.diode.v1.ingester_pb2.DeviceConfig."""
-
-        def __new__(
-            cls,
-            startup: bytes | None = None,
-            running: bytes | None = None,
-            candidate: bytes | None = None,
-            metadata: dict[str, Any] | None = None,
-        ):
-            """Create a new DeviceConfig."""
-            metadata = convert_dict_to_struct(metadata)
-            result = pb.DeviceConfig(
-                startup=startup,
-                running=running,
-                candidate=candidate,
-                metadata=metadata,
-            )
-            return result
-
-else:
-    DeviceConfig = None  # Placeholder until pb.DeviceConfig is available
 
 
 def translate_tenant(
@@ -139,7 +109,6 @@ def translate_device(
     elif serial_number is not None and not isinstance(serial_number, str | bytes):
         serial_number = str(serial_number)
 
-    # Translate device configuration if available
     device_config = None
     if config_info and options:
         device_config = translate_device_config(config_info, options)
@@ -158,11 +127,8 @@ def translate_device(
         "tenant": translate_tenant(defaults.tenant),
         "description": description,
         "comments": comments,
+        "config": device_config,
     }
-
-    # Add device_config if SDK supports it and config is available
-    if device_config is not None and _has_device_config:
-        device_params["device_config"] = device_config
 
     device = Device(**device_params)
     return device
@@ -213,7 +179,7 @@ def translate_vlan(vid: str, vlan_name: str, defaults: Defaults) -> VLAN | None:
     return vlan
 
 
-def translate_device_config(config_info: dict, options: Options):
+def translate_device_config(config_info: dict, options: Options) -> DeviceConfig | None:
     """
     Translate device configuration from NAPALM format to Diode SDK DeviceConfig entity.
 
@@ -224,14 +190,9 @@ def translate_device_config(config_info: dict, options: Options):
 
     Returns:
     -------
-        DeviceConfig | None: Translated DeviceConfig entity or None if no config data
-        or if DeviceConfig is not yet available in the SDK.
+        DeviceConfig | None: Translated DeviceConfig entity or None if no config data.
 
     """
-    # Return None if DeviceConfig is not yet available in the SDK
-    if not _has_device_config:
-        return None
-
     if not config_info:
         return None
 

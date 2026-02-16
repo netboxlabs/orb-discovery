@@ -18,7 +18,6 @@ from device_discovery.policy.models import (
     VlanParameters,
 )
 from device_discovery.translate import (
-    _has_device_config,
     translate_data,
     translate_device,
     translate_device_config,
@@ -585,8 +584,8 @@ def test_translate_data_with_builtin_patterns(
             assert interface_entity.interface.type == "1000base-t"
 
 
-def test_translate_device_config_returns_none_when_sdk_unavailable():
-    """Test that translate_device_config returns None when SDK doesn't support it yet."""
+def test_translate_device_config_with_valid_config():
+    """Test that translate_device_config returns DeviceConfig with valid data."""
     config_info = {
         "startup": "startup config content",
         "running": "running config content",
@@ -595,11 +594,12 @@ def test_translate_device_config_returns_none_when_sdk_unavailable():
 
     result = translate_device_config(config_info, options)
 
-    # Should return None since pb.DeviceConfig doesn't exist yet
-    if not _has_device_config:
-        assert result is None
-    else:
-        assert result is not None
+    # Should return a valid DeviceConfig
+    assert result is not None
+    assert result.startup == b"startup config content"
+    assert result.running == b"running config content"
+    # Protobuf uses empty bytes for unset byte fields
+    assert result.candidate == b""
 
 
 def test_translate_device_config_with_empty_config():
@@ -649,18 +649,18 @@ def test_translate_device_config_respects_capture_flags():
     # Test with only running config enabled
     options_running = Options(capture_running_config=True, capture_startup_config=False)
     result = translate_device_config(config_info, options_running)
-    if _has_device_config:
-        assert result is not None
-    else:
-        assert result is None
+    assert result is not None
+    assert result.running == b"running config content"
+    # Protobuf uses empty bytes for unset byte fields
+    assert result.startup == b""
 
     # Test with only startup config enabled
     options_startup = Options(capture_running_config=False, capture_startup_config=True)
     result = translate_device_config(config_info, options_startup)
-    if _has_device_config:
-        assert result is not None
-    else:
-        assert result is None
+    assert result is not None
+    assert result.startup == b"startup config content"
+    # Protobuf uses empty bytes for unset byte fields
+    assert result.running == b""
 
 
 def test_translate_device_config_string_to_bytes_conversion():
@@ -673,10 +673,7 @@ def test_translate_device_config_string_to_bytes_conversion():
 
     result = translate_device_config(config_info, options)
 
-    if not _has_device_config:
-        pytest.skip("pb.DeviceConfig not yet available in SDK")
-
-    # When SDK is available, verify strings were converted to bytes
+    # Verify strings were converted to bytes
     assert result is not None
     assert isinstance(result.running, bytes)
     assert isinstance(result.startup, bytes)
@@ -693,9 +690,6 @@ def test_translate_device_config_with_bytes_input():
     options = Options(capture_running_config=True, capture_startup_config=True)
 
     result = translate_device_config(config_info, options)
-
-    if not _has_device_config:
-        pytest.skip("pb.DeviceConfig not yet available in SDK")
 
     # Bytes should pass through without conversion
     assert result is not None
@@ -714,9 +708,6 @@ def test_translate_device_config_with_empty_string():
     options = Options(capture_running_config=True, capture_startup_config=True)
 
     result = translate_device_config(config_info, options)
-
-    if not _has_device_config:
-        pytest.skip("pb.DeviceConfig not yet available in SDK")
 
     # Empty strings should be encoded to empty bytes
     assert result is not None
@@ -737,9 +728,9 @@ def test_translate_device_config_candidate_not_captured():
 
     result = translate_device_config(config_info, options)
 
-    if _has_device_config and result is not None:
-        # Candidate should always be None
-        assert result.candidate is None
+    # Candidate should always be empty (not captured)
+    assert result is not None
+    assert result.candidate == b""
 
 
 def test_translate_device_with_config_integration(sample_device_info):
