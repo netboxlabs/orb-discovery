@@ -127,9 +127,10 @@ def translate_device(
         "tenant": translate_tenant(defaults.tenant),
         "description": description,
         "comments": comments,
-        "config": device_config,
     }
 
+    if device_config is not None:
+        device_params["config"] = device_config
     device = Device(**device_params)
     return device
 
