@@ -3,9 +3,7 @@
 """Translate from NAPALM output format to Diode SDK entities."""
 
 from collections.abc import Iterable
-from typing import Any
 
-from google.protobuf.struct_pb2 import Struct
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
 from netboxlabs.diode.sdk.ingester import (
     VLAN,
@@ -21,15 +19,6 @@ from netboxlabs.diode.sdk.ingester import (
 
 from device_discovery.interface import build_interface_entities
 from device_discovery.policy.models import Defaults, Options, TenantParameters
-
-
-def convert_dict_to_struct(data: dict[str, Any] | None) -> Struct | None:
-    """Convert a dictionary to a protobuf Struct."""
-    if data is None:
-        return None
-    struct = Struct()
-    struct.update(data)
-    return struct
 
 
 def translate_tenant(
