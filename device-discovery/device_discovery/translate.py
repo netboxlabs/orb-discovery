@@ -209,7 +209,7 @@ def translate_device_config(config_info: dict, options: Options) -> DeviceConfig
             running = running.encode("utf-8")
 
     # Skip if no actual config data present
-    if not (startup or running):
+    if startup is None and running is None:
         return None
 
     # Metadata is not captured for device configs - device association is via
