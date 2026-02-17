@@ -228,7 +228,7 @@ def translate_device_config(config_info: dict, options: Options) -> DeviceConfig
     return DeviceConfig(
         startup=startup,
         running=running,
-        candidate=None,  # Candidate not captured
+        candidate=None,
         metadata=None,
     )
 
@@ -250,7 +250,6 @@ def translate_data(data: dict) -> Iterable[Entity]:
 
     defaults = data.get("defaults") or Defaults()
     options = data.get("options") or Options()
-
     device_info = data.get("device", {})
     config_info = data.get("config") or {}
     interfaces = data.get("interface") or {}
@@ -266,7 +265,7 @@ def translate_data(data: dict) -> Iterable[Entity]:
                 device_info["platform"] = device_info.get("os_version")[:100]
         device = translate_device(device_info, defaults, config_info, options)
         entities.append(Entity(device=device))
-
+        device.ClearField("config")
         interface_related_entities = build_interface_entities(
             device, interfaces, interfaces_ip, defaults
         )

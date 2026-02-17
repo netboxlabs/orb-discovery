@@ -207,9 +207,9 @@ class PolicyRunner:
                 "options": config.options,
             }
             # Only retrieve config if at least one capture flag is enabled
-            options = config.options or {}
-            if getattr(options, "capture_running_config", False) or getattr(
-                options, "capture_startup_config", False
+            if config.options and (
+                config.options.capture_running_config
+                or config.options.capture_startup_config
             ):
                 try:
                     data["config"] = device.get_config()
