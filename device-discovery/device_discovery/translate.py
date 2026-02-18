@@ -2,6 +2,7 @@
 # Copyright 2024 NetBox Labs Inc
 """Translate from NAPALM output format to Diode SDK entities."""
 
+import copy
 from collections.abc import Iterable
 
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
@@ -254,9 +255,10 @@ def translate_data(data: dict) -> Iterable[Entity]:
                 device_info["platform"] = device_info.get("os_version")[:100]
         device = translate_device(device_info, defaults, config_info, options)
         entities.append(Entity(device=device))
-        device.ClearField("config")
+        device_for_interfaces = copy.deepcopy(device)
+        device_for_interfaces.ClearField("config")
         interface_related_entities = build_interface_entities(
-            device, interfaces, interfaces_ip, defaults
+            device_for_interfaces, interfaces, interfaces_ip, defaults
         )
         entities.extend(interface_related_entities)
 
