@@ -230,6 +230,7 @@ func queryTargetRunner(clientFactory snmp.ClientFactory, mappingEntries []config
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mappingConfig: &config.Mapping{Entries: mappingEntries},
 		scope:         config.Scope{Authentication: config.Authentication{}},
+		config:        config.PolicyConfig{Retries: 0, Defaults: config.Defaults{}},
 		snmpTimeout:   time.Second,
 		ClientFactory: clientFactory,
 	}

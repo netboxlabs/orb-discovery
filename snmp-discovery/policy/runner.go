@@ -373,6 +373,9 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 		oids mapping.ObjectIDValueMap
 		err  error
 	}
+	// The buffered channel ensures the goroutine can always send its result and exit,
+	// even if we have already returned due to context cancellation. The goroutine is
+	// bounded by snmpTimeout (set on the SNMP client), so it is not a permanent leak.
 	resultCh := make(chan walkResult, 1)
 	go func() {
 		oids, err := host.Walk(objectIDs)
