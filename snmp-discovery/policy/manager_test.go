@@ -38,7 +38,7 @@ func (m *MockRunner) Stop() error {
 
 func TestManagerParsePolicies(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil, "")
 	assert.NoError(t, err)
 
 	t.Run("Valid Policy", func(t *testing.T) {
@@ -374,7 +374,7 @@ func TestManagerParsePolicies(t *testing.T) {
 
 func TestManagerPolicyLifecycle(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil, "")
 	assert.NoError(t, err)
 	yamlData := []byte(`
         policies:
@@ -466,7 +466,7 @@ func TestManagerGetCapabilities(t *testing.T) {
 
 func TestManagerApplyDefaults_RoleAndSite(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil, "")
 	assert.NoError(t, err)
 
 	t.Run("Empty Role gets set to undefined", func(t *testing.T) {
@@ -587,7 +587,7 @@ func TestManagerApplyDefaults_RoleAndSite(t *testing.T) {
 
 func TestManagerApplyDefaults_Location(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil, "")
 	assert.NoError(t, err)
 
 	t.Run("Existing Location value is preserved", func(t *testing.T) {
@@ -665,7 +665,7 @@ func TestManagerApplyDefaults_Location(t *testing.T) {
 
 func TestManagerParsePoliciesWithPerTargetAuth(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil, "")
 	assert.NoError(t, err)
 
 	t.Run("Valid Per-Target Auth - SNMPv2c", func(t *testing.T) {
@@ -960,7 +960,7 @@ devices:
 	// Create mock manufacturer lookup
 	manufacturerLookup := &data.ManufacturerLookup{}
 
-	manager, err := policy.NewManager(ctx, logger, mockClient, manufacturerLookup)
+	manager, err := policy.NewManager(ctx, logger, mockClient, manufacturerLookup, "")
 	assert.NoError(t, err)
 
 	// Create a policy with device lookup extensions directory
@@ -993,7 +993,7 @@ devices:
 
 func TestManagerParsePoliciesWithOverrideDefaults(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil, "")
 	assert.NoError(t, err)
 
 	t.Run("Valid Per-Target Override Defaults - Basic", func(t *testing.T) {

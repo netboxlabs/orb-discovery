@@ -15,6 +15,9 @@ FROM alpine:3.22
 # Copy the binary
 COPY --from=builder /build/snmp-discovery /usr/local/bin/snmp-discovery
 
+# Copy bundled ktranslate SNMP profiles to the default profiles directory
+COPY --from=builder /src/snmp-discovery/data/snmp-profiles /usr/local/share/snmp-profiles
+
 LABEL maintainer="techops@netboxlabs.com"
 LABEL org.opencontainers.image.title="Orb SNMP Discovery"
 LABEL org.opencontainers.image.url="https://github.com/netboxlabs/orb-discovery/tree/release/snmp-discovery"

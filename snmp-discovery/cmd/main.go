@@ -41,6 +41,9 @@ func main() {
 	otelEndpoint := flag.String("otel-endpoint", "", "OpenTelemetry exporter endpoint (e.g. localhost:4317)."+
 		" Environment variable can be used by wrapping it in ${} (e.g. ${OTEL_ENDPOINT})")
 	otelExportPeriod := flag.Int("otel-export-period", 10, "Period in seconds between OpenTelemetry exports")
+	snmpProfilesDir := flag.String("snmp-profiles-dir", "", "default directory for ktranslate-compatible SNMP profile YAML files."+
+		" Overrides the built-in default (/usr/local/share/snmp-profiles). Per-policy profiles_dir still takes precedence."+
+		" Environment variable can be used by wrapping it in ${} (e.g. ${SNMP_PROFILES_DIR})")
 
 	flag.Parse()
 
@@ -107,7 +110,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	policyManager, err := policy.NewManager(ctx, logger, client, manufacturers)
+	policyManager, err := policy.NewManager(ctx, logger, client, manufacturers, env.ResolveEnvOrExit(*snmpProfilesDir))
 	if err != nil {
 		logger.Error("failed to create policy manager", "error", err)
 		os.Exit(1)
