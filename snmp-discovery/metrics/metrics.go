@@ -177,6 +177,11 @@ func GetDiscoveryAttempts() metric.Int64Counter {
 	return GetCounter("discovery_attempts", "Number of SNMP discovery attempts")
 }
 
+// GetMeter returns the global meter, or nil if metrics are not configured.
+func GetMeter() metric.Meter {
+	return meter
+}
+
 // ResetMeter resets the meter to nil for testing purposes.
 func ResetMeter() {
 	meter = nil

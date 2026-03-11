@@ -333,6 +333,7 @@ func (r *Runner) runMetrics(target config.Target) {
 		return
 	}
 	policyName := r.ctx.Value(policyKey).(string)
+	r.logger.Debug("Running SNMP metrics collection", "host", target.Host, "policy", policyName)
 	ctx, cancel := context.WithTimeout(r.ctx, r.metricsInterval)
 	defer cancel()
 	auth := r.resolveTargetAuthentication(target)

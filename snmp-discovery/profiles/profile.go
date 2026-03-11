@@ -46,11 +46,12 @@ type Profile struct {
 // MetricEntry is one element in the top-level metrics list.
 // It represents either a scalar metric (Symbol) or a table metric (Table + Symbols).
 type MetricEntry struct {
-	MIB        string      `yaml:"MIB"`
-	Symbol     *Symbol     `yaml:"symbol"`
-	Table      *Table      `yaml:"table"`
-	Symbols    []Symbol    `yaml:"symbols"`
-	MetricTags []MetricTag `yaml:"metric_tags"`
+	MIB           string      `yaml:"MIB"`
+	Symbol        *Symbol     `yaml:"symbol"`
+	Table         *Table      `yaml:"table"`
+	Symbols       []Symbol    `yaml:"symbols"`
+	MetricTags    []MetricTag `yaml:"metric_tags"`
+	WalkFullTable bool        `yaml:"walk_full_table,omitempty"`
 }
 
 // Symbol represents a single scalar SNMP OID to collect as a metric.

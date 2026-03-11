@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gosnmp/gosnmp"
@@ -28,6 +29,12 @@ const (
 	sysNameOID     = "1.3.6.1.2.1.1.5"
 )
 
+// observedPoint holds a single metric observation with its attribute set.
+type observedPoint struct {
+	value int64
+	attrs []attribute.KeyValue
+}
+
 // MetricsCollector collects SNMP operational metrics from devices using ktranslate profiles
 // and exports them via the configured OTLP endpoint.
 type MetricsCollector struct {
@@ -37,6 +44,19 @@ type MetricsCollector struct {
 	logger        *slog.Logger
 	snmpTimeout   time.Duration
 	retries       int
+
+	pollMu    sync.Mutex
+	pollState map[string]map[string]time.Time // host -> symbolOID -> lastPoll
+
+	// Observable gauge store: device_ip -> metricName -> observations.
+	// Updated after each CollectTarget run; read by OTLP callbacks on every export cycle.
+	storeMu     sync.RWMutex
+	deviceStore map[string]map[string][]observedPoint
+
+	// Registered observable gauge instruments (one per unique metric name).
+	gaugeMu       sync.Mutex
+	instruments   map[string]metric.Int64ObservableGauge
+	registrations []metric.Registration // kept alive to prevent GC
 }
 
 // NewMetricsCollector creates a MetricsCollector.
@@ -48,7 +68,67 @@ func NewMetricsCollector(clientFactory snmp.ClientFactory, matcher *profiles.Mat
 		logger:        logger,
 		snmpTimeout:   snmpTimeout,
 		retries:       retries,
+		pollState:     make(map[string]map[string]time.Time),
+		deviceStore:   make(map[string]map[string][]observedPoint),
+		instruments:   make(map[string]metric.Int64ObservableGauge),
 	}
+}
+
+// isPollReady returns true if the symbol OID is due to be polled for the given host.
+// pollTimeSec == 0 means always poll. Updates the last-poll timestamp on true.
+func (c *MetricsCollector) isPollReady(host, oid string, pollTimeSec int) bool {
+	if pollTimeSec <= 0 {
+		return true
+	}
+	c.pollMu.Lock()
+	defer c.pollMu.Unlock()
+	if c.pollState[host] == nil {
+		c.pollState[host] = make(map[string]time.Time)
+	}
+	now := time.Now()
+	if last, ok := c.pollState[host][oid]; ok && now.Before(last.Add(time.Duration(pollTimeSec)*time.Second)) {
+		return false
+	}
+	c.pollState[host][oid] = now
+	return true
+}
+
+// ensureInstrument lazily registers an observable gauge callback for metricName.
+// The callback reads from the shared deviceStore on every OTLP export cycle.
+func (c *MetricsCollector) ensureInstrument(name, description string) {
+	c.gaugeMu.Lock()
+	defer c.gaugeMu.Unlock()
+	if _, ok := c.instruments[name]; ok {
+		return
+	}
+	m := metrics.GetMeter()
+	if m == nil {
+		return
+	}
+	g, err := m.Int64ObservableGauge(name, metric.WithDescription(description))
+	if err != nil {
+		c.logger.Error("Failed to create observable gauge", "name", name, "error", err)
+		return
+	}
+	// Capture name and g by value for the closure.
+	gInst := g
+	metricName := name
+	reg, err := m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+		c.storeMu.RLock()
+		defer c.storeMu.RUnlock()
+		for _, deviceMetrics := range c.deviceStore {
+			for _, pt := range deviceMetrics[metricName] {
+				o.ObserveInt64(gInst, pt.value, metric.WithAttributes(pt.attrs...))
+			}
+		}
+		return nil
+	}, gInst)
+	if err != nil {
+		c.logger.Error("Failed to register observable gauge callback", "name", name, "error", err)
+		return
+	}
+	c.instruments[name] = g
+	c.registrations = append(c.registrations, reg)
 }
 
 // CollectTarget collects SNMP metrics from a single target using its matched profile.
@@ -79,7 +159,7 @@ func (c *MetricsCollector) CollectTarget(ctx context.Context, target config.Targ
 
 	profile, ok := c.matcher.MatchWithDescr(sysOIDValue, sysDescr)
 	if !ok {
-		c.logger.Debug("No SNMP profile matched", "host", target.Host, "sysObjectID", sysOIDValue)
+		c.logger.Debug("No SNMP profile matched, skipping metrics collection", "host", target.Host, "sysObjectID", sysOIDValue)
 		return nil
 	}
 	c.logger.Debug("Matched SNMP profile", "host", target.Host, "sysObjectID", sysOIDValue, "profile", profile.FileName)
@@ -105,16 +185,45 @@ func (c *MetricsCollector) CollectTarget(ctx context.Context, target config.Targ
 	deviceTagAttrs := c.collectDeviceTags(walker, profile.MetricTags)
 	baseAttrs = append(baseAttrs, deviceTagAttrs...)
 
+	// localBuf accumulates fresh observations for this run.
+	// throttledMetrics records metric names skipped due to poll_time_sec not elapsed.
+	localBuf := make(map[string][]observedPoint)
+	throttledMetrics := make(map[string]struct{})
+
 	for _, entry := range profile.Metrics {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if entry.Symbol != nil {
-			c.collectScalar(ctx, walker, entry.Symbol, baseAttrs)
+			c.collectScalar(ctx, walker, entry.Symbol, baseAttrs, target.Host, localBuf, throttledMetrics)
 		} else if entry.Table != nil {
-			c.collectTable(ctx, walker, &entry, baseAttrs)
+			c.collectTable(ctx, walker, &entry, baseAttrs, target.Host, localBuf, throttledMetrics)
 		}
 	}
+
+	// Rebuild the device store:
+	// - throttled metrics: carry last-known value forward (poll not yet due)
+	// - polled metrics: use fresh values from localBuf (empty = device doesn't support that OID)
+	// This prevents stale rows from persisting when a table row disappears.
+	c.storeMu.Lock()
+	prevStore := c.deviceStore[target.Host]
+	newStore := make(map[string][]observedPoint, len(localBuf)+len(throttledMetrics))
+	for metricName := range throttledMetrics {
+		if pts, ok := prevStore[metricName]; ok {
+			newStore[metricName] = pts
+		}
+	}
+	for name, pts := range localBuf {
+		newStore[name] = pts
+	}
+	c.deviceStore[target.Host] = newStore
+	c.storeMu.Unlock()
+
+	// Ensure an observable gauge callback is registered for each metric name.
+	for name := range newStore {
+		c.ensureInstrument(name, name+" (SNMP profile metric)")
+	}
+
 	return nil
 }
 
@@ -143,8 +252,14 @@ func (c *MetricsCollector) collectDeviceTags(walker snmp.Walker, metricTags []pr
 	return attrs
 }
 
-// collectScalar collects a single scalar OID metric.
-func (c *MetricsCollector) collectScalar(ctx context.Context, walker snmp.Walker, sym *profiles.Symbol, baseAttrs []attribute.KeyValue) {
+// collectScalar collects a single scalar OID metric into localBuf.
+// Records the metric name in throttledMetrics when poll_time_sec has not elapsed.
+func (c *MetricsCollector) collectScalar(_ context.Context, walker snmp.Walker, sym *profiles.Symbol, baseAttrs []attribute.KeyValue, host string, localBuf map[string][]observedPoint, throttledMetrics map[string]struct{}) {
+	metricName := buildMetricName(sym.Name)
+	if !c.isPollReady(host, sym.OID, sym.PollTimeSec) {
+		throttledMetrics[metricName] = struct{}{}
+		return
+	}
 	pdus, err := walker.Walk(sym.OID, 0)
 	if err != nil {
 		c.logger.Debug("Error walking scalar OID", "oid", sym.OID, "name", sym.Name, "error", err)
@@ -171,10 +286,7 @@ func (c *MetricsCollector) collectScalar(ctx context.Context, walker snmp.Walker
 			attrs = append(attrs, attribute.String(sym.Name+"_value", strVal))
 		}
 
-		g := metrics.GetGauge(buildMetricName(sym.Name), sym.Name+" (SNMP profile metric)")
-		if g != nil {
-			g.Record(ctx, val, metric.WithAttributes(attrs...))
-		}
+		localBuf[metricName] = append(localBuf[metricName], observedPoint{value: val, attrs: attrs})
 	}
 }
 
@@ -185,9 +297,36 @@ type conditionCheck struct {
 }
 
 // collectTable collects all columns in an SNMP table, joining metric and tag columns by row index.
-// Symbols with a condition field are only emitted for rows where the condition is satisfied.
-func (c *MetricsCollector) collectTable(ctx context.Context, walker snmp.Walker, entry *profiles.MetricEntry, baseAttrs []attribute.KeyValue) {
-	// --- Tag columns ---
+func (c *MetricsCollector) collectTable(ctx context.Context, walker snmp.Walker, entry *profiles.MetricEntry, baseAttrs []attribute.KeyValue, host string, localBuf map[string][]observedPoint, throttledMetrics map[string]struct{}) {
+	// --- Phase 1: decide which symbols need polling this run ---
+	type symState struct {
+		sym       *profiles.Symbol
+		throttled bool
+	}
+	states := make([]symState, len(entry.Symbols))
+	anyActive := false
+	for i := range entry.Symbols {
+		sym := &entry.Symbols[i]
+		if c.isPollReady(host, sym.OID, sym.PollTimeSec) {
+			states[i] = symState{sym: sym, throttled: false}
+			anyActive = true
+		} else {
+			states[i] = symState{sym: sym, throttled: true}
+			throttledMetrics[buildMetricName(sym.Name)] = struct{}{}
+		}
+	}
+	if !anyActive {
+		return // all symbols throttled; skip all SNMP walks
+	}
+
+	// --- Phase 2: obtain PDUs (walk_full_table or per-column walks) ---
+	// columnPDUs maps columnOID -> (fullOID -> PDU), used for both metric and condition columns.
+	var columnPDUs map[string]map[string]snmp.PDU
+	if entry.WalkFullTable && entry.Table != nil {
+		columnPDUs = c.walkFullTable(walker, entry)
+	}
+
+	// --- Phase 3: walk tag columns ---
 	// rowTags: rowIndex -> tag name -> tag value string
 	rowTags := make(map[string]map[string]string)
 	for _, mt := range entry.MetricTags {
@@ -195,10 +334,16 @@ func (c *MetricsCollector) collectTable(ctx context.Context, walker snmp.Walker,
 		if col == nil || col.OID == "" {
 			continue
 		}
-		pdus, err := walker.Walk(col.OID, 1)
-		if err != nil {
-			c.logger.Debug("Error walking tag column", "oid", col.OID, "tag", mt.Tag, "error", err)
-			continue
+		var pdus map[string]snmp.PDU
+		if columnPDUs != nil {
+			pdus = columnPDUs[col.OID]
+		} else {
+			var err error
+			pdus, err = walker.Walk(col.OID, 1)
+			if err != nil {
+				c.logger.Debug("Error walking tag column", "oid", col.OID, "tag", mt.Tag, "error", err)
+				continue
+			}
 		}
 		for fullOID, pdu := range pdus {
 			rowIdx := extractRowIndex(fullOID, col.OID)
@@ -213,46 +358,46 @@ func (c *MetricsCollector) collectTable(ctx context.Context, walker snmp.Walker,
 		}
 	}
 
-	// --- Conditions ---
-	// Build a name->OID index for all symbols in this table entry.
+	// --- Phase 4: parse and walk condition columns (active symbols only) ---
 	symOIDByName := make(map[string]string, len(entry.Symbols))
 	for _, sym := range entry.Symbols {
 		symOIDByName[sym.Name] = sym.OID
 	}
-	// Parse conditions and walk their referenced column OIDs.
-	// conditionRowVals: conditionColumnOID -> rowIdx -> int64 value
 	conditionRowVals := make(map[string]map[string]int64)
-	// conditions: symbol OID -> conditionCheck (only for symbols that have conditions)
 	conditions := make(map[string]conditionCheck)
-	for _, sym := range entry.Symbols {
-		if sym.Condition == "" {
+	for _, st := range states {
+		if st.throttled || st.sym.Condition == "" {
 			continue
 		}
-		parts := strings.SplitN(sym.Condition, "=", 2)
+		parts := strings.SplitN(st.sym.Condition, "=", 2)
 		if len(parts) != 2 {
-			c.logger.Warn("Ignoring malformed condition", "symbol", sym.Name, "condition", sym.Condition)
+			c.logger.Warn("Ignoring malformed condition", "symbol", st.sym.Name, "condition", st.sym.Condition)
 			continue
 		}
 		refName := strings.TrimSpace(parts[0])
 		expectedStr := strings.TrimSpace(parts[1])
 		expected, err := strconv.ParseInt(expectedStr, 10, 64)
 		if err != nil {
-			c.logger.Warn("Ignoring condition with non-integer value", "symbol", sym.Name, "condition", sym.Condition)
+			c.logger.Warn("Ignoring condition with non-integer value", "symbol", st.sym.Name, "condition", st.sym.Condition)
 			continue
 		}
 		refOID, ok := symOIDByName[refName]
 		if !ok {
-			c.logger.Warn("Condition references unknown symbol", "symbol", sym.Name, "ref", refName)
+			c.logger.Warn("Condition references unknown symbol", "symbol", st.sym.Name, "ref", refName)
 			continue
 		}
-		conditions[sym.OID] = conditionCheck{columnOID: refOID, expected: expected}
-		// Walk the condition column if not already walked.
+		conditions[st.sym.OID] = conditionCheck{columnOID: refOID, expected: expected}
 		if _, walked := conditionRowVals[refOID]; !walked {
-			pdus, err := walker.Walk(refOID, 1)
-			if err != nil {
-				c.logger.Debug("Error walking condition column", "oid", refOID, "error", err)
-				conditionRowVals[refOID] = nil
-				continue
+			var pdus map[string]snmp.PDU
+			if columnPDUs != nil {
+				pdus = columnPDUs[refOID]
+			} else {
+				pdus, err = walker.Walk(refOID, 1)
+				if err != nil {
+					c.logger.Debug("Error walking condition column", "oid", refOID, "error", err)
+					conditionRowVals[refOID] = nil
+					continue
+				}
 			}
 			rowVals := make(map[string]int64, len(pdus))
 			for fullOID, pdu := range pdus {
@@ -265,25 +410,37 @@ func (c *MetricsCollector) collectTable(ctx context.Context, walker snmp.Walker,
 		}
 	}
 
-	// --- Metric columns ---
-	for i := range entry.Symbols {
-		sym := &entry.Symbols[i]
-		pdus, err := walker.Walk(sym.OID, 1)
-		if err != nil {
-			c.logger.Debug("Error walking table column", "oid", sym.OID, "name", sym.Name, "error", err)
+	// --- Phase 5: collect active metric columns ---
+	for _, st := range states {
+		if st.throttled {
 			continue
 		}
-		// Pre-look up condition for this symbol (zero value = no condition).
+		sym := st.sym
+		var pdus map[string]snmp.PDU
+		if columnPDUs != nil {
+			pdus = columnPDUs[sym.OID]
+		} else {
+			var err error
+			pdus, err = walker.Walk(sym.OID, 1)
+			if err != nil {
+				c.logger.Debug("Error walking table column", "oid", sym.OID, "name", sym.Name, "error", err)
+				continue
+			}
+		}
+
 		cond, hasCondition := conditions[sym.OID]
+		metricName := buildMetricName(sym.Name)
 
 		for fullOID, pdu := range pdus {
+			if err := ctx.Err(); err != nil {
+				return
+			}
 			rowIdx := extractRowIndex(fullOID, sym.OID)
 
-			// Apply condition filter.
 			if hasCondition {
 				rowVals := conditionRowVals[cond.columnOID]
 				if rowVals == nil {
-					continue // condition column walk failed; skip all rows
+					continue
 				}
 				if rowVals[rowIdx] != cond.expected {
 					continue
@@ -315,12 +472,44 @@ func (c *MetricsCollector) collectTable(ctx context.Context, walker snmp.Walker,
 				rowAttrs = append(rowAttrs, attribute.String(sym.Name+"_value", strVal))
 			}
 
-			g := metrics.GetGauge(buildMetricName(sym.Name), sym.Name+" (SNMP profile table metric)")
-			if g != nil {
-				g.Record(ctx, val, metric.WithAttributes(rowAttrs...))
+			localBuf[metricName] = append(localBuf[metricName], observedPoint{value: val, attrs: rowAttrs})
+		}
+	}
+}
+
+// walkFullTable walks the table root OID once and distributes PDUs to per-column maps.
+// This matches ktranslate's walk_full_table behaviour: a single BulkWalk of the table root,
+// with results filtered back to requested column OID prefixes.
+func (c *MetricsCollector) walkFullTable(walker snmp.Walker, entry *profiles.MetricEntry) map[string]map[string]snmp.PDU {
+	allPDUs, err := walker.Walk(entry.Table.OID, 0)
+	if err != nil {
+		c.logger.Debug("Error walking full table", "oid", entry.Table.OID, "table", entry.Table.Name, "error", err)
+		return nil
+	}
+
+	// Build set of interesting column OID prefixes (metric + tag + condition refs).
+	colPrefixes := make(map[string]struct{})
+	for _, sym := range entry.Symbols {
+		colPrefixes[sym.OID] = struct{}{}
+	}
+	for _, mt := range entry.MetricTags {
+		if col := metricTagColumn(&mt); col != nil && col.OID != "" {
+			colPrefixes[col.OID] = struct{}{}
+		}
+	}
+
+	result := make(map[string]map[string]snmp.PDU, len(colPrefixes))
+	for fullOID, pdu := range allPDUs {
+		for colOID := range colPrefixes {
+			if strings.HasPrefix(fullOID, colOID+".") || fullOID == colOID {
+				if result[colOID] == nil {
+					result[colOID] = make(map[string]snmp.PDU)
+				}
+				result[colOID][fullOID] = pdu
 			}
 		}
 	}
+	return result
 }
 
 // walkScalar walks a scalar OID subtree and returns the first string value found.
@@ -438,9 +627,6 @@ func pduToValue(pdu snmp.PDU, conversion string) (int64, string, error) {
 // applyHexToInt converts an OctetString byte slice to an integer using
 // the hextoint:<endianness>:<type> conversion rule.
 func applyHexToInt(raw []byte, conversion string) (int64, error) {
-	// Format: hextoint:<endianness>:<type>
-	// endianness: BigEndian | LittleEndian
-	// type: uint16 | uint32 | uint64
 	parts := strings.SplitN(conversion, ":", 3)
 	if len(parts) != 3 {
 		return 0, fmt.Errorf("invalid hextoint format: %s", conversion)
@@ -448,7 +634,6 @@ func applyHexToInt(raw []byte, conversion string) (int64, error) {
 	endianStr := parts[1]
 	typeStr := parts[2]
 
-	// If the raw bytes look like a hex string, decode them first.
 	decoded := raw
 	if b, err := hex.DecodeString(strings.TrimSpace(string(raw))); err == nil {
 		decoded = b
@@ -485,10 +670,6 @@ func applyHexToInt(raw []byte, conversion string) (int64, error) {
 }
 
 // applyRegexp applies a regexp: conversion to a string value.
-// The pattern is expected to have at least one capture group; the first group is returned.
-// If no capture group is present the full match is used.
-// The extracted string is parsed as int64; on success the numeric value is returned.
-// The original extracted string is also returned for use as a display attribute.
 func applyRegexp(raw, conversion string) (int64, string, error) {
 	pattern := strings.TrimPrefix(conversion, "regexp:")
 	re, err := regexp.Compile(pattern)
@@ -534,7 +715,6 @@ func hexBytesToIP(raw []byte) string {
 }
 
 // pduToString converts a PDU value to a human-readable string for tag/attribute use.
-// Applies enum mapping and conversion from TagColumn if present.
 func pduToString(pdu snmp.PDU, col *profiles.TagColumn) string {
 	switch pdu.Type {
 	case gosnmp.OctetString:
