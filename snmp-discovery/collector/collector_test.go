@@ -55,15 +55,19 @@ var discardLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions
 func oIDPDU(oid string) snmp.PDU {
 	return snmp.PDU{Name: oid, Type: gosnmp.ObjectIdentifier, Value: oid}
 }
+
 func intPDU(oid string, v int) snmp.PDU {
 	return snmp.PDU{Name: oid, Type: gosnmp.Integer, Value: v}
 }
+
 func counter32PDU(oid string, v uint) snmp.PDU {
 	return snmp.PDU{Name: oid, Type: gosnmp.Counter32, Value: v}
 }
+
 func counter64PDU(oid string, v uint64) snmp.PDU {
 	return snmp.PDU{Name: oid, Type: gosnmp.Counter64, Value: v}
 }
+
 func stringPDU(oid string, v string) snmp.PDU {
 	return snmp.PDU{Name: oid, Type: gosnmp.OctetString, Value: []byte(v)}
 }
@@ -334,7 +338,7 @@ func TestCollectTarget_ThrottledMetricCarriesForward(t *testing.T) {
 		sysObjValue = "1.3.6.1.4.1.9999.3"
 	)
 	p := profileWithOID(sysObjValue, "test3.yml", []profiles.MetricEntry{
-		{Symbol: &profiles.Symbol{Name: "fastMetric", OID: fastOID}},          // no poll_time_sec, always polled
+		{Symbol: &profiles.Symbol{Name: "fastMetric", OID: fastOID}},                   // no poll_time_sec, always polled
 		{Symbol: &profiles.Symbol{Name: "slowMetric", OID: slowOID, PollTimeSec: 300}}, // 5 min throttle
 	})
 
