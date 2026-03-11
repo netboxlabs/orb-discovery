@@ -123,7 +123,7 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 				return nil, fmt.Errorf("resolving SNMP profiles: %w", resolveErr)
 			}
 			matcher := profiles.NewMatcher(resolvedProfiles)
-			runner.metricsCollector = collector.NewMetricsCollector(ClientFactory, matcher, logger, runner.snmpTimeout, runner.config.Retries)
+			runner.metricsCollector = collector.NewMetricsCollector(ClientFactory, matcher, deviceLookup, logger, runner.snmpTimeout, runner.config.Retries)
 			runner.metricsInterval = time.Duration(*policy.Config.MetricsInterval) * time.Second
 			logger.Info("SNMP metrics collection enabled", "profiles_dir", profilesDir, "profile_count", loader.Count(), "interval", runner.metricsInterval)
 		}

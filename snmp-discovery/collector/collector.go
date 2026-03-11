@@ -14,6 +14,7 @@ import (
 
 	"github.com/gosnmp/gosnmp"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/data"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/metrics"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/profiles"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/snmp"
@@ -32,16 +33,18 @@ const (
 type MetricsCollector struct {
 	clientFactory snmp.ClientFactory
 	matcher       *profiles.Matcher
+	deviceLookup  data.DeviceRetriever
 	logger        *slog.Logger
 	snmpTimeout   time.Duration
 	retries       int
 }
 
 // NewMetricsCollector creates a MetricsCollector.
-func NewMetricsCollector(clientFactory snmp.ClientFactory, matcher *profiles.Matcher, logger *slog.Logger, snmpTimeout time.Duration, retries int) *MetricsCollector {
+func NewMetricsCollector(clientFactory snmp.ClientFactory, matcher *profiles.Matcher, deviceLookup data.DeviceRetriever, logger *slog.Logger, snmpTimeout time.Duration, retries int) *MetricsCollector {
 	return &MetricsCollector{
 		clientFactory: clientFactory,
 		matcher:       matcher,
+		deviceLookup:  deviceLookup,
 		logger:        logger,
 		snmpTimeout:   snmpTimeout,
 		retries:       retries,
@@ -91,6 +94,11 @@ func (c *MetricsCollector) CollectTarget(ctx context.Context, target config.Targ
 		attribute.String("device_name", deviceName),
 		attribute.String("profile_name", profileName(profile)),
 		attribute.String("policy", policyName),
+	}
+	if c.deviceLookup != nil {
+		if deviceType, err := c.deviceLookup.GetDevice(sysOIDValue); err == nil && deviceType != "" {
+			baseAttrs = append(baseAttrs, attribute.String("device_type", deviceType))
+		}
 	}
 
 	// Collect top-level metric_tags as additional device-level attributes.
