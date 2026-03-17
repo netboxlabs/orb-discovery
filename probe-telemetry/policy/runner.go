@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sync"
 
 	configpb "github.com/cloudprober/cloudprober/config/proto"
 	"github.com/cloudprober/cloudprober/prober"
@@ -15,16 +14,12 @@ import (
 	"github.com/netboxlabs/orb-discovery/probe-telemetry/config"
 )
 
-// initHTTPOnce ensures cloudprober's shared HTTP mux is set exactly once per
-// process. We never actually bind the mux to a port — it only exists so that
-// prober.Init() can register its internal /probestatus handler without
-// panicking.
-var initHTTPOnce sync.Once
-
-func ensureCloudproberHTTP() {
-	initHTTPOnce.Do(func() {
-		state.SetDefaultHTTPServeMux(http.NewServeMux())
-	})
+// newCloudproberMux creates a fresh HTTP mux and installs it as cloudprober's
+// default. Each Runner gets its own mux so cloudprober can re-register its
+// internal handlers (e.g. /status/static/) without conflicting with a
+// previously created Runner.
+func newCloudproberMux() {
+	state.SetDefaultHTTPServeMux(http.NewServeMux())
 }
 
 // Runner wraps a cloudprober Prober for a single policy. Each Runner owns its
@@ -47,7 +42,7 @@ func NewRunner(
 	otelEndpoint string,
 	otelExportPeriod int,
 ) (*Runner, error) {
-	ensureCloudproberHTTP()
+	newCloudproberMux()
 
 	cfgText := BuildCloudproberTextproto(name, policy, otelEndpoint, otelExportPeriod)
 	logger.Debug("cloudprober config", "policy", name, "config", cfgText)

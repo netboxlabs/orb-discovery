@@ -12,14 +12,16 @@ import (
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/env"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/metrics"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/policy"
-	"gopkg.in/yaml.v3"
+	"github.com/netboxlabs/orb-discovery/snmp-telemetry/server"
+	"github.com/netboxlabs/orb-discovery/snmp-telemetry/version"
 )
 
 // AppName is the application name
 const AppName = "snmp-telemetry"
 
 func main() {
-	configFile := flag.String("config", "", "path to YAML configuration file (required)")
+	host := flag.String("host", "0.0.0.0", "server host")
+	port := flag.Int("port", 8074, "server port")
 	otelEndpoint := flag.String("otel-endpoint", "", "OpenTelemetry exporter endpoint (e.g. localhost:4317)."+
 		" Environment variable can be used by wrapping it in ${} (e.g. ${OTEL_ENDPOINT})")
 	otelExportPeriod := flag.Int("otel-export-period", 10, "period in seconds between OpenTelemetry exports")
@@ -38,32 +40,8 @@ func main() {
 		os.Exit(0)
 	}
 
-	if *configFile == "" {
-		fmt.Fprintf(os.Stderr, "error: --config is required\n")
-		fmt.Fprintf(os.Stderr, "Usage of %s:\n", AppName)
-		flag.PrintDefaults()
-		os.Exit(1)
-	}
-
 	logger := config.NewLogger(*logLevel, *logFormat)
-
-	// Load configuration file
-	configData, err := os.ReadFile(*configFile)
-	if err != nil {
-		logger.Error("Failed to read config file", "path", *configFile, "error", err)
-		os.Exit(1)
-	}
-
-	var appConfig config.AppConfig
-	if err := yaml.Unmarshal(configData, &appConfig); err != nil {
-		logger.Error("Failed to parse config file", "path", *configFile, "error", err)
-		os.Exit(1)
-	}
-
-	if len(appConfig.Policies) == 0 {
-		logger.Error("No policies found in config file", "path", *configFile)
-		os.Exit(1)
-	}
+	logger.Info("starting "+AppName, "version", version.GetBuildVersion())
 
 	ctx := context.Background()
 
@@ -78,11 +56,7 @@ func main() {
 
 	profilesDir := env.ResolveEnvOrExit(*snmpProfilesDir)
 	manager := policy.NewManager(ctx, logger, profilesDir)
-
-	if err := manager.StartAll(appConfig.Policies); err != nil {
-		logger.Error("Failed to start policies", "error", err)
-		os.Exit(1)
-	}
+	srv := server.NewServer(*host, *port, logger, manager, version.GetBuildVersion())
 
 	// Handle signals
 	done := make(chan bool, 1)
@@ -94,10 +68,8 @@ func main() {
 		for {
 			select {
 			case <-sigs:
-				logger.Warn("stop signal received, stopping snmp-telemetry")
-				if err := manager.Stop(); err != nil {
-					logger.Error("failed to stop manager", "error", err)
-				}
+				logger.Warn("stop signal received, stopping " + AppName)
+				srv.Stop()
 				if err := metrics.Shutdown(ctx); err != nil {
 					logger.Error("failed to shutdown metrics", "error", err)
 				}
@@ -107,6 +79,19 @@ func main() {
 				done <- true
 				return
 			}
+		}
+	}()
+
+	serverErrCh := srv.Start()
+
+	go func() {
+		if err, ok := <-serverErrCh; ok && err != nil {
+			logger.Error(AppName+" server encountered an error", "error", err)
+			srv.Stop()
+			if shutdownErr := metrics.Shutdown(ctx); shutdownErr != nil {
+				logger.Error("failed to shutdown metrics", "error", shutdownErr)
+			}
+			cancelFunc()
 		}
 	}()
 

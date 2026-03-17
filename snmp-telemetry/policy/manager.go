@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -10,12 +11,19 @@ import (
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/data"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/env"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/snmp"
+	"gopkg.in/yaml.v3"
 )
 
 const (
 	// SNMPDefaultPort is the default SNMP port
 	SNMPDefaultPort = 161
 )
+
+// Status represents the status of a policy
+type Status struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
 
 // Manager manages snmp-telemetry policy runners
 type Manager struct {
@@ -35,28 +43,47 @@ func NewManager(ctx context.Context, logger *slog.Logger, defaultProfilesDir str
 	}
 }
 
-// StartAll starts a runner for each policy in the provided map
-func (m *Manager) StartAll(policies map[string]config.Policy) error {
-	for name, policy := range policies {
+// ParsePolicies parses and validates policies from a YAML request body
+func (m *Manager) ParsePolicies(data []byte) (map[string]config.Policy, error) {
+	var payload config.Policies
+	if err := yaml.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+
+	if len(payload.Policies) == 0 {
+		return nil, errors.New("no policies found in the request")
+	}
+
+	for name, policy := range payload.Policies {
 		if err := m.validatePolicy(policy); err != nil {
-			return fmt.Errorf("%s: invalid policy: %w", name, err)
+			return nil, fmt.Errorf("%s: invalid policy: %w", name, err)
 		}
 	}
 
-	for name, policy := range policies {
-		if err := m.resolveAuthenticationEnvVars(&policy); err != nil {
-			return fmt.Errorf("%s: failed to resolve environment variables: %w", name, err)
+	for name := range payload.Policies {
+		updated := payload.Policies[name]
+		if err := m.resolveAuthenticationEnvVars(&updated); err != nil {
+			return nil, fmt.Errorf("%s: failed to resolve environment variables: %w", name, err)
 		}
-		m.applyDefaults(&policy)
-
-		if err := m.startPolicy(name, policy); err != nil {
-			return fmt.Errorf("starting policy %s: %w", name, err)
-		}
+		m.applyDefaults(&updated)
+		payload.Policies[name] = updated
 	}
-	return nil
+
+	return payload.Policies, nil
 }
 
-func (m *Manager) startPolicy(name string, policy config.Policy) error {
+// HasPolicy checks if the policy exists
+func (m *Manager) HasPolicy(name string) bool {
+	_, ok := m.policies[name]
+	return ok
+}
+
+// StartPolicy starts a single named policy
+func (m *Manager) StartPolicy(name string, policy config.Policy) error {
+	if m.HasPolicy(name) {
+		return fmt.Errorf("policy %s already exists", name)
+	}
+
 	deviceLookup, err := data.LoadDeviceLookupExtensions(policy.Config.LookupExtensionsDir)
 	if err != nil {
 		m.logger.Warn("Failed to load device lookup extensions", "error", err, "directory", policy.Config.LookupExtensionsDir)
@@ -73,18 +100,45 @@ func (m *Manager) startPolicy(name string, policy config.Policy) error {
 
 	r.Start()
 	m.policies[name] = r
+	m.logger.Info("started policy", "policy", name)
+	return nil
+}
+
+// StopPolicy stops a single named policy
+func (m *Manager) StopPolicy(name string) error {
+	r, ok := m.policies[name]
+	if !ok {
+		return nil
+	}
+	if err := r.Stop(); err != nil {
+		return fmt.Errorf("stopping policy %s: %w", name, err)
+	}
+	delete(m.policies, name)
 	return nil
 }
 
 // Stop stops all running policies
 func (m *Manager) Stop() error {
-	for name, runner := range m.policies {
-		if err := runner.Stop(); err != nil {
-			return fmt.Errorf("stopping policy %s: %w", name, err)
+	for name := range m.policies {
+		if err := m.StopPolicy(name); err != nil {
+			return err
 		}
-		delete(m.policies, name)
 	}
 	return nil
+}
+
+// GetCapabilities returns the capabilities of snmp-telemetry
+func (m *Manager) GetCapabilities() []string {
+	return []string{"targets"}
+}
+
+// GetPolicyStatuses returns the status of all known policies
+func (m *Manager) GetPolicyStatuses() []Status {
+	statuses := make([]Status, 0, len(m.policies))
+	for name := range m.policies {
+		statuses = append(statuses, Status{Name: name, Status: "running"})
+	}
+	return statuses
 }
 
 // applyDefaults applies the default values to the policy

@@ -1,7 +1,16 @@
 package config
 
-// AppConfig is the top-level configuration loaded from a YAML file.
-type AppConfig struct {
+import "time"
+
+// Status represents the status of the probe-telemetry service
+type Status struct {
+	StartTime     time.Time `json:"start_time"`
+	UpTimeSeconds int64     `json:"up_time_seconds"`
+	Version       string    `json:"version"`
+}
+
+// Policies represents a collection of policies (used for HTTP API body parsing)
+type Policies struct {
 	Policies map[string]Policy `yaml:"policies"`
 }
 

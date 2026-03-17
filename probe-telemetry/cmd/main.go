@@ -8,11 +8,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/netboxlabs/orb-discovery/probe-telemetry/config"
 	"github.com/netboxlabs/orb-discovery/probe-telemetry/env"
 	"github.com/netboxlabs/orb-discovery/probe-telemetry/policy"
+	"github.com/netboxlabs/orb-discovery/probe-telemetry/server"
 	"github.com/netboxlabs/orb-discovery/probe-telemetry/version"
 )
 
@@ -20,7 +19,8 @@ import (
 const AppName = "probe-telemetry"
 
 func main() {
-	configFile := flag.String("config", "", "path to YAML configuration file (required)")
+	host := flag.String("host", "0.0.0.0", "server host")
+	port := flag.Int("port", 8075, "server port")
 	otelEndpoint := flag.String("otel-endpoint", "", "OpenTelemetry gRPC exporter endpoint (e.g. grpc://localhost:4317)."+
 		" Environment variable can be used by wrapping it in ${} (e.g. ${OTEL_ENDPOINT})")
 	otelExportPeriod := flag.Int("otel-export-period", 10, "period in seconds between OpenTelemetry metric exports")
@@ -36,31 +36,8 @@ func main() {
 		os.Exit(0)
 	}
 
-	if *configFile == "" {
-		fmt.Fprintf(os.Stderr, "error: --config is required\n\nUsage of %s:\n", AppName)
-		flag.PrintDefaults()
-		os.Exit(1)
-	}
-
 	logger := config.NewLogger(*logLevel, *logFormat)
 	logger.Info("starting "+AppName, "version", version.GetBuildVersion())
-
-	raw, err := os.ReadFile(*configFile)
-	if err != nil {
-		logger.Error("failed to read config file", "path", *configFile, "error", err)
-		os.Exit(1)
-	}
-
-	var appConfig config.AppConfig
-	if err := yaml.Unmarshal(raw, &appConfig); err != nil {
-		logger.Error("failed to parse config file", "path", *configFile, "error", err)
-		os.Exit(1)
-	}
-
-	if len(appConfig.Policies) == 0 {
-		logger.Error("no policies found in config file", "path", *configFile)
-		os.Exit(1)
-	}
 
 	endpoint := env.ResolveEnvOrExit(*otelEndpoint)
 	if endpoint == "" {
@@ -73,26 +50,38 @@ func main() {
 	defer cancelRoot()
 
 	manager := policy.NewManager(ctx, logger, endpoint, *otelExportPeriod)
-
-	if err := manager.StartAll(appConfig.Policies); err != nil {
-		logger.Error("failed to start policies", "error", err)
-		os.Exit(1)
-	}
+	srv := server.NewServer(*host, *port, logger, manager, version.GetBuildVersion())
 
 	// Handle termination signals
-	done := make(chan struct{})
+	done := make(chan bool, 1)
+	rootCtx, cancelFunc := context.WithCancel(ctx)
+
 	go func() {
 		sigs := make(chan os.Signal, 1)
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-		<-sigs
-		logger.Info("shutdown signal received, stopping " + AppName)
-		if err := manager.Stop(); err != nil {
-			logger.Error("error stopping manager", "error", err)
+		for {
+			select {
+			case <-sigs:
+				logger.Info("shutdown signal received, stopping " + AppName)
+				srv.Stop()
+				cancelFunc()
+			case <-rootCtx.Done():
+				logger.Info(AppName + " stopped")
+				done <- true
+				return
+			}
 		}
-		cancelRoot()
-		close(done)
+	}()
+
+	serverErrCh := srv.Start()
+
+	go func() {
+		if err, ok := <-serverErrCh; ok && err != nil {
+			logger.Error(AppName+" server encountered an error", "error", err)
+			srv.Stop()
+			cancelFunc()
+		}
 	}()
 
 	<-done
-	logger.Info(AppName + " stopped")
 }
