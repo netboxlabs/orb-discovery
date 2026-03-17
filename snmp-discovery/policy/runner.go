@@ -4,18 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/go-co-op/gocron/v2"
 	"github.com/netboxlabs/diode-sdk-go/diode"
-	"github.com/netboxlabs/orb-discovery/snmp-discovery/collector"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/data"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/mapping"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/metrics"
-	"github.com/netboxlabs/orb-discovery/snmp-discovery/profiles"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/snmp"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/targets"
 	"go.opentelemetry.io/otel/attribute"
@@ -32,7 +29,6 @@ const (
 	defaultSNMPTimeout                 = 5 * time.Second
 	defaultSNMPProbeTimeout            = 1 * time.Second
 	defaultSNMPProbeOID                = "1.3.6.1.2.1.1" // SNMPv2-MIB::system
-	defaultProfilesDir                 = "/usr/local/share/snmp-profiles"
 )
 
 // expandedTargetGroup represents a group of expanded targets with their original target string
@@ -55,17 +51,13 @@ type Runner struct {
 	config           config.PolicyConfig
 	ClientFactory    snmp.ClientFactory
 	manufacturers    data.ManufacturerRetriever
-	mappingConfig    *config.Mapping
-	deviceLookup     data.DeviceRetriever
-	runStore         *RunStore
-	metricsCollector *collector.MetricsCollector
-	metricsInterval  time.Duration
+	mappingConfig *config.Mapping
+	deviceLookup  data.DeviceRetriever
+	runStore      *RunStore
 }
 
 // NewRunner returns a new policy runner.
-// instanceProfilesDir is the instance-level default profiles directory set via CLI flag;
-// it overrides the compiled-in constant but is itself overridden by policy.Config.ProfilesDir.
-func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client, ClientFactory snmp.ClientFactory, mappingConfig *config.Mapping, manufacturers data.ManufacturerRetriever, deviceLookup data.DeviceRetriever, runStore *RunStore, instanceProfilesDir string) (*Runner, error) {
+func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, client diode.Client, ClientFactory snmp.ClientFactory, mappingConfig *config.Mapping, manufacturers data.ManufacturerRetriever, deviceLookup data.DeviceRetriever, runStore *RunStore) (*Runner, error) {
 	s, err := gocron.NewScheduler()
 	if err != nil {
 		return nil, err
@@ -101,34 +93,6 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 	runner.scope = policy.Scope
 	runner.config = policy.Config
 
-	// Initialize metrics collector if metrics_interval is configured
-	if policy.Config.MetricsInterval != nil && *policy.Config.MetricsInterval > 0 {
-		// Priority: per-policy config > CLI flag (instanceProfilesDir) > compiled-in constant
-		profilesDir := policy.Config.ProfilesDir
-		if profilesDir == "" {
-			profilesDir = instanceProfilesDir
-		}
-		if profilesDir == "" {
-			profilesDir = defaultProfilesDir
-		}
-		if _, statErr := os.Stat(profilesDir); statErr != nil {
-			logger.Warn("SNMP profiles directory not found, metrics collection disabled", "dir", profilesDir)
-		} else {
-			loader, loadErr := profiles.NewLoader(profilesDir, logger)
-			if loadErr != nil {
-				return nil, fmt.Errorf("loading SNMP profiles from %s: %w", profilesDir, loadErr)
-			}
-			resolvedProfiles, resolveErr := loader.AllResolved()
-			if resolveErr != nil {
-				return nil, fmt.Errorf("resolving SNMP profiles: %w", resolveErr)
-			}
-			matcher := profiles.NewMatcher(resolvedProfiles)
-			runner.metricsCollector = collector.NewMetricsCollector(ClientFactory, matcher, deviceLookup, logger, runner.snmpTimeout, runner.config.Retries)
-			runner.metricsInterval = time.Duration(*policy.Config.MetricsInterval) * time.Second
-			logger.Info("SNMP metrics collection enabled", "profiles_dir", profilesDir, "profile_count", loader.Count(), "interval", runner.metricsInterval)
-		}
-	}
-
 	expandedTargetGroups := runner.expandTargetRanges(runner.scope.Targets)
 
 	for _, group := range expandedTargetGroups {
@@ -147,17 +111,6 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 				return nil, err
 			}
 			runner.tasks = append(runner.tasks, task)
-
-			// Schedule metrics collection job if enabled
-			if runner.metricsCollector != nil {
-				metricsTask := gocron.NewTask(runner.runMetrics, group.targets[0])
-				_, err = runner.scheduler.NewJob(gocron.DurationJob(runner.metricsInterval), metricsTask,
-					gocron.WithSingletonMode(gocron.LimitModeReschedule))
-				if err != nil {
-					return nil, fmt.Errorf("scheduling metrics job for %s: %w", group.targets[0].Host, err)
-				}
-				runner.tasks = append(runner.tasks, metricsTask)
-			}
 			continue
 		}
 		// Create scan task for multiple targets with original target
@@ -253,19 +206,6 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 			continue
 		}
 		r.tasks = append(r.tasks, task)
-
-		// Schedule metrics collection job for this responsive target if enabled
-		if r.metricsCollector != nil {
-			metricsTask := gocron.NewTask(r.runMetrics, target)
-			_, err = r.scheduler.NewJob(gocron.DurationJob(r.metricsInterval), metricsTask,
-				gocron.WithSingletonMode(gocron.LimitModeReschedule))
-			if err != nil {
-				r.logger.Error("failed to schedule metrics job for responsive target",
-					"host", target.Host, "policy", policyName, "error", err)
-				continue
-			}
-			r.tasks = append(r.tasks, metricsTask)
-		}
 	}
 
 	// Update scan run status
@@ -325,21 +265,6 @@ func (r *Runner) probeTarget(ctx context.Context, target config.Target) bool {
 // run runs the policy for a single target (no parent)
 func (r *Runner) run(target config.Target) {
 	r.runWithMetadata(target, "")
-}
-
-// runMetrics collects SNMP operational metrics from a target using its matched profile.
-func (r *Runner) runMetrics(target config.Target) {
-	if r.metricsCollector == nil {
-		return
-	}
-	policyName := r.ctx.Value(policyKey).(string)
-	r.logger.Debug("Running SNMP metrics collection", "host", target.Host, "policy", policyName)
-	ctx, cancel := context.WithTimeout(r.ctx, r.metricsInterval)
-	defer cancel()
-	auth := r.resolveTargetAuthentication(target)
-	if err := r.metricsCollector.CollectTarget(ctx, target, auth, policyName); err != nil {
-		r.logger.Warn("SNMP metrics collection failed", "host", target.Host, "policy", policyName, "error", err)
-	}
 }
 
 // runWithMetadata runs the policy with metadata tracking

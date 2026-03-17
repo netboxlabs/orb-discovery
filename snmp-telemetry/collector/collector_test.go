@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/gosnmp/gosnmp"
-	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
-	"github.com/netboxlabs/orb-discovery/snmp-discovery/profiles"
-	"github.com/netboxlabs/orb-discovery/snmp-discovery/snmp"
+	"github.com/netboxlabs/orb-discovery/snmp-telemetry/config"
+	"github.com/netboxlabs/orb-discovery/snmp-telemetry/profiles"
+	"github.com/netboxlabs/orb-discovery/snmp-telemetry/snmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

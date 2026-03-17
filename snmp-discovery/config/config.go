@@ -160,12 +160,6 @@ type PolicyConfig struct {
 	SNMPProbeTimeout    int      `yaml:"snmp_probe_timeout"`
 	Retries             int      `yaml:"retries"`
 	LookupExtensionsDir string   `yaml:"lookup_extensions_dir,omitempty"`
-	// MetricsInterval is the interval in seconds between SNMP metrics collection runs.
-	// When nil or zero, metrics collection is disabled.
-	MetricsInterval *int `yaml:"metrics_interval,omitempty"`
-	// ProfilesDir is the path to a directory containing ktranslate-compatible SNMP profile YAML files.
-	// Defaults to the built-in profiles directory when empty.
-	ProfilesDir string `yaml:"profiles_dir,omitempty"`
 }
 
 // Policy represents a snmp-discovery policy

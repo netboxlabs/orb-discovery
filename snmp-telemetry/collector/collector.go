@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/gosnmp/gosnmp"
-	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
-	"github.com/netboxlabs/orb-discovery/snmp-discovery/data"
-	"github.com/netboxlabs/orb-discovery/snmp-discovery/metrics"
-	"github.com/netboxlabs/orb-discovery/snmp-discovery/profiles"
-	"github.com/netboxlabs/orb-discovery/snmp-discovery/snmp"
+	"github.com/netboxlabs/orb-discovery/snmp-telemetry/config"
+	"github.com/netboxlabs/orb-discovery/snmp-telemetry/data"
+	"github.com/netboxlabs/orb-discovery/snmp-telemetry/metrics"
+	"github.com/netboxlabs/orb-discovery/snmp-telemetry/profiles"
+	"github.com/netboxlabs/orb-discovery/snmp-telemetry/snmp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -478,8 +478,6 @@ func (c *MetricsCollector) collectTable(ctx context.Context, walker snmp.Walker,
 }
 
 // walkFullTable walks the table root OID once and distributes PDUs to per-column maps.
-// This matches ktranslate's walk_full_table behaviour: a single BulkWalk of the table root,
-// with results filtered back to requested column OID prefixes.
 func (c *MetricsCollector) walkFullTable(walker snmp.Walker, entry *profiles.MetricEntry) map[string]map[string]snmp.PDU {
 	allPDUs, err := walker.Walk(entry.Table.OID, 0)
 	if err != nil {
@@ -541,7 +539,6 @@ func (c *MetricsCollector) walkScalar(walker snmp.Walker, oid string) (string, e
 }
 
 // extractRowIndex strips the column OID prefix from a full OID to get the row index suffix.
-// Example: fullOID="1.3.6.1.2.1.2.2.1.2.3", columnOID="1.3.6.1.2.1.2.2.1.2" -> "3"
 func extractRowIndex(fullOID, columnOID string) string {
 	prefix := columnOID + "."
 	if strings.HasPrefix(fullOID, prefix) {

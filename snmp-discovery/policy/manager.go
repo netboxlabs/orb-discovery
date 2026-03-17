@@ -32,12 +32,11 @@ type Manager struct {
 	ctx                context.Context
 	mappingConfig      config.Mapping
 	manufacturers      data.ManufacturerRetriever
-	runStore           *RunStore
-	defaultProfilesDir string // instance-level default, overrides compiled-in constant
+	runStore *RunStore
 }
 
 // NewManager returns a new policy manager
-func NewManager(ctx context.Context, logger *slog.Logger, client diode.Client, manufacturers data.ManufacturerRetriever, defaultProfilesDir string) (*Manager, error) {
+func NewManager(ctx context.Context, logger *slog.Logger, client diode.Client, manufacturers data.ManufacturerRetriever) (*Manager, error) {
 	mappingConfig, err := loadMappingConfig()
 	if err != nil {
 		logger.Error("Failed to load mapping config", "error", err)
@@ -45,14 +44,13 @@ func NewManager(ctx context.Context, logger *slog.Logger, client diode.Client, m
 	}
 
 	return &Manager{
-		ctx:                ctx,
-		client:             client,
-		logger:             logger,
-		mappingConfig:      mappingConfig,
-		policies:           make(map[string]*Runner),
-		manufacturers:      manufacturers,
-		runStore:           NewRunStore(),
-		defaultProfilesDir: defaultProfilesDir,
+		ctx:           ctx,
+		client:        client,
+		logger:        logger,
+		mappingConfig: mappingConfig,
+		policies:      make(map[string]*Runner),
+		manufacturers: manufacturers,
+		runStore:      NewRunStore(),
 	}, nil
 }
 
@@ -201,11 +199,6 @@ func (m *Manager) validatePolicy(policy config.Policy) error {
 		}
 	}
 
-	// Validate metrics config
-	if policy.Config.MetricsInterval != nil && *policy.Config.MetricsInterval <= 0 {
-		return fmt.Errorf("metrics_interval must be a positive integer")
-	}
-
 	return nil
 }
 
@@ -236,7 +229,7 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 			return snmp.NewClient(host, port, retries, timeout, authentication, logger)
 		}
 
-		r, err := NewRunner(m.ctx, m.logger, name, policy, m.client, clientFactory, &m.mappingConfig, m.manufacturers, deviceLookup, m.runStore, m.defaultProfilesDir)
+		r, err := NewRunner(m.ctx, m.logger, name, policy, m.client, clientFactory, &m.mappingConfig, m.manufacturers, deviceLookup, m.runStore)
 		if err != nil {
 			return err
 		}

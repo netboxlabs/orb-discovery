@@ -43,7 +43,7 @@ func TestServerConfigureAndStart(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	client := new(MockClient)
-	policyManager, err := policy.NewManager(ctx, logger, client, nil, "")
+	policyManager, err := policy.NewManager(ctx, logger, client, nil)
 	require.NoError(t, err)
 
 	err = setupTestMeter(t)
@@ -74,7 +74,7 @@ func TestServerGetStatusWithPolicies(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	client := new(MockClient)
-	policyManager, err := policy.NewManager(ctx, logger, client, nil, "")
+	policyManager, err := policy.NewManager(ctx, logger, client, nil)
 	require.NoError(t, err)
 
 	err = setupTestMeter(t)
@@ -133,7 +133,7 @@ func TestServerGetCapabilities(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	client := new(MockClient)
-	policyManager, err := policy.NewManager(ctx, logger, client, nil, "")
+	policyManager, err := policy.NewManager(ctx, logger, client, nil)
 	require.NoError(t, err)
 
 	srv := server.NewServer("localhost", 8081, logger, policyManager, "1.0.0")
@@ -153,7 +153,7 @@ func TestServerCreateDeletePolicy(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	client := new(MockClient)
-	policyManager, err := policy.NewManager(ctx, logger, client, nil, "")
+	policyManager, err := policy.NewManager(ctx, logger, client, nil)
 	require.NoError(t, err)
 
 	srv := server.NewServer("localhost", 8081, logger, policyManager, "1.0.0")
@@ -532,7 +532,7 @@ func TestServerCreateInvalidPolicy(t *testing.T) {
 			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 			client := new(MockClient)
 
-			policyManager, err := policy.NewManager(ctx, logger, client, nil, "")
+			policyManager, err := policy.NewManager(ctx, logger, client, nil)
 			require.NoError(t, err)
 
 			srv := server.NewServer("localhost", 8073, logger, policyManager, "1.0.0")
