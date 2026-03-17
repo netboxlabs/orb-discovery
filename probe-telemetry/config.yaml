@@ -1,0 +1,19 @@
+policies:
+  example:
+    defaults:
+      site: demo
+      role: web
+      tags:
+        - example
+
+    probes:
+      - name: google-http
+        type: http
+        targets:
+          - host: www.google.com
+        interval: 5s
+        timeout: 5s
+        http:
+          scheme: HTTPS
+          path: /
+          port: 443
