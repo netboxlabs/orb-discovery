@@ -172,18 +172,10 @@ func (c *MetricsCollector) CollectTarget(ctx context.Context, target config.Targ
 	baseAttrs := []attribute.KeyValue{
 		attribute.String("device_ip", target.Host),
 		attribute.String("device_name", deviceName),
-		attribute.String("profile_name", profileName(profile)),
-		attribute.String("policy", policyName),
 	}
-	if c.deviceLookup != nil {
-		if deviceType, err := c.deviceLookup.GetDevice(sysOIDValue); err == nil && deviceType != "" {
-			baseAttrs = append(baseAttrs, attribute.String("device_type", deviceType))
-		}
+	if target.ID != "" {
+		baseAttrs = append(baseAttrs, attribute.String("id", target.ID))
 	}
-
-	// Collect top-level metric_tags as additional device-level attributes.
-	deviceTagAttrs := c.collectDeviceTags(walker, profile.MetricTags)
-	baseAttrs = append(baseAttrs, deviceTagAttrs...)
 
 	// localBuf accumulates fresh observations for this run.
 	// throttledMetrics records metric names skipped due to poll_time_sec not elapsed.

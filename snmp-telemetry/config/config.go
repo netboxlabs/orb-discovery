@@ -24,6 +24,7 @@ type Scope struct {
 type Target struct {
 	Host           string          `yaml:"host"`
 	Port           uint16          `yaml:"port" default:"161"`
+	ID             string          `yaml:"id,omitempty"`
 	Authentication *Authentication `yaml:"authentication,omitempty"`
 }
 

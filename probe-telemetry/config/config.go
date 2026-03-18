@@ -57,6 +57,7 @@ type Policy struct {
 // precedence over the probe-level and policy-level defaults.
 type Target struct {
 	Host             string    `yaml:"host"`
+	ID               string    `yaml:"id,omitempty"`
 	OverrideDefaults *Defaults `yaml:"override_defaults,omitempty"`
 }
 

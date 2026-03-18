@@ -84,6 +84,9 @@ func BuildCloudproberTextproto(
 			// NetBox-derived labels — only the delta over policy-level defaults,
 			// since policy defaults are already emitted as resource_attribute.
 			writeLabels(&sb, deltaDefaults(policy.Defaults, targetDefaults))
+			if target.ID != "" {
+				fmt.Fprintf(&sb, "  additional_label { key: \"id\" value: %q }\n", target.ID)
+			}
 
 			sb.WriteString("}\n\n")
 		}
