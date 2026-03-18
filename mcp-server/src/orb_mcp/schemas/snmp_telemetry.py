@@ -8,6 +8,7 @@ from orb_mcp.schemas.common import Authentication
 class SNMPTelemetryTarget(BaseModel):
     host: str
     port: int = Field(default=161, ge=1, le=65535)
+    id: str | None = None  # optional NetBox join key — emitted as id= label on all metrics
     authentication: Authentication | None = None
 
 
@@ -22,7 +23,6 @@ class SNMPTelemetryPolicyConfig(BaseModel):
     profiles_dir: str | None = None
     snmp_timeout: int = 5
     retries: int = 3
-    lookup_extensions_dir: str | None = None
 
     @field_validator("schedule")
     @classmethod

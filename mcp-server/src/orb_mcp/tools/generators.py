@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import yaml
 
 
+def _make_policy_name(prefix: str, policy_name: str | None) -> str:
+    """Return policy_name if provided, otherwise generate one from prefix + short UUID."""
+    if policy_name:
+        return policy_name
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
 async def generate_snmp_discovery_policy(
-    policy_name: str,
     targets: list[dict[str, Any]],
     authentication: dict[str, Any],
+    policy_name: str | None = None,
     schedule: str | None = None,
     timeout: int = 120,
     snmp_timeout: int = 5,
@@ -23,6 +31,8 @@ async def generate_snmp_discovery_policy(
 ) -> str:
     """
     Generate a valid YAML policy document for the snmp-discovery agent.
+
+    `policy_name` is optional — if omitted, a unique name is generated automatically.
 
     Each entry in `targets` is a dict with at minimum a `host` key (IP, CIDR, or range).
     Optional target keys: `port` (default 161), `authentication` (per-target override),
@@ -43,6 +53,8 @@ async def generate_snmp_discovery_policy(
         SNMPDiscoveryPolicyConfig,
         SNMPDiscoveryScope,
     )
+
+    name = _make_policy_name("snmp-discovery", policy_name)
 
     defaults = None
     if any(v is not None for v in [site, location, role, tags, interface_patterns]):
@@ -67,53 +79,50 @@ async def generate_snmp_discovery_policy(
         {"targets": targets, "authentication": authentication}
     )
     policy = SNMPDiscoveryPolicy(config=config, scope=scope)
-    policies = SNMPDiscoveryPolicies(policies={policy_name: policy})
+    policies = SNMPDiscoveryPolicies(policies={name: policy})
     data = policies.model_dump(exclude_none=True)
     return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
 async def generate_probe_telemetry_policy(
-    policy_name: str,
     probes: list[dict[str, Any]],
-    site: str | None = None,
-    role: str | None = None,
-    location: str | None = None,
-    tenant: str | None = None,
-    tags: list[str] | None = None,
+    policy_name: str | None = None,
 ) -> str:
     """
     Generate a valid YAML policy document for the probe-telemetry agent.
 
+    `policy_name` is optional — if omitted, a unique name is generated automatically.
+
     `probes` is a list of probe dicts. Each probe must have:
     - `name`: unique string identifier
     - `type`: one of "http", "ping", "dns", "tcp"
-    - `targets`: list of dicts with `host` key
+    - `targets`: list of dicts with `host` key; optionally `id` (NetBox device ID join key)
     - A type-specific config block matching the `type` field:
       - `http`: dict with `scheme`, `path`, `port`, `method`, optional `headers`
       - `ping`: dict with `packets_per_probe`, `packets_interval_msec`, `payload_size`
       - `dns`: dict with `domain`, `query_type` (A/AAAA/MX), `min_answers`
       - `tcp`: dict with `port`, `tls_handshake`
-    - Optional: `interval` (e.g. "30s"), `timeout` (e.g. "10s"), `override_defaults`
+    - Optional: `interval` (e.g. "30s"), `timeout` (e.g. "10s")
+
+    Target `id` is the NetBox device ID join key — emitted as the `id=` label on all metrics
+    for that target. Site, role, and other enrichment labels are attached at the
+    Prometheus/Alloy level via relabeling rules, not by the agent.
 
     Returns the YAML string ready to POST to the agent's /api/v1/policies endpoint.
     """
-    from orb_mcp.schemas.probe_telemetry import ProbeDefaults, ProbeTelemetryPolicies, ProbeTelemetryPolicy
+    from orb_mcp.schemas.probe_telemetry import ProbeTelemetryPolicies, ProbeTelemetryPolicy
 
-    defaults = None
-    if any(v is not None for v in [site, role, location, tenant, tags]):
-        defaults = ProbeDefaults(site=site, role=role, location=location, tenant=tenant, tags=tags)
+    name = _make_policy_name("probe-telemetry", policy_name)
 
-    policy = ProbeTelemetryPolicy.model_validate(
-        {"defaults": defaults.model_dump(exclude_none=True) if defaults else None, "probes": probes}
-    )
-    policies = ProbeTelemetryPolicies(policies={policy_name: policy})
+    policy = ProbeTelemetryPolicy.model_validate({"probes": probes})
+    policies = ProbeTelemetryPolicies(policies={name: policy})
     data = policies.model_dump(exclude_none=True)
     return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
 async def generate_device_discovery_policy(
-    policy_name: str,
     scope: list[dict[str, Any]],
+    policy_name: str | None = None,
     schedule: str | None = None,
     site: str | None = None,
     role: str | None = None,
@@ -128,6 +137,8 @@ async def generate_device_discovery_policy(
 ) -> str:
     """
     Generate a valid YAML policy document for the device_discovery backend (NAPALM-based).
+
+    `policy_name` is optional — if omitted, a unique name is generated automatically.
 
     Each entry in `scope` is a dict with:
     - `hostname` (required): IP, range (192.168.0.1-10), or subnet (192.168.0.0/24)
@@ -149,6 +160,8 @@ async def generate_device_discovery_policy(
         DeviceDiscoveryPolicyConfig,
     )
 
+    name = _make_policy_name("device-discovery", policy_name)
+
     defaults = None
     if any(v is not None for v in [site, role, location, tenant, tags, description, comments, if_type, interface_patterns]):
         defaults = DeviceDiscoveryDefaults(
@@ -163,14 +176,14 @@ async def generate_device_discovery_policy(
         "options": options,
     })
     policy = DeviceDiscoveryPolicy.model_validate({"config": config.model_dump(exclude_none=True), "scope": scope})
-    policies = DeviceDiscoveryPolicies(policies={policy_name: policy})
+    policies = DeviceDiscoveryPolicies(policies={name: policy})
     data = policies.model_dump(exclude_none=True)
     return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
 async def generate_network_discovery_policy(
-    policy_name: str,
     targets: list[str],
+    policy_name: str | None = None,
     schedule: str | None = None,
     timeout: int | None = None,
     description: str | None = None,
@@ -196,6 +209,8 @@ async def generate_network_discovery_policy(
     """
     Generate a valid YAML policy document for the network_discovery backend (NMAP-based).
 
+    `policy_name` is optional — if omitted, a unique name is generated automatically.
+
     `targets`: IPs (192.168.1.1), ranges (192.168.1.10-20), subnets (192.168.1.0/24), or hostnames.
     `timeout`: NMAP scan timeout in minutes (default: 2).
     `scan_types`: e.g. ["connect", "syn", "udp"]. Use ["connect"] + skip_host=True for rootless podman.
@@ -214,6 +229,8 @@ async def generate_network_discovery_policy(
         NetworkDiscoveryPolicyConfig,
         NetworkDiscoveryScope,
     )
+
+    name = _make_policy_name("network-discovery", policy_name)
 
     defaults = None
     if any(v is not None for v in [description, tags, comments, network_mask]):
@@ -245,20 +262,22 @@ async def generate_network_discovery_policy(
         "dns_servers": dns_servers,
     })
     policy = NetworkDiscoveryPolicy(config=config, scope=scope)
-    policies = NetworkDiscoveryPolicies(policies={policy_name: policy})
+    policies = NetworkDiscoveryPolicies(policies={name: policy})
     data = policies.model_dump(exclude_none=True)
     return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
 async def generate_worker_policy(
-    policy_name: str,
     package: str,
     scope: dict[str, Any] | list[Any],
+    policy_name: str | None = None,
     schedule: str | None = None,
     extra_config: dict[str, Any] | None = None,
 ) -> str:
     """
     Generate a valid YAML policy document for the worker backend (custom Python worker).
+
+    `policy_name` is optional — if omitted, a unique name is generated automatically.
 
     `package` (required): Python package name implementing the Backend class.
     `scope`: user-defined scope (any dict or list structure passed to the worker).
@@ -270,6 +289,8 @@ async def generate_worker_policy(
     """
     from orb_mcp.schemas.worker import WorkerPolicies, WorkerPolicy, WorkerPolicyConfig
 
+    name = _make_policy_name("worker", policy_name)
+
     config_data: dict[str, Any] = {"package": package}
     if schedule is not None:
         config_data["schedule"] = schedule
@@ -278,33 +299,37 @@ async def generate_worker_policy(
 
     config = WorkerPolicyConfig.model_validate(config_data)
     policy = WorkerPolicy(config=config, scope=scope)
-    policies = WorkerPolicies(policies={policy_name: policy})
+    policies = WorkerPolicies(policies={name: policy})
     data = policies.model_dump(exclude_none=True)
     return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
 async def generate_snmp_telemetry_policy(
-    policy_name: str,
     targets: list[dict[str, Any]],
     authentication: dict[str, Any],
-    schedule: str | None = None,
+    policy_name: str | None = None,
     metrics_interval: int | None = None,
     snmp_timeout: int = 5,
     retries: int = 3,
     profiles_dir: str | None = None,
-    lookup_extensions_dir: str | None = None,
 ) -> str:
     """
     Generate a valid YAML policy document for the snmp-telemetry agent.
 
-    Each entry in `targets` is a dict with at minimum a `host` key.
-    Optional target keys: `port` (default 161), `authentication` (per-target override).
+    `policy_name` is optional — if omitted, a unique name is generated automatically.
+
+    Each entry in `targets` is a dict with at minimum a `host` key (IP, CIDR, or range).
+    Optional target keys:
+    - `port` (default 161)
+    - `id` (string): NetBox device ID — emitted as the `id=` label on all metrics for this target.
+      Use this as the join key for Prometheus/Alloy relabeling rules that attach site, role, etc.
+    - `authentication` (per-target override)
 
     `authentication` must include `protocol_version` (SNMPv1, SNMPv2c, or SNMPv3).
     For SNMPv2c/v1: also include `community`.
     For SNMPv3: also include `username`, `security_level`, and optionally auth/priv fields.
 
-    `metrics_interval`: seconds between metric collections. Omit or set to None to disable.
+    `metrics_interval`: seconds between metric collections (required, must be >= 1).
     `profiles_dir`: path to ktranslate SNMP profiles directory (default: /usr/local/share/snmp-profiles).
 
     Returns the YAML string ready to POST to the agent's /api/v1/policies endpoint.
@@ -316,18 +341,18 @@ async def generate_snmp_telemetry_policy(
         SNMPTelemetryScope,
     )
 
+    name = _make_policy_name("snmp-telemetry", policy_name)
+
     config = SNMPTelemetryPolicyConfig(
-        schedule=schedule,
         metrics_interval=metrics_interval,
         snmp_timeout=snmp_timeout,
         retries=retries,
         profiles_dir=profiles_dir,
-        lookup_extensions_dir=lookup_extensions_dir,
     )
     scope = SNMPTelemetryScope.model_validate(
         {"targets": targets, "authentication": authentication}
     )
     policy = SNMPTelemetryPolicy(config=config, scope=scope)
-    policies = SNMPTelemetryPolicies(policies={policy_name: policy})
+    policies = SNMPTelemetryPolicies(policies={name: policy})
     data = policies.model_dump(exclude_none=True)
     return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)

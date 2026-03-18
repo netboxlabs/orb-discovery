@@ -105,13 +105,11 @@ async def test_generate_probe_telemetry_http():
                 "http": {"scheme": "HTTPS", "path": "/health", "port": 443, "method": "GET"},
             }
         ],
-        site="dc-01",
-        tags=["monitoring"],
     )
     data = yaml.safe_load(result)
     assert "policies" in data
     policy = data["policies"]["web_check"]
-    assert policy["defaults"]["site"] == "dc-01"
+    assert "defaults" not in policy
     probe = policy["probes"][0]
     assert probe["name"] == "health"
     assert probe["type"] == "http"

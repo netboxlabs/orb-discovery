@@ -6,17 +6,9 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-class ProbeDefaults(BaseModel):
-    site: str | None = None
-    role: str | None = None
-    location: str | None = None
-    tenant: str | None = None
-    tags: list[str] | None = None
-
-
 class ProbeTarget(BaseModel):
     host: str
-    override_defaults: ProbeDefaults | None = None
+    id: str | None = None  # optional NetBox join key — emitted as id= label on metrics
 
 
 class HTTPConf(BaseModel):
@@ -53,7 +45,6 @@ class ProbeConfig(BaseModel):
     targets: list[ProbeTarget] = Field(min_length=1)
     interval: str = "30s"
     timeout: str = "10s"
-    override_defaults: ProbeDefaults | None = None
     http: HTTPConf | None = None
     ping: PingConf | None = None
     dns: DNSConf | None = None
@@ -75,7 +66,6 @@ class ProbeConfig(BaseModel):
 
 
 class ProbeTelemetryPolicy(BaseModel):
-    defaults: ProbeDefaults | None = None
     probes: list[ProbeConfig] = Field(min_length=1)
 
 
