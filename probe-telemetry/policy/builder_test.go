@@ -6,7 +6,6 @@ import (
 
 	"github.com/netboxlabs/orb-discovery/probe-telemetry/config"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -207,76 +206,6 @@ func TestEphemeralPort(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Resource attributes (policy-level defaults → OTLP resource attributes)
-// ---------------------------------------------------------------------------
-
-func TestResourceAttributesFromPolicyDefaults(t *testing.T) {
-	pol := httpPolicy("h.com")
-	pol.Defaults = config.Defaults{Site: "dc1", Role: "web", Location: "rack-a", Tenant: "acme", Tags: []string{"prod"}}
-	out := BuildCloudproberTextproto("p", pol, "grpc://localhost:4317", 10)
-
-	require.Contains(t, out, "otel_surfacer {")
-	// resource_attribute stanzas live inside the otel_surfacer block
-	assert.Contains(t, out, `resource_attribute { key: "site" value: "dc1" }`)
-	assert.Contains(t, out, `resource_attribute { key: "role" value: "web" }`)
-	assert.Contains(t, out, `resource_attribute { key: "location" value: "rack-a" }`)
-	assert.Contains(t, out, `resource_attribute { key: "tenant" value: "acme" }`)
-	assert.Contains(t, out, `resource_attribute { key: "tag_prod" value: "true" }`)
-}
-
-func TestNoResourceAttributesWhenDefaultsEmpty(t *testing.T) {
-	out := BuildCloudproberTextproto("p", httpPolicy("h.com"), "grpc://localhost:4317", 10)
-	assert.NotContains(t, out, "resource_attribute")
-}
-
-// ---------------------------------------------------------------------------
-// Delta labels (target/probe overrides → additional_label, no duplication)
-// ---------------------------------------------------------------------------
-
-func TestNoDuplicateLabelsWhenNoOverride(t *testing.T) {
-	pol := httpPolicy("h.com")
-	pol.Defaults = config.Defaults{Site: "dc1", Role: "web"}
-	out := BuildCloudproberTextproto("p", pol, "grpc://localhost:4317", 10)
-	// policy defaults are resource_attributes; no per-probe additional_label for same values
-	assert.NotContains(t, out, "additional_label")
-}
-
-func TestTargetOverrideBecomesAdditionalLabel(t *testing.T) {
-	site2 := "dc2"
-	pol := config.Policy{
-		Defaults: config.Defaults{Site: "dc1", Role: "web"},
-		Probes: []config.ProbeConfig{{
-			Name: "x",
-			Type: "http",
-			Targets: []config.Target{
-				{Host: "h1.com"},
-				{Host: "h2.com", OverrideDefaults: &config.Defaults{Site: site2}},
-			},
-			HTTP: &config.HTTPConf{},
-		}},
-	}
-	out := BuildCloudproberTextproto("p", pol, "grpc://localhost:4317", 10)
-	// h2 stanza should have additional_label for site=dc2 (the override)
-	assert.Contains(t, out, `additional_label { key: "site" value: "dc2" }`)
-	// h1 stanza should have no additional_label (inherits policy defaults already in resource_attribute)
-	assert.Equal(t, 1, strings.Count(out, "additional_label"), "only the overriding target should emit additional_label")
-}
-
-func TestProbeOverrideBecomesAdditionalLabel(t *testing.T) {
-	pol := config.Policy{
-		Defaults: config.Defaults{Role: "web"},
-		Probes: []config.ProbeConfig{{
-			Name:             "infra-ping",
-			Type:             "ping",
-			Targets:          []config.Target{{Host: "8.8.8.8"}},
-			OverrideDefaults: &config.Defaults{Role: "infra"},
-		}},
-	}
-	out := BuildCloudproberTextproto("p", pol, "grpc://localhost:4317", 10)
-	assert.Contains(t, out, `additional_label { key: "role" value: "infra" }`)
-}
-
-// ---------------------------------------------------------------------------
 // Multiple probes
 // ---------------------------------------------------------------------------
 
@@ -294,20 +223,3 @@ func TestMultipleProbesInPolicy(t *testing.T) {
 	assert.Contains(t, out, "ping_probe {")
 }
 
-// ---------------------------------------------------------------------------
-// equalTags / deltaDefaults (internal helpers via observable output)
-// ---------------------------------------------------------------------------
-
-func TestTagsDeltaWhenTagsOverridden(t *testing.T) {
-	pol := config.Policy{
-		Defaults: config.Defaults{Tags: []string{"prod"}},
-		Probes: []config.ProbeConfig{{
-			Name:    "x",
-			Type:    "ping",
-			Targets: []config.Target{{Host: "8.8.8.8", OverrideDefaults: &config.Defaults{Tags: []string{"staging"}}}},
-		}},
-	}
-	out := BuildCloudproberTextproto("p", pol, "grpc://localhost:4317", 10)
-	assert.Contains(t, out, `additional_label { key: "tag_staging" value: "true" }`)
-	assert.NotContains(t, out, `additional_label { key: "tag_prod" value: "true" }`)
-}

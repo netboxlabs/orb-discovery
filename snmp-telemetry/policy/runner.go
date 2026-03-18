@@ -10,7 +10,6 @@ import (
 	"github.com/go-co-op/gocron/v2"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/collector"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/config"
-	"github.com/netboxlabs/orb-discovery/snmp-telemetry/data"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/profiles"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/snmp"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/targets"
@@ -41,7 +40,7 @@ type Runner struct {
 // NewRunner returns a new policy runner.
 // instanceProfilesDir is the instance-level default profiles directory set via CLI flag;
 // it overrides the compiled-in constant but is itself overridden by policy.Config.ProfilesDir.
-func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, clientFactory snmp.ClientFactory, deviceLookup data.DeviceRetriever, instanceProfilesDir string) (*Runner, error) {
+func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, clientFactory snmp.ClientFactory, instanceProfilesDir string) (*Runner, error) {
 	s, err := gocron.NewScheduler()
 	if err != nil {
 		return nil, err
@@ -87,7 +86,7 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 		return nil, fmt.Errorf("resolving SNMP profiles: %w", resolveErr)
 	}
 	matcher := profiles.NewMatcher(resolvedProfiles)
-	runner.metricsCollector = collector.NewMetricsCollector(clientFactory, matcher, deviceLookup, logger, snmpTimeout, policy.Config.Retries)
+	runner.metricsCollector = collector.NewMetricsCollector(clientFactory, matcher, logger, snmpTimeout, policy.Config.Retries)
 	logger.Info("SNMP metrics collection enabled", "profiles_dir", profilesDir, "profile_count", loader.Count(), "interval", runner.metricsInterval)
 
 	// Schedule a metrics job for each expanded target

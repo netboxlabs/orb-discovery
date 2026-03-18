@@ -14,51 +14,15 @@ type Policies struct {
 	Policies map[string]Policy `yaml:"policies"`
 }
 
-// Defaults holds NetBox-contextual metadata that becomes OTLP attributes on
-// every metric emitted for the associated probe target.
-// Tags are exported as individual "tag_<value>=true" labels.
-type Defaults struct {
-	Site     string   `yaml:"site,omitempty"`
-	Role     string   `yaml:"role,omitempty"`
-	Location string   `yaml:"location,omitempty"`
-	Tenant   string   `yaml:"tenant,omitempty"`
-	Tags     []string `yaml:"tags,omitempty"`
-}
-
-// MergeDefaults merges override into base; non-zero override fields win.
-// Tags are replaced (not appended) when override specifies any.
-func MergeDefaults(base, override Defaults) Defaults {
-	merged := base
-	if override.Site != "" {
-		merged.Site = override.Site
-	}
-	if override.Role != "" {
-		merged.Role = override.Role
-	}
-	if override.Location != "" {
-		merged.Location = override.Location
-	}
-	if override.Tenant != "" {
-		merged.Tenant = override.Tenant
-	}
-	if len(override.Tags) > 0 {
-		merged.Tags = override.Tags
-	}
-	return merged
-}
-
-// Policy groups a set of probes sharing a common defaults baseline.
+// Policy groups a set of probes sharing a common configuration.
 type Policy struct {
-	Defaults Defaults      `yaml:"defaults,omitempty"`
-	Probes   []ProbeConfig `yaml:"probes"`
+	Probes []ProbeConfig `yaml:"probes"`
 }
 
-// Target is a single probe destination. OverrideDefaults, if set, takes
-// precedence over the probe-level and policy-level defaults.
+// Target is a single probe destination.
 type Target struct {
-	Host             string    `yaml:"host"`
-	ID               string    `yaml:"id,omitempty"`
-	OverrideDefaults *Defaults `yaml:"override_defaults,omitempty"`
+	Host string `yaml:"host"`
+	ID   string `yaml:"id,omitempty"`
 }
 
 // ProbeConfig describes one logical probe (potentially multiple targets).
@@ -66,10 +30,9 @@ type ProbeConfig struct {
 	Name             string    `yaml:"name"`
 	Type             string    `yaml:"type"`             // http, ping, dns, tcp
 	Targets          []Target  `yaml:"targets"`
-	Interval         string    `yaml:"interval"`         // e.g. "10s", "1m" — default "30s"
-	Timeout          string    `yaml:"timeout"`          // e.g. "5s"        — default "10s"
-	OverrideDefaults *Defaults `yaml:"override_defaults,omitempty"`
-	HTTP             *HTTPConf `yaml:"http,omitempty"`
+	Interval string    `yaml:"interval"` // e.g. "10s", "1m" — default "30s"
+	Timeout  string    `yaml:"timeout"`  // e.g. "5s"        — default "10s"
+	HTTP     *HTTPConf `yaml:"http,omitempty"`
 	Ping             *PingConf `yaml:"ping,omitempty"`
 	DNS              *DNSConf  `yaml:"dns,omitempty"`
 	TCP              *TCPConf  `yaml:"tcp,omitempty"`

@@ -89,7 +89,7 @@ func newCollector(factory snmp.ClientFactory, p *profiles.Profile) *MetricsColle
 		ps = []*profiles.Profile{p}
 	}
 	matcher := profiles.NewMatcher(ps)
-	return NewMetricsCollector(factory, matcher, nil, discardLogger, time.Second, 1)
+	return NewMetricsCollector(factory, matcher, discardLogger, time.Second, 1)
 }
 
 // deviceStore is a test-only accessor to read the collector's internal store.

@@ -45,9 +45,8 @@ type PolicyConfig struct {
 	Schedule            *string `yaml:"schedule,omitempty"`
 	MetricsInterval     *int    `yaml:"metrics_interval"`
 	ProfilesDir         string  `yaml:"profiles_dir,omitempty"`
-	SNMPTimeout         int     `yaml:"snmp_timeout"`
-	Retries             int     `yaml:"retries"`
-	LookupExtensionsDir string  `yaml:"lookup_extensions_dir,omitempty"`
+	SNMPTimeout     int `yaml:"snmp_timeout"`
+	Retries         int `yaml:"retries"`
 }
 
 // Policy represents a snmp-telemetry metrics collection policy

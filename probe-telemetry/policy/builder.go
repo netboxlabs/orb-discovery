@@ -32,12 +32,6 @@ func BuildCloudproberTextproto(
 	var sb strings.Builder
 
 	for _, probe := range policy.Probes {
-		// Resolve probe-effective defaults
-		probeDefaults := policy.Defaults
-		if probe.OverrideDefaults != nil {
-			probeDefaults = config.MergeDefaults(policy.Defaults, *probe.OverrideDefaults)
-		}
-
 		interval := probe.Interval
 		if interval == "" {
 			interval = "30s"
@@ -50,12 +44,6 @@ func BuildCloudproberTextproto(
 		probeType := strings.ToUpper(probe.Type)
 
 		for _, target := range probe.Targets {
-			// Resolve target-effective defaults
-			targetDefaults := probeDefaults
-			if target.OverrideDefaults != nil {
-				targetDefaults = config.MergeDefaults(probeDefaults, *target.OverrideDefaults)
-			}
-
 			probeName := fmt.Sprintf("%s_%s_%s",
 				sanitize(policyName),
 				sanitize(probe.Name),
@@ -81,9 +69,6 @@ func BuildCloudproberTextproto(
 				sb.WriteString(buildTCPProbeConf(probe.TCP))
 			}
 
-			// NetBox-derived labels — only the delta over policy-level defaults,
-			// since policy defaults are already emitted as resource_attribute.
-			writeLabels(&sb, deltaDefaults(policy.Defaults, targetDefaults))
 			if target.ID != "" {
 				fmt.Fprintf(&sb, "  additional_label { key: \"id\" value: %q }\n", target.ID)
 			}
@@ -103,11 +88,6 @@ func BuildCloudproberTextproto(
 		fmt.Fprintf(&sb, "    otlp_grpc_exporter {\n      endpoint: %q\n      insecure: true\n    }\n", endpoint)
 		fmt.Fprintf(&sb, "    export_interval_sec: %d\n", exportPeriodSec)
 		sb.WriteString("    metrics_prefix: \"probe_\"\n")
-
-		// Policy-level Defaults become OTLP resource attributes — they describe
-		// the origin of all telemetry produced by this policy's prober instance.
-		writeResourceAttributes(&sb, policy.Defaults)
-
 		sb.WriteString("  }\n}\n\n")
 	} else {
 		// No OTLP endpoint — use the FILE surfacer (writes to stdout).
@@ -200,83 +180,3 @@ func buildTCPProbeConf(t *config.TCPConf) string {
 	return sb.String()
 }
 
-// writeLabels appends additional_label stanzas for each non-empty Defaults field.
-// Pass the delta (fields that override the policy-level defaults) so that
-// resource_attribute and additional_label don't duplicate the same key.
-func writeLabels(sb *strings.Builder, d config.Defaults) {
-	if d.Site != "" {
-		fmt.Fprintf(sb, "  additional_label { key: \"site\" value: %q }\n", d.Site)
-	}
-	if d.Role != "" {
-		fmt.Fprintf(sb, "  additional_label { key: \"role\" value: %q }\n", d.Role)
-	}
-	if d.Location != "" {
-		fmt.Fprintf(sb, "  additional_label { key: \"location\" value: %q }\n", d.Location)
-	}
-	if d.Tenant != "" {
-		fmt.Fprintf(sb, "  additional_label { key: \"tenant\" value: %q }\n", d.Tenant)
-	}
-	for _, tag := range d.Tags {
-		fmt.Fprintf(sb, "  additional_label { key: %q value: \"true\" }\n", "tag_"+tag)
-	}
-}
-
-// writeResourceAttributes appends resource_attribute stanzas inside the
-// otel_surfacer block for each non-empty Defaults field.
-func writeResourceAttributes(sb *strings.Builder, d config.Defaults) {
-	if d.Site != "" {
-		fmt.Fprintf(sb, "    resource_attribute { key: \"site\" value: %q }\n", d.Site)
-	}
-	if d.Role != "" {
-		fmt.Fprintf(sb, "    resource_attribute { key: \"role\" value: %q }\n", d.Role)
-	}
-	if d.Location != "" {
-		fmt.Fprintf(sb, "    resource_attribute { key: \"location\" value: %q }\n", d.Location)
-	}
-	if d.Tenant != "" {
-		fmt.Fprintf(sb, "    resource_attribute { key: \"tenant\" value: %q }\n", d.Tenant)
-	}
-	for _, tag := range d.Tags {
-		fmt.Fprintf(sb, "    resource_attribute { key: %q value: \"true\" }\n", "tag_"+tag)
-	}
-}
-
-// deltaDefaults returns only the fields that differ between target and base.
-// These are the override-only values that should become additional_labels,
-// avoiding duplication with resource_attribute (which carries the policy base).
-func deltaDefaults(base, target config.Defaults) config.Defaults {
-	var delta config.Defaults
-	if target.Site != base.Site {
-		delta.Site = target.Site
-	}
-	if target.Role != base.Role {
-		delta.Role = target.Role
-	}
-	if target.Location != base.Location {
-		delta.Location = target.Location
-	}
-	if target.Tenant != base.Tenant {
-		delta.Tenant = target.Tenant
-	}
-	// Tags: emit only if the override list differs from the base
-	if len(target.Tags) > 0 && !equalTags(base.Tags, target.Tags) {
-		delta.Tags = target.Tags
-	}
-	return delta
-}
-
-func equalTags(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	set := make(map[string]struct{}, len(a))
-	for _, t := range a {
-		set[t] = struct{}{}
-	}
-	for _, t := range b {
-		if _, ok := set[t]; !ok {
-			return false
-		}
-	}
-	return true
-}

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/config"
-	"github.com/netboxlabs/orb-discovery/snmp-telemetry/data"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/env"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/snmp"
 	"gopkg.in/yaml.v3"
@@ -84,16 +83,11 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 		return fmt.Errorf("policy %s already exists", name)
 	}
 
-	deviceLookup, err := data.LoadDeviceLookupExtensions(policy.Config.LookupExtensionsDir)
-	if err != nil {
-		m.logger.Warn("Failed to load device lookup extensions", "error", err, "directory", policy.Config.LookupExtensionsDir)
-	}
-
 	clientFactory := func(host string, port uint16, retries int, timeout time.Duration, authentication *config.Authentication, logger *slog.Logger) (snmp.Walker, error) {
 		return snmp.NewClient(host, port, retries, timeout, authentication, logger)
 	}
 
-	r, err := NewRunner(m.ctx, m.logger, name, policy, clientFactory, deviceLookup, m.defaultProfilesDir)
+	r, err := NewRunner(m.ctx, m.logger, name, policy, clientFactory, m.defaultProfilesDir)
 	if err != nil {
 		return err
 	}

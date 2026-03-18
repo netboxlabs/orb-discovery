@@ -15,7 +15,6 @@ import (
 
 	"github.com/gosnmp/gosnmp"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/config"
-	"github.com/netboxlabs/orb-discovery/snmp-telemetry/data"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/metrics"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/profiles"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/snmp"
@@ -40,7 +39,6 @@ type observedPoint struct {
 type MetricsCollector struct {
 	clientFactory snmp.ClientFactory
 	matcher       *profiles.Matcher
-	deviceLookup  data.DeviceRetriever
 	logger        *slog.Logger
 	snmpTimeout   time.Duration
 	retries       int
@@ -60,11 +58,10 @@ type MetricsCollector struct {
 }
 
 // NewMetricsCollector creates a MetricsCollector.
-func NewMetricsCollector(clientFactory snmp.ClientFactory, matcher *profiles.Matcher, deviceLookup data.DeviceRetriever, logger *slog.Logger, snmpTimeout time.Duration, retries int) *MetricsCollector {
+func NewMetricsCollector(clientFactory snmp.ClientFactory, matcher *profiles.Matcher, logger *slog.Logger, snmpTimeout time.Duration, retries int) *MetricsCollector {
 	return &MetricsCollector{
 		clientFactory: clientFactory,
 		matcher:       matcher,
-		deviceLookup:  deviceLookup,
 		logger:        logger,
 		snmpTimeout:   snmpTimeout,
 		retries:       retries,
@@ -217,31 +214,6 @@ func (c *MetricsCollector) CollectTarget(ctx context.Context, target config.Targ
 	}
 
 	return nil
-}
-
-// collectDeviceTags walks the top-level profile metric_tags and returns them as OTLP attributes.
-// These are device-wide scalar OIDs (e.g. sysName, sysLocation) inherited from system-mib.yml.
-func (c *MetricsCollector) collectDeviceTags(walker snmp.Walker, metricTags []profiles.MetricTag) []attribute.KeyValue {
-	var attrs []attribute.KeyValue
-	for _, mt := range metricTags {
-		col := metricTagColumn(&mt)
-		if col == nil || col.OID == "" {
-			continue
-		}
-		val, err := c.walkScalar(walker, col.OID)
-		if err != nil || val == "" {
-			continue
-		}
-		tagName := mt.Tag
-		if tagName == "" {
-			tagName = col.Name
-		}
-		if tagName == "" {
-			continue
-		}
-		attrs = append(attrs, attribute.String(strings.ToLower(tagName), val))
-	}
-	return attrs
 }
 
 // collectScalar collects a single scalar OID metric into localBuf.
