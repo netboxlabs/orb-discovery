@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "orb-discovery": {
+      "command": "uv",
+      "args": ["--directory", "mcp-server", "run", "orb-mcp-server"]
+    }
+  }
+}
