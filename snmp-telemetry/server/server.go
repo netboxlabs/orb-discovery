@@ -69,6 +69,7 @@ func NewServer(host string, port int, logger *slog.Logger, manager *policy.Manag
 	{
 		v1.GET("/status", server.getStatus)
 		v1.GET("/capabilities", server.getCapabilities)
+		v1.GET("/policies", server.getPolicies)
 		v1.POST("/policies", server.createPolicy)
 		v1.DELETE("/policies/:policy", server.deletePolicy)
 	}
@@ -111,6 +112,10 @@ func (s *Server) getStatus(c *gin.Context) {
 
 func (s *Server) getCapabilities(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, Capabilities{Capabilities: s.manager.GetCapabilities()})
+}
+
+func (s *Server) getPolicies(c *gin.Context) {
+	c.IndentedJSON(http.StatusOK, s.manager.GetPolicyStatuses())
 }
 
 func (s *Server) createPolicy(c *gin.Context) {

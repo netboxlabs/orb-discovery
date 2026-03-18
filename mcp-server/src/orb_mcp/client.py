@@ -28,5 +28,8 @@ class AgentClient:
     async def get_status(self) -> httpx.Response:
         return await self._client.get("/api/v1/status")
 
+    async def get_policies(self) -> httpx.Response:
+        return await self._client.get("/api/v1/policies")
+
     async def get_capabilities(self) -> httpx.Response:
         return await self._client.get("/api/v1/capabilities")

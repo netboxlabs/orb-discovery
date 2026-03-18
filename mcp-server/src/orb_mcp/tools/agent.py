@@ -24,6 +24,8 @@ _DEFAULT_PORTS: dict[str, int] = {
     "worker": 8071,
 }
 
+_TELEMETRY_AGENTS = {"snmp-telemetry", "probe-telemetry"}
+
 
 def _base_url(agent_type: AgentType, host: str, port: int | None) -> str:
     effective_port = port if port is not None else _DEFAULT_PORTS[agent_type]
@@ -69,17 +71,22 @@ async def list_policies(
     agent_port: int | None = None,
 ) -> dict[str, Any]:
     """
-    Retrieve current policy statuses from a running orb-discovery agent (GET /api/v1/status).
+    Retrieve current policy statuses from a running orb-discovery agent.
+
+    For snmp-telemetry and probe-telemetry agents, calls GET /api/v1/policies and returns
+    a flat JSON array of [{name, status}] objects. For other agents (e.g. snmp-discovery),
+    falls back to GET /api/v1/status which includes policies alongside version/uptime fields.
 
     `agent_type`: 'snmp-discovery', 'snmp-telemetry', or 'probe-telemetry'.
     `agent_host`: hostname or IP of the running agent (default: 'localhost').
     `agent_port`: port number (defaults: snmp-discovery=8070, snmp-telemetry=8074, probe-telemetry=8075).
-
-    Returns the agent's status response including all active policies and their run history.
     """
     try:
         async with AgentClient(_base_url(agent_type, agent_host, agent_port)) as client:
-            response = await client.get_status()
+            if agent_type in _TELEMETRY_AGENTS:
+                response = await client.get_policies()
+            else:
+                response = await client.get_status()
             return _response_dict(response)
     except httpx.ConnectError as e:
         return {"status_code": None, "error": f"Could not connect to {agent_type} at {agent_host}: {e}"}
