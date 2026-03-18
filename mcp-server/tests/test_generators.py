@@ -81,6 +81,53 @@ async def test_generate_snmp_discovery_missing_community(basic_targets):
         )
 
 
+@pytest.mark.parametrize("alias", ["2c", "v2c", "2", "v2", "SNMPv2c"])
+async def test_protocol_version_v2c_aliases(alias, basic_targets):
+    result = await generate_snmp_telemetry_policy(
+        policy_name="alias_test",
+        targets=basic_targets,
+        authentication={"protocol_version": alias, "community": "public"},
+    )
+    import yaml
+
+    auth = yaml.safe_load(result)["policies"]["alias_test"]["scope"]["authentication"]
+    assert auth["protocol_version"] == "SNMPv2c"
+
+
+@pytest.mark.parametrize("alias", ["1", "v1", "SNMPv1"])
+async def test_protocol_version_v1_aliases(alias, basic_targets):
+    result = await generate_snmp_telemetry_policy(
+        policy_name="alias_test",
+        targets=basic_targets,
+        authentication={"protocol_version": alias, "community": "public"},
+    )
+    import yaml
+
+    auth = yaml.safe_load(result)["policies"]["alias_test"]["scope"]["authentication"]
+    assert auth["protocol_version"] == "SNMPv1"
+
+
+@pytest.mark.parametrize("alias", ["3", "v3", "SNMPv3"])
+async def test_protocol_version_v3_aliases(alias, basic_targets):
+    result = await generate_snmp_telemetry_policy(
+        policy_name="alias_test",
+        targets=basic_targets,
+        authentication={
+            "protocol_version": alias,
+            "username": "admin",
+            "security_level": "authPriv",
+            "auth_protocol": "SHA",
+            "auth_passphrase": "authsecret",
+            "priv_protocol": "AES",
+            "priv_passphrase": "privsecret",
+        },
+    )
+    import yaml
+
+    auth = yaml.safe_load(result)["policies"]["alias_test"]["scope"]["authentication"]
+    assert auth["protocol_version"] == "SNMPv3"
+
+
 async def test_generate_snmp_discovery_if_type(snmpv2c_auth, basic_targets):
     result = await generate_snmp_discovery_policy(
         policy_name="iface",

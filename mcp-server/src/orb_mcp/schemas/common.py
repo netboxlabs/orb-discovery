@@ -2,13 +2,36 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
+
+_PROTOCOL_VERSION_ALIASES: dict[str, str] = {
+    "1": "SNMPv1",
+    "v1": "SNMPv1",
+    "snmpv1": "SNMPv1",
+    "2": "SNMPv2c",
+    "v2": "SNMPv2c",
+    "2c": "SNMPv2c",
+    "v2c": "SNMPv2c",
+    "snmpv2c": "SNMPv2c",
+    "3": "SNMPv3",
+    "v3": "SNMPv3",
+    "snmpv3": "SNMPv3",
+}
 
 
 class Authentication(BaseModel):
     """SNMP authentication credentials. Mirrors the Go Authentication struct (flat, all fields)."""
 
     protocol_version: Literal["SNMPv1", "SNMPv2c", "SNMPv3"]
+
+    @field_validator("protocol_version", mode="before")
+    @classmethod
+    def normalize_protocol_version(cls, v: object) -> object:
+        if isinstance(v, str):
+            normalized = _PROTOCOL_VERSION_ALIASES.get(v.lower())
+            if normalized:
+                return normalized
+        return v
     community: str | None = None
     security_level: str | None = None  # noAuthNoPriv, authNoPriv, authPriv
     username: str | None = None

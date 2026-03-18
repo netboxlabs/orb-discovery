@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -119,6 +120,51 @@ func TestValidate_UnsupportedProtocolVersion(t *testing.T) {
 	pol := minimalPolicy(auth)
 	err := m.validatePolicy(pol)
 	assert.ErrorContains(t, err, "unsupported protocol version")
+}
+
+func TestNormalizeProtocolVersion(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"2c", "SNMPv2c"},
+		{"v2c", "SNMPv2c"},
+		{"2", "SNMPv2c"},
+		{"v2", "SNMPv2c"},
+		{"SNMPv2c", "SNMPv2c"},
+		{"1", "SNMPv1"},
+		{"v1", "SNMPv1"},
+		{"SNMPv1", "SNMPv1"},
+		{"3", "SNMPv3"},
+		{"v3", "SNMPv3"},
+		{"SNMPv3", "SNMPv3"},
+		{"unknown", "unknown"},
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, normalizeProtocolVersion(tc.input), "input: %s", tc.input)
+	}
+}
+
+func TestValidate_ProtocolVersionAliasesAccepted(t *testing.T) {
+	m := newTestManager()
+	for _, alias := range []string{"2c", "v2c", "2", "v2"} {
+		yaml := fmt.Sprintf(`policies:
+  test:
+    config:
+      metrics_interval: 60
+    scope:
+      authentication:
+        protocol_version: %s
+        community: public
+      targets:
+        - host: 192.168.1.1
+`, alias)
+		policies, err := m.ParsePolicies([]byte(yaml))
+		assert.NoError(t, err, "alias %q should be accepted", alias)
+		if err == nil {
+			assert.Equal(t, "SNMPv2c", policies["test"].Scope.Authentication.ProtocolVersion, "alias %q should normalize to SNMPv2c", alias)
+		}
+	}
 }
 
 func TestValidate_V2cMissingCommunity(t *testing.T) {

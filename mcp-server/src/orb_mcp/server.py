@@ -1,3 +1,5 @@
+import os
+
 from mcp.server.fastmcp import FastMCP
 
 from orb_mcp.tools.agent import delete_policy, get_agent_status, list_policies, submit_policy
@@ -13,6 +15,8 @@ from orb_mcp.tools.validator import validate_policy
 
 mcp = FastMCP(
     name="orb-discovery-mcp",
+    host=os.environ.get("MCP_HOST", "127.0.0.1"),
+    port=int(os.environ.get("MCP_PORT", "8000")),
     instructions=(
         "Tools for generating, validating, and managing policies for orb-discovery agents. "
         "Use the generate_* tools to produce valid YAML, validate_policy to check it, "
@@ -35,7 +39,10 @@ mcp.tool()(get_agent_status)
 
 
 def main() -> None:
-    mcp.run()
+    import os
+
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":
