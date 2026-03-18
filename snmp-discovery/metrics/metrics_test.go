@@ -218,5 +218,6 @@ func NewMockMeter() *MockMeter {
 
 // Add this helper function to reset the metrics state
 func resetMetricsState() {
+	// This function exposes a way to reset the meter to nil for testing
 	metrics.ResetMeter()
 }

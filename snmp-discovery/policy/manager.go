@@ -26,13 +26,13 @@ const (
 
 // Manager represents the policy manager
 type Manager struct {
-	policies           map[string]*Runner
-	client             diode.Client
-	logger             *slog.Logger
-	ctx                context.Context
-	mappingConfig      config.Mapping
-	manufacturers      data.ManufacturerRetriever
-	runStore *RunStore
+	policies      map[string]*Runner
+	client        diode.Client
+	logger        *slog.Logger
+	ctx           context.Context
+	mappingConfig config.Mapping
+	manufacturers data.ManufacturerRetriever
+	runStore      *RunStore
 }
 
 // NewManager returns a new policy manager

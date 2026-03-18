@@ -177,15 +177,9 @@ func GetDiscoveryAttempts() metric.Int64Counter {
 	return GetCounter("discovery_attempts", "Number of SNMP discovery attempts")
 }
 
-// ResetMeter resets the meter and all caches to nil/empty (used in tests).
+// ResetMeter resets the meter to nil for testing purposes.
 func ResetMeter() {
-	cacheLock.Lock()
-	defer cacheLock.Unlock()
 	meter = nil
-	counterCache = map[string]metric.Int64Counter{}
-	upDownCounterCache = map[string]metric.Int64UpDownCounter{}
-	histogramCache = map[string]metric.Float64Histogram{}
-	gaugeCache = map[string]metric.Int64Gauge{}
 }
 
 // Shutdown gracefully shuts down the metrics exporter
