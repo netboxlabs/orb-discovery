@@ -100,6 +100,7 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 			t := config.Target{
 				Host:           ip,
 				Port:           target.Port,
+				ID:             target.ID,
 				Authentication: target.Authentication,
 			}
 			if t.Port == 0 {
