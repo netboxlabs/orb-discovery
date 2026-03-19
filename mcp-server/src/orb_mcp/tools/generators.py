@@ -5,6 +5,9 @@ from typing import Any
 
 import yaml
 
+from orb_mcp.schemas.probe_telemetry import ProbeConfig
+from orb_mcp.schemas.snmp_telemetry import SNMPTelemetryTarget
+
 
 def _make_policy_name(prefix: str, policy_name: str | None) -> str:
     """Return policy_name if provided, otherwise generate one from prefix + short UUID."""
@@ -85,7 +88,7 @@ async def generate_snmp_discovery_policy(
 
 
 async def generate_probe_telemetry_policy(
-    probes: list[dict[str, Any]],
+    probes: list[ProbeConfig],
     policy_name: str | None = None,
 ) -> str:
     """
@@ -93,20 +96,12 @@ async def generate_probe_telemetry_policy(
 
     `policy_name` is optional — if omitted, a unique name is generated automatically.
 
-    `probes` is a list of probe dicts. Each probe must have:
+    Each probe in `probes` must have:
     - `name`: unique string identifier
     - `type`: one of "http", "ping", "dns", "tcp"
-    - `targets`: list of dicts with `host` key; optionally `id` (NetBox device ID join key)
-    - A type-specific config block matching the `type` field:
-      - `http`: dict with `scheme`, `path`, `port`, `method`, optional `headers`
-      - `ping`: dict with `packets_per_probe`, `packets_interval_msec`, `payload_size`
-      - `dns`: dict with `domain`, `query_type` (A/AAAA/MX), `min_answers`
-      - `tcp`: dict with `port`, `tls_handshake`
+    - `targets`: list of ProbeTarget objects with `host` and optional `id` (NetBox device ID join key)
+    - A type-specific config block matching the `type` field
     - Optional: `interval` (e.g. "30s"), `timeout` (e.g. "10s")
-
-    Target `id` is the NetBox device ID join key — emitted as the `id=` label on all metrics
-    for that target. Site, role, and other enrichment labels are attached at the
-    Prometheus/Alloy level via relabeling rules, not by the agent.
 
     Returns the YAML string ready to POST to the agent's /api/v1/policies endpoint.
     """
@@ -304,8 +299,63 @@ async def generate_worker_policy(
     return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
+async def generate_flow_telemetry_policy(
+    port: int,
+    rollups: list[dict],
+    policy_name: str | None = None,
+    host: str | None = None,
+    id: str | None = None,
+    protocol: str | None = None,
+    workers: int | None = None,
+    queue_size: int | None = None,
+) -> str:
+    """
+    Generate a valid YAML policy document for the flow-telemetry agent.
+
+    `policy_name` is optional — if omitted, a unique name is generated automatically.
+
+    `port` (required): UDP port to listen on for incoming flow datagrams.
+    `host` (optional): IP address to bind the UDP listener to. Defaults to 0.0.0.0.
+    `id` (optional): identifier attached to all exported metrics as an OTLP attribute.
+      Use it to distinguish between multiple flow-telemetry instances (e.g. by site or role).
+    `protocol` (optional): flow decoder — 'auto', 'netflow5', 'netflow9', 'ipfix', or 'sflow'.
+      Defaults to 'auto'.
+    `workers` (optional): number of UDP receiver goroutines. Defaults to 2.
+    `queue_size` (optional): UDP receive queue depth. Defaults to 10000.
+    `rollups` (required): list of aggregation rules. Each entry must have:
+      - `method`: 'sum', 'max', or 'min'
+      - `name`: metric name suffix — exported as flow.<name>
+      - `metrics`: list of flow fields to aggregate ('bytes', 'packets')
+      - `dimensions` (optional): list of grouping keys
+          Valid dimensions: src_addr, dst_addr, src_port, dst_port, proto,
+          sampler_addr, in_if, out_if, src_as, dst_as
+
+    Returns the YAML string ready to POST to the agent's /api/v1/policies endpoint.
+    """
+    from orb_mcp.schemas.flow_telemetry import (
+        FlowPolicyConfig,
+        FlowScope,
+        FlowTelemetryPolicies,
+        FlowTelemetryPolicy,
+    )
+
+    name = _make_policy_name("flow-telemetry", policy_name)
+
+    scope = FlowScope.model_validate({"port": port, "host": host, "id": id})
+    config = FlowPolicyConfig.model_validate({
+        "protocol": protocol,
+        "workers": workers,
+        "queue_size": queue_size,
+        "rollups": rollups,
+    })
+    policy = FlowTelemetryPolicy(scope=scope, config=config)
+    policies = FlowTelemetryPolicies(policies={name: policy})
+    data = policies.model_dump(exclude_none=True)
+    return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+
 async def generate_snmp_telemetry_policy(
-    targets: list[dict[str, Any]],
+    targets: list[SNMPTelemetryTarget],
     authentication: dict[str, Any],
     policy_name: str | None = None,
     metrics_interval: int | None = None,
@@ -318,12 +368,9 @@ async def generate_snmp_telemetry_policy(
 
     `policy_name` is optional — if omitted, a unique name is generated automatically.
 
-    Each entry in `targets` is a dict with at minimum a `host` key (IP, CIDR, or range).
-    Optional target keys:
-    - `port` (default 161)
-    - `id` (string): NetBox device ID — emitted as the `id=` label on all metrics for this target.
-      Use this as the join key for Prometheus/Alloy relabeling rules that attach site, role, etc.
-    - `authentication` (per-target override)
+    Each entry in `targets` is an SNMPTelemetryTarget with `host` (IP, CIDR, or range),
+    optional `port` (default 161), optional `id` (NetBox device join key), and optional
+    per-target `authentication` override.
 
     `authentication` must include `protocol_version` (SNMPv1, SNMPv2c, or SNMPv3).
     For SNMPv2c/v1: also include `community`.

@@ -2,6 +2,7 @@ import pytest
 import yaml
 
 from orb_mcp.tools.generators import (
+    generate_flow_telemetry_policy,
     generate_probe_telemetry_policy,
     generate_snmp_discovery_policy,
     generate_snmp_telemetry_policy,
@@ -234,3 +235,136 @@ async def test_generate_snmp_telemetry_no_metrics_interval(snmpv2c_auth, basic_t
     data = yaml.safe_load(result)
     # metrics_interval should not appear when None
     assert "metrics_interval" not in data["policies"]["no_metrics"]["config"]
+
+
+# --- flow-telemetry ---
+
+_BASIC_ROLLUP = {
+    "method": "sum",
+    "name": "flow_bytes",
+    "metrics": ["bytes"],
+    "dimensions": ["src_addr", "dst_addr"],
+}
+
+
+async def test_generate_flow_telemetry_basic():
+    result = await generate_flow_telemetry_policy(
+        policy_name="flows",
+        port=9995,
+        rollups=[_BASIC_ROLLUP],
+    )
+    data = yaml.safe_load(result)
+    assert "policies" in data
+    policy = data["policies"]["flows"]
+    assert policy["scope"]["port"] == 9995
+    assert "host" not in policy["scope"]
+    assert "id" not in policy["scope"]
+    rollup = policy["config"]["rollups"][0]
+    assert rollup["method"] == "sum"
+    assert rollup["name"] == "flow_bytes"
+    assert rollup["metrics"] == ["bytes"]
+    assert rollup["dimensions"] == ["src_addr", "dst_addr"]
+
+
+async def test_generate_flow_telemetry_with_scope_fields():
+    result = await generate_flow_telemetry_policy(
+        policy_name="flows",
+        port=9995,
+        host="192.168.1.10",
+        id="site-a",
+        rollups=[_BASIC_ROLLUP],
+    )
+    data = yaml.safe_load(result)
+    scope = data["policies"]["flows"]["scope"]
+    assert scope["host"] == "192.168.1.10"
+    assert scope["id"] == "site-a"
+
+
+async def test_generate_flow_telemetry_protocol_options():
+    for proto in ["auto", "netflow5", "netflow9", "ipfix", "sflow"]:
+        result = await generate_flow_telemetry_policy(
+            policy_name="flows",
+            port=9995,
+            protocol=proto,
+            rollups=[_BASIC_ROLLUP],
+        )
+        data = yaml.safe_load(result)
+        assert data["policies"]["flows"]["config"]["protocol"] == proto
+
+
+async def test_generate_flow_telemetry_workers_and_queue():
+    result = await generate_flow_telemetry_policy(
+        policy_name="flows",
+        port=9995,
+        workers=4,
+        queue_size=50000,
+        rollups=[_BASIC_ROLLUP],
+    )
+    data = yaml.safe_load(result)
+    config = data["policies"]["flows"]["config"]
+    assert config["workers"] == 4
+    assert config["queue_size"] == 50000
+
+
+async def test_generate_flow_telemetry_multiple_rollups():
+    result = await generate_flow_telemetry_policy(
+        policy_name="flows",
+        port=9995,
+        rollups=[
+            {"method": "sum", "name": "bytes", "metrics": ["bytes"], "dimensions": ["src_addr"]},
+            {"method": "max", "name": "max_pkts", "metrics": ["packets"], "dimensions": ["dst_addr"]},
+        ],
+    )
+    data = yaml.safe_load(result)
+    rollups = data["policies"]["flows"]["config"]["rollups"]
+    assert len(rollups) == 2
+    assert rollups[1]["method"] == "max"
+
+
+async def test_generate_flow_telemetry_auto_policy_name():
+    result = await generate_flow_telemetry_policy(port=9995, rollups=[_BASIC_ROLLUP])
+    data = yaml.safe_load(result)
+    name = next(iter(data["policies"]))
+    assert name.startswith("flow-telemetry-")
+
+
+async def test_generate_flow_telemetry_invalid_method():
+    with pytest.raises(Exception):
+        await generate_flow_telemetry_policy(
+            policy_name="bad",
+            port=9995,
+            rollups=[{"method": "average", "name": "x", "metrics": ["bytes"], "dimensions": []}],
+        )
+
+
+async def test_generate_flow_telemetry_invalid_metric():
+    with pytest.raises(Exception):
+        await generate_flow_telemetry_policy(
+            policy_name="bad",
+            port=9995,
+            rollups=[{"method": "sum", "name": "x", "metrics": ["bits"], "dimensions": []}],
+        )
+
+
+async def test_generate_flow_telemetry_invalid_dimension():
+    with pytest.raises(Exception):
+        await generate_flow_telemetry_policy(
+            policy_name="bad",
+            port=9995,
+            rollups=[{"method": "sum", "name": "x", "metrics": ["bytes"], "dimensions": ["hostname"]}],
+        )
+
+
+async def test_generate_flow_telemetry_invalid_protocol():
+    with pytest.raises(Exception):
+        await generate_flow_telemetry_policy(
+            policy_name="bad",
+            port=9995,
+            protocol="cflow",
+            rollups=[_BASIC_ROLLUP],
+        )
+
+
+async def test_generate_flow_telemetry_no_rollups():
+    with pytest.raises(Exception):
+        await generate_flow_telemetry_policy(policy_name="bad", port=9995, rollups=[])

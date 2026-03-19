@@ -10,6 +10,7 @@ AgentType = Literal[
     "snmp-discovery",
     "snmp-telemetry",
     "probe-telemetry",
+    "flow-telemetry",
     "device-discovery",
     "network-discovery",
     "worker",
@@ -19,12 +20,13 @@ _DEFAULT_PORTS: dict[str, int] = {
     "snmp-discovery": 8070,
     "snmp-telemetry": 8074,
     "probe-telemetry": 8075,
+    "flow-telemetry": 8076,
     "device-discovery": 8072,
     "network-discovery": 8073,
     "worker": 8071,
 }
 
-_TELEMETRY_AGENTS = {"snmp-telemetry", "probe-telemetry"}
+_TELEMETRY_AGENTS = {"snmp-telemetry", "probe-telemetry", "flow-telemetry"}
 
 
 def _base_url(agent_type: AgentType, host: str, port: int | None) -> str:
