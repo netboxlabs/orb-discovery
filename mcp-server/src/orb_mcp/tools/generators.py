@@ -99,7 +99,7 @@ async def generate_probe_telemetry_policy(
     Each probe in `probes` must have:
     - `name`: unique string identifier
     - `type`: one of "http", "ping", "dns", "tcp"
-    - `targets`: list of ProbeTarget objects with `host` and optional `id` (NetBox device ID join key)
+    - `targets`: list of ProbeTarget objects with `host` and optional `id` in the format 'dcim.device:<netbox_id>' (e.g. 'dcim.device:42') — used as the Alloy enrichment join key
     - A type-specific config block matching the `type` field
     - Optional: `interval` (e.g. "30s"), `timeout` (e.g. "10s")
 
@@ -369,7 +369,8 @@ async def generate_snmp_telemetry_policy(
     `policy_name` is optional — if omitted, a unique name is generated automatically.
 
     Each entry in `targets` is an SNMPTelemetryTarget with `host` (IP, CIDR, or range),
-    optional `port` (default 161), optional `id` (NetBox device join key), and optional
+    optional `port` (default 161), optional `id` in the format 'dcim.device:<netbox_id>'
+    (e.g. 'dcim.device:42') — used as the Alloy enrichment join key, and optional
     per-target `authentication` override.
 
     `authentication` must include `protocol_version` (SNMPv1, SNMPv2c, or SNMPv3).
