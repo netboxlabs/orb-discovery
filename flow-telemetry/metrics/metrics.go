@@ -29,7 +29,7 @@ func SetupMetricsExport(ctx context.Context, logg *slog.Logger, endpoint string,
 	}
 
 	exporter, err := otlpmetric.New(ctx,
-		otlpmetric.WithEndpointURL(endpoint),
+		otlpmetric.WithEndpoint(endpoint),
 		otlpmetric.WithInsecure(),
 	)
 	if err != nil {
