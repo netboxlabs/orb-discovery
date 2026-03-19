@@ -111,7 +111,6 @@ func (r *Runner) registerGauges(m metric.Meter) error {
 
 	// Capture locals for the closure.
 	window := r.window
-	policyName := r.name
 	scopeID := r.policy.Scope.ID
 	rollupCfgs := r.policy.Config.Rollups
 
@@ -119,9 +118,9 @@ func (r *Runner) registerGauges(m metric.Meter) error {
 		snapshot := window.Snapshot()
 		for i, rl := range rollupCfgs {
 			for _, pt := range snapshot[rl.Name] {
-				attrs := []attribute.KeyValue{attribute.String("policy", policyName)}
+				attrs := []attribute.KeyValue{}
 				if scopeID != "" {
-					attrs = append(attrs, attribute.String("id", scopeID))
+					attrs = append(attrs, attribute.String("netbox_id", scopeID))
 				}
 				for k, v := range pt.Attrs {
 					attrs = append(attrs, attribute.String(k, v))

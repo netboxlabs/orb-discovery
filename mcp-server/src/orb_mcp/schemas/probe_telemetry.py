@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 class ProbeTarget(BaseModel):
     host: str
-    id: str | None = Field(default=None, description="NetBox device identifier in the format 'dcim.device:<id>' (e.g. 'dcim.device:42'). Emitted as the id= label on all metrics for this target. Used as the join key for Prometheus/Alloy relabeling rules that attach site, role, rack, and other NetBox enrichment labels.")
+    id: str | None = Field(default=None, description="NetBox device identifier in the format 'dcim.device:<id>' (e.g. 'dcim.device:42'). Emitted as the netbox_id= label on all metrics for this target. Used as the join key for Prometheus/Alloy relabeling rules that attach site, role, rack, and other NetBox enrichment labels.")
 
 
 class HTTPConf(BaseModel):

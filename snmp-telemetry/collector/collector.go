@@ -161,17 +161,11 @@ func (c *MetricsCollector) CollectTarget(ctx context.Context, target config.Targ
 	}
 	c.logger.Debug("Matched SNMP profile", "host", target.Host, "sysObjectID", sysOIDValue, "profile", profile.FileName)
 
-	deviceName := target.Host
-	if name, err := c.walkScalar(walker, sysNameOID); err == nil && name != "" {
-		deviceName = name
-	}
-
 	baseAttrs := []attribute.KeyValue{
 		attribute.String("device_ip", target.Host),
-		attribute.String("device_name", deviceName),
 	}
 	if target.ID != "" {
-		baseAttrs = append(baseAttrs, attribute.String("id", target.ID))
+		baseAttrs = append(baseAttrs, attribute.String("netbox_id", target.ID))
 	}
 
 	// localBuf accumulates fresh observations for this run.

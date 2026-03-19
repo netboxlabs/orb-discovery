@@ -16,7 +16,7 @@ _VALID_PROTOCOLS = {"auto", "netflow5", "netflow9", "ipfix", "sflow", ""}
 class FlowScope(BaseModel):
     port: int = Field(ge=1, le=65535, description="UDP port to listen on.")
     host: str | None = Field(default=None, description="IP address to bind the UDP listener to. Defaults to 0.0.0.0.")
-    id: str | None = Field(default=None, description="Optional identifier attached to all exported metrics as an OTLP attribute. Use it to distinguish between multiple flow-telemetry instances (e.g. by site or role).")
+    id: str | None = Field(default=None, description="NetBox device identifier. Emitted as the netbox_id= label on all exported metrics. Used as the join key for Prometheus/Alloy relabeling rules that attach site, role, and other NetBox enrichment labels.")
 
 
 class Rollup(BaseModel):

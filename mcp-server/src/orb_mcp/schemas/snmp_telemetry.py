@@ -8,7 +8,7 @@ from orb_mcp.schemas.common import Authentication
 class SNMPTelemetryTarget(BaseModel):
     host: str
     port: int = Field(default=161, ge=1, le=65535)
-    id: str | None = Field(default=None, description="NetBox device identifier in the format 'dcim.device:<id>' (e.g. 'dcim.device:42'). Emitted as the id= label on all metrics for this target. Used as the join key for Prometheus/Alloy relabeling rules that attach site, role, rack, and other NetBox enrichment labels.")
+    id: str | None = Field(default=None, description="NetBox device identifier in the format 'dcim.device:<id>' (e.g. 'dcim.device:42'). Emitted as the netbox_id= label on all metrics for this target. Used as the join key for Prometheus/Alloy relabeling rules that attach site, role, rack, and other NetBox enrichment labels.")
     authentication: Authentication | None = None
 
 

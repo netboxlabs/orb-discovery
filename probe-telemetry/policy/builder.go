@@ -70,7 +70,7 @@ func BuildCloudproberTextproto(
 			}
 
 			if target.ID != "" {
-				fmt.Fprintf(&sb, "  additional_label { key: \"id\" value: %q }\n", target.ID)
+				fmt.Fprintf(&sb, "  additional_label { key: \"netbox_id\" value: %q }\n", target.ID)
 			}
 
 			sb.WriteString("}\n\n")
@@ -179,4 +179,3 @@ func buildTCPProbeConf(t *config.TCPConf) string {
 	sb.WriteString("  }\n")
 	return sb.String()
 }
-
