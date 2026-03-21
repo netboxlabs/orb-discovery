@@ -121,13 +121,13 @@ func NewListener(ctx context.Context, logger *slog.Logger, cfg config.PolicyConf
 	errCh := make(chan error, 16)
 	go func() {
 		defer close(errCh)
+		defer close(ch)
 		for {
 			select {
 			case <-ctx.Done():
 				if err := recv.Stop(); err != nil {
 					logger.Warn("error stopping flow receiver", "error", err)
 				}
-				close(ch)
 				return
 			case err, ok := <-recv.Errors():
 				if !ok {
