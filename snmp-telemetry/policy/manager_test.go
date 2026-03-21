@@ -308,3 +308,77 @@ func TestStop_EmptyManager(t *testing.T) {
 	m := newTestManager()
 	assert.NoError(t, m.Stop())
 }
+
+// ---------------------------------------------------------------------------
+// GetPolicyStatuses — error tracking
+// ---------------------------------------------------------------------------
+
+func TestGetPolicyStatuses_NoError(t *testing.T) {
+	m := newTestManager()
+	r := &Runner{targetErrs: make(map[string]error)}
+	m.policies["policy1"] = r
+
+	statuses := m.GetPolicyStatuses()
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "policy1", statuses[0].Name)
+	assert.Equal(t, "running", statuses[0].Status)
+	assert.Nil(t, statuses[0].LastError)
+	assert.Nil(t, statuses[0].LastErrorAt)
+}
+
+func TestGetPolicyStatuses_WithError(t *testing.T) {
+	m := newTestManager()
+	r := &Runner{targetErrs: make(map[string]error)}
+	m.policies["policy1"] = r
+
+	someErr := fmt.Errorf("connection timed out")
+	r.SetTargetError("192.168.1.1:161", someErr)
+
+	statuses := m.GetPolicyStatuses()
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "running_with_errors", statuses[0].Status)
+	require.NotNil(t, statuses[0].LastError)
+	assert.Contains(t, *statuses[0].LastError, "192.168.1.1:161")
+	assert.Contains(t, *statuses[0].LastError, "connection timed out")
+	require.NotNil(t, statuses[0].LastErrorAt)
+}
+
+func TestGetPolicyStatuses_ErrorThenClear(t *testing.T) {
+	m := newTestManager()
+	r := &Runner{targetErrs: make(map[string]error)}
+	m.policies["policy1"] = r
+
+	r.SetTargetError("192.168.1.1:161", fmt.Errorf("some error"))
+	r.ClearTargetError("192.168.1.1:161")
+
+	statuses := m.GetPolicyStatuses()
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "running", statuses[0].Status)
+	assert.Nil(t, statuses[0].LastError)
+	assert.Nil(t, statuses[0].LastErrorAt)
+}
+
+func TestGetPolicyStatuses_MixedState(t *testing.T) {
+	m := newTestManager()
+	healthy := &Runner{targetErrs: make(map[string]error)}
+	failing := &Runner{targetErrs: make(map[string]error)}
+	m.policies["healthy-policy"] = healthy
+	m.policies["failing-policy"] = failing
+
+	failing.SetTargetError("10.0.0.1:161", fmt.Errorf("unreachable"))
+
+	statuses := m.GetPolicyStatuses()
+	require.Len(t, statuses, 2)
+
+	byName := make(map[string]Status, 2)
+	for _, s := range statuses {
+		byName[s.Name] = s
+	}
+
+	assert.Equal(t, "running", byName["healthy-policy"].Status)
+	assert.Nil(t, byName["healthy-policy"].LastError)
+
+	assert.Equal(t, "running_with_errors", byName["failing-policy"].Status)
+	require.NotNil(t, byName["failing-policy"].LastError)
+	assert.Contains(t, *byName["failing-policy"].LastError, "10.0.0.1:161")
+}

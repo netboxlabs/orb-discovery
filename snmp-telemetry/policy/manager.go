@@ -21,8 +21,10 @@ const (
 
 // Status represents the status of a policy
 type Status struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
+	Name        string     `json:"name"`
+	Status      string     `json:"status"`
+	LastError   *string    `json:"last_error,omitempty"`
+	LastErrorAt *time.Time `json:"last_error_at,omitempty"`
 }
 
 // Manager manages snmp-telemetry policy runners
@@ -132,8 +134,15 @@ func (m *Manager) GetCapabilities() []string {
 // GetPolicyStatuses returns the status of all known policies
 func (m *Manager) GetPolicyStatuses() []Status {
 	statuses := make([]Status, 0, len(m.policies))
-	for name := range m.policies {
-		statuses = append(statuses, Status{Name: name, Status: "running"})
+	for name, runner := range m.policies {
+		s := Status{Name: name, Status: "running"}
+		if err, at := runner.GetLastError(); err != nil {
+			msg := err.Error()
+			s.Status = "running_with_errors"
+			s.LastError = &msg
+			s.LastErrorAt = &at
+		}
+		statuses = append(statuses, s)
 	}
 	return statuses
 }
