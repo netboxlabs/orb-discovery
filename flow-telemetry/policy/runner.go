@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -24,6 +26,10 @@ type Runner struct {
 	policy config.Policy
 	window *rollup.Window
 	reg    metric.Registration // kept alive to prevent GC
+
+	mu        sync.RWMutex
+	lastErr   error
+	lastErrAt time.Time
 }
 
 // NewRunner creates a Runner (does not start it).
@@ -36,6 +42,29 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 		name:   name,
 		policy: policy,
 	}
+}
+
+// SetError records a runtime error on the runner.
+func (r *Runner) SetError(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lastErr = err
+	r.lastErrAt = time.Now()
+}
+
+// ClearError clears any previously recorded runtime error.
+func (r *Runner) ClearError() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lastErr = nil
+	r.lastErrAt = time.Time{}
+}
+
+// GetLastError returns the last recorded error and the time it was set.
+func (r *Runner) GetLastError() (error, time.Time) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.lastErr, r.lastErrAt
 }
 
 // Start begins flow ingestion and registers OTLP observable gauges.
@@ -60,7 +89,7 @@ func (r *Runner) Start() error {
 	}
 
 	// Start the goflow2 UDP listener.
-	flowCh, err := flow.NewListener(r.ctx, r.logger, r.policy.Config, r.policy.Scope.Host, r.policy.Scope.Port)
+	flowCh, errCh, err := flow.NewListener(r.ctx, r.logger, r.policy.Config, r.policy.Scope.Host, r.policy.Scope.Port)
 	if err != nil {
 		if r.reg != nil {
 			_ = r.reg.Unregister()
@@ -72,6 +101,17 @@ func (r *Runner) Start() error {
 	go func() {
 		for rec := range flowCh {
 			r.window.Add(rec)
+		}
+	}()
+
+	// Monitor the listener error channel.
+	go func() {
+		for err := range errCh {
+			r.SetError(fmt.Errorf("flow listener error: %w", err))
+		}
+		// errCh closed without context cancellation = listener stopped unexpectedly
+		if r.ctx.Err() == nil {
+			r.SetError(fmt.Errorf("flow listener stopped unexpectedly"))
 		}
 	}()
 

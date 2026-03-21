@@ -73,8 +73,9 @@ func fromProtoMessage(msg *protoproducer.ProtoProducerMessage) FlowRecord {
 // NewListener starts a goflow2 UDP listener for the given policy config.
 // host is the IP address to bind to; defaults to "0.0.0.0" when empty.
 // Decoded FlowRecords are sent to the returned channel.
-// The channel is closed when ctx is cancelled.
-func NewListener(ctx context.Context, logger *slog.Logger, cfg config.PolicyConfig, host string, port int) (<-chan FlowRecord, error) {
+// Runtime errors from the UDP receiver are forwarded to the error channel.
+// Both channels are closed when ctx is cancelled.
+func NewListener(ctx context.Context, logger *slog.Logger, cfg config.PolicyConfig, host string, port int) (<-chan FlowRecord, <-chan error, error) {
 	if host == "" {
 		host = "0.0.0.0"
 	}
@@ -82,7 +83,7 @@ func NewListener(ctx context.Context, logger *slog.Logger, cfg config.PolicyConf
 
 	flowProducer, err := protoproducer.CreateProtoProducer(nil, protoproducer.CreateSamplingSystem)
 	if err != nil {
-		return nil, fmt.Errorf("creating flow producer: %w", err)
+		return nil, nil, fmt.Errorf("creating flow producer: %w", err)
 	}
 
 	pipeConfig := &utils.PipeConfig{
@@ -106,18 +107,20 @@ func NewListener(ctx context.Context, logger *slog.Logger, cfg config.PolicyConf
 		QueueSize: queueSize,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("creating UDP receiver: %w", err)
+		return nil, nil, fmt.Errorf("creating UDP receiver: %w", err)
 	}
 
 	pipe := selectPipe(strings.ToLower(cfg.Protocol), pipeConfig)
 
 	if err := recv.Start(host, port, pipe.DecodeFlow); err != nil {
-		return nil, fmt.Errorf("starting UDP receiver on %s:%d: %w", host, port, err)
+		return nil, nil, fmt.Errorf("starting UDP receiver on %s:%d: %w", host, port, err)
 	}
 
 	logger.Info("flow listener started", "host", host, "port", port, "protocol", cfg.Protocol, "workers", workers)
 
+	errCh := make(chan error, 16)
 	go func() {
+		defer close(errCh)
 		for {
 			select {
 			case <-ctx.Done():
@@ -132,12 +135,16 @@ func NewListener(ctx context.Context, logger *slog.Logger, cfg config.PolicyConf
 				}
 				if err != nil {
 					logger.Warn("flow receiver error", "error", err)
+					select {
+					case errCh <- err:
+					default: // drop if full
+					}
 				}
 			}
 		}
 	}()
 
-	return ch, nil
+	return ch, errCh, nil
 }
 
 func selectPipe(protocol string, cfg *utils.PipeConfig) utils.FlowPipe {

@@ -2,11 +2,13 @@ package policy
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestManager() *Manager {
@@ -338,6 +340,84 @@ policies:
 	policies, err := m.ParsePolicies([]byte(yaml))
 	assert.NoError(t, err)
 	assert.Equal(t, "site-a", policies["test"].Scope.ID)
+}
+
+func newTestRunner() *Runner {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &Runner{
+		ctx:    ctx,
+		cancel: cancel,
+		logger: slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		name:   "test",
+	}
+	return r
+}
+
+func TestGetPolicyStatuses_NoError(t *testing.T) {
+	m := newTestManager()
+	r := newTestRunner()
+	m.policies["test"] = r
+
+	statuses := m.GetPolicyStatuses()
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "test", statuses[0].Name)
+	assert.Equal(t, "running", statuses[0].Status)
+	assert.Nil(t, statuses[0].LastError)
+	assert.Nil(t, statuses[0].LastErrorAt)
+}
+
+func TestGetPolicyStatuses_WithError(t *testing.T) {
+	m := newTestManager()
+	r := newTestRunner()
+	r.SetError(errors.New("something went wrong"))
+	m.policies["test"] = r
+
+	statuses := m.GetPolicyStatuses()
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "running_with_errors", statuses[0].Status)
+	require.NotNil(t, statuses[0].LastError)
+	assert.Equal(t, "something went wrong", *statuses[0].LastError)
+	assert.NotNil(t, statuses[0].LastErrorAt)
+}
+
+func TestGetPolicyStatuses_AfterClearError(t *testing.T) {
+	m := newTestManager()
+	r := newTestRunner()
+	r.SetError(errors.New("transient error"))
+	r.ClearError()
+	m.policies["test"] = r
+
+	statuses := m.GetPolicyStatuses()
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "running", statuses[0].Status)
+	assert.Nil(t, statuses[0].LastError)
+	assert.Nil(t, statuses[0].LastErrorAt)
+}
+
+func TestGetPolicyStatuses_MixedState(t *testing.T) {
+	m := newTestManager()
+
+	r1 := newTestRunner()
+	m.policies["healthy"] = r1
+
+	r2 := newTestRunner()
+	r2.SetError(errors.New("listener failed"))
+	m.policies["broken"] = r2
+
+	statuses := m.GetPolicyStatuses()
+	require.Len(t, statuses, 2)
+
+	statusMap := make(map[string]Status, 2)
+	for _, s := range statuses {
+		statusMap[s.Name] = s
+	}
+
+	assert.Equal(t, "running", statusMap["healthy"].Status)
+	assert.Nil(t, statusMap["healthy"].LastError)
+
+	assert.Equal(t, "running_with_errors", statusMap["broken"].Status)
+	require.NotNil(t, statusMap["broken"].LastError)
+	assert.Equal(t, "listener failed", *statusMap["broken"].LastError)
 }
 
 func TestParsePolicies_ScopeDefaults(t *testing.T) {
