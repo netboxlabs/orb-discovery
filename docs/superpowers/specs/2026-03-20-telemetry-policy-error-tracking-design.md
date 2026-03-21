@@ -125,17 +125,15 @@ SNMP metric collection runs periodically per target. One gocron job is created p
 The Runner tracks errors per target in a thread-safe map:
 
 ```go
-// Additional fields on Runner
-targetErrs   map[string]error   // key = "host:port"
-targetErrsMu sync.RWMutex
+// Additional field on Runner (protected by the existing r.mu, no separate mutex needed)
+targetErrs   map[string]error   // key = "host:port"; initialized in NewRunner
 
 func (r *Runner) SetTargetError(target string, err error) {
     r.mu.Lock()
     defer r.mu.Unlock()
     r.targetErrs[target] = err
     r.lastErrAt = time.Now()
-    // Build combined error message
-    r.lastErr = r.buildCombinedError()
+    r.lastErr = r.buildCombinedError() // must be called with r.mu held
 }
 
 func (r *Runner) ClearTargetError(target string) {
@@ -144,15 +142,16 @@ func (r *Runner) ClearTargetError(target string) {
     delete(r.targetErrs, target)
     if len(r.targetErrs) == 0 {
         r.lastErr = nil
+        r.lastErrAt = time.Time{} // reset stale timestamp when all targets recover
     } else {
-        r.lastErr = r.buildCombinedError()
+        r.lastErr = r.buildCombinedError() // must be called with r.mu held
     }
 }
 ```
 
-`buildCombinedError()` returns an error summarizing all failing targets (e.g. `"metrics collection failed for 192.168.1.1: timeout; 192.168.1.2: authentication failure"`).
+`buildCombinedError()` (private, must only be called with `r.mu` held) returns an error summarizing all failing targets, e.g. `"metrics collection failed: 192.168.1.1: timeout; 192.168.1.2: authentication failure"`.
 
-The `SetError`/`ClearError`/`GetLastError` public API remains the same; the map is an internal implementation detail. `targetErrs` must be initialized in `NewRunner`.
+The `SetError`/`ClearError`/`GetLastError` public API remains the same; the map is an internal implementation detail. `targetErrs` must be initialized to an empty map in `NewRunner`.
 
 ### probe-telemetry
 
@@ -175,30 +174,46 @@ No `ClearError` is needed: an unexpected prober exit is unrecoverable without de
 
 ### flow-telemetry
 
-**Location**: `flow-telemetry/policy/runner.go` — flow record consumer goroutine in `Start()`
+**Locations**: `flow-telemetry/flow/listener.go` (signature change) + `flow-telemetry/policy/runner.go` (consumption)
 
-The UDP listener feeds records into a channel. **Important**: `flow.NewListener` only closes `flowCh` when `ctx.Done()` fires — it does not close the channel on internal goflow2 errors. The listener exposes a `recv.Errors()` channel for runtime errors.
+`flow.NewListener` currently returns `(<-chan FlowRecord, error)`. The `UDPReceiver` (`recv`) is a local variable inside `NewListener`; its `recv.Errors()` channel is drained by an internal goroutine that only logs errors — they are never surfaced to callers.
 
-**Detection mechanism**: Monitor `recv.Errors()` in a separate goroutine alongside the record consumer:
+**Required change to `NewListener` signature (Option A)**:
 
 ```go
+// Before:
+func NewListener(ctx context.Context, ...) (<-chan FlowRecord, error)
+
+// After:
+func NewListener(ctx context.Context, ...) (<-chan FlowRecord, <-chan error, error)
+```
+
+The internal goroutine that currently logs `recv.Errors()` items now also forwards them to the returned error channel (buffered, e.g. capacity 16 to avoid blocking). The channel is closed when the goroutine exits (i.e. when `ctx.Done()` fires and `recv.Errors()` is drained).
+
+**Runner detection** (in `Start()`):
+
+```go
+flowCh, errCh, err := flow.NewListener(r.ctx, ...)
+if err != nil {
+    return err
+}
 go func() {
     for rec := range flowCh {
         r.window.Add(rec)
     }
 }()
 go func() {
-    for err := range listener.Errors() {
+    for err := range errCh {
         r.SetError(fmt.Errorf("flow listener error: %w", err))
     }
-    // Errors() channel closed = listener shut down
-    if r.ctx.Err() == nil { // not a normal shutdown
+    // errCh closed without context cancellation = listener stopped unexpectedly
+    if r.ctx.Err() == nil {
         r.SetError(fmt.Errorf("flow listener stopped unexpectedly"))
     }
 }()
 ```
 
-**Implementation note**: The `flow.NewListener` return type must expose `Errors() <-chan error`. Verify this interface exists at `flow-telemetry/flow/listener.go` before implementing; if not, a wrapper that drains goflow2's error output needs to be added to the `Listener` type.
+The caller of `runner.Start()` in `policy/manager.go` already handles the `error` return and does not need to change.
 
 ---
 
@@ -223,7 +238,8 @@ Update the `list_policies` tool docstring in `mcp-server/src/orb_mcp/tools/agent
 | `snmp-telemetry/policy/manager.go` | Extend Status struct; update GetPolicyStatuses() |
 | `probe-telemetry/policy/runner.go` | Add error fields + methods; wrap prober goroutine |
 | `probe-telemetry/policy/manager.go` | Extend Status struct; update GetPolicyStatuses() |
-| `flow-telemetry/policy/runner.go` | Add error fields + methods; wrap flow consumer goroutine |
+| `flow-telemetry/flow/listener.go` | Change `NewListener` signature to return `<-chan error` |
+| `flow-telemetry/policy/runner.go` | Add error fields + methods; consume error channel from NewListener |
 | `flow-telemetry/policy/manager.go` | Extend Status struct; update GetPolicyStatuses() |
 | `mcp-server/src/orb_mcp/tools/agent.py` | Update `list_policies` docstring |
 
