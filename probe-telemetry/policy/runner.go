@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,10 @@ import (
 
 	"github.com/netboxlabs/orb-discovery/probe-telemetry/config"
 )
+
+// ErrProberExited is set when the cloudprober prober goroutine exits unexpectedly
+// without the policy context being cancelled (i.e. not via a normal Stop() call).
+var ErrProberExited = errors.New("prober exited unexpectedly")
 
 // newCloudproberMux creates a fresh HTTP mux and installs it as cloudprober's
 // default. Each Runner gets its own mux so cloudprober can re-register its
@@ -104,7 +109,7 @@ func (r *Runner) Start() {
 		// r.ctx.Err() is non-nil only when Stop() → cancel() was called (normal shutdown).
 		// If the goroutine exits with ctx still active, the prober crashed unexpectedly.
 		if r.ctx.Err() == nil {
-			r.SetError(fmt.Errorf("prober exited unexpectedly"))
+			r.SetError(ErrProberExited)
 		}
 	}()
 }

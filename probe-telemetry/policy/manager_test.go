@@ -146,7 +146,7 @@ func TestGetPolicyStatuses_NoError(t *testing.T) {
 func TestGetPolicyStatuses_WithError(t *testing.T) {
 	m := newTestManager()
 	r := &Runner{}
-	r.SetError(fmt.Errorf("prober exited unexpectedly"))
+	r.SetError(ErrProberExited)
 	m.policies["beta"] = r
 
 	statuses := m.GetPolicyStatuses()
@@ -154,7 +154,7 @@ func TestGetPolicyStatuses_WithError(t *testing.T) {
 	assert.Equal(t, "beta", statuses[0].Name)
 	assert.Equal(t, "running_with_errors", statuses[0].Status)
 	require.NotNil(t, statuses[0].LastError)
-	assert.Equal(t, "prober exited unexpectedly", *statuses[0].LastError)
+	assert.Equal(t, ErrProberExited.Error(), *statuses[0].LastError)
 	assert.NotNil(t, statuses[0].LastErrorAt)
 }
 
