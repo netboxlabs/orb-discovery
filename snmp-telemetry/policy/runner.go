@@ -162,6 +162,8 @@ func (r *Runner) SetTargetError(target string, err error) {
 
 // ClearTargetError removes the error for a specific target.
 // If all targets recover, clears lastErr and resets lastErrAt.
+// Note: on partial recovery (some targets still failing), lastErrAt is NOT updated —
+// it continues to reflect when errors were first recorded, not when the set last changed.
 func (r *Runner) ClearTargetError(target string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

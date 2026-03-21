@@ -52,9 +52,9 @@ async def submit_policy(
     Submit a policy YAML document to a running orb-discovery agent (POST /api/v1/policies).
 
     `yaml_content`: the complete YAML policy document (e.g. output from generate_* tools).
-    `agent_type`: 'snmp-discovery', 'snmp-telemetry', or 'probe-telemetry'.
+    `agent_type`: 'snmp-discovery', 'snmp-telemetry', 'probe-telemetry', or 'flow-telemetry'.
     `agent_host`: hostname or IP of the running agent (default: 'localhost').
-    `agent_port`: port number (defaults: snmp-discovery=8070, snmp-telemetry=8074, probe-telemetry=8075).
+    `agent_port`: port number (defaults: snmp-discovery=8070, snmp-telemetry=8074, probe-telemetry=8075, flow-telemetry=8076).
 
     Returns the HTTP status code and the agent's JSON response.
     Status 201 = policy started. Status 409 = policy name already exists (delete it first).
@@ -91,9 +91,9 @@ async def list_policies(
     For other agents (e.g. snmp-discovery), falls back to GET /api/v1/status which
     includes policies alongside version/uptime fields.
 
-    `agent_type`: 'snmp-discovery', 'snmp-telemetry', or 'probe-telemetry'.
+    `agent_type`: 'snmp-discovery', 'snmp-telemetry', 'probe-telemetry', or 'flow-telemetry'.
     `agent_host`: hostname or IP of the running agent (default: 'localhost').
-    `agent_port`: port number (defaults: snmp-discovery=8070, snmp-telemetry=8074, probe-telemetry=8075).
+    `agent_port`: port number (defaults: snmp-discovery=8070, snmp-telemetry=8074, probe-telemetry=8075, flow-telemetry=8076).
     """
     try:
         async with AgentClient(_base_url(agent_type, agent_host, agent_port)) as client:
@@ -116,9 +116,9 @@ async def delete_policy(
     Delete a named policy from a running orb-discovery agent (DELETE /api/v1/policies/:name).
 
     `policy_name`: the name of the policy to delete (as it was submitted).
-    `agent_type`: 'snmp-discovery', 'snmp-telemetry', or 'probe-telemetry'.
+    `agent_type`: 'snmp-discovery', 'snmp-telemetry', 'probe-telemetry', or 'flow-telemetry'.
     `agent_host`: hostname or IP of the running agent (default: 'localhost').
-    `agent_port`: port number (defaults: snmp-discovery=8070, snmp-telemetry=8074, probe-telemetry=8075).
+    `agent_port`: port number (defaults: snmp-discovery=8070, snmp-telemetry=8074, probe-telemetry=8075, flow-telemetry=8076).
 
     Returns the HTTP status code and the agent's JSON response.
     Status 200 = policy stopped and removed. Status 404 = policy not found.
@@ -139,9 +139,9 @@ async def get_agent_status(
     """
     Get the health status of a running orb-discovery agent (GET /api/v1/status).
 
-    `agent_type`: 'snmp-discovery', 'snmp-telemetry', or 'probe-telemetry'.
+    `agent_type`: 'snmp-discovery', 'snmp-telemetry', 'probe-telemetry', or 'flow-telemetry'.
     `agent_host`: hostname or IP of the running agent (default: 'localhost').
-    `agent_port`: port number (defaults: snmp-discovery=8070, snmp-telemetry=8074, probe-telemetry=8075).
+    `agent_port`: port number (defaults: snmp-discovery=8070, snmp-telemetry=8074, probe-telemetry=8075, flow-telemetry=8076).
 
     Returns service uptime, version, and per-policy run history. Useful for health-checking
     before submitting new policies.
