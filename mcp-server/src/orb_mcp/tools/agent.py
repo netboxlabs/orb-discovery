@@ -75,9 +75,21 @@ async def list_policies(
     """
     Retrieve current policy statuses from a running orb-discovery agent.
 
-    For snmp-telemetry and probe-telemetry agents, calls GET /api/v1/policies and returns
-    a flat JSON array of [{name, status}] objects. For other agents (e.g. snmp-discovery),
-    falls back to GET /api/v1/status which includes policies alongside version/uptime fields.
+    For telemetry agents (snmp-telemetry, probe-telemetry, flow-telemetry), calls
+    GET /api/v1/policies and returns a JSON array of policy status objects. Each object
+    contains:
+      - name: policy name
+      - status: "running" (healthy) or "running_with_errors" (policy is running but has
+        encountered a runtime error such as SNMP timeout or authentication failure)
+      - last_error: (optional) human-readable error message from the most recent failure
+      - last_error_at: (optional) RFC3339 timestamp of when the error last occurred
+
+    A "running_with_errors" status means the policy is still active but experiencing
+    issues. Delete and resubmit the policy to reset, or wait for self-healing (errors
+    clear automatically on the next successful run cycle).
+
+    For other agents (e.g. snmp-discovery), falls back to GET /api/v1/status which
+    includes policies alongside version/uptime fields.
 
     `agent_type`: 'snmp-discovery', 'snmp-telemetry', or 'probe-telemetry'.
     `agent_host`: hostname or IP of the running agent (default: 'localhost').
