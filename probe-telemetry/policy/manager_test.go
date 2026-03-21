@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -124,4 +125,76 @@ func TestApplyDefaults_PreservesExistingValues(t *testing.T) {
 func TestStop_EmptyManager(t *testing.T) {
 	m := newTestManager()
 	assert.NoError(t, m.Stop())
+}
+
+// ---------------------------------------------------------------------------
+// GetPolicyStatuses
+// ---------------------------------------------------------------------------
+
+func TestGetPolicyStatuses_NoError(t *testing.T) {
+	m := newTestManager()
+	m.policies["alpha"] = &Runner{}
+
+	statuses := m.GetPolicyStatuses()
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "alpha", statuses[0].Name)
+	assert.Equal(t, "running", statuses[0].Status)
+	assert.Nil(t, statuses[0].LastError)
+	assert.Nil(t, statuses[0].LastErrorAt)
+}
+
+func TestGetPolicyStatuses_WithError(t *testing.T) {
+	m := newTestManager()
+	r := &Runner{}
+	r.SetError(fmt.Errorf("prober exited unexpectedly"))
+	m.policies["beta"] = r
+
+	statuses := m.GetPolicyStatuses()
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "beta", statuses[0].Name)
+	assert.Equal(t, "running_with_errors", statuses[0].Status)
+	require.NotNil(t, statuses[0].LastError)
+	assert.Equal(t, "prober exited unexpectedly", *statuses[0].LastError)
+	assert.NotNil(t, statuses[0].LastErrorAt)
+}
+
+func TestGetPolicyStatuses_ClearedError(t *testing.T) {
+	m := newTestManager()
+	r := &Runner{}
+	r.SetError(fmt.Errorf("some transient error"))
+	r.ClearError()
+	m.policies["gamma"] = r
+
+	statuses := m.GetPolicyStatuses()
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "gamma", statuses[0].Name)
+	assert.Equal(t, "running", statuses[0].Status)
+	assert.Nil(t, statuses[0].LastError)
+	assert.Nil(t, statuses[0].LastErrorAt)
+}
+
+func TestGetPolicyStatuses_MixedState(t *testing.T) {
+	m := newTestManager()
+
+	healthy := &Runner{}
+	m.policies["healthy"] = healthy
+
+	errored := &Runner{}
+	errored.SetError(fmt.Errorf("crashed"))
+	m.policies["errored"] = errored
+
+	statuses := m.GetPolicyStatuses()
+	require.Len(t, statuses, 2)
+
+	byName := make(map[string]Status, 2)
+	for _, s := range statuses {
+		byName[s.Name] = s
+	}
+
+	assert.Equal(t, "running", byName["healthy"].Status)
+	assert.Nil(t, byName["healthy"].LastError)
+
+	assert.Equal(t, "running_with_errors", byName["errored"].Status)
+	require.NotNil(t, byName["errored"].LastError)
+	assert.Equal(t, "crashed", *byName["errored"].LastError)
 }

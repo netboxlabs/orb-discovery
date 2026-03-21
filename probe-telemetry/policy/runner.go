@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
+	"time"
 
 	configpb "github.com/cloudprober/cloudprober/config/proto"
 	"github.com/cloudprober/cloudprober/prober"
@@ -30,6 +32,10 @@ type Runner struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	logger *slog.Logger
+
+	mu        sync.RWMutex
+	lastErr   error
+	lastErrAt time.Time
 }
 
 // NewRunner creates and initialises a cloudprober Prober from the supplied
@@ -68,9 +74,39 @@ func NewRunner(
 	}, nil
 }
 
+// SetError records an error on the runner.
+func (r *Runner) SetError(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lastErr = err
+	r.lastErrAt = time.Now()
+}
+
+// ClearError clears any previously recorded error.
+func (r *Runner) ClearError() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lastErr = nil
+	r.lastErrAt = time.Time{}
+}
+
+// GetLastError returns the last recorded error and the time it was set.
+func (r *Runner) GetLastError() (error, time.Time) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.lastErr, r.lastErrAt
+}
+
 // Start begins the probe loop in a background goroutine.
 func (r *Runner) Start() {
-	go r.prb.Start(r.ctx)
+	go func() {
+		r.prb.Start(r.ctx)
+		// r.ctx.Err() is non-nil only when Stop() → cancel() was called (normal shutdown).
+		// If the goroutine exits with ctx still active, the prober crashed unexpectedly.
+		if r.ctx.Err() == nil {
+			r.SetError(fmt.Errorf("prober exited unexpectedly"))
+		}
+	}()
 }
 
 // Stop cancels the runner context, causing cloudprober to stop all probes.
