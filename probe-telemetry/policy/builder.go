@@ -3,6 +3,7 @@ package policy
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/netboxlabs/orb-discovery/probe-telemetry/config"
@@ -71,6 +72,17 @@ func BuildCloudproberTextproto(
 
 			if target.ID != "" {
 				fmt.Fprintf(&sb, "  additional_label { key: \"netbox_id\" value: %q }\n", target.ID)
+			}
+
+			if len(target.Labels) > 0 {
+				keys := make([]string, 0, len(target.Labels))
+				for k := range target.Labels {
+					keys = append(keys, k)
+				}
+				slices.Sort(keys)
+				for _, k := range keys {
+					fmt.Fprintf(&sb, "  additional_label { key: %q value: %q }\n", k, target.Labels[k])
+				}
 			}
 
 			sb.WriteString("}\n\n")

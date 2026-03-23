@@ -209,6 +209,50 @@ func TestEphemeralPort(t *testing.T) {
 // Multiple probes
 // ---------------------------------------------------------------------------
 
+func TestTargetLabelsEmitAdditionalLabels(t *testing.T) {
+	pol := config.Policy{
+		Probes: []config.ProbeConfig{{
+			Name: "tcp-check",
+			Type: "tcp",
+			Targets: []config.Target{{
+				Host: "10.0.0.1",
+				ID:   "dcim.device:42",
+				Labels: map[string]string{
+					"proto":        "tcp",
+					"port":         "443",
+					"service_name": "HTTPS",
+				},
+			}},
+			TCP: &config.TCPConf{Port: 443},
+		}},
+	}
+	out := BuildCloudproberTextproto("p", pol, "", 10)
+	// Labels should be emitted in sorted key order after netbox_id
+	assert.Contains(t, out, `additional_label { key: "netbox_id" value: "dcim.device:42" }`)
+	assert.Contains(t, out, `additional_label { key: "port" value: "443" }`)
+	assert.Contains(t, out, `additional_label { key: "proto" value: "tcp" }`)
+	assert.Contains(t, out, `additional_label { key: "service_name" value: "HTTPS" }`)
+	// Verify sorted order: port < proto < service_name
+	portIdx := strings.Index(out, `key: "port"`)
+	protoIdx := strings.Index(out, `key: "proto"`)
+	svcIdx := strings.Index(out, `key: "service_name"`)
+	assert.Less(t, portIdx, protoIdx, "port label should appear before proto")
+	assert.Less(t, protoIdx, svcIdx, "proto label should appear before service_name")
+}
+
+func TestTargetWithNoLabelsEmitsNoAdditionalLabels(t *testing.T) {
+	pol := config.Policy{
+		Probes: []config.ProbeConfig{{
+			Name:    "ping-check",
+			Type:    "ping",
+			Targets: []config.Target{{Host: "10.0.0.1"}},
+			Ping:    &config.PingConf{PacketsPerProbe: 3},
+		}},
+	}
+	out := BuildCloudproberTextproto("p", pol, "", 10)
+	assert.NotContains(t, out, "additional_label")
+}
+
 func TestMultipleProbesInPolicy(t *testing.T) {
 	pol := config.Policy{
 		Probes: []config.ProbeConfig{

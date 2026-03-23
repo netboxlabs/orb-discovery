@@ -21,8 +21,9 @@ type Policy struct {
 
 // Target is a single probe destination.
 type Target struct {
-	Host string `yaml:"host"`
-	ID   string `yaml:"id,omitempty"`
+	Host   string            `yaml:"host"`
+	ID     string            `yaml:"id,omitempty"`
+	Labels map[string]string `yaml:"labels,omitempty"`
 }
 
 // ProbeConfig describes one logical probe (potentially multiple targets).
