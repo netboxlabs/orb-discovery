@@ -5,11 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/netboxlabs/orb-discovery/snmp-telemetry/collector"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/config"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/env"
+	"github.com/netboxlabs/orb-discovery/snmp-telemetry/profiles"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/snmp"
 	"gopkg.in/yaml.v3"
 )
@@ -33,6 +37,9 @@ type Manager struct {
 	logger             *slog.Logger
 	ctx                context.Context
 	defaultProfilesDir string
+
+	collectorsMu    sync.Mutex
+	collectorsByDir map[string]*collector.MetricsCollector
 }
 
 // NewManager returns a new policy manager
@@ -42,7 +49,38 @@ func NewManager(ctx context.Context, logger *slog.Logger, defaultProfilesDir str
 		logger:             logger,
 		policies:           make(map[string]*Runner),
 		defaultProfilesDir: defaultProfilesDir,
+		collectorsByDir:    make(map[string]*collector.MetricsCollector),
 	}
+}
+
+// getOrCreateCollector returns the shared MetricsCollector for the given profiles directory,
+// creating it (and loading profiles) on first use. Subsequent calls for the same dir return
+// the cached instance without re-loading. Thread-safe.
+func (m *Manager) getOrCreateCollector(profilesDir string) (*collector.MetricsCollector, error) {
+	m.collectorsMu.Lock()
+	defer m.collectorsMu.Unlock()
+	if c, ok := m.collectorsByDir[profilesDir]; ok {
+		return c, nil
+	}
+	if _, err := os.Stat(profilesDir); err != nil {
+		return nil, fmt.Errorf("SNMP profiles directory not found: %s", profilesDir)
+	}
+	loader, err := profiles.NewLoader(profilesDir, m.logger)
+	if err != nil {
+		return nil, fmt.Errorf("loading SNMP profiles from %s: %w", profilesDir, err)
+	}
+	resolved, err := loader.AllResolved()
+	if err != nil {
+		return nil, fmt.Errorf("resolving SNMP profiles: %w", err)
+	}
+	matcher := profiles.NewMatcher(resolved)
+	clientFactory := func(host string, port uint16, retries int, timeout time.Duration, auth *config.Authentication, logger *slog.Logger) (snmp.Walker, error) {
+		return snmp.NewClient(host, port, retries, timeout, auth, logger)
+	}
+	c := collector.NewMetricsCollector(clientFactory, matcher, m.logger, defaultSNMPTimeout, 0)
+	m.collectorsByDir[profilesDir] = c
+	m.logger.Info("loaded SNMP profiles", "dir", profilesDir, "count", loader.Count())
+	return c, nil
 }
 
 // ParsePolicies parses and validates policies from a YAML request body
@@ -88,11 +126,20 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 		return fmt.Errorf("policy %s already exists", name)
 	}
 
-	clientFactory := func(host string, port uint16, retries int, timeout time.Duration, authentication *config.Authentication, logger *slog.Logger) (snmp.Walker, error) {
-		return snmp.NewClient(host, port, retries, timeout, authentication, logger)
+	profilesDir := policy.Config.ProfilesDir
+	if profilesDir == "" {
+		profilesDir = m.defaultProfilesDir
+	}
+	if profilesDir == "" {
+		profilesDir = defaultProfilesDir
 	}
 
-	r, err := NewRunner(m.ctx, m.logger, name, policy, clientFactory, m.defaultProfilesDir)
+	sharedCollector, err := m.getOrCreateCollector(profilesDir)
+	if err != nil {
+		return err
+	}
+
+	r, err := NewRunner(m.ctx, m.logger, name, policy, sharedCollector)
 	if err != nil {
 		return err
 	}

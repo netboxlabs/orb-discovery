@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -12,8 +11,6 @@ import (
 	"github.com/go-co-op/gocron/v2"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/collector"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/config"
-	"github.com/netboxlabs/orb-discovery/snmp-telemetry/profiles"
-	"github.com/netboxlabs/orb-discovery/snmp-telemetry/snmp"
 	"github.com/netboxlabs/orb-discovery/snmp-telemetry/targets"
 )
 
@@ -33,7 +30,6 @@ type Runner struct {
 	ctx              context.Context
 	metricsCollector *collector.MetricsCollector
 	metricsInterval  time.Duration
-	snmpTimeout      time.Duration
 	config           config.PolicyConfig
 	scope            config.Scope
 	logger           *slog.Logger
@@ -44,57 +40,28 @@ type Runner struct {
 }
 
 // NewRunner returns a new policy runner.
-// instanceProfilesDir is the instance-level default profiles directory set via CLI flag;
-// it overrides the compiled-in constant but is itself overridden by policy.Config.ProfilesDir.
-func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, clientFactory snmp.ClientFactory, instanceProfilesDir string) (*Runner, error) {
+// metricsCollector is the shared collector for this policy's profiles directory —
+// created once by the Manager and reused across all policies using the same dir.
+func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy, metricsCollector *collector.MetricsCollector) (*Runner, error) {
 	s, err := gocron.NewScheduler()
 	if err != nil {
 		return nil, err
 	}
 
-	snmpTimeout := time.Duration(policy.Config.SNMPTimeout) * time.Second
-	if snmpTimeout == 0 {
-		snmpTimeout = defaultSNMPTimeout
-	}
-
 	runner := &Runner{
-		scheduler:   s,
-		logger:      logger,
-		snmpTimeout: snmpTimeout,
-		config:      policy.Config,
-		scope:       policy.Scope,
-		ctx:         context.WithValue(ctx, policyKey, name),
-		targetErrs:  make(map[string]error),
+		scheduler:        s,
+		logger:           logger,
+		metricsCollector: metricsCollector,
+		config:           policy.Config,
+		scope:            policy.Scope,
+		ctx:              context.WithValue(ctx, policyKey, name),
+		targetErrs:       make(map[string]error),
 	}
 
 	if policy.Config.MetricsInterval == nil || *policy.Config.MetricsInterval <= 0 {
 		return nil, fmt.Errorf("metrics_interval must be a positive integer")
 	}
 	runner.metricsInterval = time.Duration(*policy.Config.MetricsInterval) * time.Second
-
-	// Priority: per-policy config > CLI flag (instanceProfilesDir) > compiled-in constant
-	profilesDir := policy.Config.ProfilesDir
-	if profilesDir == "" {
-		profilesDir = instanceProfilesDir
-	}
-	if profilesDir == "" {
-		profilesDir = defaultProfilesDir
-	}
-	if _, statErr := os.Stat(profilesDir); statErr != nil {
-		return nil, fmt.Errorf("SNMP profiles directory not found: %s", profilesDir)
-	}
-
-	loader, loadErr := profiles.NewLoader(profilesDir, logger)
-	if loadErr != nil {
-		return nil, fmt.Errorf("loading SNMP profiles from %s: %w", profilesDir, loadErr)
-	}
-	resolvedProfiles, resolveErr := loader.AllResolved()
-	if resolveErr != nil {
-		return nil, fmt.Errorf("resolving SNMP profiles: %w", resolveErr)
-	}
-	matcher := profiles.NewMatcher(resolvedProfiles)
-	runner.metricsCollector = collector.NewMetricsCollector(clientFactory, matcher, logger, snmpTimeout, policy.Config.Retries)
-	logger.Info("SNMP metrics collection enabled", "profiles_dir", profilesDir, "profile_count", loader.Count(), "interval", runner.metricsInterval)
 
 	// Schedule a metrics job for each expanded target
 	for _, target := range runner.scope.Targets {
