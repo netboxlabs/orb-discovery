@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,7 +30,7 @@ func SetupMetricsExport(ctx context.Context, logg *slog.Logger, endpoint string,
 	}
 
 	exporter, err := otlpmetric.New(ctx,
-		otlpmetric.WithEndpointURL(endpoint),
+		otlpmetric.WithEndpoint(strings.TrimPrefix(endpoint, "grpc://")),
 		otlpmetric.WithInsecure(),
 	)
 	if err != nil {
