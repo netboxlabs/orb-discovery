@@ -16,6 +16,8 @@ jobs:
     with:
       image_ref: "docker.io/netboxlabs/${{ matrix.service }}:latest"
     permissions:
+      actions: read
       contents: read
       id-token: write
+      security-events: write
     secrets: inherit
