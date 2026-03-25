@@ -1,0 +1,88 @@
+name: Container Scan
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "network-discovery/**"
+      - "snmp-discovery/**"
+      - ".github/workflows/container-scan.yaml"
+      - "!network-discovery/docker/**"
+      - "!snmp-discovery/docker/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25'
+
+jobs:
+  build:
+    name: Build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: network-discovery
+            dockerfile: network-discovery/docker/Dockerfile
+            context: network-discovery
+          - service: snmp-discovery
+            dockerfile: snmp-discovery/docker/Dockerfile
+            context: snmp-discovery
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Build image
+        uses: docker/build-push-action@1dc73863535b631f98b2378be8619f83b136f4a0 # v6.17.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          load: true
+          push: false
+          platforms: linux/amd64
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+          build-args: |
+            GO_VERSION=${{ env.GO_VERSION }}
+          tags: ${{ matrix.service }}:scan
+
+      - name: Save image
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: docker save "${SERVICE}:scan" -o image.tar
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: docker-image-${{ matrix.service }}
+          path: image.tar
+          retention-days: 1
+
+  scan:
+    name: Scan ${{ matrix.service }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [network-discovery, snmp-discovery]
+    uses: netboxlabs/internal-workflows/.github/workflows/reusable-container-scan.yml@develop
+    with:
+      image_ref: "${{ matrix.service }}:scan"
+      image_artifact_name: "docker-image-${{ matrix.service }}"
+      comment_marker: "<!-- trivy-scan-${{ matrix.service }} -->"
+      sarif_enabled: false
+      artifact_name_prefix: "sbom-${{ matrix.service }}"
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+      security-events: write
+    secrets: inherit
