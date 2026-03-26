@@ -203,19 +203,11 @@ class PolicyRunner:
                     },
                 )
 
-            try:
-                interface_ip = device.get_interfaces_ip()
-            except Exception as e:
-                logger.warning(
-                    f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting interface IPs: {e}. Continuing without interface IP data."
-                )
-                interface_ip = {}
-
             data = {
                 "driver": scope.driver,
                 "device": device.get_facts(),
                 "interface": device.get_interfaces(),
-                "interface_ip": interface_ip,
+                "interface_ip": device.get_interfaces_ip(),
                 "defaults": config.defaults,
                 "options": config.options,
             }

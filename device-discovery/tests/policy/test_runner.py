@@ -218,33 +218,6 @@ def test_run_device_with_discovered_driver(
         assert data["interface_ip"] == {"eth0": "192.168.1.1"}
 
 
-def test_run_device_get_interfaces_ip_exception(
-    policy_runner, sample_scopes, sample_config, run_store
-):
-    """Test that get_interfaces_ip exceptions are handled gracefully (e.g. NAPALM NX-OS SSH UnboundLocalError)."""
-    with (
-        patch("device_discovery.policy.runner.get_network_driver") as mock_get_driver,
-        patch("device_discovery.client.Client.ingest") as mock_ingest,
-    ):
-        mock_driver_instance = MagicMock()
-        mock_get_driver.return_value.return_value.__enter__.return_value = (
-            mock_driver_instance
-        )
-        mock_driver_instance.get_facts.return_value = {"model": "SampleModel"}
-        mock_driver_instance.get_interfaces.return_value = {"eth0": "up"}
-        mock_driver_instance.get_interfaces_ip.side_effect = UnboundLocalError(
-            "cannot access local variable 'interface' where it is not associated with a value"
-        )
-
-        policy_runner.run_store = run_store
-        policy_runner.name = "test_policy"
-        policy_runner.run("test_id", sample_scopes[0], sample_config)
-
-        mock_ingest.assert_called_once()
-        _, data = mock_ingest.call_args[0]
-        assert data["interface_ip"] == {}
-
-
 def test_run_discovered_driver_error(
     policy_runner, sample_scopes, sample_config, run_store
 ):
