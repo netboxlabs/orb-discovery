@@ -12,6 +12,8 @@ from typing import Any
 from napalm import get_network_driver
 from napalm.base.base import NetworkDriver
 
+_DRIVER_MISMATCH_MARKERS = ["%", "Invalid input", "^"]
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -139,6 +141,15 @@ def discover_device_driver(info: dict) -> str | None:
             ) as device:
                 device_info = device.get_facts()
                 if device_info.get("serial_number", "Unknown").lower() == "unknown":
+                    logger.info(
+                        f"Hostname {info.hostname}: '{driver}' driver did not work"
+                    )
+                    continue
+                if any(
+                    marker in field
+                    for marker in _DRIVER_MISMATCH_MARKERS
+                    for field in (device_info.get("hostname", ""), device_info.get("fqdn", ""))
+                ):
                     logger.info(
                         f"Hostname {info.hostname}: '{driver}' driver did not work"
                     )
