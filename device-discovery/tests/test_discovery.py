@@ -166,7 +166,8 @@ def test_discover_device_driver_mixed_results(mock_get_network_driver):
 
 
 def _make_driver_mock(mock_get_network_driver, facts: dict):
-    """Configure mock_get_network_driver so device.get_facts() returns facts.
+    """
+    Configure mock_get_network_driver so device.get_facts() returns facts.
 
     The call chain in discover_device_driver is:
       np_driver = get_network_driver(name)   → class mock
