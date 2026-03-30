@@ -32,14 +32,14 @@ type Manager struct {
 	ctx           context.Context
 	mappingConfig config.Mapping
 	manufacturers data.ManufacturerRetriever
-	jobStore      *JobStore
+	runStore      *RunStore
 }
 
 // NewManager returns a new policy manager
 func NewManager(ctx context.Context, logger *slog.Logger, client diode.Client, manufacturers data.ManufacturerRetriever) (*Manager, error) {
 	mappingConfig, err := loadMappingConfig()
 	if err != nil {
-		logger.Error("Failed to load mapping config", "error", err)
+		logger.Error("failed to load mapping config", "error", err)
 		return nil, err
 	}
 
@@ -50,7 +50,7 @@ func NewManager(ctx context.Context, logger *slog.Logger, client diode.Client, m
 		mappingConfig: mappingConfig,
 		policies:      make(map[string]*Runner),
 		manufacturers: manufacturers,
-		jobStore:      NewJobStore(),
+		runStore:      NewRunStore(),
 	}, nil
 }
 
@@ -121,49 +121,81 @@ func (m *Manager) applyDefaults(policy *config.Policy) {
 	}
 }
 
+// validateAuthentication validates a single authentication configuration
+func (m *Manager) validateAuthentication(auth *config.Authentication, context string) error {
+	if auth == nil {
+		return fmt.Errorf("%s: authentication is nil", context)
+	}
+
+	if auth.ProtocolVersion == "" {
+		return fmt.Errorf("%s: missing protocol version", context)
+	}
+
+	if auth.ProtocolVersion != "SNMPv1" && auth.ProtocolVersion != "SNMPv2c" && auth.ProtocolVersion != "SNMPv3" {
+		return fmt.Errorf("%s: unsupported protocol version", context)
+	}
+
+	if auth.ProtocolVersion == "SNMPv2c" || auth.ProtocolVersion == "SNMPv1" {
+		if auth.Community == "" {
+			return fmt.Errorf("%s: missing community", context)
+		}
+	}
+
+	if auth.ProtocolVersion == "SNMPv3" {
+		if auth.SecurityLevel != "noAuthNoPriv" &&
+			auth.SecurityLevel != "authNoPriv" &&
+			auth.SecurityLevel != "authPriv" {
+			return fmt.Errorf("%s: invalid security level %s", context, auth.SecurityLevel)
+		}
+		if auth.SecurityLevel == "authNoPriv" || auth.SecurityLevel == "authPriv" {
+			if auth.Username == "" {
+				return fmt.Errorf("%s: missing username", context)
+			}
+
+			if auth.AuthPassphrase == "" {
+				return fmt.Errorf("%s: missing auth passphrase", context)
+			}
+
+			if auth.AuthProtocol == "" {
+				return fmt.Errorf("%s: missing auth protocol", context)
+			}
+		}
+		if auth.SecurityLevel == "authPriv" {
+			if auth.PrivPassphrase == "" {
+				return fmt.Errorf("%s: missing priv passphrase", context)
+			}
+
+			if auth.PrivProtocol == "" {
+				return fmt.Errorf("%s: missing priv protocol", context)
+			}
+		}
+	}
+
+	return nil
+}
+
 // validatePolicy validates the policy
 func (m *Manager) validatePolicy(policy config.Policy) error {
-	if policy.Scope.Authentication.ProtocolVersion == "" {
-		return fmt.Errorf("missing protocol version")
-	}
+	hasPolicyAuth := policy.Scope.Authentication.ProtocolVersion != ""
 
-	if policy.Scope.Authentication.ProtocolVersion != "SNMPv1" && policy.Scope.Authentication.ProtocolVersion != "SNMPv2c" && policy.Scope.Authentication.ProtocolVersion != "SNMPv3" {
-		return fmt.Errorf("unsupported protocol version")
-	}
-
-	if policy.Scope.Authentication.ProtocolVersion == "SNMPv2c" || policy.Scope.Authentication.ProtocolVersion == "SNMPv1" {
-		if policy.Scope.Authentication.Community == "" {
-			return fmt.Errorf("missing community")
+	// Validate policy-level auth if present
+	if hasPolicyAuth {
+		if err := m.validateAuthentication(&policy.Scope.Authentication, "policy-level"); err != nil {
+			return err
 		}
 	}
 
-	if policy.Scope.Authentication.ProtocolVersion == "SNMPv3" {
-		if policy.Scope.Authentication.SecurityLevel != "noAuthNoPriv" &&
-			policy.Scope.Authentication.SecurityLevel != "authNoPriv" &&
-			policy.Scope.Authentication.SecurityLevel != "authPriv" {
-			return fmt.Errorf("invalid security level %s", policy.Scope.Authentication.SecurityLevel)
-		}
-		if policy.Scope.Authentication.SecurityLevel == "authNoPriv" || policy.Scope.Authentication.SecurityLevel == "authPriv" {
-			if policy.Scope.Authentication.Username == "" {
-				return fmt.Errorf("missing username")
+	// Validate each target's authentication
+	for _, target := range policy.Scope.Targets {
+		if target.Authentication != nil {
+			// Target has its own auth - validate it
+			context := fmt.Sprintf("target %s", target.Host)
+			if err := m.validateAuthentication(target.Authentication, context); err != nil {
+				return err
 			}
-
-			if policy.Scope.Authentication.AuthPassphrase == "" {
-				return fmt.Errorf("missing auth passphrase")
-			}
-
-			if policy.Scope.Authentication.AuthProtocol == "" {
-				return fmt.Errorf("missing auth protocol")
-			}
-		}
-		if policy.Scope.Authentication.SecurityLevel == "authPriv" {
-			if policy.Scope.Authentication.PrivPassphrase == "" {
-				return fmt.Errorf("missing priv passphrase")
-			}
-
-			if policy.Scope.Authentication.PrivProtocol == "" {
-				return fmt.Errorf("missing priv protocol")
-			}
+		} else if !hasPolicyAuth {
+			// Target has no auth and there's no policy-level fallback
+			return fmt.Errorf("target %s: no authentication configured and no policy-level fallback available", target.Host)
 		}
 	}
 
@@ -178,7 +210,7 @@ func (m *Manager) HasPolicy(name string) bool {
 
 // StartPolicy starts the policy
 func (m *Manager) StartPolicy(name string, policy config.Policy) error {
-	m.logger.Debug("Starting policy", "policy", policy)
+	m.logger.Debug("starting policy", "policy", policy)
 	if len(policy.Scope.Targets) == 0 {
 		return fmt.Errorf("%s : no targets found in the policy", name)
 	}
@@ -187,9 +219,9 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 		// Load device lookup extensions
 		deviceLookup, err := data.LoadDeviceLookupExtensions(policy.Config.LookupExtensionsDir)
 		if err != nil {
-			m.logger.Warn("Failed to load device lookup extensions", "error", err, "directory", policy.Config.LookupExtensionsDir)
+			m.logger.Warn("failed to load device lookup extensions", "error", err, "directory", policy.Config.LookupExtensionsDir)
 		} else {
-			m.logger.Info("Loaded device lookup extensions", "directory", policy.Config.LookupExtensionsDir)
+			m.logger.Info("loaded device lookup extensions", "directory", policy.Config.LookupExtensionsDir)
 		}
 
 		// Create logger-aware ClientFactory wrapper
@@ -197,7 +229,7 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 			return snmp.NewClient(host, port, retries, timeout, authentication, logger)
 		}
 
-		r, err := NewRunner(m.ctx, m.logger, name, policy, m.client, clientFactory, &m.mappingConfig, m.manufacturers, deviceLookup, m.jobStore)
+		r, err := NewRunner(m.ctx, m.logger, name, policy, m.client, clientFactory, &m.mappingConfig, m.manufacturers, deviceLookup, m.runStore)
 		if err != nil {
 			return err
 		}
@@ -234,9 +266,12 @@ func (m *Manager) GetCapabilities() []string {
 	return []string{"targets"}
 }
 
-// resolveAuthenticationEnvVars resolves environment variables in authentication configuration
-func (m *Manager) resolveAuthenticationEnvVars(policy *config.Policy) error {
-	auth := &policy.Scope.Authentication
+// resolveAuthenticationEnvVarsForAuth resolves environment variables for a single Authentication
+func (m *Manager) resolveAuthenticationEnvVarsForAuth(auth *config.Authentication, context string) error {
+	if auth == nil {
+		return nil
+	}
+
 	fields := []struct {
 		field *string
 		label string
@@ -246,11 +281,12 @@ func (m *Manager) resolveAuthenticationEnvVars(policy *config.Policy) error {
 		{&auth.AuthPassphrase, "auth_passphrase"},
 		{&auth.PrivPassphrase, "priv_passphrase"},
 	}
+
 	// Iterate over the fields and resolve environment variables
 	for _, f := range fields {
 		resolved, err := env.ResolveEnv(*f.field)
 		if err != nil {
-			return fmt.Errorf("failed to resolve %s environment variable: %w", f.label, err)
+			return fmt.Errorf("%s: failed to resolve %s environment variable: %w", context, f.label, err)
 		}
 		*f.field = resolved
 	}
@@ -258,46 +294,80 @@ func (m *Manager) resolveAuthenticationEnvVars(policy *config.Policy) error {
 	return nil
 }
 
-// Status represents the status of a policy with its jobs
-type Status struct {
-	Name   string `json:"name"`
-	Status string `json:"status"` // derived from latest job
-	Jobs   []*Job `json:"jobs"`
+// resolveAuthenticationEnvVars resolves environment variables in authentication configuration
+func (m *Manager) resolveAuthenticationEnvVars(policy *config.Policy) error {
+	// Resolve policy-level authentication
+	if err := m.resolveAuthenticationEnvVarsForAuth(&policy.Scope.Authentication, "policy-level"); err != nil {
+		return err
+	}
+
+	// Resolve target-level authentication
+	for i := range policy.Scope.Targets {
+		if policy.Scope.Targets[i].Authentication != nil {
+			context := fmt.Sprintf("target %s", policy.Scope.Targets[i].Host)
+			if err := m.resolveAuthenticationEnvVarsForAuth(policy.Scope.Targets[i].Authentication, context); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
-// GetPolicyStatuses returns all policies with their status and jobs
+// Status represents the status of a policy with its runs
+type Status struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // derived from latest run
+	Runs   []*Run `json:"runs"`
+}
+
+// findLatestRun returns the most recent run from a sorted list
+// Note: GetRunsForPolicy returns runs sorted by CreatedAt descending (newest first)
+func findLatestRun(runs []*Run) *Run {
+	if len(runs) == 0 {
+		return nil
+	}
+	// Runs are already sorted newest first by GetRunsForPolicy
+	return runs[0]
+}
+
+// GetPolicyStatuses returns all policies with their status and runs
 func (m *Manager) GetPolicyStatuses() []Status {
-	allJobs := m.jobStore.GetAllPoliciesWithJobs()
+	allRuns := m.runStore.GetAllPoliciesWithRuns()
 
 	var statuses []Status
 
 	// Get statuses for all policies that have runners
 	for name := range m.policies {
-		jobs := m.jobStore.GetJobsForPolicy(name)
+		runs := m.runStore.GetRunsForPolicy(name)
 		status := "unknown"
-		if len(jobs) > 0 {
-			latestJob := jobs[len(jobs)-1]
-			status = string(latestJob.Status)
+		if len(runs) > 0 {
+			latestRun := findLatestRun(runs)
+			if latestRun != nil {
+				status = string(latestRun.Status)
+			}
 		}
 		statuses = append(statuses, Status{
 			Name:   name,
 			Status: status,
-			Jobs:   jobs,
+			Runs:   runs,
 		})
 	}
 
-	// Also include policies that have jobs but no active runner
-	for name, jobs := range allJobs {
+	// Also include policies that have runs but no active runner
+	for name, runs := range allRuns {
 		if !m.HasPolicy(name) {
 			status := "unknown"
-			if len(jobs) > 0 {
-				latestJob := jobs[len(jobs)-1]
-				status = string(latestJob.Status)
+			if len(runs) > 0 {
+				latestRun := findLatestRun(runs)
+				if latestRun != nil {
+					status = string(latestRun.Status)
+				}
 			}
 			statuses = append(statuses, Status{
 				Name:   name,
 				Status: status,
-				Jobs:   jobs,
+				Runs:   runs,
 			})
 		}
 	}

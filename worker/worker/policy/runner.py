@@ -9,18 +9,21 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
-from netboxlabs.diode.sdk import DiodeClient, DiodeDryRunClient, DiodeOTLPClient
-from netboxlabs.diode.sdk.diode.v1 import ingester_pb2
+from netboxlabs.diode.sdk import (
+    DiodeClient,
+    DiodeDryRunClient,
+    DiodeOTLPClient,
+    create_message_chunks,
+    estimate_message_size,
+)
 
 from worker.backend import Backend, load_class
+from worker.entity_metadata import apply_run_id_to_entities
 from worker.metrics import get_metric
 from worker.models import DiodeConfig, Policy, Status
+from worker.policy.run import RunStatus, RunStore
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-TARGET_CHUNK_SIZE = 3.5
 
 
 class PolicyRunner:
@@ -33,8 +36,11 @@ class PolicyRunner:
         self.policy = None
         self.status = Status.NEW
         self.scheduler = BackgroundScheduler()
+        self.run_store = None
 
-    def setup(self, name: str, diode_config: DiodeConfig, policy: Policy):
+    def setup(
+        self, name: str, diode_config: DiodeConfig, policy: Policy, run_store: RunStore
+    ):
         """
         Set up the policy runner.
 
@@ -43,14 +49,19 @@ class PolicyRunner:
             name: Policy name.
             diode_config: Diode configuration data.
             policy: Policy configuration data.
+            run_store: RunStore instance for tracking runs.
 
         """
         self.name = name.replace("\r\n", "").replace("\n", "")
         policy.config.package = policy.config.package.replace("\r\n", "").replace(
             "\n", ""
         )
+
+        # Debug logging for backend loading
+        logger.debug(f"Loading backend class: {policy.config.package}")
         backend_class = load_class(policy.config.package)
         backend = backend_class()
+        logger.debug(f"Backend class loaded successfully: {backend_class.__name__}")
 
         metadata = backend.setup()
         app_name = (
@@ -63,7 +74,10 @@ class PolicyRunner:
                 app_name=app_name,
                 output_dir=diode_config.dry_run_output_dir,
             )
-        elif diode_config.client_id is not None and diode_config.client_secret is not None:
+        elif (
+            diode_config.client_id is not None
+            and diode_config.client_secret is not None
+        ):
             client = DiodeClient(
                 target=diode_config.target,
                 app_name=app_name,
@@ -81,6 +95,7 @@ class PolicyRunner:
 
         self.metadata = metadata
         self.policy = policy
+        self.run_store = run_store
 
         self.scheduler.start()
 
@@ -108,7 +123,10 @@ class PolicyRunner:
             active_policies.add(1, {"policy": self.name})
 
     def run(
-        self, client: DiodeClient | DiodeDryRunClient, backend: Backend, policy: Policy
+        self,
+        client: DiodeClient | DiodeDryRunClient | DiodeOTLPClient,
+        backend: Backend,
+        policy: Policy,
     ):
         """
         Run the custom backend code for the specified scope.
@@ -124,25 +142,60 @@ class PolicyRunner:
         if policy_executions:
             policy_executions.add(1, {"policy": self.name})
 
+        # CREATE RUN AT START with metadata from backend setup
+        run_metadata = {
+            "name": self.metadata.name,
+            "app_name": self.metadata.app_name,
+            "app_version": self.metadata.app_version,
+        }
+        run = self.run_store.create_run(
+            policy_name=self.name,
+            metadata=run_metadata,
+        )
+
         exec_start_time = time.perf_counter()
+        entity_count = 0
         try:
-            entities = backend.run(self.name, policy)
+            logger.debug(f"Policy {self.name}: Starting backend execution")
+            entities = list(backend.run(self.name, policy))
+            elapsed = time.perf_counter() - exec_start_time
+            logger.debug(f"Policy {self.name}: Backend execution completed in {elapsed:.3f} seconds")
+            entity_count = len(entities)
+
+            apply_run_id_to_entities(entities, run.id)
+
             metadata = {
                 "policy_name": self.name,
                 "worker_backend": self.metadata.name,
+                "run_id": run.id,
             }
+            chunk_num = 1
+            size_bytes = estimate_message_size(entities)
 
-            for chunk_num, entity_chunk in enumerate(self._create_message_chunks(entities), 1):
-                chunk_size_mb = self._estimate_message_size(entity_chunk) / (1024 * 1024)
-                logger.debug(
-                    f"Ingesting chunk {chunk_num} with {len(entity_chunk)} entities (~{chunk_size_mb:.2f} MB)"
-                )
-                response = client.ingest(entities=entity_chunk, metadata=metadata)
+            if size_bytes > (3.0 * 1024 * 1024):
+                chunks = create_message_chunks(entities)
+                chunk_num = len(chunks)
+                for chunk in chunks:
+                    response = client.ingest(entities=chunk, metadata=metadata)
+                    if response.errors:
+                        raise RuntimeError(f"Chunk ingestion failed: {response.errors}")
+            else:
+                response = client.ingest(entities=entities, metadata=metadata)
                 if response.errors:
-                    raise RuntimeError(f"Chunk {chunk_num} ingestion failed: {response.errors}")
-                logger.debug(f"Chunk {chunk_num} ingested successfully")
+                    raise RuntimeError(f"Entities ingestion failed: {response.errors}")
+            logger.info(
+                f"Policy {self.name}: Successfully ingested {entity_count} entities in {chunk_num} chunks"
+            )
 
-            logger.info(f"Policy {self.name}: Successfully ingested {len(entities)} entities in {chunk_num} chunks")
+            # UPDATE RUN ON SUCCESS
+            self.run_store.update_run(
+                policy_name=self.name,
+                run_id=run.id,
+                status=RunStatus.COMPLETED,
+                error=None,
+                entity_count=entity_count,
+            )
+
             run_success = get_metric("backend_execution_success")
             if run_success:
                 run_success.add(
@@ -156,6 +209,16 @@ class PolicyRunner:
                 )
         except Exception as e:
             logger.error(f"Policy {self.name}: {e}")
+
+            # UPDATE RUN ON FAILURE
+            self.run_store.update_run(
+                policy_name=self.name,
+                run_id=run.id,
+                status=RunStatus.FAILED,
+                error=e,
+                entity_count=entity_count,
+            )
+
             run_failure = get_metric("backend_execution_failure")
             if run_failure:
                 run_failure.add(
@@ -188,34 +251,3 @@ class PolicyRunner:
         active_policies = get_metric("active_policies")
         if active_policies:
             active_policies.add(-1, {"policy": self.name})
-
-    def _create_message_chunks(self, entities: list[ingester_pb2.Entity]) -> list[list[ingester_pb2.Entity]]:
-        """Create 3.5MB chunks from entities, always returning at least one chunk."""
-        total_entities = len(entities)
-        if total_entities == 0:
-            return [entities]
-
-        # Estimate total size and calculate approximate entities per chunk
-        total_size = self._estimate_message_size(entities)
-        target_bytes = TARGET_CHUNK_SIZE * 1024 * 1024
-
-        if total_size <= target_bytes:
-            # Single chunk if within limit
-            return [entities]
-
-        # Calculate entities per chunk based on size ratio
-        entities_per_chunk = max(1, int(total_entities * target_bytes / total_size))
-
-        chunks = []
-        for i in range(0, total_entities, entities_per_chunk):
-            chunk = entities[i : i + entities_per_chunk]
-            chunks.append(chunk)
-
-        return chunks
-
-
-    def _estimate_message_size(self, entities: list[ingester_pb2.Entity]) -> int:
-        """Estimate the serialized size of entities using minimal IngestRequest."""
-        request = ingester_pb2.IngestRequest()
-        request.entities.extend(entities)
-        return request.ByteSize()

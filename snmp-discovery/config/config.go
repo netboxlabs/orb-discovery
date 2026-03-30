@@ -17,8 +17,10 @@ type Scope struct {
 
 // Target represents a target host to crawl
 type Target struct {
-	Host string `yaml:"host"`
-	Port uint16 `yaml:"port" default:"161"`
+	Host             string          `yaml:"host"`
+	Port             uint16          `yaml:"port" default:"161"`
+	Authentication   *Authentication `yaml:"authentication,omitempty"`
+	OverrideDefaults *Defaults       `yaml:"override_defaults,omitempty"`
 }
 
 // Authentication represents the authentication credentials for a target host
@@ -50,6 +52,12 @@ type InterfaceDefaults struct {
 	Type        string   `yaml:"if_type,omitempty"`
 }
 
+// InterfacePattern represents a regex pattern for interface type matching
+type InterfacePattern struct {
+	Match string `yaml:"match"` // Regex pattern for interface name
+	Type  string `yaml:"type"`  // NetBox interface type to assign
+}
+
 // DeviceDefaults represents default values for a specific entity type
 type DeviceDefaults struct {
 	Description string   `yaml:"description,omitempty"`
@@ -59,13 +67,88 @@ type DeviceDefaults struct {
 
 // Defaults represents the supported default values for a policy
 type Defaults struct {
-	Tags      []string          `yaml:"tags,omitempty"`
-	Site      string            `yaml:"site,omitempty"`
-	Location  string            `yaml:"location,omitempty"`
-	Role      string            `yaml:"role,omitempty"`
-	IPAddress IPAddressDefaults `yaml:"ip_address,omitempty"`
-	Interface InterfaceDefaults `yaml:"interface,omitempty"`
-	Device    DeviceDefaults    `yaml:"device,omitempty"`
+	Tags              []string           `yaml:"tags,omitempty"`
+	Site              string             `yaml:"site,omitempty"`
+	Location          string             `yaml:"location,omitempty"`
+	Role              string             `yaml:"role,omitempty"`
+	IPAddress         IPAddressDefaults  `yaml:"ip_address,omitempty"`
+	Interface         InterfaceDefaults  `yaml:"interface,omitempty"`
+	Device            DeviceDefaults     `yaml:"device,omitempty"`
+	InterfacePatterns []InterfacePattern `yaml:"interface_patterns,omitempty"`
+}
+
+// MergeDefaults merges target-level override defaults with policy-level defaults
+// Target overrides take precedence over policy defaults for non-zero values
+func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
+	if overrideDefaults == nil {
+		return policyDefaults
+	}
+
+	// Create a copy of policy defaults
+	merged := *policyDefaults
+
+	// Override top-level fields if set in override
+	if overrideDefaults.Site != "" {
+		merged.Site = overrideDefaults.Site
+	}
+	if overrideDefaults.Location != "" {
+		merged.Location = overrideDefaults.Location
+	}
+	if overrideDefaults.Role != "" {
+		merged.Role = overrideDefaults.Role
+	}
+	if len(overrideDefaults.Tags) > 0 {
+		merged.Tags = overrideDefaults.Tags
+	}
+
+	// Merge IPAddress defaults
+	if overrideDefaults.IPAddress.Description != "" {
+		merged.IPAddress.Description = overrideDefaults.IPAddress.Description
+	}
+	if len(overrideDefaults.IPAddress.Tags) > 0 {
+		merged.IPAddress.Tags = overrideDefaults.IPAddress.Tags
+	}
+	if overrideDefaults.IPAddress.Comments != "" {
+		merged.IPAddress.Comments = overrideDefaults.IPAddress.Comments
+	}
+	if overrideDefaults.IPAddress.Role != "" {
+		merged.IPAddress.Role = overrideDefaults.IPAddress.Role
+	}
+	if overrideDefaults.IPAddress.Tenant != "" {
+		merged.IPAddress.Tenant = overrideDefaults.IPAddress.Tenant
+	}
+	if overrideDefaults.IPAddress.Vrf != "" {
+		merged.IPAddress.Vrf = overrideDefaults.IPAddress.Vrf
+	}
+
+	// Merge Interface defaults
+	if overrideDefaults.Interface.Description != "" {
+		merged.Interface.Description = overrideDefaults.Interface.Description
+	}
+	if len(overrideDefaults.Interface.Tags) > 0 {
+		merged.Interface.Tags = overrideDefaults.Interface.Tags
+	}
+	if overrideDefaults.Interface.Type != "" {
+		merged.Interface.Type = overrideDefaults.Interface.Type
+	}
+
+	// Merge Device defaults
+	if overrideDefaults.Device.Description != "" {
+		merged.Device.Description = overrideDefaults.Device.Description
+	}
+	if len(overrideDefaults.Device.Tags) > 0 {
+		merged.Device.Tags = overrideDefaults.Device.Tags
+	}
+	if overrideDefaults.Device.Comments != "" {
+		merged.Device.Comments = overrideDefaults.Device.Comments
+	}
+
+	// Override InterfacePatterns if provided
+	if len(overrideDefaults.InterfacePatterns) > 0 {
+		merged.InterfacePatterns = overrideDefaults.InterfacePatterns
+	}
+
+	return &merged
 }
 
 // PolicyConfig represents the configuration of a policy

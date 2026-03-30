@@ -8,10 +8,9 @@ import os
 import yaml
 
 from worker.models import DiodeConfig, Policy, PolicyRequest
+from worker.policy.run import RunStore
 from worker.policy.runner import PolicyRunner
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -46,6 +45,7 @@ class PolicyManager:
         self.runners = dict[str, PolicyRunner]()
         self.config = None
         self.loaded_modules = set()
+        self.run_store = RunStore()
 
     def get_loaded_modules(self):
         """Return the loaded modules."""
@@ -76,7 +76,7 @@ class PolicyManager:
             raise ValueError(f"policy '{name}' already exists")
 
         runner = PolicyRunner()
-        runner.setup(name, self.config, policy)
+        runner.setup(name, self.config, policy, self.run_store)
         self.loaded_modules.add(policy.config.package)
         self.runners[name] = runner
 

@@ -21,6 +21,7 @@ from device_discovery.policy.portscan import (
     expand_hostnames,
     find_reachable_hosts,
 )
+from device_discovery.policy.run import RunStatus, RunStore
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -37,8 +38,11 @@ class PolicyRunner:
         self.config = None
         self.status = Status.NEW
         self.scheduler = BackgroundScheduler()
+        self.run_store = None
 
-    def setup(self, name: str, config: Config, scopes: list[Napalm]):
+    def setup(
+        self, name: str, config: Config, scopes: list[Napalm], run_store: RunStore
+    ):
         """
         Set up the policy runner.
 
@@ -47,10 +51,12 @@ class PolicyRunner:
             name: Policy name.
             config: Configuration data containing site information.
             scopes: scope data for the devices.
+            run_store: RunStore instance for tracking runs.
 
         """
         self.name = name.replace("\r\n", "").replace("\n", "")
         self.config = config
+        self.run_store = run_store
 
         self.config = self.config or Config(defaults=Defaults(), options=Options())
         self.config.defaults = self.config.defaults or Defaults()
@@ -154,7 +160,11 @@ class PolicyRunner:
         return True
 
     def _collect_device_data(
-        self, scope: Napalm, sanitized_hostname: str, config: Config
+        self,
+        scope: Napalm,
+        sanitized_hostname: str,
+        config: Config,
+        run_id: str,
     ):
         """
         Connect to device and collect data.
@@ -164,6 +174,7 @@ class PolicyRunner:
             scope: Scope data for the device.
             sanitized_hostname: Sanitized hostname for logging.
             config: Configuration data containing site information.
+            run_id: Run identifier for ingest and per-entity metadata.
 
         """
         np_driver = get_network_driver(scope.driver)
@@ -200,6 +211,17 @@ class PolicyRunner:
                 "defaults": config.defaults,
                 "options": config.options,
             }
+            # Only retrieve config if at least one capture flag is enabled
+            if config.options and (
+                config.options.capture_running_config
+                or config.options.capture_startup_config
+            ):
+                try:
+                    data["config"] = device.get_config()
+                except Exception as e:
+                    logger.warning(
+                        f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting config: {e}. Continuing without config data."
+                    )
             try:
                 data["vlan"] = device.get_vlans()
             except Exception as e:
@@ -207,7 +229,7 @@ class PolicyRunner:
                     f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting VLANs: {e}. Continuing without VLAN data."
                 )
             metadata = {"policy_name": self.name, "hostname": sanitized_hostname}
-            Client().ingest(metadata, data)
+            Client().ingest(metadata, data, run_id=run_id)
             discovery_success = get_metric("discovery_success")
             if discovery_success:
                 discovery_success.add(1, {"policy": self.name})
@@ -232,26 +254,61 @@ class PolicyRunner:
         if not hostnames:
             return
 
-        results = find_reachable_hosts(hostnames, ports, timeout)
+        # Get original hostname from scope for parent tracking
+        original_hostname = scope.hostname
 
-        for hostname in hostnames:
-            if results.get(hostname):
-                logger.info(
-                    f"Policy {self.name}, Hostname {hostname}: Reachable port found, scheduling discovery job"
-                )
-                id = str(uuid.uuid4())
-                self.scopes[id] = scope.model_copy(update={"hostname": hostname})
-                self.scheduler.add_job(
-                    self.run,
-                    id=id,
-                    trigger=trigger,
-                    args=[id, self.scopes[id], config],
-                    misfire_grace_time=None,
-                )
-            else:
-                logger.info(
-                    f"Policy {self.name}, Hostname {hostname}: No reachable port found, skipping discovery job"
-                )
+        # CREATE RUN FOR SCAN OPERATION
+        scan_run = self.run_store.create_run(
+            policy_name=self.name,
+            target=original_hostname,
+            parent_target="",
+        )
+
+        try:
+            results = find_reachable_hosts(hostnames, ports, timeout)
+            reachable_count = sum(1 for v in results.values() if v)
+
+            # UPDATE SCAN RUN
+            self.run_store.update_run(
+                policy_name=self.name,
+                target=original_hostname,
+                run_id=scan_run.id,
+                status=RunStatus.COMPLETED,
+                error=None,
+                entity_count=reachable_count,
+            )
+
+            for hostname in hostnames:
+                if results.get(hostname):
+                    logger.info(
+                        f"Policy {self.name}, Hostname {hostname}: Reachable port found, scheduling discovery job"
+                    )
+                    id = str(uuid.uuid4())
+                    self.scopes[id] = scope.model_copy(update={"hostname": hostname})
+                    self.scheduler.add_job(
+                        self.run_with_parent,
+                        id=id,
+                        trigger=trigger,
+                        args=[id, self.scopes[id], config, original_hostname],
+                        misfire_grace_time=None,
+                    )
+                else:
+                    logger.info(
+                        f"Policy {self.name}, Hostname {hostname}: No reachable port found, skipping discovery job"
+                    )
+        except Exception as e:
+            logger.error(
+                f"Policy {self.name}, Error during port scan for {original_hostname}: {e}"
+            )
+            # UPDATE SCAN RUN AS FAILED
+            self.run_store.update_run(
+                policy_name=self.name,
+                target=original_hostname,
+                run_id=scan_run.id,
+                status=RunStatus.FAILED,
+                error=e,
+                entity_count=0,
+            )
 
     def run(self, id: str, scope: Napalm, config: Config):
         """
@@ -267,8 +324,24 @@ class PolicyRunner:
         discovery_start_time = time.perf_counter()
         sanitized_hostname = scope.hostname.replace("\r\n", "").replace("\n", "")
 
+        # CREATE RUN AT START
+        run = self.run_store.create_run(
+            policy_name=self.name,
+            target=sanitized_hostname,
+            parent_target="",
+        )
+
         # Try to discover driver if needed
         if not self._discover_driver(scope, sanitized_hostname):
+            # UPDATE RUN ON DRIVER DISCOVERY FAILURE
+            self.run_store.update_run(
+                policy_name=self.name,
+                target=sanitized_hostname,
+                run_id=run.id,
+                status=RunStatus.FAILED,
+                error=Exception("Not able to discover device driver"),
+                entity_count=0,
+            )
             try:
                 self.scheduler.remove_job(id)
             except Exception as e:
@@ -287,7 +360,17 @@ class PolicyRunner:
                 discovery_attempts.add(1, {"policy": self.name})
 
             # Collect data from device
-            self._collect_device_data(scope, sanitized_hostname, config)
+            self._collect_device_data(scope, sanitized_hostname, config, run.id)
+
+            # UPDATE RUN ON SUCCESS
+            self.run_store.update_run(
+                policy_name=self.name,
+                target=sanitized_hostname,
+                run_id=run.id,
+                status=RunStatus.COMPLETED,
+                error=None,
+                entity_count=1,
+            )
 
             # Record total discovery duration
             discovery_latency = get_metric("discovery_latency")
@@ -303,6 +386,128 @@ class PolicyRunner:
                 )
 
         except Exception as e:
+            # UPDATE RUN ON FAILURE
+            self.run_store.update_run(
+                policy_name=self.name,
+                target=sanitized_hostname,
+                run_id=run.id,
+                status=RunStatus.FAILED,
+                error=e,
+                entity_count=0,
+            )
+
+            discovery_failure = get_metric("discovery_failure")
+            if discovery_failure:
+                discovery_failure.add(1, {"policy": self.name})
+            logger.error(
+                f"Policy {self.name}, Hostname {sanitized_hostname}: {e}", exc_info=True
+            )
+            # Still record discovery duration on failure
+            discovery_latency = get_metric("discovery_latency")
+            if discovery_latency:
+                discovery_duration = (time.perf_counter() - discovery_start_time) * 1000
+                discovery_latency.record(
+                    discovery_duration,
+                    {
+                        "policy": self.name,
+                        "hostname": sanitized_hostname,
+                        "driver": str(scope.driver),
+                        "status": "failed",
+                    },
+                )
+
+    def run_with_parent(
+        self, id: str, scope: Napalm, config: Config, parent_target: str
+    ):
+        """
+        Run the device driver code for a single scope item with parent tracking.
+
+        This is used for targets discovered from range scans to maintain the
+        parent-child relationship.
+
+        Args:
+        ----
+            id: Job ID.
+            scope: scope data for the device.
+            config: Configuration data containing site information.
+            parent_target: Parent target that this target was discovered from.
+
+        """
+        discovery_start_time = time.perf_counter()
+        sanitized_hostname = scope.hostname.replace("\r\n", "").replace("\n", "")
+
+        # CREATE RUN WITH PARENT
+        run = self.run_store.create_run(
+            policy_name=self.name,
+            target=sanitized_hostname,
+            parent_target=parent_target,
+        )
+
+        # Try to discover driver if needed
+        if not self._discover_driver(scope, sanitized_hostname):
+            # UPDATE RUN ON DRIVER DISCOVERY FAILURE
+            self.run_store.update_run(
+                policy_name=self.name,
+                target=sanitized_hostname,
+                run_id=run.id,
+                status=RunStatus.FAILED,
+                error=Exception("Not able to discover device driver"),
+                entity_count=0,
+            )
+            try:
+                self.scheduler.remove_job(id)
+            except Exception as e:
+                logger.error(
+                    f"Policy {self.name}, Hostname {sanitized_hostname}: Error removing job: {e}"
+                )
+            return
+
+        logger.info(
+            f"Policy {self.name}, Hostname {sanitized_hostname}: Get driver '{scope.driver}'"
+        )
+
+        try:
+            discovery_attempts = get_metric("discovery_attempts")
+            if discovery_attempts:
+                discovery_attempts.add(1, {"policy": self.name})
+
+            # Collect data from device
+            self._collect_device_data(scope, sanitized_hostname, config, run.id)
+
+            # UPDATE RUN ON SUCCESS
+            self.run_store.update_run(
+                policy_name=self.name,
+                target=sanitized_hostname,
+                run_id=run.id,
+                status=RunStatus.COMPLETED,
+                error=None,
+                entity_count=1,
+            )
+
+            # Record total discovery duration
+            discovery_latency = get_metric("discovery_latency")
+            if discovery_latency:
+                discovery_duration = (time.perf_counter() - discovery_start_time) * 1000
+                discovery_latency.record(
+                    discovery_duration,
+                    {
+                        "policy": self.name,
+                        "hostname": sanitized_hostname,
+                        "driver": scope.driver,
+                    },
+                )
+
+        except Exception as e:
+            # UPDATE RUN ON FAILURE
+            self.run_store.update_run(
+                policy_name=self.name,
+                target=sanitized_hostname,
+                run_id=run.id,
+                status=RunStatus.FAILED,
+                error=e,
+                entity_count=0,
+            )
+
             discovery_failure = get_metric("discovery_failure")
             if discovery_failure:
                 discovery_failure.add(1, {"policy": self.name})

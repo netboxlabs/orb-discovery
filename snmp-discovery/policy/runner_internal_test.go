@@ -16,6 +16,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// slowWalker blocks in Connect until done is closed, simulating a long-running SNMP operation.
+type slowWalker struct {
+	done <-chan struct{}
+}
+
+func (s *slowWalker) Connect() error {
+	<-s.done
+	return errors.New("unblocked")
+}
+
+func (s *slowWalker) Walk(_ string, _ int) (map[string]snmp.PDU, error) {
+	return nil, nil
+}
+
+func (s *slowWalker) Close() error { return nil }
+
 type testWalker struct {
 	connectErr     error
 	walkErr        error
@@ -56,15 +72,19 @@ func TestExpandTargetRangesGroupsTargets(t *testing.T) {
 	expanded := runner.expandTargetRanges(configuredTargets)
 	require.Len(t, expanded, 2)
 
-	require.Len(t, expanded[0], 2)
-	assert.Equal(t, "192.168.1.1", expanded[0][0].Host)
-	assert.Equal(t, uint16(161), expanded[0][0].Port)
-	assert.Equal(t, "192.168.1.2", expanded[0][1].Host)
-	assert.Equal(t, uint16(161), expanded[0][1].Port)
+	// Check first group (192.168.1.1-2 expands to 2 targets)
+	assert.Equal(t, "192.168.1.1-2", expanded[0].originalTarget)
+	require.Len(t, expanded[0].targets, 2)
+	assert.Equal(t, "192.168.1.1", expanded[0].targets[0].Host)
+	assert.Equal(t, uint16(161), expanded[0].targets[0].Port)
+	assert.Equal(t, "192.168.1.2", expanded[0].targets[1].Host)
+	assert.Equal(t, uint16(161), expanded[0].targets[1].Port)
 
-	require.Len(t, expanded[1], 1)
-	assert.Equal(t, "example.com", expanded[1][0].Host)
-	assert.Equal(t, uint16(162), expanded[1][0].Port)
+	// Check second group (example.com expands to 1 target)
+	assert.Equal(t, "example.com", expanded[1].originalTarget)
+	require.Len(t, expanded[1].targets, 1)
+	assert.Equal(t, "example.com", expanded[1].targets[0].Host)
+	assert.Equal(t, uint16(162), expanded[1].targets[0].Port)
 }
 
 func TestProbeTargetCanceledContextSkipsClientFactory(t *testing.T) {
@@ -170,11 +190,14 @@ func TestRunScanSchedulesResponsiveTargets(t *testing.T) {
 	scheduler, err := gocron.NewScheduler()
 	require.NoError(t, err)
 
+	runStore := NewRunStore()
+
 	runner := &Runner{
 		scheduler: scheduler,
 		ctx:       context.WithValue(context.Background(), policyKey, "test-policy"),
 		timeout:   5 * time.Second,
 		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		runStore:  runStore,
 	}
 
 	runner.ClientFactory = func(host string, _ uint16, _ int, _ time.Duration, _ *config.Authentication, _ *slog.Logger) (snmp.Walker, error) {
@@ -184,12 +207,97 @@ func TestRunScanSchedulesResponsiveTargets(t *testing.T) {
 		return &testWalker{walkErr: errors.New("no response")}, nil
 	}
 
-	runner.runScan([]config.Target{
+	runner.runScanWithOriginal([]config.Target{
 		{Host: "good-1", Port: 161},
 		{Host: "bad-1", Port: 161},
 		{Host: "good-2", Port: 161},
-	})
+	}, "192.168.1.0/24")
 
 	assert.Len(t, runner.tasks, 2)
 	assert.Len(t, runner.scheduler.Jobs(), 2)
+
+	// Verify scan run was created
+	runs := runStore.GetRunsForTarget("test-policy", "192.168.1.0/24", 161)
+	require.Len(t, runs, 1, "Scan run should be created")
+	assert.Equal(t, "192.168.1.0/24", runs[0].Metadata["target"])
+	assert.Equal(t, "161", runs[0].Metadata["port"])
+	assert.Equal(t, RunStatusCompleted, runs[0].Status)
+}
+
+func queryTargetRunner(clientFactory snmp.ClientFactory, mappingEntries []config.MappingEntry) *Runner {
+	return &Runner{
+		ctx:           context.WithValue(context.Background(), policyKey, "test-policy"),
+		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		mappingConfig: &config.Mapping{Entries: mappingEntries},
+		scope:         config.Scope{Authentication: config.Authentication{}},
+		config:        config.PolicyConfig{Retries: 0, Defaults: config.Defaults{}},
+		snmpTimeout:   time.Second,
+		ClientFactory: clientFactory,
+	}
+}
+
+func TestQueryTargetContextAlreadyCanceled(t *testing.T) {
+	runner := queryTargetRunner(snmp.NewFakeSNMPWalker, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	entities, err := runner.queryTarget(ctx, config.Target{Host: "127.0.0.1", Port: 161})
+	assert.Nil(t, entities)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestQueryTargetContextTimeout(t *testing.T) {
+	done := make(chan struct{})
+	defer close(done)
+
+	runner := queryTargetRunner(func(_ string, _ uint16, _ int, _ time.Duration, _ *config.Authentication, _ *slog.Logger) (snmp.Walker, error) {
+		return &slowWalker{done: done}, nil
+	}, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	entities, err := runner.queryTarget(ctx, config.Target{Host: "127.0.0.1", Port: 161})
+	assert.Nil(t, entities)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestQueryTargetWalkError(t *testing.T) {
+	walkErr := errors.New("snmp walk failed")
+	entries := []config.MappingEntry{
+		{
+			OID:    "iso.3.6.1.2.1.2.2.1",
+			Entity: "interface",
+			Field:  "_id",
+			MappingEntries: []config.MappingEntry{
+				{OID: "iso.3.6.1.2.1.2.2.1.2", Entity: "interface", Field: "name"},
+			},
+		},
+	}
+	runner := queryTargetRunner(func(_ string, _ uint16, _ int, _ time.Duration, _ *config.Authentication, _ *slog.Logger) (snmp.Walker, error) {
+		return &testWalker{walkErr: walkErr}, nil
+	}, entries)
+
+	entities, err := runner.queryTarget(context.Background(), config.Target{Host: "127.0.0.1", Port: 161})
+	assert.Nil(t, entities)
+	assert.ErrorIs(t, err, walkErr)
+}
+
+func TestQueryTargetSuccess(t *testing.T) {
+	entries := []config.MappingEntry{
+		{
+			OID:    "iso.3.6.1.2.1.2.2.1",
+			Entity: "interface",
+			Field:  "_id",
+			MappingEntries: []config.MappingEntry{
+				{OID: "iso.3.6.1.2.1.2.2.1.2", Entity: "interface", Field: "name"},
+			},
+		},
+	}
+	runner := queryTargetRunner(snmp.NewFakeSNMPWalker, entries)
+
+	entities, err := runner.queryTarget(context.Background(), config.Target{Host: "127.0.0.1", Port: 161})
+	require.NoError(t, err)
+	assert.NotEmpty(t, entities)
 }

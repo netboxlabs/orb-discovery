@@ -6,13 +6,21 @@ import logging
 import threading
 from typing import Any
 
-from netboxlabs.diode.sdk import DiodeClient, DiodeDryRunClient, DiodeOTLPClient
+from netboxlabs.diode.sdk import (
+    DiodeClient,
+    DiodeDryRunClient,
+    DiodeOTLPClient,
+    create_message_chunks,
+    estimate_message_size,
+)
 
+from device_discovery.entity_metadata import apply_run_id_to_entities
 from device_discovery.translate import translate_data
 from device_discovery.version import version_semver
 
 APP_NAME = "device-discovery"
 APP_VERSION = version_semver()
+MAX_MESSAGE_SIZE_BYTES = 3 * 1024 * 1024  # 3MB threshold for chunking
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -99,7 +107,12 @@ class Client:
                     app_version=APP_VERSION,
                 )
 
-    def ingest(self, metadata: dict[str, Any] | None, data: dict):
+    def ingest(
+        self,
+        metadata: dict[str, Any] | None,
+        data: dict,
+        run_id: str | None = None,
+    ):
         """
         Ingest data using the Diode client after translating it.
 
@@ -107,6 +120,7 @@ class Client:
         ----
             metadata (dict[str, Any] | None): Metadata to attach to the ingestion request.
             data (dict): The data to be ingested.
+            run_id (str | None): Discovery run ID for ingest and per-entity metadata.
 
         Raises:
         ------
@@ -118,16 +132,59 @@ class Client:
 
         with self._lock:
             translated_entities = translate_data(data)
-            request_metadata = metadata or {}
-            response = self.diode_client.ingest(
-                entities=translated_entities, metadata=request_metadata
+            entities_list = (
+                translated_entities
+                if isinstance(translated_entities, list)
+                else list(translated_entities)
             )
+            if run_id is not None:
+                apply_run_id_to_entities(entities_list, run_id)
 
-        hostname = request_metadata.get("hostname") or "unknown-host"
+            request_metadata = dict(metadata or {})
+            if run_id is not None:
+                request_metadata["run_id"] = str(run_id)
 
-        if response.errors:
-            logger.error(
-                f"ERROR ingestion failed for {hostname} : {response.errors}"
-            )
-        else:
-            logger.info(f"Hostname {hostname}: Successful ingestion")
+            entity_count = len(entities_list)
+
+            hostname = request_metadata.get("hostname") or "unknown-host"
+
+            # Check message size and chunk if needed
+            size_bytes = estimate_message_size(entities_list)
+
+            if size_bytes > MAX_MESSAGE_SIZE_BYTES:
+                chunks = create_message_chunks(entities_list)
+                chunk_num = len(chunks)
+                logger.info(
+                    f"Hostname {hostname}: Message size {size_bytes} bytes exceeds 3MB, "
+                    f"splitting into {chunk_num} chunks"
+                )
+
+                for i, chunk in enumerate(chunks, 1):
+                    response = self.diode_client.ingest(
+                        entities=chunk, metadata=request_metadata
+                    )
+                    if response.errors:
+                        error_msg = (
+                            f"Ingestion failed for {hostname} chunk {i}/{chunk_num}: "
+                            f"{response.errors}"
+                        )
+                        logger.error(f"ERROR {error_msg}")
+                        raise RuntimeError(error_msg)
+
+                logger.info(
+                    f"Hostname {hostname}: Successfully ingested {entity_count} entities "
+                    f"in {chunk_num} chunks"
+                )
+            else:
+                response = self.diode_client.ingest(
+                    entities=entities_list, metadata=request_metadata
+                )
+
+                if response.errors:
+                    error_msg = f"Ingestion failed for {hostname}: {response.errors}"
+                    logger.error(f"ERROR {error_msg}")
+                    raise RuntimeError(error_msg)
+
+                logger.info(
+                    f"Hostname {hostname}: Successfully ingested {entity_count} entities"
+                )
