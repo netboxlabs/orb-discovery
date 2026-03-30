@@ -55,7 +55,8 @@ type entPhysicalEntry struct {
 	MfgName      string
 }
 
-type stackInfo struct {
+// StackInfo holds the result of stack topology detection.
+type StackInfo struct {
 	Active            bool
 	VirtualChassis    *diode.VirtualChassis
 	MemberDevices     map[string]*diode.Device
@@ -63,28 +64,32 @@ type stackInfo struct {
 	InterfaceToMember map[string]string
 }
 
-type moduleInfo struct {
+// ModuleInfo holds the result of module topology detection.
+type ModuleInfo struct {
 	Active      bool
 	ModuleBays  map[string]*diode.ModuleBay
 	Modules     map[string]*diode.Module
 	ModuleTypes map[string]*diode.ModuleType
 }
 
-type stackDetector struct {
+// StackDetector parses entity MIB OIDs to detect stack and module topology.
+type StackDetector struct {
 	logger            *slog.Logger
 	entries           map[string]*entPhysicalEntry
 	interfaceToMember map[string]string
 }
 
-func NewStackDetector(logger *slog.Logger) *stackDetector {
-	return &stackDetector{
+// NewStackDetector creates a new StackDetector instance.
+func NewStackDetector(logger *slog.Logger) *StackDetector {
+	return &StackDetector{
 		logger:            logger,
 		entries:           make(map[string]*entPhysicalEntry),
 		interfaceToMember: make(map[string]string),
 	}
 }
 
-func (d *stackDetector) Filter(objectIDs ObjectIDValueMap) ObjectIDValueMap {
+// Filter removes entity MIB OIDs from the map, consuming them into the detector's state.
+func (d *StackDetector) Filter(objectIDs ObjectIDValueMap) ObjectIDValueMap {
 	filtered := make(ObjectIDValueMap, len(objectIDs))
 	for oid, value := range objectIDs {
 		if d.consume(oid, value) {
@@ -95,7 +100,7 @@ func (d *stackDetector) Filter(objectIDs ObjectIDValueMap) ObjectIDValueMap {
 	return filtered
 }
 
-func (d *stackDetector) consume(oid string, value Value) bool {
+func (d *StackDetector) consume(oid string, value Value) bool {
 	normalized := strings.TrimPrefix(oid, ".")
 
 	switch {
@@ -151,7 +156,7 @@ func (d *stackDetector) consume(oid string, value Value) bool {
 	}
 }
 
-func (d *stackDetector) getOrCreateEntry(index string) *entPhysicalEntry {
+func (d *StackDetector) getOrCreateEntry(index string) *entPhysicalEntry {
 	entry, ok := d.entries[index]
 	if ok {
 		return entry
@@ -166,10 +171,11 @@ func (d *stackDetector) getOrCreateEntry(index string) *entPhysicalEntry {
 	return entry
 }
 
-func (d *stackDetector) BuildStackInfo(registry *EntityRegistry, baseDevice *diode.Device, defaults *config.Defaults) stackInfo {
+// BuildStackInfo constructs stack topology entities from the consumed entity MIB data.
+func (d *StackDetector) BuildStackInfo(registry *EntityRegistry, baseDevice *diode.Device, defaults *config.Defaults) StackInfo {
 	members := d.stackMembers()
 	if len(members) < 2 {
-		return stackInfo{}
+		return StackInfo{}
 	}
 
 	positions := assignPositions(members)
@@ -204,7 +210,7 @@ func (d *stackDetector) BuildStackInfo(registry *EntityRegistry, baseDevice *dio
 		virtualChassis.Master = master
 	}
 
-	return stackInfo{
+	return StackInfo{
 		Active:            true,
 		VirtualChassis:    virtualChassis,
 		MemberDevices:     memberDevices,
@@ -213,10 +219,11 @@ func (d *stackDetector) BuildStackInfo(registry *EntityRegistry, baseDevice *dio
 	}
 }
 
-func (d *stackDetector) BuildModuleInfo(baseDevice *diode.Device, memberDevices map[string]*diode.Device) moduleInfo {
+// BuildModuleInfo constructs module bay and module entities from the consumed entity MIB data.
+func (d *StackDetector) BuildModuleInfo(baseDevice *diode.Device, memberDevices map[string]*diode.Device) ModuleInfo {
 	modules := d.moduleEntries()
 	if len(modules) == 0 {
-		return moduleInfo{}
+		return ModuleInfo{}
 	}
 
 	moduleBays := make(map[string]*diode.ModuleBay)
@@ -255,10 +262,10 @@ func (d *stackDetector) BuildModuleInfo(baseDevice *diode.Device, memberDevices 
 	}
 
 	if len(moduleEntities) == 0 {
-		return moduleInfo{}
+		return ModuleInfo{}
 	}
 
-	return moduleInfo{
+	return ModuleInfo{
 		Active:      true,
 		ModuleBays:  moduleBays,
 		Modules:     moduleEntities,
@@ -266,7 +273,7 @@ func (d *stackDetector) BuildModuleInfo(baseDevice *diode.Device, memberDevices 
 	}
 }
 
-func (d *stackDetector) stackMembers() []entPhysicalEntry {
+func (d *StackDetector) stackMembers() []entPhysicalEntry {
 	chassis := make([]entPhysicalEntry, 0)
 	containers := make(map[string]entPhysicalEntry)
 	for _, entry := range d.entries {
@@ -482,7 +489,7 @@ func parseInt(value string, fallback int) int {
 	return parsed
 }
 
-func (d *stackDetector) moduleEntries() []*entPhysicalEntry {
+func (d *StackDetector) moduleEntries() []*entPhysicalEntry {
 	modules := make([]*entPhysicalEntry, 0)
 	for _, entry := range d.entries {
 		if entry.Class == entPhysicalClassModule {
@@ -492,7 +499,7 @@ func (d *stackDetector) moduleEntries() []*entPhysicalEntry {
 	return modules
 }
 
-func (d *stackDetector) moduleBayEntry(moduleEntry *entPhysicalEntry) *entPhysicalEntry {
+func (d *StackDetector) moduleBayEntry(moduleEntry *entPhysicalEntry) *entPhysicalEntry {
 	if moduleEntry == nil || moduleEntry.ContainedIn <= 0 {
 		return nil
 	}
@@ -503,7 +510,7 @@ func (d *stackDetector) moduleBayEntry(moduleEntry *entPhysicalEntry) *entPhysic
 	return nil
 }
 
-func (d *stackDetector) deviceForEntry(entry *entPhysicalEntry, baseDevice *diode.Device, memberDevices map[string]*diode.Device) *diode.Device {
+func (d *StackDetector) deviceForEntry(entry *entPhysicalEntry, baseDevice *diode.Device, memberDevices map[string]*diode.Device) *diode.Device {
 	if entry == nil {
 		return baseDevice
 	}
@@ -521,7 +528,7 @@ func (d *stackDetector) deviceForEntry(entry *entPhysicalEntry, baseDevice *diod
 	return nil
 }
 
-func (d *stackDetector) findAncestor(entry *entPhysicalEntry, predicate func(*entPhysicalEntry) bool) *entPhysicalEntry {
+func (d *StackDetector) findAncestor(entry *entPhysicalEntry, predicate func(*entPhysicalEntry) bool) *entPhysicalEntry {
 	if entry == nil {
 		return nil
 	}
@@ -544,7 +551,7 @@ func (d *stackDetector) findAncestor(entry *entPhysicalEntry, predicate func(*en
 	return nil
 }
 
-func (d *stackDetector) entryByIndex(index int) *entPhysicalEntry {
+func (d *StackDetector) entryByIndex(index int) *entPhysicalEntry {
 	if index <= 0 {
 		return nil
 	}
