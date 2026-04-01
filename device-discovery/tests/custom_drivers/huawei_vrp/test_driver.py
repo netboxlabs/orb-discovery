@@ -1,0 +1,13 @@
+"""Unit tests for custom_napalm.huawei_vrp.VRPDriver."""
+
+from pathlib import Path
+
+from custom_napalm.huawei_vrp import VRPDriver
+from tests.custom_drivers.base_test import BaseDriverTest
+from tests.custom_drivers.mock_device import FakeCLIDevice
+
+
+class TestVRPDriver(BaseDriverTest):
+    driver_cls = VRPDriver
+    fake_device_cls = FakeCLIDevice
+    mock_data_root = Path(__file__).parent / "mock_data"

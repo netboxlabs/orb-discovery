@@ -13,6 +13,7 @@ from napalm import get_network_driver
 from napalm.base.base import NetworkDriver
 
 _DRIVER_MISMATCH_MARKERS = ["%", "Invalid input", "^"]
+_DEFAULT_DRIVERS = ["eos", "ios", "iosxr_netconf", "junos", "nxos", "nxos_ssh"]
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -67,7 +68,7 @@ def napalm_driver_list() -> list[str]:
                    discovered driver names from the installed packages.
 
     """
-    napalm_packages = ["eos", "ios", "iosxr_netconf", "junos", "nxos", "nxos_ssh"]
+    napalm_packages = list(_DEFAULT_DRIVERS)
     prefix = "napalm_"
     for dist in packages_distributions():
         if dist.startswith(prefix):
@@ -84,6 +85,13 @@ def napalm_driver_list() -> list[str]:
                 napalm_packages = walk_napalm_packages(module, prefix, napalm_packages)
             except Exception as e:
                 logger.error(f"Error importing module {dist}: {str(e)}")
+    # Scan in-repo custom_napalm drivers
+    custom_prefix = "custom_napalm."
+    try:
+        custom_module = import_module("custom_napalm")
+        napalm_packages = walk_napalm_packages(custom_module, custom_prefix, napalm_packages)
+    except ImportError:
+        pass
     return napalm_packages
 
 
@@ -111,7 +119,7 @@ def set_napalm_logs_level(level: int):
     logging.getLogger("pyeapi").setLevel(level)
 
 
-def discover_device_driver(info: dict) -> str | None:
+def discover_device_driver(info: dict, drivers: list[str] | None = None) -> str | None:
     """
     Discover the correct NAPALM driver for the given device information.
 
@@ -120,15 +128,18 @@ def discover_device_driver(info: dict) -> str | None:
         info (dict): A dictionary containing device connection information.
             Expected keys are 'hostname', 'username', 'password', 'timeout',
             and 'optional_args'.
+        drivers (list[str] | None): Ordered list of driver names to try. Defaults
+            to the built-in NAPALM drivers (_DEFAULT_DRIVERS) when not specified.
 
     Returns:
     -------
         str: The name of the driver that successfully connects and identifies
-             the device. Returns an empty string if no suitable driver is found.
+             the device. Returns None if no suitable driver is found.
 
     """
+    driver_list = drivers if drivers is not None else _DEFAULT_DRIVERS
     set_napalm_logs_level(logging.CRITICAL)
-    for driver in supported_drivers:
+    for driver in driver_list:
         try:
             logger.info(f"Hostname {info.hostname}: Trying '{driver}' driver")
             np_driver = get_network_driver(driver)
