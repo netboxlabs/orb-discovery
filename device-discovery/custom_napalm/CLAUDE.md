@@ -494,6 +494,7 @@ Before opening a PR with a new driver, confirm all of the following:
 - [ ] `python -c "from device_discovery.discovery import supported_drivers; print(supported_drivers)"` includes the new driver.
 - [ ] Unit test module created under `tests/custom_drivers/<driver_name>/`.
 - [ ] Mock data files exist for all five test methods with an `expected_result.json` for each.
+- [ ] `ruff check .` from `device-discovery/` reports no errors.
 - [ ] `pytest tests/custom_drivers/ -v` — all tests pass (existing + new).
 - [ ] `docker run` mockit container starts and SSH access works (`ssh -p <port> admin@localhost`).
 - [ ] `device-discovery` dry-run produces a device entity + interface entities with correct fields.
