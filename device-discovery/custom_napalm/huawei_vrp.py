@@ -153,7 +153,7 @@ class VRPDriver(_napalm_base.NetworkDriver):
             "uptime": int(uptime),
             "vendor": vendor,
             "os_version": os_version,
-            "serial_number": ",".join(serial_number) if serial_number else "Unknown",
+            "serial_number": serial_number[0] if serial_number else "Unknown",
             "model": model,
             "hostname": hostname,
             "fqdn": "Unknown",
