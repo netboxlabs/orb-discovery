@@ -132,7 +132,7 @@ class PolicyRunner:
         if policy_executions:
             policy_executions.add(1, {"policy": self.name})
 
-    def _discover_driver(self, scope: Napalm, sanitized_hostname: str, config: Config) -> bool:
+    def _discover_driver(self, scope: Napalm, sanitized_hostname: str) -> bool:
         """
         Discover the device driver if not provided.
 
@@ -140,7 +140,6 @@ class PolicyRunner:
         ----
             scope: Scope data for the device.
             sanitized_hostname: Sanitized hostname for logging.
-            config: Policy configuration, used to resolve the discovery driver list.
 
         Returns:
         -------
@@ -151,8 +150,7 @@ class PolicyRunner:
             logger.info(
                 f"Policy {self.name}, Hostname {sanitized_hostname}: Driver not informed, discovering it"
             )
-            discovery_drivers = config.options.discovery_drivers if config and config.options else None
-            scope.driver = discover_device_driver(scope, drivers=discovery_drivers)
+            scope.driver = discover_device_driver(scope)
             if scope.driver is None:
                 self.status = Status.FAILED
                 logger.error(
@@ -334,7 +332,7 @@ class PolicyRunner:
         )
 
         # Try to discover driver if needed
-        if not self._discover_driver(scope, sanitized_hostname, config):
+        if not self._discover_driver(scope, sanitized_hostname):
             # UPDATE RUN ON DRIVER DISCOVERY FAILURE
             self.run_store.update_run(
                 policy_name=self.name,
@@ -446,7 +444,7 @@ class PolicyRunner:
         )
 
         # Try to discover driver if needed
-        if not self._discover_driver(scope, sanitized_hostname, config):
+        if not self._discover_driver(scope, sanitized_hostname):
             # UPDATE RUN ON DRIVER DISCOVERY FAILURE
             self.run_store.update_run(
                 policy_name=self.name,

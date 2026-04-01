@@ -8,6 +8,8 @@ from tests.custom_drivers.mock_device import FakeCLIDevice
 
 
 class TestPANOSSHDriver(BaseDriverTest):
+    """Unit tests for PANOSSHDriver using file-based CLI mocks."""
+
     driver_cls = PANOSSHDriver
     fake_device_cls = FakeCLIDevice
     mock_data_root = Path(__file__).parent / "mock_data"

@@ -1,4 +1,5 @@
-"""Base test class for custom NAPALM drivers.
+"""
+Base test class for custom NAPALM drivers.
 
 Usage
 -----
@@ -29,7 +30,8 @@ from typing import Any
 
 
 def parametrize_scenarios(metafunc, mock_data_root: Path) -> None:
-    """Parametrize ``scenario`` fixture from sub-folders of each test method's mock directory.
+    """
+    Parametrize ``scenario`` fixture from sub-folders of each test method's mock directory.
 
     For ``test_get_facts``, looks for folders under ``mock_data_root/test_get_facts/``.
     Falls back to ``["normal"]`` if the directory doesn't exist.
@@ -53,7 +55,8 @@ def _load_expected(mock_dir: Path) -> dict | None:
 
 
 class BaseDriverTest:
-    """Tests for the NAPALM getter methods used by device-discovery.
+    """
+    Tests for the NAPALM getter methods used by device-discovery.
 
     Validates:
     1. Return type is a dict.
@@ -88,6 +91,7 @@ class BaseDriverTest:
     # ------------------------------------------------------------------
 
     def test_get_facts(self, scenario: str) -> None:
+        """Verify get_facts returns a valid dict with required keys."""
         mock_dir = self._mock_dir("test_get_facts", scenario)
         driver = self._build_driver(mock_dir)
         result = driver.get_facts()
@@ -103,6 +107,7 @@ class BaseDriverTest:
             assert result == expected
 
     def test_get_interfaces(self, scenario: str) -> None:
+        """Verify get_interfaces returns a valid dict with required per-interface keys."""
         mock_dir = self._mock_dir("test_get_interfaces", scenario)
         driver = self._build_driver(mock_dir)
         result = driver.get_interfaces()
@@ -119,6 +124,7 @@ class BaseDriverTest:
             assert result == expected
 
     def test_get_interfaces_ip(self, scenario: str) -> None:
+        """Verify get_interfaces_ip returns valid address families with prefix lengths."""
         mock_dir = self._mock_dir("test_get_interfaces_ip", scenario)
         driver = self._build_driver(mock_dir)
         result = driver.get_interfaces_ip()
@@ -136,6 +142,7 @@ class BaseDriverTest:
             assert result == expected
 
     def test_get_config(self, scenario: str) -> None:
+        """Verify get_config returns a dict with running/candidate/startup keys."""
         mock_dir = self._mock_dir("test_get_config", scenario)
         driver = self._build_driver(mock_dir)
         result = driver.get_config()
@@ -148,6 +155,7 @@ class BaseDriverTest:
             assert result == expected
 
     def test_get_vlans(self, scenario: str) -> None:
+        """Verify get_vlans returns a valid dict with name and interfaces per VLAN."""
         mock_dir = self._mock_dir("test_get_vlans", scenario)
         driver = self._build_driver(mock_dir)
         result = driver.get_vlans()

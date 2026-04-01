@@ -1,6 +1,7 @@
 # Copyright 2026 NetBox Labs Inc
 # Based on napalm-panos (Apache-2.0): https://github.com/napalm-automation-community/napalm-panos
-"""Custom PAN-OS NAPALM driver.
+"""
+Custom PAN-OS NAPALM driver.
 
 Implements only the methods used by device-discovery:
   get_facts, get_interfaces, get_interfaces_ip, get_config, get_vlans.
@@ -12,15 +13,48 @@ import re
 import xml.etree.ElementTree
 
 import napalm.base as _napalm_base
+import pan.xapi
+import xmltodict
 from napalm.base import models
 from napalm.base.exceptions import ConnectionException
 from napalm.base.helpers import mac as standardize_mac
 from napalm.base.utils.string_parsers import convert_uptime_string_seconds
 
-import pan.xapi
-import xmltodict
-
 logger = logging.getLogger(__name__)
+
+
+def _extract_ip_info(parsed_intf_dict: dict) -> dict:
+    """Extract NAPALM-format IP address info from a single PAN-OS interface dict."""
+    intf = parsed_intf_dict["name"]
+    ip_info: dict = {intf: {}}
+
+    v4_ip = parsed_intf_dict.get("ip")
+    secondary_v4_ip = parsed_intf_dict.get("addr")
+    v6_ip = parsed_intf_dict.get("addr6")
+
+    if v4_ip and v4_ip != "N/A":
+        address, pref = v4_ip.split("/")
+        ip_info[intf].setdefault("ipv4", {})[address] = {"prefix_length": int(pref)}
+
+    if secondary_v4_ip is not None:
+        members = secondary_v4_ip["member"]
+        if not isinstance(members, list):
+            members = [members]
+        for entry in members:
+            address, pref = entry.split("/")
+            ip_info[intf].setdefault("ipv4", {})[address] = {"prefix_length": int(pref)}
+
+    if v6_ip is not None:
+        members = v6_ip["member"]
+        if not isinstance(members, list):
+            members = [members]
+        for entry in members:
+            address, pref = entry.split("/")
+            ip_info[intf].setdefault("ipv6", {})[address] = {"prefix_length": int(pref)}
+
+    if ip_info == {intf: {}}:
+        return {}
+    return ip_info
 
 
 class PANOSDriver(_napalm_base.NetworkDriver):
@@ -125,6 +159,16 @@ class PANOSDriver(_napalm_base.NetworkDriver):
 
         return facts
 
+    @staticmethod
+    def _parse_speed(speed_raw) -> float:
+        """Convert a raw speed value from PAN-OS to a float (Mbps). Returns 0.0 for unknown."""
+        if speed_raw in ("[n/a]", "unknown", None):
+            return 0.0
+        try:
+            return float(speed_raw)
+        except ValueError:
+            return 0.0
+
     def get_interfaces(self):
         """Return interface details keyed by interface name."""
         subif_defaults = {
@@ -175,14 +219,7 @@ class PANOSDriver(_napalm_base.NetworkDriver):
             elif conf_state not in ("up", "auto"):
                 logger.warning("Unknown configured state %s for interface %s", conf_state, intf)
 
-            speed = interface_info.get("speed")
-            if speed in ("[n/a]", "unknown", None):
-                speed = 0.0
-            else:
-                try:
-                    speed = float(speed)
-                except ValueError:
-                    speed = 0.0
+            speed = self._parse_speed(interface_info.get("speed"))
 
             interface_dict[intf] = {
                 "is_up": interface_info.get("state") == "up",
@@ -198,39 +235,6 @@ class PANOSDriver(_napalm_base.NetworkDriver):
 
     def get_interfaces_ip(self):
         """Return IP addresses per interface."""
-
-        def extract_ip_info(parsed_intf_dict):
-            intf = parsed_intf_dict["name"]
-            ip_info = {intf: {}}
-
-            v4_ip = parsed_intf_dict.get("ip")
-            secondary_v4_ip = parsed_intf_dict.get("addr")
-            v6_ip = parsed_intf_dict.get("addr6")
-
-            if v4_ip and v4_ip != "N/A":
-                address, pref = v4_ip.split("/")
-                ip_info[intf].setdefault("ipv4", {})[address] = {"prefix_length": int(pref)}
-
-            if secondary_v4_ip is not None:
-                members = secondary_v4_ip["member"]
-                if not isinstance(members, list):
-                    members = [members]
-                for entry in members:
-                    address, pref = entry.split("/")
-                    ip_info[intf].setdefault("ipv4", {})[address] = {"prefix_length": int(pref)}
-
-            if v6_ip is not None:
-                members = v6_ip["member"]
-                if not isinstance(members, list):
-                    members = [members]
-                for entry in members:
-                    address, pref = entry.split("/")
-                    ip_info[intf].setdefault("ipv6", {})[address] = {"prefix_length": int(pref)}
-
-            if ip_info == {intf: {}}:
-                return {}
-            return ip_info
-
         self.device.op(cmd="<show><interface>all</interface></show>")
         interface_info_xml = xmltodict.parse(self.device.xml_root())
         interface_info_json = json.dumps(interface_info_xml["response"]["result"]["ifnet"]["entry"])
@@ -241,7 +245,7 @@ class PANOSDriver(_napalm_base.NetworkDriver):
 
         ip_interfaces = {}
         for intf_dict in interface_info:
-            ip_info = extract_ip_info(intf_dict)
+            ip_info = _extract_ip_info(intf_dict)
             if ip_info:
                 ip_interfaces.update(ip_info)
 
@@ -266,7 +270,8 @@ class PANOSDriver(_napalm_base.NetworkDriver):
         return {"running": running, "candidate": candidate, "startup": ""}
 
     def get_vlans(self):
-        """Return VLAN information.
+        """
+        Return VLAN information.
 
         PAN-OS does not expose a traditional VLAN table via the XML API in the
         same way as Cisco/Juniper platforms. Returns an empty dict so that

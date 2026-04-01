@@ -158,10 +158,6 @@ class Options(BaseModel):
     capture_startup_config: bool | None = Field(
         default=False, description="Capture startup/saved configuration, optional"
     )
-    discovery_drivers: list[str] | None = Field(
-        default=None,
-        description="Ordered list of drivers to try during auto-discovery. Defaults to built-in NAPALM drivers only.",
-    )
 
 
 class Config(BaseModel):
