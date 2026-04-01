@@ -80,7 +80,10 @@ class VRPDriver(_napalm_base.NetworkDriver):
         if optional_args is None:
             optional_args = {}
 
-        self.transport = optional_args.get("transport", "ssh")
+        transport = optional_args.get("transport", "ssh")
+        if transport not in ("ssh", "telnet"):
+            raise ValueError(f"Unsupported transport '{transport}': must be 'ssh' or 'telnet'")
+        self.transport = transport
         self.netmiko_optional_args = netmiko_args(optional_args)
         default_port = {"ssh": 22, "telnet": 23}
         self.netmiko_optional_args.setdefault("port", default_port[self.transport])

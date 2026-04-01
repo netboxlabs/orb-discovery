@@ -70,7 +70,6 @@ class PANOSDriver(_napalm_base.NetworkDriver):
 
         if optional_args is None:
             optional_args = {}
-        self.verify = optional_args.get("ssl_verify", False)
         self.api_key = optional_args.get("api_key", "")
 
     def open(self):
