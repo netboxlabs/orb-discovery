@@ -1,4 +1,4 @@
-# Copyright 2024 NetBox Labs Inc
+# Copyright 2026 NetBox Labs Inc
 """Custom PAN-OS SSH NAPALM driver.
 
 Implements only the methods used by device-discovery:
