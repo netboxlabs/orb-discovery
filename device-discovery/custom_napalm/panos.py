@@ -1,4 +1,4 @@
-# Copyright 2024 NetBox Labs Inc
+# Copyright 2026 NetBox Labs Inc
 # Based on napalm-panos (Apache-2.0): https://github.com/napalm-automation-community/napalm-panos
 """Custom PAN-OS NAPALM driver.
 
@@ -11,7 +11,8 @@ import logging
 import re
 import xml.etree.ElementTree
 
-from napalm.base import NetworkDriver, models
+import napalm.base as _napalm_base
+from napalm.base import models
 from napalm.base.exceptions import ConnectionException
 from napalm.base.helpers import mac as standardize_mac
 from napalm.base.utils.string_parsers import convert_uptime_string_seconds
@@ -22,7 +23,7 @@ import xmltodict
 logger = logging.getLogger(__name__)
 
 
-class PANOSDriver(NetworkDriver):
+class PANOSDriver(_napalm_base.NetworkDriver):
     """PAN-OS NAPALM driver (read-only subset for device-discovery)."""
 
     def __init__(self, hostname, username, password, timeout=60, optional_args=None):

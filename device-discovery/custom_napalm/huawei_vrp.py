@@ -1,4 +1,4 @@
-# Copyright 2024 NetBox Labs Inc
+# Copyright 2026 NetBox Labs Inc
 # Based on napalm-huawei-vrp (Apache-2.0): https://github.com/napalm-automation-community/napalm-huawei-vrp
 """Custom Huawei VRP NAPALM driver.
 
@@ -12,7 +12,8 @@ falls back to regex for commands without templates (serial number, IPv6).
 import re
 import socket
 
-from napalm.base import NetworkDriver, models
+import napalm.base as _napalm_base
+from napalm.base import models
 from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
 
@@ -66,7 +67,7 @@ def _separate_section(separator: str, content: str) -> list[str]:
     return [line + next(it, "") for line in it]
 
 
-class VRPDriver(NetworkDriver):
+class VRPDriver(_napalm_base.NetworkDriver):
     """Huawei VRP NAPALM driver (read-only subset for device-discovery)."""
 
     def __init__(self, hostname, username, password, timeout=60, optional_args=None):
