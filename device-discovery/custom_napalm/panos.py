@@ -236,11 +236,13 @@ class PANOSDriver(_napalm_base.NetworkDriver):
         """Return IP addresses per interface."""
         self.device.op(cmd="<show><interface>all</interface></show>")
         interface_info_xml = xmltodict.parse(self.device.xml_root())
-        interface_info_json = json.dumps(interface_info_xml["response"]["result"]["ifnet"]["entry"])
-        interface_info = json.loads(interface_info_json)
+        result = interface_info_xml.get("response", {}).get("result", {}) or {}
+        ifnet = result.get("ifnet") or {}
+        entry = ifnet.get("entry")
+        if not entry:
+            return {}
 
-        if isinstance(interface_info, dict):
-            interface_info = [interface_info]
+        interface_info = entry if isinstance(entry, list) else [entry]
 
         ip_interfaces = {}
         for intf_dict in interface_info:
