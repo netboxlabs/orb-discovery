@@ -87,7 +87,24 @@ def napalm_driver_list() -> list[str]:
     return napalm_packages
 
 
-supported_drivers = napalm_driver_list()
+def custom_napalm_driver_list() -> list[str]:
+    """
+    List the available custom NAPALM drivers from the custom_napalm package.
+
+    Returns
+    -------
+        List[str]: Driver short-names (e.g. 'panos', 'huawei_vrp') found in custom_napalm.
+
+    """
+    try:
+        module = import_module("custom_napalm")
+        return walk_napalm_packages(module, "custom_napalm.", [])
+    except Exception as e:
+        logger.error(f"Error loading custom_napalm drivers: {str(e)}")
+        return []
+
+
+supported_drivers = napalm_driver_list() + custom_napalm_driver_list()
 
 
 def set_napalm_logs_level(level: int):

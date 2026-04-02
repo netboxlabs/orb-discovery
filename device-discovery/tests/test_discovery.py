@@ -11,6 +11,7 @@ from napalm.base.base import NetworkDriver
 
 from device_discovery.discovery import (
     _DRIVER_MISMATCH_MARKERS,
+    custom_napalm_driver_list,
     discover_device_driver,
     napalm_driver_list,
     set_napalm_logs_level,
@@ -436,3 +437,32 @@ def test_set_napalm_logs_level(mock_loggers):
 
     for logger in mock_loggers.values():
         logger.setLevel.assert_called_once_with(logging.DEBUG)
+
+
+def test_custom_napalm_driver_list(mock_import_module, mock_walk_packages):
+    """Test that custom_napalm_driver_list discovers drivers from the custom_napalm package."""
+    class MockVRPDriver(NetworkDriver):
+        pass
+
+    mock_module = MagicMock()
+    mock_module.__path__ = ["custom_napalm"]
+    mock_module.__name__ = "custom_napalm"
+    setattr(mock_module, "MockVRPDriver", MockVRPDriver)
+
+    mock_package = MagicMock()
+    mock_package.name = "custom_napalm.huawei_vrp"
+
+    mock_import_module.return_value = mock_module
+    mock_walk_packages.return_value = [mock_package]
+
+    result = custom_napalm_driver_list()
+
+    mock_import_module.assert_any_call("custom_napalm")
+    assert "huawei_vrp" in result
+
+
+def test_supported_drivers_includes_custom_napalm():
+    """Test that supported_drivers contains drivers from custom_napalm."""
+    pytest.importorskip("custom_napalm")
+    for driver in ("panos", "panos_ssh", "huawei_vrp"):
+        assert driver in supported_drivers, f"Expected '{driver}' in supported_drivers"
