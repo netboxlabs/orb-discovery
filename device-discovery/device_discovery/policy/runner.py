@@ -65,6 +65,12 @@ class PolicyRunner:
         self.scheduler.start()
 
         if self.config.options.discovery_drivers is not None:
+            if not self.config.options.discovery_drivers:
+                self.scheduler.shutdown()
+                raise Exception(
+                    f"Policy {self.name}: discovery_drivers must not be empty. "
+                    f"Supported drivers are: {supported_drivers}."
+                )
             invalid = [d for d in self.config.options.discovery_drivers if d not in supported_drivers]
             if invalid:
                 self.scheduler.shutdown()

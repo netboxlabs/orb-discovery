@@ -236,7 +236,7 @@ def test_run_discovered_driver_error(
         # Run the device with an error to check error handling
         policy_runner.run("test_id", sample_scopes[0], sample_config)
 
-        mock_discover.assert_called_once()
+        mock_discover.assert_called_once_with(sample_scopes[0], drivers=None)
         assert mock_logger_error.call_count == 2
         assert policy_runner.status == Status.FAILED
 
@@ -502,6 +502,21 @@ def test_setup_raises_on_unknown_discovery_drivers():
     run_store = RunStore()
 
     with pytest.raises(Exception, match="discovery_drivers contains unknown drivers"):
+        runner.setup("test-policy", config, scope, run_store)
+
+
+def test_setup_raises_on_empty_discovery_drivers():
+    """setup() raises if discovery_drivers is an empty list."""
+    from device_discovery.policy.runner import PolicyRunner
+    from device_discovery.policy.models import Config, Napalm, Options
+    from device_discovery.policy.run import RunStore
+
+    runner = PolicyRunner()
+    config = Config(options=Options(discovery_drivers=[]))
+    scope = [Napalm(hostname="192.168.1.1", username="admin", password="pass")]
+    run_store = RunStore()
+
+    with pytest.raises(Exception, match="discovery_drivers must not be empty"):
         runner.setup("test-policy", config, scope, run_store)
 
 
