@@ -22,15 +22,30 @@ from ntc_templates.parse import parse_output
 
 logger = logging.getLogger(__name__)
 
-_CIPHER_RE = re.compile(r"(\bcipher\b)\s+\S+", re.IGNORECASE)
-_SECRET_RE = re.compile(r"(\bsecret\b(?:\s+\d+)?)\s+\S+", re.IGNORECASE)
-_COMMUNITY_RE = re.compile(r"(\bcommunity\b(?:\s+(?:read|write))?)\s+\S+", re.IGNORECASE)
+# "password cipher <hash>" / "psk cipher <hash>" / "key cipher <hash>"
+# Excludes algorithm-list lines like "ssh server cipher aes256_ctr" where
+# "cipher" introduces an algorithm name, not a credential.
+_PASSWORD_CIPHER_RE = re.compile(r"(password\s+cipher)\s+\S+", re.IGNORECASE)
+_PSK_CIPHER_RE = re.compile(r"(psk\s+cipher)\s+\S+", re.IGNORECASE)
+_KEY_CIPHER_RE = re.compile(r"(key\s+cipher)\s+\S+", re.IGNORECASE)
+
+# "secret <algorithm-id> <hash>" — digit required; avoids matching non-credential
+# uses such as OSPF/BGP lines that happen to contain the word "secret".
+_SECRET_RE = re.compile(r"(\bsecret\s+\d+)\s+\S+", re.IGNORECASE)
+
+# Anchored to the SNMP agent command form to avoid false positives on
+# BGP/OSPF community attributes.
+_SNMP_COMMUNITY_RE = re.compile(
+    r"(snmp-agent\s+community\s+(?:read|write))\s+\S+", re.IGNORECASE
+)
 
 
 def _sanitize_config(text: str) -> str:
-    text = _CIPHER_RE.sub(r"\1 <redacted>", text)
+    text = _PASSWORD_CIPHER_RE.sub(r"\1 <redacted>", text)
+    text = _PSK_CIPHER_RE.sub(r"\1 <redacted>", text)
+    text = _KEY_CIPHER_RE.sub(r"\1 <redacted>", text)
     text = _SECRET_RE.sub(r"\1 <redacted>", text)
-    text = _COMMUNITY_RE.sub(r"\1 <redacted>", text)
+    text = _SNMP_COMMUNITY_RE.sub(r"\1 <redacted>", text)
     return text
 
 # Uptime conversion constants
