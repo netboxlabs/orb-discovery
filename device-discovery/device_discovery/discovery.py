@@ -128,7 +128,7 @@ def set_napalm_logs_level(level: int):
     logging.getLogger("pyeapi").setLevel(level)
 
 
-def discover_device_driver(info: dict) -> str | None:
+def discover_device_driver(info: dict, drivers: list[str] | None = None) -> str | None:
     """
     Discover the correct NAPALM driver for the given device information.
 
@@ -137,6 +137,9 @@ def discover_device_driver(info: dict) -> str | None:
         info (dict): A dictionary containing device connection information.
             Expected keys are 'hostname', 'username', 'password', 'timeout',
             and 'optional_args'.
+        drivers (list[str] | None): An optional list of driver names to try.
+            When provided, only those drivers are attempted. When None,
+            all entries in ``supported_drivers`` are tried.
 
     Returns:
     -------
@@ -145,7 +148,8 @@ def discover_device_driver(info: dict) -> str | None:
 
     """
     set_napalm_logs_level(logging.CRITICAL)
-    for driver in supported_drivers:
+    driver_list = drivers if drivers is not None else supported_drivers
+    for driver in driver_list:
         try:
             logger.info(f"Hostname {info.hostname}: Trying '{driver}' driver")
             np_driver = get_network_driver(driver)

@@ -202,7 +202,7 @@ def test_run_device_with_discovered_driver(
         policy_runner.run("test_id", sample_scopes[0], sample_config)
 
         # Verify driver discovery and ingestion
-        mock_discover.assert_called_once_with(sample_scopes[0])
+        mock_discover.assert_called_once_with(sample_scopes[0], drivers=None)
         mock_ingest.assert_called_once()
         metadata_arg, data = mock_ingest.call_args[0]
         kwargs = mock_ingest.call_args[1]
@@ -488,3 +488,35 @@ def test_options_discovery_drivers_parsed():
     from device_discovery.policy.models import Options
     opts = Options(discovery_drivers=["ios", "panos"])
     assert opts.discovery_drivers == ["ios", "panos"]
+
+
+def test_setup_raises_on_unknown_discovery_drivers():
+    """setup() raises if discovery_drivers contains a driver not in supported_drivers."""
+    from device_discovery.policy.runner import PolicyRunner
+    from device_discovery.policy.models import Config, Napalm, Options
+    from device_discovery.policy.run import RunStore
+
+    runner = PolicyRunner()
+    config = Config(options=Options(discovery_drivers=["not_a_real_driver_xyz"]))
+    scope = [Napalm(hostname="192.168.1.1", username="admin", password="pass")]
+    run_store = RunStore()
+
+    with pytest.raises(Exception, match="discovery_drivers contains unknown drivers"):
+        runner.setup("test-policy", config, scope, run_store)
+
+
+def test_setup_accepts_valid_discovery_drivers():
+    """setup() does not raise when discovery_drivers contains only known drivers."""
+    from device_discovery.policy.runner import PolicyRunner
+    from device_discovery.policy.models import Config, Napalm, Options
+    from device_discovery.policy.run import RunStore
+
+    runner = PolicyRunner()
+    config = Config(options=Options(discovery_drivers=["ios", "eos"]))
+    scope = [Napalm(hostname="192.168.1.1", username="admin", password="pass")]
+    run_store = RunStore()
+
+    try:
+        runner.setup("test-policy", config, scope, run_store)
+    finally:
+        runner.stop()

@@ -466,3 +466,44 @@ def test_supported_drivers_includes_custom_napalm():
     pytest.importorskip("custom_napalm")
     for driver in ("panos", "panos_ssh", "huawei_vrp"):
         assert driver in supported_drivers, f"Expected '{driver}' in supported_drivers"
+
+
+def test_discover_device_driver_uses_provided_drivers(mock_get_network_driver):
+    """discover_device_driver only tries drivers from the provided list."""
+    _make_driver_mock(mock_get_network_driver, {
+        "serial_number": "XYZ999",
+        "hostname": "mydevice",
+        "fqdn": "mydevice.local",
+    })
+
+    info = SimpleNamespace(
+        hostname="testhost",
+        username="testuser",
+        password="testpass",
+        timeout=10,
+        optional_args={},
+    )
+
+    driver = discover_device_driver(info, drivers=["panos"])
+    assert driver == "panos"
+    mock_get_network_driver.assert_called_once_with("panos")
+
+
+def test_discover_device_driver_defaults_to_supported_drivers(mock_get_network_driver):
+    """discover_device_driver defaults to supported_drivers when drivers=None."""
+    _make_driver_mock(mock_get_network_driver, {
+        "serial_number": "ABC123",
+        "hostname": "host",
+        "fqdn": "host.local",
+    })
+
+    info = SimpleNamespace(
+        hostname="testhost",
+        username="testuser",
+        password="testpass",
+        timeout=10,
+        optional_args={},
+    )
+
+    driver = discover_device_driver(info)  # no drivers= arg
+    assert driver in supported_drivers

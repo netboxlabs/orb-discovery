@@ -63,6 +63,16 @@ class PolicyRunner:
         self.config.options = self.config.options or Options()
 
         self.scheduler.start()
+
+        if self.config.options.discovery_drivers is not None:
+            invalid = [d for d in self.config.options.discovery_drivers if d not in supported_drivers]
+            if invalid:
+                self.scheduler.shutdown()
+                raise Exception(
+                    f"Policy {self.name}: discovery_drivers contains unknown drivers: {invalid}. "
+                    f"Supported drivers are: {supported_drivers}."
+                )
+
         set_telemetry = True
         for scope in scopes:
             sanitized_hostname = scope.hostname.replace("\r\n", "").replace("\n", "")
@@ -132,7 +142,7 @@ class PolicyRunner:
         if policy_executions:
             policy_executions.add(1, {"policy": self.name})
 
-    def _discover_driver(self, scope: Napalm, sanitized_hostname: str) -> bool:
+    def _discover_driver(self, scope: Napalm, sanitized_hostname: str, discovery_drivers: list[str] | None) -> bool:
         """
         Discover the device driver if not provided.
 
@@ -140,6 +150,8 @@ class PolicyRunner:
         ----
             scope: Scope data for the device.
             sanitized_hostname: Sanitized hostname for logging.
+            discovery_drivers: Optional list of driver names to restrict discovery to.
+                When None, all supported drivers are tried.
 
         Returns:
         -------
@@ -150,7 +162,7 @@ class PolicyRunner:
             logger.info(
                 f"Policy {self.name}, Hostname {sanitized_hostname}: Driver not informed, discovering it"
             )
-            scope.driver = discover_device_driver(scope)
+            scope.driver = discover_device_driver(scope, drivers=discovery_drivers)
             if scope.driver is None:
                 self.status = Status.FAILED
                 logger.error(
@@ -332,7 +344,8 @@ class PolicyRunner:
         )
 
         # Try to discover driver if needed
-        if not self._discover_driver(scope, sanitized_hostname):
+        discovery_drivers = config.options.discovery_drivers if config.options else None
+        if not self._discover_driver(scope, sanitized_hostname, discovery_drivers):
             # UPDATE RUN ON DRIVER DISCOVERY FAILURE
             self.run_store.update_run(
                 policy_name=self.name,
@@ -444,7 +457,8 @@ class PolicyRunner:
         )
 
         # Try to discover driver if needed
-        if not self._discover_driver(scope, sanitized_hostname):
+        discovery_drivers = config.options.discovery_drivers if config.options else None
+        if not self._discover_driver(scope, sanitized_hostname, discovery_drivers):
             # UPDATE RUN ON DRIVER DISCOVERY FAILURE
             self.run_store.update_run(
                 policy_name=self.name,
