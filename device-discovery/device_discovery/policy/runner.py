@@ -40,6 +40,32 @@ class PolicyRunner:
         self.scheduler = BackgroundScheduler()
         self.run_store = None
 
+    def _validate_discovery_drivers(self):
+        """
+        Validate the discovery_drivers option against supported_drivers.
+
+        Raises
+        ------
+            Exception: If discovery_drivers is empty or contains unknown driver names.
+
+        """
+        drivers = self.config.options.discovery_drivers
+        if drivers is None:
+            return
+        if not drivers:
+            self.scheduler.shutdown()
+            raise Exception(
+                f"Policy {self.name}: discovery_drivers must not be empty. "
+                f"Supported drivers are: {supported_drivers}."
+            )
+        invalid = [d for d in drivers if d not in supported_drivers]
+        if invalid:
+            self.scheduler.shutdown()
+            raise Exception(
+                f"Policy {self.name}: discovery_drivers contains unknown drivers: {invalid}. "
+                f"Supported drivers are: {supported_drivers}."
+            )
+
     def setup(
         self, name: str, config: Config, scopes: list[Napalm], run_store: RunStore
     ):
@@ -63,21 +89,7 @@ class PolicyRunner:
         self.config.options = self.config.options or Options()
 
         self.scheduler.start()
-
-        if self.config.options.discovery_drivers is not None:
-            if not self.config.options.discovery_drivers:
-                self.scheduler.shutdown()
-                raise Exception(
-                    f"Policy {self.name}: discovery_drivers must not be empty. "
-                    f"Supported drivers are: {supported_drivers}."
-                )
-            invalid = [d for d in self.config.options.discovery_drivers if d not in supported_drivers]
-            if invalid:
-                self.scheduler.shutdown()
-                raise Exception(
-                    f"Policy {self.name}: discovery_drivers contains unknown drivers: {invalid}. "
-                    f"Supported drivers are: {supported_drivers}."
-                )
+        self._validate_discovery_drivers()
 
         set_telemetry = True
         for scope in scopes:
