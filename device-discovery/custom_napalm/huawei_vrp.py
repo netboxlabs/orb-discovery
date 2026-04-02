@@ -20,6 +20,8 @@ from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
+from custom_napalm._sanitize import sanitize_huawei_vrp
+
 logger = logging.getLogger(__name__)
 
 # Uptime conversion constants
@@ -255,6 +257,11 @@ class VRPDriver(_napalm_base.NetworkDriver):
             config["running"] = self.device.send_command("display current-configuration")
         if retrieve.lower() in ("startup", "all"):
             config["startup"] = self.device.send_command("display saved-configuration")
+
+        if sanitized:
+            for key in ("running", "candidate", "startup"):
+                if config[key]:
+                    config[key] = sanitize_huawei_vrp(config[key])
 
         return config
 
