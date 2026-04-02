@@ -18,9 +18,19 @@ from napalm.base import models
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
-from custom_napalm._sanitize import sanitize_fortios
-
 logger = logging.getLogger(__name__)
+
+_SET_FIELDS_RE = re.compile(
+    r"(set\s+(?:password|passwd|psk|psksecret|secret|auth-password))\s+.*",
+    re.IGNORECASE,
+)
+_ENC_RE = re.compile(r"(\bENC\b)\s+\S+")
+
+
+def _sanitize_config(text: str) -> str:
+    text = _SET_FIELDS_RE.sub(r"\1 <redacted>", text)
+    text = _ENC_RE.sub(r"\1 <redacted>", text)
+    return text
 
 
 def _parse_uptime(output: str) -> int:
@@ -203,7 +213,7 @@ class FortiOSSSHDriver(_napalm_base.NetworkDriver):
         if sanitized:
             for key in ("running", "candidate", "startup"):
                 if config[key]:
-                    config[key] = sanitize_fortios(config[key])
+                    config[key] = _sanitize_config(config[key])
 
         return config
 

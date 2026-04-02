@@ -20,9 +20,18 @@ from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
-from custom_napalm._sanitize import sanitize_huawei_vrp
-
 logger = logging.getLogger(__name__)
+
+_CIPHER_RE = re.compile(r"(\bcipher\b)\s+\S+", re.IGNORECASE)
+_SECRET_RE = re.compile(r"(\bsecret\b(?:\s+\d+)?)\s+\S+", re.IGNORECASE)
+_COMMUNITY_RE = re.compile(r"(\bcommunity\b(?:\s+(?:read|write))?)\s+\S+", re.IGNORECASE)
+
+
+def _sanitize_config(text: str) -> str:
+    text = _CIPHER_RE.sub(r"\1 <redacted>", text)
+    text = _SECRET_RE.sub(r"\1 <redacted>", text)
+    text = _COMMUNITY_RE.sub(r"\1 <redacted>", text)
+    return text
 
 # Uptime conversion constants
 _HOUR_SECONDS = 3600
@@ -261,7 +270,7 @@ class VRPDriver(_napalm_base.NetworkDriver):
         if sanitized:
             for key in ("running", "candidate", "startup"):
                 if config[key]:
-                    config[key] = sanitize_huawei_vrp(config[key])
+                    config[key] = _sanitize_config(config[key])
 
         return config
 

@@ -20,9 +20,17 @@ from napalm.base.exceptions import ConnectionException
 from napalm.base.helpers import mac as standardize_mac
 from napalm.base.utils.string_parsers import convert_uptime_string_seconds
 
-from custom_napalm._sanitize import sanitize_panos
-
 logger = logging.getLogger(__name__)
+
+_SECRET_TAG_RE = re.compile(
+    r"(<(phash|password|psk|secret|hash|bind-password|api-key)>)"
+    r"[^<]*"
+    r"(</\2>)"
+)
+
+
+def _sanitize_config(text: str) -> str:
+    return _SECRET_TAG_RE.sub(r"\1<redacted>\3", text)
 
 
 def _extract_ip_info(parsed_intf_dict: dict) -> dict:
@@ -272,9 +280,9 @@ class PANOSDriver(_napalm_base.NetworkDriver):
 
         if sanitized:
             if running:
-                running = sanitize_panos(running)
+                running = _sanitize_config(running)
             if candidate:
-                candidate = sanitize_panos(candidate)
+                candidate = _sanitize_config(candidate)
 
         return {"running": running, "candidate": candidate, "startup": ""}
 

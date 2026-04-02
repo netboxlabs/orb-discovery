@@ -18,9 +18,17 @@ from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
-from custom_napalm._sanitize import sanitize_panos
-
 logger = logging.getLogger(__name__)
+
+_SECRET_TAG_RE = re.compile(
+    r"(<(phash|password|psk|secret|hash|bind-password|api-key)>)"
+    r"[^<]*"
+    r"(</\2>)"
+)
+
+
+def _sanitize_config(text: str) -> str:
+    return _SECRET_TAG_RE.sub(r"\1<redacted>\3", text)
 
 
 def _parse_uptime(uptime_str: str) -> int:
@@ -198,7 +206,7 @@ class PANOSSHDriver(_napalm_base.NetworkDriver):
         if sanitized:
             for key in ("running", "candidate", "startup"):
                 if config[key]:
-                    config[key] = sanitize_panos(config[key])
+                    config[key] = _sanitize_config(config[key])
 
         return config
 
