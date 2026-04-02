@@ -11,6 +11,7 @@ from napalm.base.base import NetworkDriver
 
 from device_discovery.discovery import (
     _DRIVER_MISMATCH_MARKERS,
+    _default_discovery_drivers,
     custom_napalm_driver_list,
     discover_device_driver,
     napalm_driver_list,
@@ -468,6 +469,15 @@ def test_supported_drivers_includes_custom_napalm():
         assert driver in supported_drivers, f"Expected '{driver}' in supported_drivers"
 
 
+def test_default_discovery_drivers_excludes_custom_napalm():
+    """Test that _default_discovery_drivers does not include custom_napalm drivers."""
+    pytest.importorskip("custom_napalm")
+    for driver in ("panos", "panos_ssh", "huawei_vrp"):
+        assert driver not in _default_discovery_drivers, (
+            f"Custom driver '{driver}' must not appear in default auto-discovery pool"
+        )
+
+
 def test_discover_device_driver_uses_provided_drivers(mock_get_network_driver):
     """discover_device_driver only tries drivers from the provided list."""
     _make_driver_mock(mock_get_network_driver, {
@@ -489,8 +499,8 @@ def test_discover_device_driver_uses_provided_drivers(mock_get_network_driver):
     mock_get_network_driver.assert_called_once_with("panos")
 
 
-def test_discover_device_driver_defaults_to_supported_drivers(mock_get_network_driver):
-    """discover_device_driver defaults to supported_drivers when drivers=None."""
+def test_discover_device_driver_defaults_to_standard_napalm_only(mock_get_network_driver):
+    """discover_device_driver defaults to standard NAPALM drivers only (no custom_napalm) when drivers=None."""
     _make_driver_mock(mock_get_network_driver, {
         "serial_number": "ABC123",
         "hostname": "host",
@@ -506,4 +516,10 @@ def test_discover_device_driver_defaults_to_supported_drivers(mock_get_network_d
     )
 
     driver = discover_device_driver(info)  # no drivers= arg
-    assert driver in supported_drivers
+    assert driver in _default_discovery_drivers
+    # custom_napalm drivers must not be tried by default
+    custom_drivers = custom_napalm_driver_list()
+    for call in mock_get_network_driver.call_args_list:
+        assert call.args[0] not in custom_drivers, (
+            f"Custom driver '{call.args[0]}' was tried during default auto-discovery"
+        )

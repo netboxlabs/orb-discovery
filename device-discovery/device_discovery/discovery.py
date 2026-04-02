@@ -104,7 +104,8 @@ def custom_napalm_driver_list() -> list[str]:
         return []
 
 
-supported_drivers = napalm_driver_list() + custom_napalm_driver_list()
+_default_discovery_drivers = napalm_driver_list()
+supported_drivers = _default_discovery_drivers + custom_napalm_driver_list()
 
 
 def set_napalm_logs_level(level: int):
@@ -139,7 +140,8 @@ def discover_device_driver(info: dict, drivers: list[str] | None = None) -> str 
             and 'optional_args'.
         drivers (list[str] | None): An optional list of driver names to try.
             When provided, only those drivers are attempted. When None,
-            all entries in ``supported_drivers`` are tried.
+            only standard NAPALM drivers are tried (custom_napalm drivers
+            are excluded from auto-discovery unless explicitly specified).
 
     Returns:
     -------
@@ -148,7 +150,7 @@ def discover_device_driver(info: dict, drivers: list[str] | None = None) -> str 
 
     """
     set_napalm_logs_level(logging.CRITICAL)
-    driver_list = drivers if drivers is not None else supported_drivers
+    driver_list = drivers if drivers is not None else _default_discovery_drivers
     for driver in driver_list:
         try:
             logger.info(f"Hostname {info.hostname}: Trying '{driver}' driver")
