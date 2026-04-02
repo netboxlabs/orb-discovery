@@ -476,3 +476,15 @@ def test_run_scan_handles_port_scan_failure(policy_runner, sample_config, run_st
         assert runs[0].status.value == "failed"
         assert runs[0].entity_count == 0
         assert "Port scan timeout" in runs[0].reason
+
+
+def test_options_discovery_drivers_default_none():
+    from device_discovery.policy.models import Options
+    opts = Options()
+    assert opts.discovery_drivers is None
+
+
+def test_options_discovery_drivers_parsed():
+    from device_discovery.policy.models import Options
+    opts = Options(discovery_drivers=["ios", "panos"])
+    assert opts.discovery_drivers == ["ios", "panos"]
