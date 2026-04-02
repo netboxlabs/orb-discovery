@@ -247,7 +247,7 @@ class PolicyRunner:
                 or config.options.capture_startup_config
             ):
                 try:
-                    data["config"] = device.get_config()
+                    data["config"] = device.get_config(sanitized=True)
                 except Exception as e:
                     logger.warning(
                         f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting config: {e}. Continuing without config data."
