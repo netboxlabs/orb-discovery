@@ -18,6 +18,8 @@ from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
+from custom_napalm._sanitize import sanitize_panos
+
 logger = logging.getLogger(__name__)
 
 
@@ -192,6 +194,11 @@ class PANOSSHDriver(_napalm_base.NetworkDriver):
             config["running"] = self.device.send_command("show config running")
         if retrieve in ("all", "candidate"):
             config["candidate"] = self.device.send_command("show config candidate")
+
+        if sanitized:
+            for key in ("running", "candidate", "startup"):
+                if config[key]:
+                    config[key] = sanitize_panos(config[key])
 
         return config
 
