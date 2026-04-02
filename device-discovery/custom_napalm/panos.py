@@ -20,6 +20,8 @@ from napalm.base.exceptions import ConnectionException
 from napalm.base.helpers import mac as standardize_mac
 from napalm.base.utils.string_parsers import convert_uptime_string_seconds
 
+from custom_napalm._sanitize import sanitize_panos
+
 logger = logging.getLogger(__name__)
 
 
@@ -267,6 +269,12 @@ class PANOSDriver(_napalm_base.NetworkDriver):
             running = self._get_running()
         if retrieve in ("all", "candidate"):
             candidate = self._get_candidate()
+
+        if sanitized:
+            if running:
+                running = sanitize_panos(running)
+            if candidate:
+                candidate = sanitize_panos(candidate)
 
         return {"running": running, "candidate": candidate, "startup": ""}
 
