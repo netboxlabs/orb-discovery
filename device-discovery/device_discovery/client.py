@@ -188,3 +188,5 @@ class Client:
                 logger.info(
                     f"Hostname {hostname}: Successfully ingested {entity_count} entities"
                 )
+
+            return entity_count
