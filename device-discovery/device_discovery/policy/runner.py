@@ -195,7 +195,7 @@ class PolicyRunner:
         sanitized_hostname: str,
         config: Config,
         run_id: str,
-    ):
+    ) -> int:
         """
         Connect to device and collect data.
 
