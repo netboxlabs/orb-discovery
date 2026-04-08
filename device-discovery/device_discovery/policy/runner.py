@@ -206,6 +206,10 @@ class PolicyRunner:
             config: Configuration data containing site information.
             run_id: Run identifier for ingest and per-entity metadata.
 
+        Returns
+        -------
+            int: Number of entities ingested.
+
         """
         np_driver = get_network_driver(scope.driver)
         logger.info(
@@ -260,10 +264,11 @@ class PolicyRunner:
                     f"Policy {self.name}, Hostname {sanitized_hostname}: Error getting VLANs: {e}. Continuing without VLAN data."
                 )
             metadata = {"policy_name": self.name, "hostname": sanitized_hostname}
-            Client().ingest(metadata, data, run_id=run_id)
+            entity_count = Client().ingest(metadata, data, run_id=run_id)
             discovery_success = get_metric("discovery_success")
             if discovery_success:
                 discovery_success.add(1, {"policy": self.name})
+            return entity_count
 
     def run_scan(
         self, hostnames: list[str], trigger: BaseTrigger, scope: Napalm, config: Config

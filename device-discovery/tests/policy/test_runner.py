@@ -537,3 +537,32 @@ def test_setup_accepts_valid_discovery_drivers():
         runner.setup("test-policy", config, scope, run_store)
     finally:
         runner.stop()
+
+
+def test_collect_device_data_returns_entity_count(policy_runner):
+    """_collect_device_data returns the number of ingested entities."""
+    scope = Napalm(
+        driver="ios",
+        hostname="router1",
+        username="admin",
+        password="password",
+    )
+    config = Config(defaults=Defaults(site="NY"))
+
+    fake_device = MagicMock()
+    fake_device.get_facts.return_value = {"hostname": "router1"}
+    fake_device.get_interfaces.return_value = {}
+    fake_device.get_interfaces_ip.return_value = {}
+    fake_device.get_vlans.return_value = {}
+    fake_device.__enter__ = MagicMock(return_value=fake_device)
+    fake_device.__exit__ = MagicMock(return_value=False)
+
+    with (
+        patch("device_discovery.policy.runner.get_network_driver", return_value=MagicMock(return_value=fake_device)),
+        patch("device_discovery.policy.runner.Client") as mock_client_cls,
+    ):
+        mock_client_cls.return_value.ingest.return_value = 7
+
+        result = policy_runner._collect_device_data(scope, "router1", config, "run-abc")
+
+    assert result == 7
