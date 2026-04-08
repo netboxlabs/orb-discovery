@@ -206,7 +206,7 @@ class PolicyRunner:
             config: Configuration data containing site information.
             run_id: Run identifier for ingest and per-entity metadata.
 
-        Returns
+        Returns:
         -------
             int: Number of entities ingested.
 
