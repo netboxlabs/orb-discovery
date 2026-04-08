@@ -566,3 +566,48 @@ def test_collect_device_data_returns_entity_count(policy_runner):
         result = policy_runner._collect_device_data(scope, "router1", config, "run-abc")
 
     assert result == 7
+
+
+def test_run_uses_entity_count_from_collect(policy_runner, run_store):
+    """run() passes the actual entity count (not 1) to update_run."""
+    scope = Napalm(driver="ios", hostname="router1", username="admin", password="password")
+    config = Config(defaults=Defaults(site="NY"), options=Options())
+    policy_runner.run_store = run_store
+
+    with (
+        patch.object(policy_runner, "_discover_driver", return_value=True),
+        patch.object(policy_runner, "_collect_device_data", return_value=5),
+        patch("device_discovery.policy.runner.get_metric", return_value=None),
+    ):
+        policy_runner.name = "test-policy"
+        run = run_store.create_run(policy_name="test-policy", target="router1")
+        # Patch create_run to return our known run
+        with patch.object(run_store, "create_run", return_value=run):
+            with patch.object(run_store, "update_run") as mock_update:
+                policy_runner.run("job-1", scope, config)
+
+    mock_update.assert_called_once()
+    call_kwargs = mock_update.call_args[1]
+    assert call_kwargs["entity_count"] == 5
+
+
+def test_run_with_parent_uses_entity_count_from_collect(policy_runner, run_store):
+    """run_with_parent() passes the actual entity count (not 1) to update_run."""
+    scope = Napalm(driver="ios", hostname="router1", username="admin", password="password")
+    config = Config(defaults=Defaults(site="NY"), options=Options())
+    policy_runner.run_store = run_store
+
+    with (
+        patch.object(policy_runner, "_discover_driver", return_value=True),
+        patch.object(policy_runner, "_collect_device_data", return_value=12),
+        patch("device_discovery.policy.runner.get_metric", return_value=None),
+    ):
+        policy_runner.name = "test-policy"
+        run = run_store.create_run(policy_name="test-policy", target="router1")
+        with patch.object(run_store, "create_run", return_value=run):
+            with patch.object(run_store, "update_run") as mock_update:
+                policy_runner.run_with_parent("job-1", scope, config, "192.168.1.0/24")
+
+    mock_update.assert_called_once()
+    call_kwargs = mock_update.call_args[1]
+    assert call_kwargs["entity_count"] == 12

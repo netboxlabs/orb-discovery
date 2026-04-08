@@ -397,7 +397,7 @@ class PolicyRunner:
                 discovery_attempts.add(1, {"policy": self.name})
 
             # Collect data from device
-            self._collect_device_data(scope, sanitized_hostname, config, run.id)
+            entity_count = self._collect_device_data(scope, sanitized_hostname, config, run.id)
 
             # UPDATE RUN ON SUCCESS
             self.run_store.update_run(
@@ -406,7 +406,7 @@ class PolicyRunner:
                 run_id=run.id,
                 status=RunStatus.COMPLETED,
                 error=None,
-                entity_count=1,
+                entity_count=entity_count,
             )
 
             # Record total discovery duration
@@ -510,7 +510,7 @@ class PolicyRunner:
                 discovery_attempts.add(1, {"policy": self.name})
 
             # Collect data from device
-            self._collect_device_data(scope, sanitized_hostname, config, run.id)
+            entity_count = self._collect_device_data(scope, sanitized_hostname, config, run.id)
 
             # UPDATE RUN ON SUCCESS
             self.run_store.update_run(
@@ -519,7 +519,7 @@ class PolicyRunner:
                 run_id=run.id,
                 status=RunStatus.COMPLETED,
                 error=None,
-                entity_count=1,
+                entity_count=entity_count,
             )
 
             # Record total discovery duration
