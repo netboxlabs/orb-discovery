@@ -243,7 +243,7 @@ def test_ingest_returns_entity_count(mock_diode_client_class, sample_data, sampl
     with patch(
         "device_discovery.client.translate_data",
         return_value=translate_data(sample_data),
-    ) as mock_translate:
+    ):
         count = client.ingest(sample_metadata, sample_data)
 
     expected = len(list(translate_data(sample_data)))
