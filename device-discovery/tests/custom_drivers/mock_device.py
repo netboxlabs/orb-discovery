@@ -113,6 +113,7 @@ class FakeRestDevice:
         /monitoring/serialnumber   -> monitoring_serialnumber.json
         /interfaces/physical       -> interfaces_physical.json
         /cli                       -> cli.json
+
     """
 
     def __init__(self, mock_dir: Path) -> None:

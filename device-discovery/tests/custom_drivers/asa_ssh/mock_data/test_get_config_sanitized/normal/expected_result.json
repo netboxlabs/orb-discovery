@@ -1,0 +1,5 @@
+{
+  "running": ": Saved\n!\nASA Version 9.16.4\n!\nhostname asa-firewall\nenable password <redacted> encrypted\npasswd <redacted> encrypted\n!\nusername admin password <redacted> privilege 15\n!\ninterface GigabitEthernet1/1\n nameif inside\n security-level 100\n ip address 192.168.1.1 255.255.255.0\n!\nsnmp-server community <redacted> RO\n!\ntunnel-group 10.0.0.1 ipsec-attributes\n pre-shared-key <redacted>\n!\nend\n",
+  "candidate": "",
+  "startup": ""
+}
