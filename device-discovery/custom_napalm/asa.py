@@ -222,9 +222,12 @@ class ASADriver(_napalm_base.NetworkDriver):
 
     def close(self) -> None:
         """Delete the API token and close the session (best-effort; logs on failure)."""
-        ok, code = self.device.delete_token()
-        if not ok:
-            logger.warning("Failed to delete API token for %s (status %s); session may linger", self.hostname, code)
+        try:
+            ok, code = self.device.delete_token()
+            if not ok:
+                logger.warning("Failed to delete API token for %s (status %s); session may linger", self.hostname, code)
+        except ConnectionException as exc:
+            logger.warning("Exception deleting API token for %s: %s", self.hostname, exc)
 
     def is_alive(self) -> dict:
         """Return token liveness."""
@@ -243,7 +246,7 @@ class ASADriver(_napalm_base.NetworkDriver):
                 fetched = len(response.get("items", []))
                 while fetched < total:
                     r = self.device.get_resp(endpoint, json_data, params={"offset": fetched}, throw=throw)
-                    if not r or "items" not in r:
+                    if not r or not r.get("items"):
                         break
                     response["items"].extend(r["items"])
                     fetched += len(r["items"])
