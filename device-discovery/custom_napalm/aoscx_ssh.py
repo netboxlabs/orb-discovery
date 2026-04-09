@@ -15,7 +15,6 @@ template which captures the primary IPv4 address in CIDR notation.
 
 import logging
 import re
-import socket
 
 import napalm.base as _napalm_base
 from napalm.base import models
