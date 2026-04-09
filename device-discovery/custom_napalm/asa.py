@@ -59,7 +59,7 @@ _SANITIZE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"^(\s*(?:password|secret))\s+(?:\d\s+)?\S+", re.M | re.I), r"\1 <redacted>"),
     (re.compile(r"^(.*wpa-psk\s+ascii\s+\d)\s+\S+", re.M | re.I), r"\1 <redacted>"),
     (re.compile(r"^(.*\bkey\s+7)\s+\S+", re.M | re.I), r"\1 <redacted>"),
-    (re.compile(r"^(\s*tacacs-server(?:\s+\S+)*\s+key)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*tacacs-server\b[^\n]*?\bkey)\s+\S+", re.M | re.I), r"\1 <redacted>"),
     (re.compile(r"^(\s*crypto\s+isakmp\s+key)\s+\S+", re.M | re.I), r"\1 <redacted>"),
     (re.compile(r"^(\s*ip\s+ospf\s+message-digest-key\s+\d+\s+md5)\s+\S+", re.M | re.I), r"\1 <redacted>"),
     (re.compile(r"^(\s*ip\s+ospf\s+authentication-key)\s+\S+", re.M | re.I), r"\1 <redacted>"),
@@ -71,6 +71,8 @@ _SANITIZE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"^(\s*(?:tacacs|radius)\s+server\s+\S+\s+key)\s+\S+", re.M | re.I), r"\1 <redacted>"),
     (re.compile(r"^(\s*ppp\s+(?:chap|pap)\s+password\s+\d)\s+\S+", re.M | re.I), r"\1 <redacted>"),
     (re.compile(r"^(\s*pre-shared-key)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    # Indented "key <secret>" lines inside aaa-server / radius-server config blocks
+    (re.compile(r"^(\s+key)\s+\S+", re.M), r"\1 <redacted>"),
 ]
 
 

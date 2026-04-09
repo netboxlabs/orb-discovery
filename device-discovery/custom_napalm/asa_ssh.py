@@ -21,19 +21,36 @@ from ntc_templates.parse import parse_output
 logger = logging.getLogger(__name__)
 
 # --- config sanitization (Cisco ASA sensitive fields) ---
-_ENABLE_PASSWORD_RE = re.compile(r"(enable\s+password)\s+\S+", re.IGNORECASE)
-_PASSWD_RE = re.compile(r"^(\s*passwd)\s+\S+", re.IGNORECASE | re.MULTILINE)
-_USERNAME_PASSWORD_RE = re.compile(r"(username\s+\S+\s+password)\s+(?:\d\s+)?\S+", re.IGNORECASE)
-_PSK_RE = re.compile(r"(\bpre-shared-key)\s+\S+", re.IGNORECASE)
-_SNMP_COMMUNITY_RE = re.compile(r"(snmp-server\s+community)\s+\S+", re.IGNORECASE)
+# Mirrors the pattern set in custom_napalm/asa.py so both drivers redact the same fields.
+_SANITIZE_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"^(\s*enable\s+password)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*passwd)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*username\s+\S+\s+(?:password|secret))\s+(?:\d\s+)?\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*snmp-server\s+community)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*snmp-server\s+host\s+\S+(?:\s+vrf\s+\S+)?(?:\s+version\s+\S+)?)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*(?:password|secret))\s+(?:\d\s+)?\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(.*wpa-psk\s+ascii\s+\d)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(.*\bkey\s+7)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*tacacs-server\b[^\n]*?\bkey)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*crypto\s+isakmp\s+key)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*ip\s+ospf\s+message-digest-key\s+\d+\s+md5)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*ip\s+ospf\s+authentication-key)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*neighbor\s+\S+\s+password)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*vrrp\s+\d+\s+authentication\s+text)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*standby\s+\d+\s+authentication\s+md5\s+key-string)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*standby\s+\d+\s+authentication)\s+\S{1,8}$", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*key-string)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*(?:tacacs|radius)\s+server\s+\S+\s+key)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*ppp\s+(?:chap|pap)\s+password\s+\d)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    (re.compile(r"^(\s*pre-shared-key)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    # Indented "key <secret>" lines inside aaa-server / radius-server config blocks
+    (re.compile(r"^(\s+key)\s+\S+", re.M), r"\1 <redacted>"),
+]
 
 
 def _sanitize_config(text: str) -> str:
-    text = _ENABLE_PASSWORD_RE.sub(r"\1 <redacted>", text)
-    text = _PASSWD_RE.sub(r"\1 <redacted>", text)
-    text = _USERNAME_PASSWORD_RE.sub(r"\1 <redacted>", text)
-    text = _PSK_RE.sub(r"\1 <redacted>", text)
-    text = _SNMP_COMMUNITY_RE.sub(r"\1 <redacted>", text)
+    for pattern, replacement in _SANITIZE_PATTERNS:
+        text = pattern.sub(replacement, text)
     return text
 
 
