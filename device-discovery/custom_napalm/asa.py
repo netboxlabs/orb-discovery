@@ -281,7 +281,22 @@ class ASADriver(_napalm_base.NetworkDriver):
 
     def get_facts(self) -> dict:
         """Return general device facts."""
-        return {}
+        serial_resp = self._send_request("/monitoring/serialnumber")
+        ver_resp = self._send_request("/monitoring/device/components/version")
+        cli_resp = self._send_request("/cli", {"commands": ["show hostname", "show hostname fqdn"]})
+        cli_outputs = cli_resp.get("response", [])
+        hostname = cli_outputs[0].strip() if len(cli_outputs) > 0 else "Unknown"
+        fqdn = cli_outputs[1].strip() if len(cli_outputs) > 1 else "Unknown"
+        return {
+            "hostname": hostname,
+            "vendor": "Cisco",
+            "model": ver_resp.get("deviceType", "Unknown"),
+            "os_version": ver_resp.get("asaVersion", "Unknown"),
+            "serial_number": serial_resp.get("serialNumber", "Unknown"),
+            "uptime": float(ver_resp.get("upTimeinSeconds", 0)),
+            "fqdn": fqdn,
+            "interface_list": self._get_interface_names(),
+        }
 
     def get_interfaces(self) -> dict:
         """Return interface details keyed by interface name."""
