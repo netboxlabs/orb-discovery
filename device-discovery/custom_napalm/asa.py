@@ -300,7 +300,28 @@ class ASADriver(_napalm_base.NetworkDriver):
 
     def get_interfaces(self) -> dict:
         """Return interface details keyed by interface name."""
-        return {}
+        interfaces: dict = {}
+        for endpoint in _INTERFACE_ENDPOINTS:
+            resp = self._send_request(endpoint, throw=False)
+            for item in resp.get("items", []):
+                hw_id = item.get("hardwareID", "")
+                if hw_id:
+                    interfaces[hw_id] = {
+                        "is_up": False,
+                        "is_enabled": not item.get("shutdown", False),
+                        "description": item.get("interfaceDesc", ""),
+                        "last_flapped": -1.0,
+                        "speed": 0,
+                        "mtu": 0,
+                        "mac_address": "",
+                    }
+        details = self._get_interfaces_details(list(interfaces.keys()))
+        for name, d in details.items():
+            if name in interfaces:
+                interfaces[name]["mac_address"] = d["mac_address"]
+                interfaces[name]["is_up"] = d["is_up"]
+                interfaces[name]["mtu"] = d["mtu"]
+        return interfaces
 
     def get_interfaces_ip(self) -> dict:
         """Return IP addresses per interface."""
