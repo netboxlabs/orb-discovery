@@ -145,3 +145,6 @@ class FakeRestDevice:
     def delete_token(self) -> tuple[bool, None]:
         """Stub — not called by tests (close() is bypassed)."""
         return (True, None)
+
+    def close_session(self) -> None:
+        """No-op stub — no real session to close."""

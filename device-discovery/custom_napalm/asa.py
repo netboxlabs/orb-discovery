@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import ssl
+import warnings
 
 import napalm.base as _napalm_base
 import requests
@@ -26,7 +27,9 @@ from requests.adapters import HTTPAdapter
 
 logger = logging.getLogger(__name__)
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+# Suppress InsecureRequestWarning inline per-call (see _no_tls_warnings context manager)
+# rather than globally so other HTTPS clients in the same process are unaffected.
+_InsecureRequestWarning = urllib3.exceptions.InsecureRequestWarning
 
 # ssl.OP_LEGACY_SERVER_CONNECT was added in Python 3.12 / OpenSSL 3.0.
 # Falls back to 0 (no-op) on older runtimes — the driver still works but
@@ -125,13 +128,15 @@ class _ASARest:
         """POST /api/tokenservices — store X-Auth-Token on success."""
         full_url = self.base_url + "/tokenservices"
         try:
-            resp = self.session.post(
-                full_url,
-                auth=(self.username, self.password),
-                data="",
-                timeout=self.timeout,
-                verify=False,
-            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", _InsecureRequestWarning)
+                resp = self.session.post(
+                    full_url,
+                    auth=(self.username, self.password),
+                    data="",
+                    timeout=self.timeout,
+                    verify=False,
+                )
             if resp.status_code == 204 and "X-Auth-Token" in resp.headers:
                 self.token = resp.headers["X-Auth-Token"]
                 self.session.headers.update({"X-Auth-Token": self.token})
@@ -144,12 +149,14 @@ class _ASARest:
         """DELETE /api/tokenservices/<token> on close."""
         full_url = f"{self.base_url}/tokenservices/{self.token}"
         try:
-            resp = self.session.delete(
-                full_url,
-                auth=(self.username, self.password),
-                timeout=self.timeout,
-                verify=False,
-            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", _InsecureRequestWarning)
+                resp = self.session.delete(
+                    full_url,
+                    auth=(self.username, self.password),
+                    timeout=self.timeout,
+                    verify=False,
+                )
             if resp.status_code == 204:
                 self.session.headers.pop("X-Auth-Token", None)
                 return (True, None)
@@ -168,10 +175,12 @@ class _ASARest:
         full_url = self.base_url + endpoint
         params = params or {}
         try:
-            if data is not None:
-                resp = self.session.post(full_url, data=data, timeout=self.timeout, params=params, verify=False)
-            else:
-                resp = self.session.get(full_url, timeout=self.timeout, params=params, verify=False)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", _InsecureRequestWarning)
+                if data is not None:
+                    resp = self.session.post(full_url, data=data, timeout=self.timeout, params=params, verify=False)
+                else:
+                    resp = self.session.get(full_url, timeout=self.timeout, params=params, verify=False)
             if resp.status_code != 200:
                 if throw:
                     raise CommandErrorException(f"Operation returned an error: {resp.status_code}")
@@ -181,6 +190,10 @@ class _ASARest:
             if throw:
                 raise ConnectionException(str(exc)) from exc
             return False
+
+    def close_session(self) -> None:
+        """Close the underlying requests.Session to release pooled connections."""
+        self.session.close()
 
     def has_active_token(self) -> bool:
         """Return True if the current auth token is still valid."""
@@ -228,6 +241,8 @@ class ASADriver(_napalm_base.NetworkDriver):
                 logger.warning("Failed to delete API token for %s (status %s); session may linger", self.hostname, code)
         except ConnectionException as exc:
             logger.warning("Exception deleting API token for %s: %s", self.hostname, exc)
+        finally:
+            self.device.close_session()
 
     def is_alive(self) -> dict:
         """Return token liveness."""
