@@ -80,7 +80,7 @@ class AOSCXDriver(_napalm_base.NetworkDriver):
         if self.session is None:
             return {"is_alive": False}
         try:
-            resp = self.session.request("GET", "system?attributes=hostname")
+            resp = self.session.request("GET", "system?attributes=hostname", verify=self._verify_ssl)
             return {"is_alive": resp.status_code == 200}
         except Exception:
             return {"is_alive": False}
@@ -131,12 +131,15 @@ class AOSCXDriver(_napalm_base.NetworkDriver):
         serial_number = "Unknown"
         model = "Unknown"
         if isinstance(subsystems, dict):
-            for subsystem in subsystems.values():
-                product_info = (
-                    subsystem.get("product_info", {})
-                    if isinstance(subsystem, dict)
-                    else {}
-                )
+            # Prefer the chassis entry (key starts with "chassis,"); fall back to
+            # the first subsystem that has product_info to handle non-modular devices.
+            chassis_items = [
+                v for k, v in subsystems.items()
+                if k.startswith("chassis,") and isinstance(v, dict)
+            ]
+            fallback_items = [v for v in subsystems.values() if isinstance(v, dict)]
+            for subsystem in chassis_items or fallback_items:
+                product_info = subsystem.get("product_info", {}) or {}
                 if product_info:
                     serial_number = product_info.get("serial_number", "Unknown")
                     model = product_info.get("product_name", "Unknown")
