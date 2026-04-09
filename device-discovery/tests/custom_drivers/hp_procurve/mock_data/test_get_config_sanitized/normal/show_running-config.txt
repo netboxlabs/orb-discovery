@@ -10,7 +10,7 @@ ip default-gateway 10.0.0.1
 password manager sha1 "SuperSecret123"
 password operator sha1 "OperatorPass456"
 snmp-server community "public" unrestricted
-snmp-server community "private" unrestricted
+snmp-server community private unrestricted
 radius-server key mysecretkey
 tacacs-server key tacacssecret
 vlan 1

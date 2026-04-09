@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 # HP ProCurve: "password manager [sha1] <hash>" / "password operator [sha1] <hash>"
 # Redact the full line after "password manager/operator" (algorithm + hash)
 _PASSWORD_RE = re.compile(r"(password\s+(?:manager|operator))\s+.*", re.IGNORECASE)
-# SNMP community string: snmp-server community "public"
-_SNMP_COMM_RE = re.compile(r'(snmp-server\s+community)\s+"[^"]*"', re.IGNORECASE)
+# SNMP community string: quoted ("public") or unquoted (public)
+_SNMP_COMM_RE = re.compile(r'(snmp-server\s+community)\s+(?:"[^"]*"|\S+)', re.IGNORECASE)
 # RADIUS shared secret
 _RADIUS_KEY_RE = re.compile(r"(radius-server\s+key)\s+\S+", re.IGNORECASE)
 # TACACS+ key (standalone or per-host)
@@ -39,7 +39,7 @@ _TACACS_KEY_RE = re.compile(
 
 def _sanitize_config(text: str) -> str:
     text = _PASSWORD_RE.sub(r"\1 <redacted>", text)
-    text = _SNMP_COMM_RE.sub(r'\1 "<redacted>"', text)
+    text = _SNMP_COMM_RE.sub(r"\1 <redacted>", text)
     text = _RADIUS_KEY_RE.sub(r"\1 <redacted>", text)
     text = _TACACS_KEY_RE.sub(r"\1 <redacted>", text)
     return text
@@ -257,6 +257,8 @@ class ProCurveDriver(_napalm_base.NetworkDriver):
                 continue
 
             prefix_length = _mask_to_prefix(subnet_mask)
+            if prefix_length < 0:
+                continue
             interfaces_ip.setdefault(vlan_name, {}).setdefault("ipv4", {})[ip_address] = {
                 "prefix_length": prefix_length
             }
