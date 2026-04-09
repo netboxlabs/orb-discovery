@@ -130,7 +130,7 @@ def _parse_version_output(raw: str) -> tuple[str, str, float]:
     uptime = 0.0
 
     # OS version: "Version X.Y.Z, Release ABC" or "Version X.Y.Z Release ABC"
-    m = re.search(r"Version\s+([\d.]+[^,\n]*?)(?:,\s*Release\s*|$)", raw, re.IGNORECASE)
+    m = re.search(r"Version\s+([\d.]+[^,\n]*?)(?:,?\s*Release\s+|$)", raw, re.IGNORECASE)
     if m:
         os_version = m.group(1).strip()
 
