@@ -324,8 +324,34 @@ class ASADriver(_napalm_base.NetworkDriver):
         return interfaces
 
     def get_interfaces_ip(self) -> dict:
-        """Return IP addresses per interface."""
-        return {}
+        """Return IPv4 and IPv6 addresses per interface."""
+        interfaces_ip: dict = {}
+        for endpoint in _INTERFACE_ENDPOINTS:
+            resp = self._send_request(endpoint, throw=False)
+            for item in resp.get("items", []):
+                hw_id = item.get("hardwareID", "")
+                if not hw_id:
+                    continue
+                ip_addr = item.get("ipAddress", "NoneSelected")
+                if ip_addr != "NoneSelected" and isinstance(ip_addr, dict):
+                    ip = ip_addr.get("ip", {}).get("value", "")
+                    mask = ip_addr.get("netMask", {}).get("value", "")
+                    if ip and mask:
+                        try:
+                            prefix = ipaddress.ip_network(f"{ip}/{mask}", strict=False).prefixlen
+                            interfaces_ip.setdefault(hw_id, {}).setdefault("ipv4", {})[ip] = {
+                                "prefix_length": prefix
+                            }
+                        except ValueError:
+                            pass
+                for ipv6 in item.get("ipv6Info", {}).get("ipv6Addresses", []):
+                    ip6 = ipv6.get("address", {}).get("value", "")
+                    prefix6 = ipv6.get("prefixLength", 0)
+                    if ip6:
+                        interfaces_ip.setdefault(hw_id, {}).setdefault("ipv6", {})[ip6] = {
+                            "prefix_length": prefix6
+                        }
+        return interfaces_ip
 
     def get_config(
         self,
