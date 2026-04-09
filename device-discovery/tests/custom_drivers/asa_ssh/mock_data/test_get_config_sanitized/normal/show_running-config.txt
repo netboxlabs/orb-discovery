@@ -7,6 +7,7 @@ enable password $sha512$5000$PlaceholderHashValue encrypted
 passwd $sha512$5000$AnotherHashValue encrypted
 !
 username admin password $sha512$5000$UserHashValue privilege 15
+username readonly password 8 $sha512$5000$TypedHashValue privilege 5
 !
 interface GigabitEthernet1/1
  nameif inside

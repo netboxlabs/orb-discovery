@@ -221,10 +221,10 @@ class ASADriver(_napalm_base.NetworkDriver):
             raise ConnectionException(f"Cannot connect to {self.hostname}. Error {code}")
 
     def close(self) -> None:
-        """Delete the API token and close the session."""
+        """Delete the API token and close the session (best-effort; logs on failure)."""
         ok, code = self.device.delete_token()
         if not ok:
-            raise ConnectionException(f"Cannot disconnect from {self.hostname}. Error {code}")
+            logger.warning("Failed to delete API token for %s (status %s); session may linger", self.hostname, code)
 
     def is_alive(self) -> dict:
         """Return token liveness."""

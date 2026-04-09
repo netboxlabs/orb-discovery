@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # --- config sanitization (Cisco ASA sensitive fields) ---
 _ENABLE_PASSWORD_RE = re.compile(r"(enable\s+password)\s+\S+", re.IGNORECASE)
 _PASSWD_RE = re.compile(r"^(\s*passwd)\s+\S+", re.IGNORECASE | re.MULTILINE)
-_USERNAME_PASSWORD_RE = re.compile(r"(username\s+\S+\s+password)\s+\S+", re.IGNORECASE)
+_USERNAME_PASSWORD_RE = re.compile(r"(username\s+\S+\s+password)\s+(?:\d\s+)?\S+", re.IGNORECASE)
 _PSK_RE = re.compile(r"(\bpre-shared-key)\s+\S+", re.IGNORECASE)
 _SNMP_COMMUNITY_RE = re.compile(r"(snmp-server\s+community)\s+\S+", re.IGNORECASE)
 
