@@ -33,9 +33,13 @@ _KEY_CIPHER_RE = re.compile(r"(\bkey\s+cipher)\s+\S+", re.IGNORECASE)
 _PSK_RE = re.compile(r"(pre-shared-key\s+(?:cipher|simple))\s+\S+", re.IGNORECASE)
 # "authentication-key cipher <value>"
 _AUTH_KEY_RE = re.compile(r"(authentication-key\s+cipher)\s+\S+", re.IGNORECASE)
-# "snmp-agent community [read|write] <value>"
+# "snmp-agent community [read|write] [cipher|simple] <value>"
+# The optional cipher/simple mode keyword must be consumed before redacting
+# so that lines like "community read cipher <secret>" redact the secret,
+# not the keyword.
 _SNMP_COMMUNITY_RE = re.compile(
-    r"(snmp-agent\s+community\s+(?:read|write))\s+\S+", re.IGNORECASE
+    r"(snmp-agent\s+community\s+(?:read|write)(?:\s+(?:cipher|simple))?)\s+\S+",
+    re.IGNORECASE,
 )
 
 
@@ -137,7 +141,7 @@ def _parse_version_output(raw: str) -> tuple[str, str, float]:
     # Uptime line (single line): "<Vendor> <Model> uptime is ..."
     # e.g. "H3C S5560X-30C-EI uptime is 2 weeks, 3 days, 4 hours, 15 minutes"
     m_uptime = re.search(
-        r"^(?:H3C|HP)\s+(.+?)\s+uptime\s+is\s+(.+)$",
+        r"^(?:H3C|HP|HPE)\s+(.+?)\s+uptime\s+is\s+(.+)$",
         raw,
         re.IGNORECASE | re.MULTILINE,
     )
