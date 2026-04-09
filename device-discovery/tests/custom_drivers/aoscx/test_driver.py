@@ -21,5 +21,6 @@ class TestAOSCXDriver(BaseDriverTest):
         driver.username = "test-user"
         driver.password = "test-pass"
         driver.timeout = 60
+        driver._verify_ssl = False
         driver.session = FakePyaoscxSession(mock_dir)
         return driver

@@ -57,7 +57,7 @@ class AOSCXDriver(_napalm_base.NetworkDriver):
         self.session = None
         if optional_args is None:
             optional_args = {}
-        self._verify_ssl = optional_args.get("verify_ssl", False)
+        self._verify_ssl: bool = bool(optional_args.get("verify_ssl", False))
 
     def open(self):
         """Open a pyaoscx v2 session to the device."""
@@ -91,8 +91,21 @@ class AOSCXDriver(_napalm_base.NetworkDriver):
 
     def _get(self, path: str) -> dict | list:
         """Perform a GET and return the parsed JSON body."""
-        resp = self.session.request("GET", path)
-        return json.loads(resp.text)
+        from napalm.base.exceptions import CommandErrorException
+
+        if self.session is None:
+            raise CommandErrorException("Session is not open; call open() first.")
+        resp = self.session.request("GET", path, verify=self._verify_ssl)
+        if resp.status_code < 200 or resp.status_code >= 300:
+            raise CommandErrorException(
+                f"REST GET {path!r} returned HTTP {resp.status_code}: {resp.text[:200]}"
+            )
+        try:
+            return json.loads(resp.text)
+        except json.JSONDecodeError as exc:
+            raise CommandErrorException(
+                f"REST GET {path!r} returned non-JSON body: {resp.text[:200]}"
+            ) from exc
 
     # ------------------------------------------------------------------
     # NAPALM getters
@@ -190,47 +203,47 @@ class AOSCXDriver(_napalm_base.NetworkDriver):
 
         return result
 
+    @staticmethod
+    def _collect_ips(intf: dict) -> dict:
+        """Extract IPv4/IPv6 addresses from a single interface dict."""
+        intf_ips: dict = {}
+
+        # IPv4 primary
+        ip4 = intf.get("ip4_address", "")
+        if ip4 and "/" in ip4:
+            addr, prefix = ip4.rsplit("/", 1)
+            if prefix.isdigit():
+                intf_ips.setdefault("ipv4", {})[addr] = {"prefix_length": int(prefix)}
+
+        # IPv4 secondary
+        for ip4_sec in (intf.get("ip4_address_secondary") or {}).keys():
+            if "/" in ip4_sec:
+                addr, prefix = ip4_sec.rsplit("/", 1)
+                if prefix.isdigit():
+                    intf_ips.setdefault("ipv4", {})[addr] = {"prefix_length": int(prefix)}
+
+        # IPv6
+        for ip6 in (intf.get("ip6_addresses") or {}).keys():
+            if "/" in ip6:
+                addr, prefix = ip6.rsplit("/", 1)
+                if prefix.isdigit():
+                    intf_ips.setdefault("ipv6", {})[addr] = {"prefix_length": int(prefix)}
+
+        return intf_ips
+
     def get_interfaces_ip(self) -> dict:
         """Return IP addresses per interface."""
         interfaces_data = self._get("system/interfaces?depth=2")
         if not isinstance(interfaces_data, dict):
             return {}
 
-        result = {}
-        for name, intf in interfaces_data.items():
-            if not isinstance(intf, dict):
-                continue
-
-            intf_ips: dict = {}
-
-            # IPv4 primary
-            ip4 = intf.get("ip4_address", "")
-            if ip4 and "/" in ip4:
-                addr, prefix = ip4.rsplit("/", 1)
-                intf_ips.setdefault("ipv4", {})[addr] = {
-                    "prefix_length": int(prefix)
-                }
-
-            # IPv4 secondary
-            for ip4_sec in (intf.get("ip4_address_secondary") or {}).keys():
-                if "/" in ip4_sec:
-                    addr, prefix = ip4_sec.rsplit("/", 1)
-                    intf_ips.setdefault("ipv4", {})[addr] = {
-                        "prefix_length": int(prefix)
-                    }
-
-            # IPv6
-            for ip6 in (intf.get("ip6_addresses") or {}).keys():
-                if "/" in ip6:
-                    addr, prefix = ip6.rsplit("/", 1)
-                    intf_ips.setdefault("ipv6", {})[addr] = {
-                        "prefix_length": int(prefix)
-                    }
-
-            if intf_ips:
-                result[name] = intf_ips
-
-        return result
+        return {
+            name: ips
+            for name, intf in interfaces_data.items()
+            if isinstance(intf, dict)
+            for ips in [self._collect_ips(intf)]
+            if ips
+        }
 
     def get_config(
         self,
