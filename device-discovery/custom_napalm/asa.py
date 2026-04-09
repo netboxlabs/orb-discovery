@@ -360,8 +360,27 @@ class ASADriver(_napalm_base.NetworkDriver):
         sanitized: bool = False,
         format: str = "text",
     ) -> models.ConfigDict:
-        """Return device configuration."""
-        return {"running": "", "candidate": "", "startup": ""}
+        """Return running / startup config via CLI, with optional sanitization."""
+        config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
+        commands: list[str] = []
+        if retrieve.lower() in ("startup", "all"):
+            commands.append("show startup-config")
+        if retrieve.lower() in ("running", "all"):
+            commands.append("show running-config")
+        if commands:
+            resp = self._send_request("/cli", {"commands": commands})
+            outputs = resp.get("response", [])
+            idx = 0
+            if retrieve.lower() in ("startup", "all") and idx < len(outputs):
+                config["startup"] = outputs[idx]
+                idx += 1
+            if retrieve.lower() in ("running", "all") and idx < len(outputs):
+                config["running"] = outputs[idx]
+        if sanitized:
+            for key in ("running", "candidate", "startup"):
+                if config[key]:
+                    config[key] = _sanitize_config(config[key])
+        return config
 
     def get_vlans(self) -> dict:
         """Cisco ASA has no traditional L2 VLAN table."""
