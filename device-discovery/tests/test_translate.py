@@ -25,6 +25,20 @@ from device_discovery.translate import (
 )
 
 
+def test_napalm_netbox_id_parsed():
+    """netbox_id field is parsed correctly."""
+    from device_discovery.policy.models import Napalm
+    n = Napalm(hostname="192.168.1.1", username="admin", password="secret", netbox_id=42)
+    assert n.netbox_id == 42
+
+
+def test_napalm_netbox_id_optional():
+    """netbox_id defaults to None."""
+    from device_discovery.policy.models import Napalm
+    n = Napalm(hostname="192.168.1.1", username="admin", password="secret")
+    assert n.netbox_id is None
+
+
 @pytest.fixture
 def sample_device_info():
     """Sample device information for testing."""
