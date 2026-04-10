@@ -6,9 +6,10 @@ Implements only the methods used by device-discovery:
   get_facts, get_interfaces, get_interfaces_ip, get_config, get_vlans.
 
 Uses Netmiko cisco_ftd device type and ntc-templates cisco_asa platform.
-FTD clish show version raises TextFSMError from the cisco_asa template;
-get_facts catches this and falls back to regex parsing of the FTD clish
-block format. Interface commands are format-compatible with cisco_asa templates.
+FTD clish show version raises TextFSMError or ParsingException from the
+cisco_asa template; get_facts catches both and falls back to regex parsing
+of the FTD clish block format. Interface commands are format-compatible
+with cisco_asa templates.
 """
 
 import logging
@@ -18,8 +19,10 @@ import napalm.base as _napalm_base
 from napalm.base import models
 from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
-from ntc_templates.parse import parse_output
+from ntc_templates.parse import ParsingException, parse_output
 from textfsm.parser import TextFSMError
+
+_PARSE_ERRORS = (TextFSMError, ParsingException)
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +165,7 @@ class FTDSSHDriver(_napalm_base.NetworkDriver):
                 serial_number = serial_list[0] if serial_list else "Unknown"
             else:
                 use_regex = True
-        except TextFSMError:
+        except _PARSE_ERRORS:
             use_regex = True
 
         if use_regex:
@@ -189,7 +192,7 @@ class FTDSSHDriver(_napalm_base.NetworkDriver):
                         inv_parsed[0],
                     )
                     serial_number = chassis.get("sn", "Unknown") or "Unknown"
-            except TextFSMError:
+            except _PARSE_ERRORS:
                 logger.warning("Failed to parse show inventory; serial unknown")
 
         # Build interface list from show interface ip brief (works on both paths)
@@ -199,7 +202,7 @@ class FTDSSHDriver(_napalm_base.NetworkDriver):
                 platform="cisco_asa", command="show interface ip brief", data=ip_brief_raw
             )
             interface_list = sorted(r["interface"] for r in ip_brief_parsed if r.get("interface"))
-        except TextFSMError:
+        except _PARSE_ERRORS:
             logger.warning("Failed to parse show interface ip brief; interface_list empty")
             interface_list = []
 
