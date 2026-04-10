@@ -6,6 +6,20 @@ import (
 	"github.com/netboxlabs/diode-sdk-go/diode"
 )
 
+// annotateDeviceWithSourceMatch sets source_match metadata on the first *diode.Device
+// in the top-level entity slice. No-op if no Device is present.
+func annotateDeviceWithSourceMatch(entities []diode.Entity, netboxID int) {
+	for _, e := range entities {
+		if d, ok := e.(*diode.Device); ok && d != nil {
+			if d.Metadata == nil {
+				d.Metadata = make(diode.Metadata)
+			}
+			d.Metadata["source_match"] = diode.Metadata{"netbox_id": netboxID}
+			return
+		}
+	}
+}
+
 // annotateEntitiesWithRunID sets per-entity Diode metadata key "run_id" on each entity
 // in the batch and on nested Device, Interface, and IPAddress references.
 func annotateEntitiesWithRunID(entities []diode.Entity, runID string) {

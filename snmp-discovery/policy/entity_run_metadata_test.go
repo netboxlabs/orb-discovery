@@ -52,3 +52,21 @@ func TestAnnotateEntitiesWithRunID_sharedDeviceVisitedOnce(t *testing.T) {
 	annotateEntitiesWithRunID(entities, "run-shared")
 	assert.Equal(t, "run-shared", dev.Metadata["run_id"])
 }
+
+func TestAnnotateDeviceWithSourceMatch_sets_metadata(t *testing.T) {
+	dev := &diode.Device{Name: diode.String("r1")}
+	entities := []diode.Entity{dev}
+	annotateDeviceWithSourceMatch(entities, 42)
+	require.Contains(t, dev.Metadata, "source_match")
+	nested, ok := dev.Metadata["source_match"].(diode.Metadata)
+	require.True(t, ok, "source_match value should be diode.Metadata")
+	assert.Equal(t, 42, nested["netbox_id"])
+}
+
+func TestAnnotateDeviceWithSourceMatch_no_device_is_noop(t *testing.T) {
+	iface := &diode.Interface{Name: diode.String("eth0")}
+	entities := []diode.Entity{iface}
+	// Should not panic when no *diode.Device is present
+	annotateDeviceWithSourceMatch(entities, 99)
+	assert.Nil(t, iface.Metadata)
+}
