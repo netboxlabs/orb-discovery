@@ -455,6 +455,9 @@ func (r *Runner) expandTargetRanges(configuredTargets []config.Target) []expande
 				Authentication:   target.Authentication,
 				OverrideDefaults: target.OverrideDefaults,
 			}
+			if len(ips) == 1 {
+				expandedTargets[i].NetboxID = target.NetboxID
+			}
 		}
 		expandedGroups = append(expandedGroups, expandedTargetGroup{
 			originalTarget: originalHost,
