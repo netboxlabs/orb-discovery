@@ -244,6 +244,7 @@ class PolicyRunner:
                 "interface_ip": device.get_interfaces_ip(),
                 "defaults": config.defaults,
                 "options": config.options,
+                "netbox_id": scope.netbox_id,
             }
             # Only retrieve config if at least one capture flag is enabled
             if config.options and (
