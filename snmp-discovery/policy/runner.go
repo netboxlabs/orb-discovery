@@ -458,7 +458,7 @@ func (r *Runner) expandTargetRanges(configuredTargets []config.Target) []expande
 				Authentication:   target.Authentication,
 				OverrideDefaults: target.OverrideDefaults,
 			}
-			if len(ips) == 1 {
+			if len(ips) == 1 && originalHost == ips[i] {
 				expandedTargets[i].NetboxID = target.NetboxID
 			}
 		}
