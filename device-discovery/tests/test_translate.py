@@ -789,6 +789,19 @@ def test_translate_data_with_config(sample_device_info):
     # When SDK supports it, device will have config attached
 
 
+def test_translate_device_with_netbox_id(sample_device_info, sample_defaults):
+    """Device metadata contains source_match when netbox_id is provided."""
+    device = translate_device(sample_device_info, sample_defaults, netbox_id=42)
+    assert "source_match" in device.metadata
+    assert device.metadata["source_match"]["netbox_id"] == 42
+
+
+def test_translate_device_without_netbox_id(sample_device_info, sample_defaults):
+    """Device metadata has no source_match key when netbox_id is not provided."""
+    device = translate_device(sample_device_info, sample_defaults)
+    assert "source_match" not in device.metadata
+
+
 def test_translate_data_with_config_disabled(sample_device_info):
     """Test that config is not captured when flags are disabled."""
     config_info = {

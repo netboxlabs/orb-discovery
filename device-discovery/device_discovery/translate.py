@@ -47,6 +47,7 @@ def translate_device(
     defaults: Defaults,
     config_info: dict | None = None,
     options: Options | None = None,
+    netbox_id: int | None = None,
 ) -> Device:
     """
     Translate device information from NAPALM format to Diode SDK Device entity.
@@ -122,6 +123,8 @@ def translate_device(
     if device_config is not None:
         device_params["config"] = device_config
     device = Device(**device_params)
+    if netbox_id is not None:
+        device.metadata.update({"source_match": {"netbox_id": netbox_id}})
     return device
 
 
@@ -244,6 +247,7 @@ def translate_data(data: dict) -> Iterable[Entity]:
     config_info = data.get("config") or {}
     interfaces = data.get("interface") or {}
     interfaces_ip = data.get("interface_ip") or {}
+    netbox_id = data.get("netbox_id")
     if device_info:
         if options.platform_omit_version:
             device_info["platform"] = data.get("driver")
@@ -253,7 +257,7 @@ def translate_data(data: dict) -> Iterable[Entity]:
             )
             if len(device_info["platform"]) > 100:
                 device_info["platform"] = device_info.get("os_version")[:100]
-        device = translate_device(device_info, defaults, config_info, options)
+        device = translate_device(device_info, defaults, config_info, options, netbox_id=netbox_id)
         entities.append(Entity(device=device))
         device_for_interfaces = copy.deepcopy(device)
         device_for_interfaces.ClearField("config")
