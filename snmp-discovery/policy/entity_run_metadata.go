@@ -6,18 +6,42 @@ import (
 	"github.com/netboxlabs/diode-sdk-go/diode"
 )
 
-// annotateDeviceWithSourceMatch sets source_match metadata on the first *diode.Device
-// in the top-level entity slice. No-op if no Device is present.
+// annotateDeviceWithSourceMatch sets source_match metadata on the *diode.Device
+// reachable from the entity batch — either at the top level or nested inside
+// Interface/IPAddress entities, mirroring the traversal in annotateEntitiesWithRunID.
 func annotateDeviceWithSourceMatch(entities []diode.Entity, netboxID int) {
+	seen := make(map[unsafe.Pointer]struct{})
 	for _, e := range entities {
-		if d, ok := e.(*diode.Device); ok && d != nil {
-			if d.Metadata == nil {
-				d.Metadata = make(diode.Metadata)
+		switch v := e.(type) {
+		case *diode.Device:
+			setDeviceSourceMatch(v, netboxID, seen)
+		case *diode.Interface:
+			if v != nil {
+				setDeviceSourceMatch(v.Device, netboxID, seen)
 			}
-			d.Metadata["source_match"] = diode.Metadata{"netbox_id": netboxID}
-			return
+		case *diode.IPAddress:
+			if v != nil {
+				if iface, ok := v.AssignedObject.(*diode.Interface); ok && iface != nil {
+					setDeviceSourceMatch(iface.Device, netboxID, seen)
+				}
+			}
 		}
 	}
+}
+
+func setDeviceSourceMatch(d *diode.Device, netboxID int, seen map[unsafe.Pointer]struct{}) {
+	if d == nil {
+		return
+	}
+	p := unsafe.Pointer(d)
+	if _, ok := seen[p]; ok {
+		return
+	}
+	seen[p] = struct{}{}
+	if d.Metadata == nil {
+		d.Metadata = make(diode.Metadata)
+	}
+	d.Metadata["source_match"] = diode.Metadata{"netbox_id": netboxID}
 }
 
 // annotateEntitiesWithRunID sets per-entity Diode metadata key "run_id" on each entity

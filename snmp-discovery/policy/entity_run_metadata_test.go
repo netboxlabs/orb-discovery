@@ -70,3 +70,35 @@ func TestAnnotateDeviceWithSourceMatch_no_device_is_noop(t *testing.T) {
 	annotateDeviceWithSourceMatch(entities, 99)
 	assert.Nil(t, iface.Metadata)
 }
+
+func TestAnnotateDeviceWithSourceMatch_nested_in_interface(t *testing.T) {
+	dev := &diode.Device{Name: diode.String("r1")}
+	iface := &diode.Interface{Name: diode.String("eth0"), Device: dev}
+	entities := []diode.Entity{iface}
+	annotateDeviceWithSourceMatch(entities, 42)
+	require.Contains(t, dev.Metadata, "source_match")
+	nested, ok := dev.Metadata["source_match"].(diode.Metadata)
+	require.True(t, ok)
+	assert.Equal(t, 42, nested["netbox_id"])
+}
+
+func TestAnnotateDeviceWithSourceMatch_nested_in_ip_address(t *testing.T) {
+	dev := &diode.Device{Name: diode.String("r1")}
+	iface := &diode.Interface{Name: diode.String("eth0"), Device: dev}
+	ip := &diode.IPAddress{Address: diode.String("10.0.0.1/24"), AssignedObject: iface}
+	entities := []diode.Entity{ip}
+	annotateDeviceWithSourceMatch(entities, 7)
+	require.Contains(t, dev.Metadata, "source_match")
+	nested, ok := dev.Metadata["source_match"].(diode.Metadata)
+	require.True(t, ok)
+	assert.Equal(t, 7, nested["netbox_id"])
+}
+
+func TestAnnotateDeviceWithSourceMatch_shared_device_annotated_once(t *testing.T) {
+	dev := &diode.Device{Name: diode.String("shared")}
+	if1 := &diode.Interface{Name: diode.String("a"), Device: dev}
+	if2 := &diode.Interface{Name: diode.String("b"), Device: dev}
+	entities := []diode.Entity{if1, if2}
+	annotateDeviceWithSourceMatch(entities, 5)
+	assert.Equal(t, diode.Metadata{"netbox_id": 5}, dev.Metadata["source_match"])
+}
