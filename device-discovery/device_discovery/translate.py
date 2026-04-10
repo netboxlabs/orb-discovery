@@ -58,6 +58,9 @@ def translate_device(
         defaults (Defaults): Default configuration.
         config_info (dict | None): Dictionary containing configuration data from NAPALM.
         options (Options | None): Discovery options.
+        netbox_id (int | None): NetBox device primary key for PK-based matching.
+            When set, writes ``source_match.netbox_id`` to device metadata.
+            Ignored when None.
 
     Returns:
     -------
