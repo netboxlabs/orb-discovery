@@ -193,7 +193,7 @@ class FTDSSHDriver(_napalm_base.NetworkDriver):
                     )
                     serial_number = chassis.get("sn", "Unknown") or "Unknown"
             except _PARSE_ERRORS:
-                logger.warning("Failed to parse show inventory; serial unknown")
+                logger.debug("Failed to parse show inventory; serial unknown")
 
         # Build interface list from show interface ip brief (works on both paths)
         ip_brief_raw = self.device.send_command("show interface ip brief")
@@ -203,7 +203,7 @@ class FTDSSHDriver(_napalm_base.NetworkDriver):
             )
             interface_list = sorted(r["interface"] for r in ip_brief_parsed if r.get("interface"))
         except _PARSE_ERRORS:
-            logger.warning("Failed to parse show interface ip brief; interface_list empty")
+            logger.debug("Failed to parse show interface ip brief; interface_list empty")
             interface_list = []
 
         return {
