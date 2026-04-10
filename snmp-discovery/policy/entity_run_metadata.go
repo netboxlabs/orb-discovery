@@ -7,8 +7,10 @@ import (
 )
 
 // annotateDeviceWithSourceMatch sets source_match metadata on the *diode.Device
-// reachable from the entity batch — either at the top level or nested inside
-// Interface/IPAddress entities, mirroring the traversal in annotateEntitiesWithRunID.
+// reachable from the entity batch — either at the top level, via Interface.Device,
+// or via IPAddress→Interface.Device. This covers the shapes produced by
+// MapObjectIDsToEntity; deeper links (Interface.Parent/Bridge/Lag,
+// IPAddress.NatInside) are not traversed.
 func annotateDeviceWithSourceMatch(entities []diode.Entity, netboxID int) {
 	seen := make(map[unsafe.Pointer]struct{})
 	for _, e := range entities {
