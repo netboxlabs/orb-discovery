@@ -321,7 +321,7 @@ class PolicyRunner:
                         f"Policy {self.name}, Hostname {hostname}: Reachable port found, scheduling discovery job"
                     )
                     id = str(uuid.uuid4())
-                    self.scopes[id] = scope.model_copy(update={"hostname": hostname})
+                    self.scopes[id] = scope.model_copy(update={"hostname": hostname, "netbox_id": None})
                     self.scheduler.add_job(
                         self.run_with_parent,
                         id=id,

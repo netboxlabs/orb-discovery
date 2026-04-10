@@ -313,11 +313,11 @@ func (r *Runner) runWithMetadata(target config.Target, parentTarget string) {
 		return
 	}
 
-	r.logEntitiesForIngestion(entities)
 	if target.NetboxID != nil {
 		annotateDeviceWithSourceMatch(entities, *target.NetboxID)
 	}
 	annotateEntitiesWithRunID(entities, run.ID)
+	r.logEntitiesForIngestion(entities)
 
 	resp, err := r.client.Ingest(r.ctx, entities, diode.WithIngestMetadata(diode.Metadata{
 		"policy_name": policyName,
