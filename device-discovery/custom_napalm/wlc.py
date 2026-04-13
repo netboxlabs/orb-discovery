@@ -14,7 +14,6 @@ import re
 
 import napalm.base as _napalm_base
 from napalm.base import models
-from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
@@ -52,6 +51,11 @@ _SNMP_V3_RE = re.compile(
     r"(config\s+snmp\s+v3user\s+add\s+\S+(?:\s+\S+){3})\s+\S+\s+\S+",
     re.M | re.I,
 )
+# SNMPv1/v2c community string: "config snmp community create <community>" or "delete <community>"
+_SNMP_COMMUNITY_RE = re.compile(
+    r"(config\s+snmp\s+community\s+(?:create|delete))\s+\S+",
+    re.M | re.I,
+)
 
 
 def _sanitize_config(text: str) -> str:
@@ -61,6 +65,7 @@ def _sanitize_config(text: str) -> str:
     text = _MGMT_USER_RE.sub(r"\1 <redacted>", text)
     text = _LOCAL_USER_RE.sub(r"\1 <redacted>", text)
     text = _SNMP_V3_RE.sub(r"\1 <redacted> <redacted>", text)
+    text = _SNMP_COMMUNITY_RE.sub(r"\1 <redacted>", text)
     return text
 
 
@@ -157,14 +162,17 @@ class WLCDriver(_napalm_base.NetworkDriver):
 
         # --- hostname / version / uptime from show sysinfo ---
         sysinfo_raw = self.device.send_command("show sysinfo")
-        parsed_sysinfo = parse_output(
-            platform="cisco_wlc_ssh", command="show sysinfo", data=sysinfo_raw
-        )
-        if parsed_sysinfo:
-            row = parsed_sysinfo[0]
-            hostname = (row.get("system_name") or "").strip() or self.hostname
-            os_version = (row.get("product_version") or "").strip() or "Unknown"
-            uptime = _parse_uptime(row.get("system_up_time") or "")
+        try:
+            parsed_sysinfo = parse_output(
+                platform="cisco_wlc_ssh", command="show sysinfo", data=sysinfo_raw
+            )
+            if parsed_sysinfo:
+                row = parsed_sysinfo[0]
+                hostname = (row.get("system_name") or "").strip() or self.hostname
+                os_version = (row.get("product_version") or "").strip() or "Unknown"
+                uptime = _parse_uptime(row.get("system_up_time") or "")
+        except Exception:
+            logger.debug("Failed to parse show sysinfo; hostname/version/uptime unknown")
 
         # --- model / serial from show inventory ---
         inv_raw = self.device.send_command("show inventory")
@@ -246,11 +254,14 @@ class WLCDriver(_napalm_base.NetworkDriver):
                 if not name:
                     continue
                 port = row.get("port", "").strip()
-                # Look up physical port status; default to up/enabled for virtual interfaces
+                # Distinguish virtual/unbound interfaces (port "N/A" or empty) from
+                # bound interfaces whose port wasn't found in port_status (parse miss).
+                # Virtual interfaces are always considered up; parse misses default False.
+                is_virtual = port in ("", "N/A")
                 phys = port_status.get(port, {})
                 interfaces[name] = {
-                    "is_up": phys.get("is_up", True),
-                    "is_enabled": phys.get("is_enabled", True),
+                    "is_up": phys.get("is_up", is_virtual),
+                    "is_enabled": phys.get("is_enabled", is_virtual),
                     "description": "",
                     "last_flapped": -1.0,
                     "mtu": -1,

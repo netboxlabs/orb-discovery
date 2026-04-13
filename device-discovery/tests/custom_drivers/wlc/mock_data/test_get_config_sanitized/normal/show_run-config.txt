@@ -9,3 +9,5 @@ config wlan create 1 CORP-SSID CORP-SSID
 config wlan security wpa akm psk set-key ascii 1 MyPSKSecret789
 config mgmtuser add admin AdminPass000 read-write
 config snmp v3user add v3admin AuthPriv hmac-sha aes128 v3AuthPass111 v3PrivPass222
+config snmp community create public123
+config snmp community delete oldSecret
