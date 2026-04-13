@@ -249,7 +249,11 @@ class ViptelaSSHDriver(_napalm_base.NetworkDriver):
             if serial_raw:
                 serial_number = serial_raw
 
-            uptime_raw = _extract_fact(sys_raw, r"^Uptime\s*:\s*(.+)")
+            uptime_raw = _extract_fact(
+                sys_raw,
+                r"^Uptime\s*:\s*(.+)",
+                r"^System\s+uptime\s*:\s*(.+)",
+            )
             if uptime_raw:
                 uptime = _parse_uptime_words(uptime_raw)
 
