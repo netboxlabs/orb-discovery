@@ -105,7 +105,7 @@ _INTF_INDEX_FLAGS_RE = re.compile(
 )
 _INTF_NAME_RE = re.compile(r'name="(?P<name>[^"]+)"')
 _INTF_TYPE_RE = re.compile(r'type="(?P<type>[^"]+)"')
-_INTF_MTU_RE = re.compile(r"\bmtu=(?P<mtu>\d+|auto)")
+_INTF_MTU_RE = re.compile(r"(?<![a-zA-Z0-9])mtu=(?P<mtu>\d+|auto)")
 _INTF_MAC_RE = re.compile(
     r"mac-address=(?P<mac>[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})"
 )
