@@ -383,7 +383,7 @@ class PolicyRunner:
             try:
                 self.scheduler.remove_job(id)
             except Exception as e:
-                logger.error(
+                logger.debug(
                     f"Policy {self.name}, Hostname {sanitized_hostname}: Error removing job: {e}"
                 )
             return
@@ -496,7 +496,7 @@ class PolicyRunner:
             try:
                 self.scheduler.remove_job(id)
             except Exception as e:
-                logger.error(
+                logger.debug(
                     f"Policy {self.name}, Hostname {sanitized_hostname}: Error removing job: {e}"
                 )
             return
