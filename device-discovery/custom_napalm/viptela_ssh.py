@@ -240,13 +240,16 @@ class ViptelaSSHDriver(_napalm_base.NetworkDriver):
                 )
                 or os_version
             )
-            # Serial: first token on the line (may be padded with spaces)
+            # Serial: first token on the line (may be padded with spaces).
+            # Reject known placeholder tokens so they don't pollute inventory
+            # with a fake serial shared across many devices.
+            _SERIAL_PLACEHOLDERS = {"none", "n/a", "na", "null", "unknown", "-"}
             serial_raw = _extract_fact(
                 sys_raw,
                 r"^Chassis\s+serial\s+number(?:/Token)?\s*:\s*(\S+)",
                 r"^Serial\s+[Nn]umber\s*:\s*(\S+)",
             )
-            if serial_raw:
+            if serial_raw and serial_raw.lower() not in _SERIAL_PLACEHOLDERS:
                 serial_number = serial_raw
 
             uptime_raw = _extract_fact(
