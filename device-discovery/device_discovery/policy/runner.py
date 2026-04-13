@@ -7,6 +7,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
+from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.base import BaseTrigger
 from apscheduler.triggers.cron import CronTrigger
@@ -382,9 +383,14 @@ class PolicyRunner:
             )
             try:
                 self.scheduler.remove_job(id)
-            except Exception as e:
+            except JobLookupError as e:
                 logger.debug(
                     f"Policy {self.name}, Hostname {sanitized_hostname}: Error removing job: {e}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Policy {self.name}, Hostname {sanitized_hostname}: Unexpected error removing job: {e}",
+                    exc_info=True,
                 )
             return
 
@@ -495,9 +501,14 @@ class PolicyRunner:
             )
             try:
                 self.scheduler.remove_job(id)
-            except Exception as e:
+            except JobLookupError as e:
                 logger.debug(
                     f"Policy {self.name}, Hostname {sanitized_hostname}: Error removing job: {e}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Policy {self.name}, Hostname {sanitized_hostname}: Unexpected error removing job: {e}",
+                    exc_info=True,
                 )
             return
 

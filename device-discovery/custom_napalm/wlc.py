@@ -254,10 +254,11 @@ class WLCDriver(_napalm_base.NetworkDriver):
                 if not name:
                     continue
                 port = row.get("port", "").strip()
-                # Distinguish virtual/unbound interfaces (port "N/A" or empty) from
-                # bound interfaces whose port wasn't found in port_status (parse miss).
-                # Virtual interfaces are always considered up; parse misses default False.
-                is_virtual = port in ("", "N/A")
+                # Distinguish virtual/unbound interfaces (non-numeric port: "", "N/A",
+                # "LAG", etc.) from bound interfaces not found in port_status (parse miss).
+                # Virtual/aggregate interfaces are always considered up; parse misses
+                # default to False to avoid false-positive healthy reports.
+                is_virtual = not port or not port.isdigit()
                 phys = port_status.get(port, {})
                 interfaces[name] = {
                     "is_up": phys.get("is_up", is_virtual),
