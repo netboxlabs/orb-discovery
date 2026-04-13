@@ -91,13 +91,17 @@ def _parse_uptime(uptime_str: str) -> float:
 # The ntc-template for "interface print detail" only matches the v6 comma
 # form, so we use regex instead across both versions.
 #
-# Each interface block is separated from the next by a blank line.  A block
-# may span two lines when a description comment precedes the name= line:
+# Each interface block starts with a row index line (" 0   R   …").  Blocks
+# are normally separated by blank lines, but RouterOS can omit those blank
+# lines in some output modes.  We therefore split on the index anchor rather
+# than on blank lines.  A block may span multiple lines when a description
+# comment precedes the name= line:
 #
 #   14   R   ;;; defconf
 #            name="bridge" type="bridge" …
 #
-# We split on blank lines and handle multi-line blocks.
+# Splitting on the index anchor handles both formats because continuation
+# lines (comments, wrapped attributes) never start with a bare digit.
 
 _INTF_INDEX_FLAGS_RE = re.compile(
     r"^\s*\d+\s*(?P<flags>[DXIRSP]*)",
@@ -115,28 +119,26 @@ def _parse_interfaces_detail(output: str) -> list[dict]:
     """
     Parse 'interface print detail' output into a list of attribute dicts.
 
-    Works for both RouterOS v6 and v7 output formats.
+    Works for both RouterOS v6 and v7 output formats, and handles both
+    blank-line-separated and tightly-packed (no blank lines) output by
+    anchoring on the row-index line rather than on blank-line delimiters.
     Returns an empty list when output is empty or unparseable.
     """
     if not output:
         return []
 
     results: list[dict] = []
-    # Split on one or more blank lines; each chunk is one interface block.
-    blocks = re.split(r"\n\s*\n", output.strip())
+    # Locate each interface block by the start of its index line
+    # (e.g. " 0   R   …" or " 14  X   …").  The Flags:/Columns: header
+    # and continuation lines (comments, wrapped attributes) never start
+    # with a bare digit, so they are naturally excluded.
+    block_starts = [m.start() for m in re.finditer(r"(?m)^\s*\d+\s", output)]
+    if not block_starts:
+        return []
 
-    for block in blocks:
-        block = block.strip()
-        if not block:
-            continue
-
-        # The first block may contain the "Flags: …" header on its leading
-        # line (the Flags line and the first interface are not separated by a
-        # blank line in RouterOS output).  Strip it so we can process the
-        # interface data that follows.
-        lines = block.splitlines()
-        if lines and lines[0].strip().startswith("Flags:"):
-            block = "\n".join(lines[1:]).strip()
+    for i, start in enumerate(block_starts):
+        end = block_starts[i + 1] if i + 1 < len(block_starts) else len(output)
+        block = output[start:end].strip()
         if not block:
             continue
 
@@ -145,7 +147,7 @@ def _parse_interfaces_detail(output: str) -> list[dict]:
             continue
         name = m_name.group("name")
 
-        # Flags come from the first non-empty line of the block (the index line).
+        # Flags come from the first line of the block (the index line).
         first_line = block.splitlines()[0]
         m_flags = _INTF_INDEX_FLAGS_RE.match(first_line)
         flags = m_flags.group("flags").upper() if m_flags else ""
