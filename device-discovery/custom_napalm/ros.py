@@ -214,10 +214,15 @@ def _parse_vlans(output: str) -> dict:
     vlans: dict = {}
     for m in _VLAN_ROW_RE.finditer(output):
         vlan_id = m.group("vlan_id")
-        vlans[vlan_id] = {
-            "name": m.group("name"),
-            "interfaces": [m.group("interface")],
-        }
+        intf = m.group("interface")
+        if vlan_id in vlans:
+            if intf not in vlans[vlan_id]["interfaces"]:
+                vlans[vlan_id]["interfaces"].append(intf)
+        else:
+            vlans[vlan_id] = {
+                "name": m.group("name"),
+                "interfaces": [intf],
+            }
     return vlans
 
 
@@ -254,7 +259,7 @@ class ROSDriver(_napalm_base.NetworkDriver):
         try:
             self.device.write_channel(chr(0))
             return {"is_alive": self.device.remote_conn.transport.is_active()}
-        except (OSError, EOFError, AttributeError):
+        except (EOFError, OSError, AttributeError):
             return {"is_alive": False}
 
     # -----------------------------------------------------------------------
@@ -348,19 +353,25 @@ class ROSDriver(_napalm_base.NetworkDriver):
 
     def _interfaces_detail(self) -> list[dict]:
         """
-        Send 'interface print detail' and return parsed interface list.
+        Send 'interface print detail' once and return the parsed interface list.
 
-        Cached per-call: both get_facts and get_interfaces need this data.
+        The result is cached on the instance so that both get_facts and
+        get_interfaces can share it without issuing a second SSH round-trip.
         Returns an empty list on failure or empty output.
         """
-        raw = self.device.send_command("interface print detail")
-        if not raw:
-            return []
-        try:
-            return _parse_interfaces_detail(raw)
-        except Exception:
-            logger.debug("Failed to parse 'interface print detail'", exc_info=True)
-            return []
+        if not hasattr(self, "_cached_interfaces_detail"):
+            raw = self.device.send_command("interface print detail")
+            if not raw:
+                self._cached_interfaces_detail: list[dict] = []
+            else:
+                try:
+                    self._cached_interfaces_detail = _parse_interfaces_detail(raw)
+                except Exception:
+                    logger.debug(
+                        "Failed to parse 'interface print detail'", exc_info=True
+                    )
+                    self._cached_interfaces_detail = []
+        return self._cached_interfaces_detail
 
     # -----------------------------------------------------------------------
     # NAPALM getters
@@ -435,6 +446,8 @@ class ROSDriver(_napalm_base.NetworkDriver):
         """
         interfaces_ip: dict = {}
 
+        # IPv6 addresses are not collected: no ntc-template exists for
+        # 'ipv6 address print' that covers both v6 and v7 output formats.
         ipv4_raw = self.device.send_command("ip address print")
         if ipv4_raw:
             try:
@@ -492,8 +505,8 @@ class ROSDriver(_napalm_base.NetworkDriver):
         Return VLAN information keyed by VLAN ID string.
 
         Parsed from 'interface vlan print' tabular output (compatible with
-        both RouterOS v6 and v7).  The 'interfaces' list contains the single
-        parent interface each VLAN is attached to.
+        both RouterOS v6 and v7).  Multiple rows for the same VLAN ID are
+        aggregated into the 'interfaces' list.
         """
         raw = self.device.send_command("interface vlan print")
         if not raw:
