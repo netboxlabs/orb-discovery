@@ -569,7 +569,7 @@ class PolicyRunner:
 
     def stop(self):
         """Stop the policy runner."""
-        self.scheduler.shutdown()
+        self.scheduler.shutdown(wait=False)
         active_policies = get_metric("active_policies")
         if active_policies:
             active_policies.add(-1, {"policy": self.name})
