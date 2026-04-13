@@ -13,7 +13,6 @@ exists for that command.
 
 import logging
 import re
-import socket
 
 import napalm.base as _napalm_base
 from napalm.base import models
@@ -69,17 +68,18 @@ def _parse_uptime_words(uptime_str: str) -> float:
     """
     Parse Viptela 'show system status' uptime string to seconds.
 
-    Handles formats like:
-      "5 days 3 hours 24 minutes 18 seconds"
-      "0 days 2 hours 30 minutes"
+    Handles both full-word and abbreviated Cisco SD-WAN formats:
+      "5 days 3 hours 24 minutes 18 seconds"   (full words)
+      "5 days 3 hrs 24 min 18 sec"             (abbreviations)
+      "0 days 2 hours 30 minutes"              (seconds absent)
       "1 day 0 hours 12 minutes 30 seconds"
     """
     seconds = 0.0
     for pattern, factor in (
         (r"(\d+)\s+days?", _DAY_SECONDS),
-        (r"(\d+)\s+hours?", _HOUR_SECONDS),
-        (r"(\d+)\s+minutes?", _MINUTE_SECONDS),
-        (r"(\d+)\s+seconds?", 1),
+        (r"(\d+)\s+(?:hours?|hrs?)", _HOUR_SECONDS),
+        (r"(\d+)\s+(?:minutes?|mins?)", _MINUTE_SECONDS),
+        (r"(\d+)\s+(?:seconds?|secs?)", 1),
     ):
         m = re.search(pattern, uptime_str, re.IGNORECASE)
         if m:
@@ -192,7 +192,7 @@ class ViptelaSSHDriver(_napalm_base.NetworkDriver):
                 platform="cisco_viptela", command="show interface", data=raw
             )
         except Exception:
-            logger.debug("Failed to parse 'show interface' output")
+            logger.debug("Failed to parse 'show interface' output", exc_info=True)
             return []
 
     # -----------------------------------------------------------------------
@@ -228,7 +228,7 @@ class ViptelaSSHDriver(_napalm_base.NetworkDriver):
             model = (
                 _extract_fact(
                     sys_raw,
-                    r"^(?:Device\s+Model|Chassis\s+type)\s*:\s*(.+)",
+                    r"^(?:Device\s+Model|Chassis\s+type|Model\s+name)\s*:\s*(.+)",
                 )
                 or model
             )
