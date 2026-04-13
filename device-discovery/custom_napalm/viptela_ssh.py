@@ -136,7 +136,7 @@ def _split_cidr(cidr: str) -> tuple[str, int]:
         return parts[0], -1
 
 
-class ViptelaSshDriver(_napalm_base.NetworkDriver):
+class ViptelaSSHDriver(_napalm_base.NetworkDriver):
     """Cisco Viptela SD-WAN NAPALM driver (read-only subset for device-discovery)."""
 
     def __init__(self, hostname, username, password, timeout=60, optional_args=None):
