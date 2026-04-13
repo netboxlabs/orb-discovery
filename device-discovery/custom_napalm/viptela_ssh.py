@@ -313,13 +313,19 @@ class ViptelaSSHDriver(_napalm_base.NetworkDriver):
             if mac == "-":
                 mac = ""
 
+            # Suppress speed for loopback interfaces so the translation layer
+            # does not fall back to speed-based type detection (which would
+            # yield '1000base-t' for Viptela loopbacks whose name is lowercase
+            # and therefore does not match the built-in '^Loopback\d+' pattern).
+            is_loopback = row.get("port_type", "").strip().lower() == "loopback"
+
             interfaces[name] = {
                 "is_up": oper_up,
                 "is_enabled": admin_up,
                 "description": "",
                 "last_flapped": -1.0,
                 "mtu": mtu,
-                "speed": _parse_speed(row.get("speed", "-")),
+                "speed": -1.0 if is_loopback else _parse_speed(row.get("speed", "-")),
                 "mac_address": mac,
             }
 
