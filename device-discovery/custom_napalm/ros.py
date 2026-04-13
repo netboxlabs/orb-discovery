@@ -196,7 +196,7 @@ def _parse_interfaces_detail(output: str) -> list[dict]:
 
 _VLAN_ROW_RE = re.compile(
     r"^\s*\d+\s+"             # row index
-    r"(?:[RX]\s+)?"           # optional R/X flag (must be followed by whitespace)
+    r"(?:[A-Z]+\s+)?"         # optional flags (R, X, D, I, H, RH, … — must be followed by whitespace)
     r"(?P<name>\S+)\s+"       # VLAN name
     r"\d+\s+"                 # MTU (ignored)
     r"\S+\s+"                 # ARP setting (ignored)
