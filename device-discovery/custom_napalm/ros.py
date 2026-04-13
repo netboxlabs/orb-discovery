@@ -105,7 +105,7 @@ _INTF_INDEX_FLAGS_RE = re.compile(
 )
 _INTF_NAME_RE = re.compile(r'name="(?P<name>[^"]+)"')
 _INTF_TYPE_RE = re.compile(r'type="(?P<type>[^"]+)"')
-_INTF_MTU_RE = re.compile(r"(?<![a-zA-Z0-9])mtu=(?P<mtu>\d+|auto)")
+_INTF_MTU_RE = re.compile(r"(?<![a-zA-Z0-9-])mtu=(?P<mtu>\d+|auto)")
 _INTF_MAC_RE = re.compile(
     r"mac-address=(?P<mac>[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})"
 )
@@ -194,7 +194,7 @@ def _parse_interfaces_detail(output: str) -> list[dict]:
 
 _VLAN_ROW_RE = re.compile(
     r"^\s*\d+\s+"             # row index
-    r"[RX ]?\s*"              # optional R/X flag
+    r"(?:[RX]\s+)?"           # optional R/X flag (must be followed by whitespace)
     r"(?P<name>\S+)\s+"       # VLAN name
     r"\d+\s+"                 # MTU (ignored)
     r"\S+\s+"                 # ARP setting (ignored)
@@ -300,8 +300,12 @@ class ROSDriver(_napalm_base.NetworkDriver):
         """
         Parse 'system routerboard print' and return (model, serial_number).
 
-        Returns the board-name derived model and serial, falling back to
-        ("Unknown", "Unknown") when the command returns no output or fails.
+        The ntc-template extracts ``hardware_model`` and ``serial_number``
+        from routerboard output (physical hardware devices only).  Returns
+        ("Unknown", "Unknown") when the command yields no output (e.g. on
+        CHR / virtual devices that have no routerboard), which causes
+        ``get_facts`` to fall back to the ``board-name`` from
+        ``system resource print``.
         """
         model = "Unknown"
         serial_number = "Unknown"
