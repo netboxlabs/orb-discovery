@@ -27,22 +27,24 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # IKE/IPSec pre-shared key: "pre-shared-key <value>"
-_PSK_RE = re.compile(r"(pre-shared-key)\s+\S+", re.IGNORECASE)
+# .* consumes the entire value segment, covering multi-token forms such as
+# "pre-shared-key ascii2 MyKey" that \S+ would only partially redact.
+_PSK_RE = re.compile(r"(pre-shared-key)\s+.*", re.IGNORECASE)
 
 # User/interface password: "password <value>"
-# Line-anchored to avoid corrupting description text containing the word "password".
-_PASSWORD_RE = re.compile(r"^(\s*password)\s+\S+", re.IGNORECASE | re.MULTILINE)
+# Line-anchored to avoid false positives in descriptions; .* redacts full value.
+_PASSWORD_RE = re.compile(r"^(\s*password)\s+.*", re.IGNORECASE | re.MULTILINE)
 
 # RADIUS/TACACS auth-password: "auth-password <value>"
-_AUTH_PASSWORD_RE = re.compile(r"(auth-password)\s+\S+", re.IGNORECASE)
+_AUTH_PASSWORD_RE = re.compile(r"(auth-password)\s+.*", re.IGNORECASE)
 
 # SNMP community string: "community <value>"
-# Line-anchored to avoid corrupting description text containing the word "community".
-_COMMUNITY_RE = re.compile(r"^(\s*community)\s+\S+", re.IGNORECASE | re.MULTILINE)
+# Line-anchored to avoid false positives; .* redacts full value.
+_COMMUNITY_RE = re.compile(r"^(\s*community)\s+.*", re.IGNORECASE | re.MULTILINE)
 
 # Generic secret field: "secret <value>"
-# Line-anchored to avoid matching "secret" used as a noun in descriptions.
-_SECRET_RE = re.compile(r"^(\s*secret)\s+\S+", re.IGNORECASE | re.MULTILINE)
+# Line-anchored to avoid false positives; .* redacts full value.
+_SECRET_RE = re.compile(r"^(\s*secret)\s+.*", re.IGNORECASE | re.MULTILINE)
 
 
 def _sanitize_config(text: str) -> str:

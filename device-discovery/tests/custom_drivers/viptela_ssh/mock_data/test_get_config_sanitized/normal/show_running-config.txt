@@ -10,7 +10,10 @@ system
    password MyAdminPass1
   !
   user operator
-   secret OpSecret99
+   password 6 MyEncryptedHash123XYZ
+  !
+  user readonly
+   secret 9 AnotherEncryptedSecret456
   !
  !
 !
@@ -19,7 +22,7 @@ vpn 0
   ip address 10.0.0.1/30
   ipsec
    ike
-    pre-shared-key ThisIsMyPreSharedKey
+    pre-shared-key ascii2 ThisIsMyPreSharedKeyWithType
    !
   !
   no shutdown
