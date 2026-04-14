@@ -1,4 +1,4 @@
-Interface 1/1/1 is up, line protocol is up
+Interface Ethernet 1/1/1 is up, line protocol is up
   IPv6 is enabled, link-local address is fe80::1/64
   Global unicast address(es):
     2001:db8::1/64 [Preferred]

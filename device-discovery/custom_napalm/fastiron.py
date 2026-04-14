@@ -10,6 +10,7 @@ for structured parsing wherever templates exist; falls back to regex for command
 that have no template (IP interface, hostname extraction).
 """
 
+import ipaddress
 import logging
 import re
 
@@ -205,9 +206,15 @@ _INTF_HDR_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Matches: "ip address: 192.168.1.1/24" or "  ip address 192.168.1.1/24"
-_IP_ADDR_RE = re.compile(
+# IPv4 CIDR:  "  ip address: 192.168.1.1/24"
+_IP_ADDR_CIDR_RE = re.compile(
     r"^\s+ip\s+address[:\s]+(?P<ip>\d+\.\d+\.\d+\.\d+)/(?P<prefix>\d+)",
+    re.MULTILINE,
+)
+
+# IPv4 mask:  "  ip address: 192.168.1.1 255.255.255.0"
+_IP_ADDR_MASK_RE = re.compile(
+    r"^\s+ip\s+address[:\s]+(?P<ip>\d+\.\d+\.\d+\.\d+)\s+(?P<mask>[\d.]+)",
     re.MULTILINE,
 )
 
@@ -223,6 +230,33 @@ _IPV6_GLOBAL_RE = re.compile(
     r"^\s+(?P<ip>[0-9a-fA-F:]+)/(?P<prefix>\d+)\s+\[(?:Preferred|Deprecated)\]",
     re.MULTILINE | re.IGNORECASE,
 )
+
+# ---------------------------------------------------------------------------
+# Interface name normalisation
+# ---------------------------------------------------------------------------
+
+# Physical ethernet prefixes — strip and keep the bare port ID (e.g. "1/1/1").
+_INTF_ETH_PREFIX_RE = re.compile(
+    r"^(?:GigabitEthernet|TenGigabitEthernet|FortyGigabitEthernet|"
+    r"HundredGigabitEthernet|FastEthernet|Ethernet)\s*",
+    re.IGNORECASE,
+)
+
+
+def _normalize_intf_name(name: str) -> str:
+    """
+    Normalise an interface name to match 'show interfaces brief' keys.
+
+    FastIron 'show ip interface' headers may use long type prefixes
+    ('Ethernet 1/1/1', 'GigabitEthernet1/1/1') while 'show interfaces brief'
+    uses the bare port ID ('1/1/1').  For virtual interfaces the type and ID
+    are joined without a space ('Ve 1' → 've1', 'management 1' → 'management1').
+    """
+    stripped = _INTF_ETH_PREFIX_RE.sub("", name).strip()
+    if " " in stripped:
+        parts = stripped.split()
+        stripped = parts[0].lower() + "".join(parts[1:])
+    return stripped
 
 
 class FastIronDriver(_napalm_base.NetworkDriver):
@@ -409,25 +443,45 @@ class FastIronDriver(_napalm_base.NetworkDriver):
         return interfaces_ip
 
     def _parse_ip_interface(self, raw: str, interfaces_ip: dict) -> None:
-        """Populate interfaces_ip with IPv4 addresses from 'show ip interface'."""
+        """
+        Populate interfaces_ip with IPv4 addresses from 'show ip interface'.
+
+        Handles both CIDR ("ip address 1.2.3.4/24") and mask
+        ("ip address 1.2.3.4 255.255.255.0") notations.
+        Interface names are normalised to match 'show interfaces brief' keys.
+        """
         current_intf: str | None = None
         for line in raw.splitlines():
             m_hdr = _INTF_HDR_RE.match(line)
             if m_hdr:
-                current_intf = m_hdr.group("name")
+                current_intf = _normalize_intf_name(m_hdr.group("name"))
                 continue
             if current_intf is None:
                 continue
-            m_addr = _IP_ADDR_RE.match(line)
-            if m_addr:
+            m_cidr = _IP_ADDR_CIDR_RE.match(line)
+            if m_cidr:
                 try:
-                    prefix = int(m_addr.group("prefix"))
+                    prefix = int(m_cidr.group("prefix"))
                 except ValueError:
                     continue
                 (
                     interfaces_ip
                     .setdefault(current_intf, {})
-                    .setdefault("ipv4", {})[m_addr.group("ip")]
+                    .setdefault("ipv4", {})[m_cidr.group("ip")]
+                ) = {"prefix_length": prefix}
+                continue
+            m_mask = _IP_ADDR_MASK_RE.match(line)
+            if m_mask:
+                try:
+                    prefix = ipaddress.IPv4Network(
+                        f"0.0.0.0/{m_mask.group('mask')}", strict=False
+                    ).prefixlen
+                except ValueError:
+                    continue
+                (
+                    interfaces_ip
+                    .setdefault(current_intf, {})
+                    .setdefault("ipv4", {})[m_mask.group("ip")]
                 ) = {"prefix_length": prefix}
 
     def _parse_ipv6_interface(self, raw: str, interfaces_ip: dict) -> None:
@@ -443,7 +497,7 @@ class FastIronDriver(_napalm_base.NetworkDriver):
         for line in raw.splitlines():
             m_hdr = _INTF_HDR_RE.match(line)
             if m_hdr:
-                current_intf = m_hdr.group("name")
+                current_intf = _normalize_intf_name(m_hdr.group("name"))
                 continue
             if current_intf is None:
                 continue
