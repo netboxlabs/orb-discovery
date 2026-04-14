@@ -316,8 +316,18 @@ class AvayaERSDriver(_napalm_base.NetworkDriver):
         """Return device configuration."""
         config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
 
-        if retrieve.lower() in ("running", "all"):
-            config["running"] = self.device.send_command("show running-config")
+        retrieve = retrieve.lower()
+        running_config = ""
+        if retrieve in ("running", "startup", "all"):
+            running_config = self.device.send_command("show running-config")
+
+        if retrieve in ("running", "all"):
+            config["running"] = running_config
+
+        if retrieve in ("startup", "all"):
+            # ERS does not distinguish startup from running config; mirror the
+            # running config rather than silently returning an empty startup.
+            config["startup"] = running_config
 
         if sanitized:
             for key in ("running", "candidate", "startup"):
