@@ -59,18 +59,33 @@ _UPTIME_UNITS = (
     (r"(\d+)\s+minute", 60),
     (r"(\d+)\s+second", 1),
 )
+# Matches the HH:MM:SS component from "35 days, 07:24:53"
+_UPTIME_HMS_RE = re.compile(r"(\d+):(\d{2}):(\d{2})")
 
 
 def _parse_uptime(uptime_str: str) -> float:
     """
     Convert an ERS uptime string to total seconds.
 
-    ERS format: "0 day(s), 1 hour(s), 26 minute(s), 13 second(s)"
+    Handles two formats emitted by different ERS firmware versions:
+
+    - ``"0 day(s), 1 hour(s), 26 minute(s), 13 second(s)"`` (older firmware)
+    - ``"35 days, 07:24:53"``  (newer firmware / ntc-template capture)
     """
     seconds = 0.0
+    # Try HH:MM:SS component first (newer format)
+    hms = _UPTIME_HMS_RE.search(uptime_str)
+    if hms:
+        seconds += int(hms.group(1)) * 3600 + int(hms.group(2)) * 60 + int(hms.group(3))
+    # Days component is always a plain digit prefix (both formats)
     for pattern, factor in _UPTIME_UNITS:
         m = re.search(pattern, uptime_str, re.IGNORECASE)
         if m:
+            # Avoid double-counting hours/minutes/seconds already handled by HMS
+            if factor < 3600 and hms:
+                continue
+            if factor == 3600 and hms:
+                continue
             seconds += int(m.group(1)) * factor
     return seconds
 
@@ -346,19 +361,52 @@ class ERSDriver(_napalm_base.NetworkDriver):
 
 def _expand_port_range(token: str) -> list[str]:
     """
-    Expand a port range token into a list of individual port names.
+    Expand a VLAN port-member token into individual port name strings.
 
-    ERS VLAN port-member tokens are either single ports ("1") or dash-separated
-    ranges ("2-4").  Returns the token as-is in a one-element list if it is not
-    a valid numeric range.
+    The ntc-template returns each ``Port Members`` continuation line as one
+    token that may itself be a comma-separated list of entries.  Each entry is
+    one of:
+
+    - ``"NONE"``       → empty list
+    - ``"1/1"``        → ``["1/1"]``
+    - ``"1"``          → ``["1"]``
+    - ``"2-4"``        → ``["2", "3", "4"]``
+    - ``"1/2-8"``      → ``["1/2", "1/3", …, "1/8"]``  (same-unit range)
+    - ``"1/1,1/49,…"`` → expanded recursively for each comma-separated part
+
+    Entries that cannot be parsed are passed through as-is.
     """
-    if "-" in token:
-        start, _, end = token.partition("-")
-        try:
-            return [str(i) for i in range(int(start), int(end) + 1)]
-        except ValueError:
-            return [token]
-    return [token]
+    ports: list[str] = []
+    # Split comma-separated compound tokens first
+    for part in token.split(","):
+        part = part.strip()
+        if not part or part.upper() == "NONE":
+            continue
+        if "-" in part:
+            # May be "2-4" or "1/2-8"
+            if "/" in part:
+                # unit/port-start - port-end  e.g. "1/2-8"
+                unit, rest = part.split("/", 1)
+                if "-" in rest:
+                    p_start, _, p_end = rest.partition("-")
+                    try:
+                        ports.extend(
+                            f"{unit}/{p}"
+                            for p in range(int(p_start), int(p_end) + 1)
+                        )
+                        continue
+                    except ValueError:
+                        pass
+            else:
+                # simple "2-4"
+                start, _, end = part.partition("-")
+                try:
+                    ports.extend(str(i) for i in range(int(start), int(end) + 1))
+                    continue
+                except ValueError:
+                    pass
+        ports.append(part)
+    return ports
 
 
 def _collect_ipv4(output: str, interfaces_ip: dict) -> None:

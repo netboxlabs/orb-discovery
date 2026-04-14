@@ -1,26 +1,25 @@
-
-System Information
-
-Operation Mode:         Switch
-Size Of Stack:          1
-Base Unit:              1
-MAC Address:            00-19-69-5B-20-A1
-PoE Module FW:
-Reset Count:            0
-Last Reset Type:        Power Cycle
-Autotopology:           Disabled
-Base Unit Selection:    Disabled
-Serial #:               SDNEMF18C0007
-Operational Software:   FW:5.5 SW:7.6.3.12
-Installed software:     FW:5.5 SW:7.6.3.12
-Operational license:    Default
-Installed license:      Default
-sysObjectID:            1.3.6.1.4.1.45.3.64.1
-sysUpTime:              0 day(s), 1 hour(s), 26 minute(s), 13 second(s)
-sysNtpTime:             Thu Jan 01 00:00:00 1970
-sysServices:            72
-sysContact:
-sysName:                ERS3626GTS-A
-sysLocation:
-Stack sysAssetId:       NA
-Unit sysAssetId:        NA
+Operation Mode:        Stack, Unit # 1
+Size Of Stack:         4
+Base Unit:             1
+MAC Address:           FF-FF-FF-FF-FF-FF
+PoE Module FW:         4.1.0.4
+Reset Count:           37
+Last Reset Type:       Power Cycle
+Autotopology:          Enabled
+Base Unit Selection:   Base unit using rear-panel switch
+sysDescr:              Ethernet Routing Switch 3549GTS-PWR+
+                       HW:03       FW:5.3.0.6   SW:v5.3.0.005
+Serial #:              1XXXXXXXXXXX
+Operational Software:  FW:5.3.0.6   SW:v5.3.0.005
+Installed software:    FW:5.3.0.6   SW:v5.3.0.005
+Operational license:   Base software
+Installed license:     Base software
+sysObjectID:           1.3.6.1.4.1.45.3.80.8
+sysUpTime:             35 days, 07:24:53
+sysNtpTime:            2015-10-21 20:26:44 GMT+00:00
+sysServices:           6
+sysContact:            sysContact
+sysName:               ERS3549GTS-A
+sysLocation:           sysLocation
+Stack sysAssetId:      stackAssetID
+Unit sysAssetId:       unitAssetID
