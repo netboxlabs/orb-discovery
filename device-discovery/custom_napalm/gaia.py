@@ -28,8 +28,8 @@ _SANITIZE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"^(set\s+user\s+\S+\s+password-hash)\s+\S+", re.M | re.I), r"\1 <redacted>"),
     # set snmp community <string> read-only|read-write  (community string is before read-only)
     (re.compile(r"^(set\s+snmp\s+community)\s+\S+(\s+(?:read-only|read-write))", re.M | re.I), r"\1 <redacted>\2"),
-    # set aaa tacacs-server <x> secret <s>
-    (re.compile(r"^(set\s+aaa\s+tacacs-server\s+\S+\s+secret)\s+\S+", re.M | re.I), r"\1 <redacted>"),
+    # set aaa tacacs-servers server <ip> key <secret> ...
+    (re.compile(r"^(set\s+aaa\s+tacacs-servers\b.*?\bkey)\s+\S+", re.M | re.I), r"\1 <redacted>"),
     # set vpn ... pre-shared-secret <s>
     (re.compile(r"^(.*pre-shared-secret)\s+\S+", re.M | re.I), r"\1 <redacted>"),
 ]
