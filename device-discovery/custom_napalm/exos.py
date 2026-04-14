@@ -68,7 +68,7 @@ def _parse_uptime(uptime_str: str) -> float:
     return seconds
 
 
-class ExesDriver(_napalm_base.NetworkDriver):
+class ExosDriver(_napalm_base.NetworkDriver):
     """Extreme EXOS NAPALM driver (read-only subset for device-discovery)."""
 
     def __init__(self, hostname, username, password, timeout=60, optional_args=None):
