@@ -203,14 +203,12 @@ class NetIronDriver(_napalm_base.NetworkDriver):
             if m:
                 uptime = float(_parse_uptime(m.group(1)))
 
-        # Interface list from show interfaces brief
-        brief_out = self.device.send_command("show interfaces brief")
-        parsed_brief = parse_output(
-            platform="brocade_netiron", command="show interfaces brief", data=brief_out
+        # Interface list from show interfaces — canonical names, consistent with get_interfaces().
+        intf_out = self.device.send_command("show interfaces")
+        parsed_intfs = parse_output(
+            platform="brocade_netiron", command="show interfaces", data=intf_out
         )
-        interface_list = [
-            row["interface"] for row in parsed_brief if row.get("interface")
-        ]
+        interface_list = [row["interface"] for row in parsed_intfs if row.get("interface")]
 
         return {
             "hostname": hostname,
@@ -248,7 +246,7 @@ class NetIronDriver(_napalm_base.NetworkDriver):
             speed_raw = row.get("actualspeed", "")
             speed = _parse_speed(speed_raw) if speed_raw else 0.0
 
-            mtu_raw = row.get("l2mtubytes", "")
+            mtu_raw = row.get("l2mtubytes", "") or row.get("l3mtubytes", "")
             try:
                 mtu = int(mtu_raw) if mtu_raw else 0
             except ValueError:

@@ -7,9 +7,9 @@
   "uptime": 310925.0,
   "fqdn": "Unknown",
   "interface_list": [
-    "1/1",
-    "1/2",
-    "ve2",
-    "lb1"
+    "GigabitEthernet1/1",
+    "GigabitEthernet1/2",
+    "Ve2",
+    "Loopback1"
   ]
 }
