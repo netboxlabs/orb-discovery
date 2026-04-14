@@ -199,7 +199,9 @@ class ERSDriver(_napalm_base.NetworkDriver):
             logger.warning("Failed to parse 'show sys-info'; returning default facts")
         else:
             row = parsed[0]
-            facts["uptime"] = _parse_uptime(row.get("sys_up_time", ""))
+            uptime_str = row.get("sys_up_time", "")
+            if uptime_str:
+                facts["uptime"] = _parse_uptime(uptime_str)
             facts["hostname"] = row.get("sys_name", "Unknown") or "Unknown"
             facts["serial_number"] = row.get("serial_number", "Unknown") or "Unknown"
             facts["os_version"] = row.get("operational_software", "Unknown") or "Unknown"
