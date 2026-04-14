@@ -156,11 +156,18 @@ class ExosDriver(_napalm_base.NetworkDriver):
         # Fetch interface list separately; this command succeeds even when
         # `show version` returns nothing (e.g. on devices where the template
         # is unavailable), so we always populate interface_list.
+        # Guard against TextFSMError: on stacked devices ports are "slot:port"
+        # (e.g. "1:1"), which the ntc-template's \d+ rule cannot match and
+        # raises TextFSMError.  Return an empty list rather than crashing.
         ports_output = self.device.send_command("show ports information")
-        parsed_ports = parse_output(
-            platform="extreme_exos", command="show ports information", data=ports_output
-        )
-        interface_list = [row["interface"] for row in parsed_ports if row.get("interface")]
+        try:
+            parsed_ports = parse_output(
+                platform="extreme_exos", command="show ports information", data=ports_output
+            )
+            interface_list = [row["interface"] for row in parsed_ports if row.get("interface")]
+        except Exception:
+            logger.warning("exos: could not parse 'show ports information'; interface_list will be empty")
+            interface_list = []
 
         return {
             "hostname": hostname,
@@ -179,9 +186,13 @@ class ExosDriver(_napalm_base.NetworkDriver):
         if not output:
             return {}
 
-        parsed = parse_output(
-            platform="extreme_exos", command="show ports information detail", data=output
-        )
+        try:
+            parsed = parse_output(
+                platform="extreme_exos", command="show ports information detail", data=output
+            )
+        except Exception:
+            logger.warning("exos: could not parse 'show ports information detail'")
+            return {}
         interfaces = {}
         for row in parsed:
             port = row.get("interface", "")
@@ -292,11 +303,15 @@ class ExosDriver(_napalm_base.NetworkDriver):
 
     def _add_tagged_vlan_ports(self, vlans: dict, ports_output: str) -> None:
         """Pass 1 — ntc-template: add tagged 802.1Q port memberships to *vlans*."""
-        parsed_ports = parse_output(
-            platform="extreme_exos",
-            command="show ports information detail",
-            data=ports_output,
-        )
+        try:
+            parsed_ports = parse_output(
+                platform="extreme_exos",
+                command="show ports information detail",
+                data=ports_output,
+            )
+        except Exception:
+            logger.warning("exos: could not parse 'show ports information detail' for tagged VLANs")
+            return
         for row in parsed_ports:
             port = row.get("interface", "")
             if not port:
