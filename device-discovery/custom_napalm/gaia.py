@@ -210,9 +210,25 @@ class GaiaDriver(_napalm_base.NetworkDriver):
 
         return interfaces_ip
 
-    def get_config(self, retrieve="all", full=False, sanitized=False, format="text") -> models.ConfigDict:
+    def get_config(
+        self,
+        retrieve: str = "all",
+        full: bool = False,
+        sanitized: bool = False,
+        format: str = "text",
+    ) -> models.ConfigDict:
         """Return device configuration."""
-        raise NotImplementedError
+        config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
+
+        if retrieve in ("all", "running"):
+            config["running"] = self.device.send_command("show configuration")
+
+        if sanitized:
+            for key in ("running", "candidate", "startup"):
+                if config[key]:
+                    config[key] = _sanitize_config(config[key])
+
+        return config
 
     def get_vlans(self) -> dict:
         """Return VLAN information."""
