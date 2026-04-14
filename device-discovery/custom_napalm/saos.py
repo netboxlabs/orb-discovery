@@ -200,14 +200,20 @@ class SAOSDriver(_napalm_base.NetworkDriver):
             status_parsed = parse_output(
                 platform="ciena_saos", command="port show status", data=status_raw
             )
-            return self._build_interfaces_from_status(status_parsed, admin_map)
         except Exception:
+            status_parsed = []
             logger.warning(
                 "saos: ntc-template failed for 'port show status' "
                 "(description with spaces?); falling back to 'port show'"
             )
 
-        # Fallback: port show — has link and admin state but no description/MTU/speed
+        if status_parsed:
+            return self._build_interfaces_from_status(status_parsed, admin_map)
+
+        logger.warning("saos: 'port show status' returned no rows; falling back to 'port show'")
+
+        # Fallback: port show — has link and admin state; speed derived from Mode field.
+        # No description or MTU available via this template.
         port_raw = self.device.send_command("port show")
         try:
             port_parsed = parse_output(
