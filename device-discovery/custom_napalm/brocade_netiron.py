@@ -35,9 +35,15 @@ _ENABLE_RE = re.compile(
 #   "username <name> password <type> <hash>"
 #   "username <name> privilege <level> password <type> <hash>"
 #   "username <name> <type> <hash>"               (no 'password' keyword)
-#   "username <name> password <type> <hash> history <hash>"  (history variant)
 _USERNAME_PASSWORD_RE = re.compile(
-    r"(\busername\s+\S+(?:\s+privilege\s+\d+)?(?:\s+password)?\s+\d+)\s+\S+(?:\s+history\s+\S+)?",
+    r"(\busername\s+\S+(?:\s+privilege\s+\d+)?(?:\s+password)?\s+\d+)\s+\S+",
+    re.IGNORECASE,
+)
+
+# "username ... <hash> history <hash>" — redacts the history hash separately so
+# the 'history' keyword is preserved in the sanitized output.
+_USERNAME_HISTORY_RE = re.compile(
+    r"(\busername\s+\S+.*?\bhistory)\s+\S+",
     re.IGNORECASE,
 )
 
@@ -55,6 +61,7 @@ _VRRP_AUTH_RE = re.compile(
 def _sanitize_config(text: str) -> str:
     text = _ENABLE_RE.sub(r"\1 <redacted>", text)
     text = _USERNAME_PASSWORD_RE.sub(r"\1 <redacted>", text)
+    text = _USERNAME_HISTORY_RE.sub(r"\1 <redacted>", text)
     text = _SNMP_COMMUNITY_RE.sub(r"\1 <redacted>", text)
     text = _VRRP_AUTH_RE.sub(r"\1 <redacted>", text)
     return text
