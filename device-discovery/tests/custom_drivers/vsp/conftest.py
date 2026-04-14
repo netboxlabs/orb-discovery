@@ -1,4 +1,5 @@
-"""Pytest config for VSP driver tests.
+"""
+Pytest config for VSP driver tests.
 
 Parametrizes test scenarios from sub-folders of mock_data/<test_method>/.
 """
