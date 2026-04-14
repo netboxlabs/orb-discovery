@@ -231,5 +231,5 @@ class GaiaDriver(_napalm_base.NetworkDriver):
         return config
 
     def get_vlans(self) -> dict:
-        """Return VLAN information."""
-        raise NotImplementedError
+        """Check Point Gaia does not expose a traditional VLAN table via CLI."""
+        return {}
