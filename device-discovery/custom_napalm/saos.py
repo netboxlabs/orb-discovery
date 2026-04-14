@@ -216,12 +216,13 @@ class SAOSDriver(_napalm_base.NetworkDriver):
             )
 
         if status_parsed:
-            return self._build_interfaces_from_status(status_parsed, admin_map)
+            interfaces = self._build_interfaces_from_status(status_parsed, admin_map)
+        else:
+            logger.warning("saos: 'port show status' returned no rows; falling back to 'port show'")
+            interfaces = {}
 
-        logger.warning("saos: 'port show status' returned no rows; falling back to 'port show'")
-
-        # Fallback: port show — has link and admin state; speed derived from Mode field.
-        # No description or MTU available via this template.
+        # Always run port show to catch interfaces absent from port show status
+        # (e.g. LAG/aggregation ports that SAOS omits from the status table).
         port_raw = self.device.send_command("port show")
         try:
             port_parsed = parse_output(
@@ -229,12 +230,11 @@ class SAOSDriver(_napalm_base.NetworkDriver):
             )
         except Exception:
             logger.warning("saos: ntc-template failed for 'port show'")
-            return {}
+            port_parsed = []
 
-        interfaces: dict = {}
         for row in port_parsed:
             name = row.get("name", "")
-            if not name:
+            if not name or name in interfaces:
                 continue
             is_up = row.get("link", "").lower() == "up"
             is_enabled = admin_map.get(name, row.get("admin_link", "").lower() == "ena")
@@ -261,9 +261,9 @@ class SAOSDriver(_napalm_base.NetworkDriver):
                 continue
 
             is_up = row.get("link", "").lower() == "up"
-            # Fall back to link state when admin_map is empty (e.g. ethernet-config
-            # parse failed) — better than unconditionally marking every port enabled.
-            is_enabled = admin_map.get(name, is_up)
+            # Default to True when admin state is unknown: admin-up-but-link-down
+            # ports must not be reported as disabled. Link state ≠ admin state.
+            is_enabled = admin_map.get(name, True)
 
             speed_raw = row.get("speed_duplex", "")
             speed = _speed_to_mbps(speed_raw)
