@@ -320,8 +320,25 @@ class FTOSDriver(_napalm_base.NetworkDriver):
         raw = self.device.send_command("show interfaces")
         return _parse_interfaces(raw)
 
+    def _resolve_bare_ipv4(self, bare: dict, interfaces_ip: dict) -> None:
+        """Resolve prefix lengths for bare IPv4 addresses using 'show running-config'."""
+        cfg_raw = self.device.send_command("show running-config")
+        prefix_map: dict[str, int] = {}
+        for m in re.finditer(r"\bip\s+address\s+(\d+\.\d+\.\d+\.\d+)/(\d+)", cfg_raw):
+            prefix_map[m.group(1)] = int(m.group(2))
+        for intf, addr in bare.items():
+            if addr in prefix_map:
+                interfaces_ip.setdefault(intf, {}).setdefault("ipv4", {})[addr] = {
+                    "prefix_length": prefix_map[addr]
+                }
+
     def _ipv4_from_brief(self, interfaces_ip: dict) -> None:
-        """Populate *interfaces_ip* with IPv4 addresses from 'show ip interface brief'."""
+        """
+        Populate *interfaces_ip* with IPv4 addresses from 'show ip interface brief'.
+
+        Rows that include a CIDR prefix (the common case) are stored directly.
+        Rows with a bare IP (no prefix) are resolved against 'show running-config'.
+        """
         raw = self.device.send_command("show ip interface brief")
         try:
             parsed = parse_output(
@@ -330,6 +347,7 @@ class FTOSDriver(_napalm_base.NetworkDriver):
         except Exception:
             logger.debug("Failed to parse 'show ip interface brief' output", exc_info=True)
             return
+        bare: dict[str, str] = {}
         for row in parsed:
             intf = row.get("interface", "").strip()
             ip_addr = row.get("ip_address", "").strip()
@@ -341,11 +359,13 @@ class FTOSDriver(_napalm_base.NetworkDriver):
                     prefix = int(prefix_str)
                 except ValueError:
                     continue
+                interfaces_ip.setdefault(intf, {}).setdefault("ipv4", {})[addr] = {
+                    "prefix_length": prefix
+                }
             else:
-                continue  # skip entries where prefix length cannot be determined
-            interfaces_ip.setdefault(intf, {}).setdefault("ipv4", {})[addr] = {
-                "prefix_length": prefix
-            }
+                bare[intf] = ip_addr
+        if bare:
+            self._resolve_bare_ipv4(bare, interfaces_ip)
 
     def _ipv6_from_brief(self, interfaces_ip: dict) -> None:
         """Populate *interfaces_ip* with IPv6 addresses from 'show ipv6 interface brief'."""
