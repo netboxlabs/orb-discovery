@@ -8,6 +8,8 @@ enable super-user-password $1$xyz$superuserhash
 !
 username admin password 7 encryptedpassword123
 username operator privilege 5 password 7 operatorhash456
+username viewer 8 viewerencrypted789
+username audit privilege 1 password 8 audithash123 history prevhash456
 !
 snmp-server community public ro
 !

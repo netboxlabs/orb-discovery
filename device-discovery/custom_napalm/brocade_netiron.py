@@ -31,10 +31,14 @@ _ENABLE_RE = re.compile(
     r"(\benable\s+(?:\d+|super-user-password))\s+\S+", re.IGNORECASE
 )
 
-# "username <name> password <type> <hash>"
-# "username <name> privilege <level> password <type> <hash>"
+# Covers all common NetIron username credential forms:
+#   "username <name> password <type> <hash>"
+#   "username <name> privilege <level> password <type> <hash>"
+#   "username <name> <type> <hash>"               (no 'password' keyword)
+#   "username <name> password <type> <hash> history <hash>"  (history variant)
 _USERNAME_PASSWORD_RE = re.compile(
-    r"(\busername\s+\S+(?:\s+privilege\s+\d+)?\s+password\s+\d+)\s+\S+", re.IGNORECASE
+    r"(\busername\s+\S+(?:\s+privilege\s+\d+)?(?:\s+password)?\s+\d+)\s+\S+(?:\s+history\s+\S+)?",
+    re.IGNORECASE,
 )
 
 # "snmp-server community <string> ..."
@@ -162,8 +166,9 @@ class NetIronDriver(_napalm_base.NetworkDriver):
         Return general device facts.
 
         Parses ``show version`` with regex (no ntc-template exists for this
-        command on brocade_netiron) and ``show interfaces brief`` via
-        ntc-templates for the interface list.
+        command on brocade_netiron) and ``show interfaces`` via ntc-templates
+        for the interface list, giving canonical names consistent with
+        ``get_interfaces()``.
         """
         # Default hostname to the connection target; overridden if show version
         # contains a "hostname <name>" line (not all NetIron variants include it).
