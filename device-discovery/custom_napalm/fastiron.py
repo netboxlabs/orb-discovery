@@ -39,9 +39,11 @@ _USERNAME_PWD_RE = re.compile(
     re.IGNORECASE,
 )
 
-# "snmp-server community <string> ..."
+# "snmp-server community [0|1] <string> ..."
+# The optional leading digit is an encryption-level marker (0=clear, 1=encrypted);
+# redact it together with the community string so neither leaks.
 _SNMP_COMMUNITY_RE = re.compile(
-    r"(snmp-server\s+community)\s+\S+",
+    r"(snmp-server\s+community)\s+(?:\d+\s+)?\S+",
     re.IGNORECASE,
 )
 
@@ -404,9 +406,8 @@ class FastIronDriver(_napalm_base.NetworkDriver):
                 continue
 
             linkstate = row.get("linkstate", "").lower()
-            portstate = row.get("portstate", "").lower()
 
-            is_up = linkstate == "up" and portstate not in ("none", "disabled", "")
+            is_up = linkstate == "up"
             is_enabled = linkstate not in ("disable", "err-dis")
 
             mac_raw = row.get("mac", "")
