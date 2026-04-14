@@ -143,9 +143,13 @@ class SAOSDriver(_napalm_base.NetworkDriver):
         """Return general device facts."""
         # --- software version ---
         sw_raw = self.device.send_command("software show")
-        sw_parsed = parse_output(
-            platform="ciena_saos", command="software show", data=sw_raw
-        )
+        try:
+            sw_parsed = parse_output(
+                platform="ciena_saos", command="software show", data=sw_raw
+            )
+        except Exception:
+            logger.warning("saos: ntc-template failed for 'software show'")
+            sw_parsed = []
         os_version = sw_parsed[0].get("version_running", "Unknown") if sw_parsed else "Unknown"
 
         # --- chassis info (hostname, model, serial) via regex ---
@@ -156,10 +160,14 @@ class SAOSDriver(_napalm_base.NetworkDriver):
 
         # --- interface list ---
         port_raw = self.device.send_command("port show")
-        port_parsed = parse_output(
-            platform="ciena_saos", command="port show", data=port_raw
-        )
-        interface_list = [r["name"] for r in port_parsed if r.get("name")]
+        try:
+            port_parsed = parse_output(
+                platform="ciena_saos", command="port show", data=port_raw
+            )
+            interface_list = [r["name"] for r in port_parsed if r.get("name")]
+        except Exception:
+            logger.warning("saos: ntc-template failed for 'port show'")
+            interface_list = []
 
         return {
             "hostname": hostname,
