@@ -30,7 +30,7 @@
     ]
   },
   "40": {
-    "name": "\"Data Center Core\"",
+    "name": "Data Center Core",
     "interfaces": [
       "1/1/1"
     ]
@@ -40,6 +40,14 @@
     "interfaces": [
       "1/1/1",
       "1/2/4:1"
+    ]
+  },
+  "60": {
+    "name": "LAGS",
+    "interfaces": [
+      "lag15",
+      "lag16",
+      "lag17"
     ]
   }
 }

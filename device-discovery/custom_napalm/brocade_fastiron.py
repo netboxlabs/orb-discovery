@@ -176,12 +176,24 @@ def _split_port_list(port_str: str) -> list[str]:
                 i += 1
             continue
         if tok == "to":
-            # Range: previous port is the start; next token is the end
-            if ports and i + 1 < len(tokens) and _PORT_ID_RE.match(tokens[i + 1]):
+            # Range: previous port is the start; next token is the end.
+            if ports and i + 1 < len(tokens):
                 start = ports.pop()
-                ports.extend(_expand_port_range(start, tokens[i + 1]))
-                i += 2
-                continue
+                end_tok = tokens[i + 1]
+                # Prefixed range: "lag 15 to 16" → start="lag15", end_tok="16"
+                # Re-apply the prefix to every member of the expanded range.
+                m_prefix = re.match(r"^([a-zA-Z]+)(\d+)$", start)
+                if m_prefix and re.match(r"^\d+$", end_tok):
+                    pfx = m_prefix.group(1)
+                    s_num, e_num = int(m_prefix.group(2)), int(end_tok)
+                    ports.extend(f"{pfx}{n}" for n in range(s_num, e_num + 1))
+                    i += 2
+                    continue
+                if _PORT_ID_RE.match(end_tok):
+                    ports.extend(_expand_port_range(start, end_tok))
+                    i += 2
+                    continue
+                ports.append(start)  # restore if no valid range
             i += 1
             continue
         if _PORT_ID_RE.match(tokens[i]):
@@ -561,6 +573,8 @@ class BrocadeFastIronDriver(_napalm_base.NetworkDriver):
             if m_hdr:
                 current_id = m_hdr.group("id")
                 name = (m_hdr.group("name") or current_id).strip()
+                if len(name) >= 2 and name[0] == '"' and name[-1] == '"':
+                    name = name[1:-1]
                 vlans.setdefault(current_id, {"name": name, "interfaces": []})
                 continue
 
