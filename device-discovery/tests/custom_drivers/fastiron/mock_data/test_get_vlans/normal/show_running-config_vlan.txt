@@ -12,3 +12,6 @@ vlan 30 name TRUNK
  tagged lag 1
  untagged ve 10
 !
+vlan 40 name "Data Center Core"
+ tagged ethe 1/1/1
+!

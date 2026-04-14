@@ -1,4 +1,6 @@
-Interface 1/1/1
-  ipv6 address 2001:db8::1/64
+Interface 1/1/1 is up, line protocol is up
+  IPv6 is enabled, link-local address is fe80::1/64
+  Global unicast address(es):
+    2001:db8::1/64 [Preferred]
 Interface mgmt1
   ipv6 address fe80::1/64

@@ -28,5 +28,11 @@
       "lag1",
       "ve10"
     ]
+  },
+  "40": {
+    "name": "\"Data Center Core\"",
+    "interfaces": [
+      "1/1/1"
+    ]
   }
 }

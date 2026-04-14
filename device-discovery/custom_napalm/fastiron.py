@@ -189,7 +189,8 @@ def _split_port_list(port_str: str) -> list[str]:
 # VLAN config regex
 # ---------------------------------------------------------------------------
 
-_VLAN_HDR_RE = re.compile(r"^vlan\s+(?P<id>\d+)(?:\s+name\s+(?P<name>\S+))?")
+# VLAN name may be multi-word (or quoted with spaces) — capture rest of line.
+_VLAN_HDR_RE = re.compile(r"^vlan\s+(?P<id>\d+)(?:\s+name\s+(?P<name>.+))?")
 _TAGGED_RE = re.compile(r"^\s+tagged\s+(?P<ports>.+)", re.IGNORECASE)
 _UNTAGGED_RE = re.compile(r"^\s+untagged\s+(?P<ports>.+)", re.IGNORECASE)
 
@@ -197,12 +198,11 @@ _UNTAGGED_RE = re.compile(r"^\s+untagged\s+(?P<ports>.+)", re.IGNORECASE)
 # IP interface regex
 # ---------------------------------------------------------------------------
 
-# Matches "Interface <name>" where <name> may be a single token (1/1/1) or
-# a multi-word identifier (Ve 1, management 1, Loopback 1).  The full
-# remainder of the line is captured so that no part of the interface name
-# is silently dropped.
+# Matches "Interface <name>" — stops before the " is <state>" status suffix
+# that some IronWare versions append (e.g. "Interface Ethernet 1/1/1 is up").
 _INTF_HDR_RE = re.compile(
-    r"^Interface\s+(?P<name>\S+(?:\s+\S+)*)",
+    r"^Interface\s+(?P<name>.+?)(?:\s+is\s+|\s*$)",
+    re.IGNORECASE,
 )
 
 # Matches: "ip address: 192.168.1.1/24" or "  ip address 192.168.1.1/24"
@@ -211,10 +211,17 @@ _IP_ADDR_RE = re.compile(
     re.MULTILINE,
 )
 
-# IPv6: "  ipv6 address 2001:db8::1/64"
+# IPv6 format A (config-style): "  ipv6 address 2001:db8::1/64"
 _IPV6_ADDR_RE = re.compile(
     r"^\s+ipv6\s+address\s+(?P<ip>[0-9a-fA-F:]+)/(?P<prefix>\d+)",
     re.MULTILINE,
+)
+
+# IPv6 format B (detail block): "  2001:db8::1/64 [Preferred]"
+# Appears under "Global unicast address(es):" in standard IronWare output.
+_IPV6_GLOBAL_RE = re.compile(
+    r"^\s+(?P<ip>[0-9a-fA-F:]+)/(?P<prefix>\d+)\s+\[(?:Preferred|Deprecated)\]",
+    re.MULTILINE | re.IGNORECASE,
 )
 
 
@@ -424,7 +431,14 @@ class FastIronDriver(_napalm_base.NetworkDriver):
                 ) = {"prefix_length": prefix}
 
     def _parse_ipv6_interface(self, raw: str, interfaces_ip: dict) -> None:
-        """Populate interfaces_ip with IPv6 addresses from 'show ipv6 interface'."""
+        """
+        Populate interfaces_ip with IPv6 addresses from 'show ipv6 interface'.
+
+        Supports two IronWare output formats:
+        - Format A (config-style): "  ipv6 address 2001:db8::1/64"
+        - Format B (detail block): "  2001:db8::1/64 [Preferred]"
+          (appears under "Global unicast address(es):" in standard IronWare output)
+        """
         current_intf: str | None = None
         for line in raw.splitlines():
             m_hdr = _INTF_HDR_RE.match(line)
@@ -433,7 +447,7 @@ class FastIronDriver(_napalm_base.NetworkDriver):
                 continue
             if current_intf is None:
                 continue
-            m_addr = _IPV6_ADDR_RE.match(line)
+            m_addr = _IPV6_ADDR_RE.match(line) or _IPV6_GLOBAL_RE.match(line)
             if m_addr:
                 try:
                     prefix = int(m_addr.group("prefix"))
