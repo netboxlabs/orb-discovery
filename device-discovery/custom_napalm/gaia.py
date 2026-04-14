@@ -188,7 +188,7 @@ class GaiaDriver(_napalm_base.NetworkDriver):
         parsed = parse_output(platform="checkpoint_gaia", command="show interfaces all", data=raw)
 
         # Build IPv6 prefix map from running config:
-        # "set interface <name> ipv6-address <addr>/<prefix>"
+        # "set interface <name> ipv6-address <addr> mask-length <len>"
         ipv6_prefix_map: dict[str, dict[str, int]] = {}
         config_raw = self.device.send_command("show configuration")
         for m in _IPV6_CFG_RE.finditer(config_raw):
