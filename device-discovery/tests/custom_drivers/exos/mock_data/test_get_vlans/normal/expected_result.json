@@ -1,7 +1,10 @@
 {
   "1": {
     "name": "Default",
-    "interfaces": []
+    "interfaces": [
+      "1",
+      "2"
+    ]
   },
   "4095": {
     "name": "Mgmt",

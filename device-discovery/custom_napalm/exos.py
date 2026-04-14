@@ -44,6 +44,15 @@ def _sanitize_config(text: str) -> str:
     return text
 
 
+# --- VLAN parsing helpers -------------------------------------------------- #
+# Split raw "show ports information detail" output into per-port sections.
+_PORT_SECTION_RE = re.compile(r"(?=^Port:\s*\d+)", re.M)
+# Capture the port number from the opening line of a section.
+_PORT_NUM_RE = re.compile(r"^Port:\s*(\d+)", re.M)
+# Capture the Internal Tag (untagged/native VLAN ID) from a VLAN cfg entry.
+# Matches: "Name: Default, Internal Tag = 1, MAC-limit = ..."
+_INTERNAL_TAG_RE = re.compile(r"Internal\s+Tag\s*=\s*(\d+)")
+
 # --- uptime helpers -------------------------------------------------------- #
 _HOUR_SECONDS = 3_600
 _DAY_SECONDS = 24 * _HOUR_SECONDS
@@ -210,7 +219,11 @@ class ExosDriver(_napalm_base.NetworkDriver):
                 try:
                     prefix_len = int(subnet.lstrip("/"))
                 except (ValueError, AttributeError):
-                    prefix_len = -1
+                    # Skip entries whose subnet token cannot be parsed; storing
+                    # prefix_length=-1 would cause ip_network() to raise ValueError
+                    # in the downstream translate layer.
+                    logger.warning("exos: skipping IP %s on %s — unparseable subnet %r", ip, intf, subnet)
+                    continue
                 interfaces_ip.setdefault(intf, {}).setdefault("ipv4", {})[ip] = {
                     "prefix_length": prefix_len
                 }
@@ -255,17 +268,34 @@ class ExosDriver(_napalm_base.NetworkDriver):
 
         if vlans:
             ports_output = self.device.send_command("show ports information detail")
-            parsed_ports = parse_output(
-                platform="extreme_exos",
-                command="show ports information detail",
-                data=ports_output,
-            )
-            for row in parsed_ports:
-                port = row.get("interface", "")
-                if not port:
-                    continue
-                for vid in row.get("vlan_id", []):
-                    if vid in vlans and port not in vlans[vid]["interfaces"]:
-                        vlans[vid]["interfaces"].append(port)
+            self._add_tagged_vlan_ports(vlans, ports_output)
+            self._add_untagged_vlan_ports(vlans, ports_output)
 
         return vlans
+
+    def _add_tagged_vlan_ports(self, vlans: dict, ports_output: str) -> None:
+        """Pass 1 — ntc-template: add tagged 802.1Q port memberships to *vlans*."""
+        parsed_ports = parse_output(
+            platform="extreme_exos",
+            command="show ports information detail",
+            data=ports_output,
+        )
+        for row in parsed_ports:
+            port = row.get("interface", "")
+            if not port:
+                continue
+            for vid in row.get("vlan_id", []):
+                if vid in vlans and port not in vlans[vid]["interfaces"]:
+                    vlans[vid]["interfaces"].append(port)
+
+    def _add_untagged_vlan_ports(self, vlans: dict, ports_output: str) -> None:
+        """Pass 2 — regex: add untagged/native VLAN memberships via Internal Tag lines."""
+        for section in _PORT_SECTION_RE.split(ports_output):
+            port_m = _PORT_NUM_RE.search(section)
+            if not port_m:
+                continue
+            port = port_m.group(1)
+            for tag_m in _INTERNAL_TAG_RE.finditer(section):
+                vid = tag_m.group(1)
+                if vid in vlans and port not in vlans[vid]["interfaces"]:
+                    vlans[vid]["interfaces"].append(port)
