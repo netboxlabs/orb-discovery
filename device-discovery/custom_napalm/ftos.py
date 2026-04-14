@@ -34,8 +34,8 @@ _PASSWORD_RE = re.compile(
     re.IGNORECASE,
 )
 
-# "enable secret <hash>"
-_SECRET_RE = re.compile(r"(enable\s+secret)\s+\S+", re.IGNORECASE)
+# "enable secret [<N>] <hash>" — encryption-type digit is optional, same as password.
+_SECRET_RE = re.compile(r"(enable\s+secret)(?:\s+\d+)?\s+\S+", re.IGNORECASE)
 
 # "snmp-server community <string> ..." — redact the community string token only.
 # Anchored after the keyword so downstream access-list names are not affected.
