@@ -46,9 +46,10 @@ def _sanitize_config(text: str) -> str:
 
 # --- VLAN parsing helpers -------------------------------------------------- #
 # Split raw "show ports information detail" output into per-port sections.
-_PORT_SECTION_RE = re.compile(r"(?=^Port:\s*\d+)", re.M)
-# Capture the port number from the opening line of a section.
-_PORT_NUM_RE = re.compile(r"^Port:\s*(\d+)", re.M)
+# Matches both standalone ports (e.g. "1") and slot-qualified stack ports (e.g. "1:1").
+_PORT_SECTION_RE = re.compile(r"(?=^Port:\s*[\d:]+)", re.M)
+# Capture the full port identifier from the opening line of a section.
+_PORT_NUM_RE = re.compile(r"^Port:\s*([\d:]+)", re.M)
 # Capture the Internal Tag (untagged/native VLAN ID) from a VLAN cfg entry.
 # Matches: "Name: Default, Internal Tag = 1, MAC-limit = ..."
 _INTERNAL_TAG_RE = re.compile(r"Internal\s+Tag\s*=\s*(\d+)")
@@ -139,8 +140,11 @@ class ExosDriver(_napalm_base.NetworkDriver):
             if m:
                 os_version = m.group(1)
 
-            # Serial number embedded in the Switch line: e.g. "(800472-00-14)"
+            # Serial number: parenthesized form "(800472-00-14)" takes priority;
+            # fall back to bare form "800615-00-08" (common on stacked/chassis output).
             m = re.search(r"\((\d{6}-\d{2}-\d+)\)", ver_output)
+            if not m:
+                m = re.search(r"\b(\d{6}-\d{2}-\d+)\b", ver_output)
             if m:
                 serial_number = m.group(1)
 
@@ -207,15 +211,21 @@ class ExosDriver(_napalm_base.NetworkDriver):
         )
         # The ntc-template emits one aggregated row with list-valued fields
         # (INTERFACE, IP, SUBNET are all List values in a single record).
-        # We iterate over all rows defensively in case a future template version
-        # emits one row per interface instead.
+        # If a future template version emits one row per interface, those fields
+        # will be plain strings; zip() over strings iterates character-by-character,
+        # so we normalise scalars to single-element lists before zipping.
         interfaces_ip: dict = {}
         for row in parsed:
-            for intf, ip, subnet in zip(
-                row.get("interface", []),
-                row.get("ip", []),
-                row.get("subnet", []),
-            ):
+            interfaces = row.get("interface", [])
+            ips = row.get("ip", [])
+            subnets = row.get("subnet", [])
+            if not isinstance(interfaces, (list, tuple)):
+                interfaces = [interfaces]
+            if not isinstance(ips, (list, tuple)):
+                ips = [ips]
+            if not isinstance(subnets, (list, tuple)):
+                subnets = [subnets]
+            for intf, ip, subnet in zip(interfaces, ips, subnets):
                 try:
                     prefix_len = int(subnet.lstrip("/"))
                 except (ValueError, AttributeError):
@@ -239,8 +249,15 @@ class ExosDriver(_napalm_base.NetworkDriver):
         """Return device configuration."""
         config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
 
-        if retrieve in ("all", "running"):
-            config["running"] = self.device.send_command("show configuration")
+        # EXOS has no distinct startup configuration; "show configuration" outputs
+        # the effective saved config. Populate both running and startup from the same
+        # command to avoid emitting empty startup data when startup capture is enabled.
+        if retrieve in ("all", "running", "startup"):
+            config_text = self.device.send_command("show configuration")
+            if retrieve in ("all", "running"):
+                config["running"] = config_text
+            if retrieve in ("all", "startup"):
+                config["startup"] = config_text
 
         if sanitized:
             for key in ("running", "candidate", "startup"):

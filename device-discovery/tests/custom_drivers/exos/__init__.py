@@ -1,1 +1,1 @@
-"""Unit tests for the Extreme EXOS (exes) custom NAPALM driver."""
+"""Unit tests for the Extreme EXOS (exos) custom NAPALM driver."""
