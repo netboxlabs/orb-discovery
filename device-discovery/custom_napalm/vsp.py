@@ -15,7 +15,6 @@ same VOSS (Virtualized OS Software) CLI, so the Netmiko device type is
 
 import logging
 import re
-import socket
 
 import napalm.base as _napalm_base
 from napalm.base import models
@@ -43,6 +42,8 @@ _SNMP_COMMUNITY_RE = re.compile(
     r'(snmp-server\s+community)\s+"[^"]*"',
     re.IGNORECASE,
 )
+
+
 def _sanitize_config(text: str) -> str:
     text = _USERNAME_PASSWORD_RE.sub(r"\1 <redacted>", text)
     text = _PASSWORD_RE.sub(r"\1<redacted>", text)
@@ -200,8 +201,9 @@ def _parse_interfaces_ip(output: str) -> dict:
 # VLAN parsing  (show vlan)
 # ---------------------------------------------------------------------------
 # Matches rows: <vlan_id> <name> <status> <type> [mstp_instance]
+# Non-greedy capture for name allows space-separated VLAN names.
 _VLAN_ROW_RE = re.compile(
-    r"^(\d+)\s+(\S+)\s+(?:Active|Suspend)\s+\S+",
+    r"^(\d+)\s+(.+?)\s+(?:Active|Suspend)\s+\S+",
     re.MULTILINE,
 )
 
