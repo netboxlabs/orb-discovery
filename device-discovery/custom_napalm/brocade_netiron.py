@@ -25,12 +25,16 @@ logger = logging.getLogger(__name__)
 # Config sanitization
 # ---------------------------------------------------------------------------
 
-# "enable <level> <hash>" — level is one or more digits
-_ENABLE_RE = re.compile(r"(\benable\s+\d+)\s+\S+", re.IGNORECASE)
+# "enable <level> <hash>" — numeric level (0, 1, 2, ...)
+# "enable super-user-password <hash>" — non-numeric ICX/NetIron form
+_ENABLE_RE = re.compile(
+    r"(\benable\s+(?:\d+|super-user-password))\s+\S+", re.IGNORECASE
+)
 
 # "username <name> password <type> <hash>"
+# "username <name> privilege <level> password <type> <hash>"
 _USERNAME_PASSWORD_RE = re.compile(
-    r"(\busername\s+\S+\s+password\s+\d+)\s+\S+", re.IGNORECASE
+    r"(\busername\s+\S+(?:\s+privilege\s+\d+)?\s+password\s+\d+)\s+\S+", re.IGNORECASE
 )
 
 # "snmp-server community <string> ..."

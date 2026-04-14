@@ -4,8 +4,10 @@
 hostname netiron-core-1
 !
 enable 0 $1$abcd$hashedpassword
+enable super-user-password $1$xyz$superuserhash
 !
 username admin password 7 encryptedpassword123
+username operator privilege 5 password 7 operatorhash456
 !
 snmp-server community public ro
 !
