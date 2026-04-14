@@ -313,6 +313,7 @@ class VSPDriver(_napalm_base.NetworkDriver):
         self._facts_from_sys_info(facts)
         self._facts_from_software(facts)
 
+        seen: set[str] = set()
         for cmd in (
             "show interfaces GigabitEthernet all",
             "show interfaces 10GigabitEthernet all",
@@ -320,7 +321,8 @@ class VSPDriver(_napalm_base.NetworkDriver):
             output = self.device.send_command(cmd)
             for port_m in _INTF_PORT_RE.finditer(output or ""):
                 port = port_m.group(1)
-                if port not in facts["interface_list"]:
+                if port not in seen:
+                    seen.add(port)
                     facts["interface_list"].append(port)
 
         return facts
@@ -363,11 +365,12 @@ class VSPDriver(_napalm_base.NetworkDriver):
         """
         config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
 
-        if retrieve.lower() in ("running", "startup", "all"):
+        retrieve = retrieve.lower()
+        if retrieve in ("running", "startup", "all"):
             config_text = self.device.send_command("show running-config")
-            if retrieve.lower() in ("running", "all"):
+            if retrieve in ("running", "all"):
                 config["running"] = config_text
-            if retrieve.lower() in ("startup", "all"):
+            if retrieve in ("startup", "all"):
                 config["startup"] = config_text
 
         if sanitized:
