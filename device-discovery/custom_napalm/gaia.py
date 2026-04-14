@@ -178,7 +178,37 @@ class GaiaDriver(_napalm_base.NetworkDriver):
 
     def get_interfaces_ip(self) -> dict:
         """Return IP addresses per interface."""
-        raise NotImplementedError
+        raw = self.device.send_command("show interfaces all")
+        parsed = parse_output(platform="checkpoint_gaia", command="show interfaces all", data=raw)
+
+        interfaces_ip: dict = {}
+        _NOT_CONFIGURED = {"not configured", ""}
+
+        for row in parsed:
+            intf = row.get("interface", "")
+            if not intf:
+                continue
+
+            # IPv4 — field contains CIDR e.g. "2.2.2.2/29"
+            ipv4_cidr = row.get("ipv4_address", "")
+            if ipv4_cidr and ipv4_cidr.lower() not in _NOT_CONFIGURED and "/" in ipv4_cidr:
+                try:
+                    ip, prefix_str = ipv4_cidr.split("/")
+                    interfaces_ip.setdefault(intf, {}).setdefault("ipv4", {})[ip] = {
+                        "prefix_length": int(prefix_str)
+                    }
+                except (ValueError, AttributeError):
+                    pass
+
+            # IPv6 — field contains bare address (no prefix in this template)
+            ipv6_addr = row.get("ipv6_address", "")
+            if ipv6_addr and ipv6_addr.lower() not in _NOT_CONFIGURED:
+                ipv6_prefix = int(row.get("ipv6_ll_mask", "128") or "128")
+                interfaces_ip.setdefault(intf, {}).setdefault("ipv6", {})[ipv6_addr] = {
+                    "prefix_length": ipv6_prefix
+                }
+
+        return interfaces_ip
 
     def get_config(self, retrieve="all", full=False, sanitized=False, format="text") -> models.ConfigDict:
         """Return device configuration."""
