@@ -58,7 +58,7 @@ _INTERNAL_TAG_RE = re.compile(r"Internal\s+Tag\s*=\s*(\d+)")
 # Used when ntc-template raises TextFSMError on stacked/chassis port IDs.
 _PORT_ADMIN_RE = re.compile(r"Admin\s+State\s*:\s*(\S+)", re.IGNORECASE)
 _PORT_LINK_RE = re.compile(r"Link\s+State\s*:\s*(\S+)", re.IGNORECASE)
-_PORT_DESC_RE = re.compile(r"Display\s+String\s*:\s*(.*)", re.IGNORECASE)
+_PORT_DESC_RE = re.compile(r"Description\s+String\s*:\s*\"?(.*?)\"?\s*$", re.IGNORECASE | re.M)
 _PORT_VLANID_RE = re.compile(r"Port-specific\s+VLAN\s+ID\s*:\s*(\d+)", re.IGNORECASE)
 
 
