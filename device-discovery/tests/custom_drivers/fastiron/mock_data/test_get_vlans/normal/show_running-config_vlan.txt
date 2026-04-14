@@ -8,3 +8,7 @@ vlan 10 name MANAGEMENT
 vlan 20 name SERVERS
  tagged ethe 1/1/1 to 1/1/4
 !
+vlan 30 name TRUNK
+ tagged lag 1
+ untagged ve 10
+!

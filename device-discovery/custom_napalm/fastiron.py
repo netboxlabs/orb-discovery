@@ -111,8 +111,12 @@ def _parse_speed(speed_str: str) -> float:
 # Port list helpers
 # ---------------------------------------------------------------------------
 
-# Tokens that appear in FastIron tagged/untagged port strings but are not port IDs.
-_NON_PORT_TOKENS = frozenset({"ethe", "ethernet", "lag", "ve"})
+# Tokens that introduce a physical port ID (the next token is the bare port).
+_ETHE_TOKENS = frozenset({"ethe", "ethernet"})
+
+# Tokens that form a named interface together with the following numeric ID.
+# e.g. "lag 10" → "lag10", "ve 555" → "ve555"
+_PREFIX_TOKENS = frozenset({"lag", "ve"})
 
 _PORT_ID_RE = re.compile(r"^\d+(?:/\d+)*$")
 
@@ -155,8 +159,16 @@ def _split_port_list(port_str: str) -> list[str]:
     i = 0
     while i < len(tokens):
         tok = tokens[i].lower()
-        if tok in _NON_PORT_TOKENS:
+        if tok in _ETHE_TOKENS:
             i += 1
+            continue
+        if tok in _PREFIX_TOKENS:
+            # Combine with next token: "lag 10" → "lag10", "ve 555" → "ve555"
+            if i + 1 < len(tokens):
+                ports.append(f"{tok}{tokens[i + 1]}")
+                i += 2
+            else:
+                i += 1
             continue
         if tok == "to":
             # Range: previous port is the start; next token is the end
@@ -172,6 +184,14 @@ def _split_port_list(port_str: str) -> list[str]:
         i += 1
     return ports
 
+
+# ---------------------------------------------------------------------------
+# VLAN config regex
+# ---------------------------------------------------------------------------
+
+_VLAN_HDR_RE = re.compile(r"^vlan\s+(?P<id>\d+)(?:\s+name\s+(?P<name>\S+))?")
+_TAGGED_RE = re.compile(r"^\s+tagged\s+(?P<ports>.+)", re.IGNORECASE)
+_UNTAGGED_RE = re.compile(r"^\s+untagged\s+(?P<ports>.+)", re.IGNORECASE)
 
 # ---------------------------------------------------------------------------
 # IP interface regex
@@ -451,36 +471,32 @@ class FastIronDriver(_napalm_base.NetworkDriver):
         """
         Return VLAN information keyed by VLAN ID string.
 
-        Parses 'show running-config vlan' with the brocade_fastiron ntc-template.
-        Tagged and untagged port strings are split into individual port IDs.
+        Parses 'show running-config vlan' with regex to handle all FastIron port
+        types: physical (ethe), LAG (lag), and routed VE (ve).  The ntc-template
+        for this command only captures physical ports, so regex is used here.
         """
         raw = self.device.send_command("show running-config vlan")
-        try:
-            parsed = parse_output(
-                platform="brocade_fastiron",
-                command="show running-config vlan",
-                data=raw,
-            )
-        except Exception:
-            logger.debug("Failed to parse 'show running-config vlan' output", exc_info=True)
-            return {}
-
         vlans: dict = {}
-        for row in parsed:
-            vlan_id = row.get("vlan_id", "")
-            if not vlan_id:
+        current_id: str | None = None
+
+        for line in raw.splitlines():
+            m_hdr = _VLAN_HDR_RE.match(line)
+            if m_hdr:
+                current_id = m_hdr.group("id")
+                name = (m_hdr.group("name") or current_id).strip()
+                vlans.setdefault(current_id, {"name": name, "interfaces": []})
                 continue
-            entry = vlans.setdefault(
-                vlan_id,
-                {
-                    "name": row.get("vlan_name", "").strip() or vlan_id,
-                    "interfaces": [],
-                },
-            )
-            for port_str in (row.get("taggedports", ""), row.get("untaggedports", "")):
-                if port_str:
-                    for port in _split_port_list(port_str):
+
+            if current_id is None:
+                continue
+
+            for pattern in (_TAGGED_RE, _UNTAGGED_RE):
+                m = pattern.match(line)
+                if m:
+                    for port in _split_port_list(m.group("ports")):
+                        entry = vlans[current_id]
                         if port not in entry["interfaces"]:
                             entry["interfaces"].append(port)
+                    break
 
         return vlans
