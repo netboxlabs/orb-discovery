@@ -182,13 +182,19 @@ class ExosDriver(_napalm_base.NetworkDriver):
             if m:
                 model = m.group(1)
 
-            m = re.search(r"^Image\s*:\s*Version\s+(\S+)", ver_output, re.M)
+            # Match "Image : Version <x>" and the common variant
+            # "Image : ExtremeXOS version <x>" (product token before "version").
+            m = re.search(r"^Image\s*:.*?\bversion\s+(\S+)", ver_output, re.M | re.IGNORECASE)
             if m:
                 os_version = m.group(1)
 
-            # Serial number: parenthesized form "(800472-00-14)" takes priority;
-            # fall back to bare form "800615-00-08" (common on stacked/chassis output).
-            m = re.search(r"\((\d{6}-\d{2}-\d+)\)", ver_output)
+            # Prefer the dedicated SysSerial field, which holds the unique device serial.
+            # The \d{6}-\d{2}-\d+ pattern in the Switch line is the hardware part number
+            # (shared across all units of the same model) and should not be used as a
+            # serial; it is kept as a last resort for output that lacks SysSerial.
+            m = re.search(r"^SysSerial\s*:\s*(\S+)", ver_output, re.M)
+            if not m:
+                m = re.search(r"\((\d{6}-\d{2}-\d+)\)", ver_output)
             if not m:
                 m = re.search(r"\b(\d{6}-\d{2}-\d+)\b", ver_output)
             if m:

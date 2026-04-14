@@ -4,6 +4,7 @@ System Type : X480-48t
 SysName     : exos-core-01
 SysLocation : Server Room
 SysContact  : admin@example.com
+SysSerial   : 1516G-00123
 Recovery Mode: None
 MSM/MM      : MSM-A (Master) - Up 3 days 4 hours 22 minutes ago, using active flash
 PowerSupply : Internal-PS (present, not powered)
