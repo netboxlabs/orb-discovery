@@ -7,7 +7,7 @@ import logging
 import re
 from collections.abc import Iterable
 
-from netboxlabs.diode.sdk.ingester import Device, Entity, Interface, IPAddress, Prefix
+from netboxlabs.diode.sdk.ingester import Device, Entity, Interface, IPAddress, Prefix, VLAN
 
 from device_discovery.defaults import DEFAULT_INTERFACE_PATTERNS
 from device_discovery.policy.models import Defaults
@@ -179,6 +179,7 @@ def translate_interface(
     interface_info: dict,
     defaults: Defaults,
     parent: Interface | None = None,
+    tagged_vlans: list[VLAN] | None = None,
 ) -> Interface:
     """
     Translate interface information from NAPALM format to Diode SDK Interface entity.
@@ -254,6 +255,7 @@ def translate_interface(
         parent=parent,
         tags=tags,
         type=interface_type,
+        tagged_vlans=tagged_vlans or None,
     )
 
     # Convert napalm interface speed from Mbps to Netbox Kbps
@@ -379,11 +381,13 @@ def build_interface_entities(
     interfaces: dict,
     interfaces_ip: dict,
     defaults: Defaults,
+    vlans_by_interface: dict[str, list[VLAN]] | None = None,
 ) -> list[Entity]:
     """Create interface entities from interface definitions and IP data."""
     interface_entities: dict[str, Interface] = {}
     entities: list[Entity] = []
     defined_interface_names = set(interfaces.keys())
+    vlans_map = vlans_by_interface or {}
 
     def interface_sort_key(name: str) -> tuple[int, str]:
         separator_score = name.count(".") + name.count(":")
@@ -400,7 +404,8 @@ def build_interface_entities(
     ):
         parent = resolve_parent(if_name)
         interface = translate_interface(
-            device, if_name, interface_info, defaults, parent=parent
+            device, if_name, interface_info, defaults, parent=parent,
+            tagged_vlans=vlans_map.get(if_name),
         )
         interface_entities[if_name] = interface
         entities.append(Entity(interface=interface))
@@ -410,7 +415,10 @@ def build_interface_entities(
         if if_name in interface_entities:
             continue
         parent = resolve_parent(if_name)
-        interface = translate_interface(device, if_name, {}, defaults, parent=parent)
+        interface = translate_interface(
+            device, if_name, {}, defaults, parent=parent,
+            tagged_vlans=vlans_map.get(if_name),
+        )
         interface_entities[if_name] = interface
         entities.append(Entity(interface=interface))
         entities.extend(translate_interface_ips(interface, interfaces_ip, defaults))

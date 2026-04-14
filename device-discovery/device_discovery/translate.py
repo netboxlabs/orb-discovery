@@ -264,8 +264,20 @@ def translate_data(data: dict) -> Iterable[Entity]:
         entities.append(Entity(device=device))
         device_for_interfaces = copy.deepcopy(device)
         device_for_interfaces.ClearField("config")
+
+        # Build interface→VLANs reverse map from VLAN data so interfaces
+        # carry their VLAN assignments.
+        vlans_by_interface: dict[str, list[VLAN]] = {}
+        if data.get("vlan"):
+            for vid, vlan_info in data["vlan"].items():
+                vlan = translate_vlan(vid, vlan_info.get("name"), defaults)
+                if vlan:
+                    for iface_name in vlan_info.get("interfaces", []):
+                        vlans_by_interface.setdefault(iface_name, []).append(vlan)
+
         interface_related_entities = build_interface_entities(
-            device_for_interfaces, interfaces, interfaces_ip, defaults
+            device_for_interfaces, interfaces, interfaces_ip, defaults,
+            vlans_by_interface=vlans_by_interface,
         )
         entities.extend(interface_related_entities)
 
