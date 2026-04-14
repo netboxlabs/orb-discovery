@@ -54,6 +54,49 @@ _PORT_NUM_RE = re.compile(r"^Port:\s*([\d:]+)", re.M)
 # Matches: "Name: Default, Internal Tag = 1, MAC-limit = ..."
 _INTERNAL_TAG_RE = re.compile(r"Internal\s+Tag\s*=\s*(\d+)")
 
+# --- regex fallbacks for "show ports information detail" ------------------- #
+# Used when ntc-template raises TextFSMError on stacked/chassis port IDs.
+_PORT_ADMIN_RE = re.compile(r"Admin\s+State\s*:\s*(\S+)", re.IGNORECASE)
+_PORT_LINK_RE = re.compile(r"Link\s+State\s*:\s*(\S+)", re.IGNORECASE)
+_PORT_DESC_RE = re.compile(r"Display\s+String\s*:\s*(.*)", re.IGNORECASE)
+_PORT_VLANID_RE = re.compile(r"Port-specific\s+VLAN\s+ID\s*:\s*(\d+)", re.IGNORECASE)
+
+
+def _parse_interfaces_regex(output: str) -> dict:
+    """Regex fallback for get_interfaces when ntc-template cannot parse the output."""
+    interfaces: dict = {}
+    for section in _PORT_SECTION_RE.split(output):
+        port_m = _PORT_NUM_RE.search(section)
+        if not port_m:
+            continue
+        port = port_m.group(1)
+        admin_m = _PORT_ADMIN_RE.search(section)
+        link_m = _PORT_LINK_RE.search(section)
+        desc_m = _PORT_DESC_RE.search(section)
+        interfaces[port] = {
+            "is_up": link_m.group(1).lower() == "active" if link_m else False,
+            "is_enabled": admin_m.group(1).lower().startswith("enabled") if admin_m else False,
+            "description": desc_m.group(1).strip() if desc_m else "",
+            "last_flapped": -1.0,
+            "mtu": -1,
+            "speed": -1.0,
+            "mac_address": "",
+        }
+    return interfaces
+
+
+def _add_tagged_vlan_ports_regex(vlans: dict, ports_output: str) -> None:
+    """Regex fallback for tagged VLAN port membership when ntc-template cannot parse."""
+    for section in _PORT_SECTION_RE.split(ports_output):
+        port_m = _PORT_NUM_RE.search(section)
+        if not port_m:
+            continue
+        port = port_m.group(1)
+        for vid_m in _PORT_VLANID_RE.finditer(section):
+            vid = vid_m.group(1)
+            if vid in vlans and port not in vlans[vid]["interfaces"]:
+                vlans[vid]["interfaces"].append(port)
+
 # --- uptime helpers -------------------------------------------------------- #
 _HOUR_SECONDS = 3_600
 _DAY_SECONDS = 24 * _HOUR_SECONDS
@@ -191,8 +234,11 @@ class ExosDriver(_napalm_base.NetworkDriver):
                 platform="extreme_exos", command="show ports information detail", data=output
             )
         except Exception:
-            logger.warning("exos: could not parse 'show ports information detail'")
-            return {}
+            logger.warning(
+                "exos: ntc-template failed for 'show ports information detail'; "
+                "falling back to regex (stacked port IDs?)"
+            )
+            return _parse_interfaces_regex(output)
         interfaces = {}
         for row in parsed:
             port = row.get("interface", "")
@@ -310,7 +356,11 @@ class ExosDriver(_napalm_base.NetworkDriver):
                 data=ports_output,
             )
         except Exception:
-            logger.warning("exos: could not parse 'show ports information detail' for tagged VLANs")
+            logger.warning(
+                "exos: ntc-template failed for 'show ports information detail' (tagged VLANs); "
+                "falling back to regex (stacked port IDs?)"
+            )
+            _add_tagged_vlan_ports_regex(vlans, ports_output)
             return
         for row in parsed_ports:
             port = row.get("interface", "")
