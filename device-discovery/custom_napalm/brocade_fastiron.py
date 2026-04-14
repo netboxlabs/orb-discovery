@@ -7,7 +7,8 @@ Implements only the methods used by device-discovery:
 
 Uses Netmiko (brocade_fastiron device type) for SSH connectivity and ntc-templates
 for structured parsing wherever templates exist; falls back to regex for commands
-that have no template (IP interface, hostname extraction).
+that have no template or where the available template is insufficient
+(IP interface, hostname extraction, VLAN parsing).
 """
 
 import ipaddress
@@ -121,7 +122,8 @@ _ETHE_TOKENS = frozenset({"ethe", "ethernet"})
 # e.g. "lag 10" → "lag10", "ve 555" → "ve555"
 _PREFIX_TOKENS = frozenset({"lag", "ve"})
 
-_PORT_ID_RE = re.compile(r"^\d+(?:/\d+)*$")
+# Matches physical port IDs including breakout (colon) notation: 1/1/1, 1/2/4:1
+_PORT_ID_RE = re.compile(r"^\d+(?:[/:]\d+)*$")
 
 
 def _expand_port_range(start: str, end: str) -> list[str]:
@@ -192,10 +194,10 @@ def _split_port_list(port_str: str) -> list[str]:
 # VLAN config regex
 # ---------------------------------------------------------------------------
 
-# VLAN name may be multi-word; strip the optional "by port" / "by protocol"
-# qualifier that IronWare appends to VLAN header lines.
+# VLAN header: name and "by port"/"by protocol" qualifier are both optional.
+# Covers: "vlan 10", "vlan 10 by port", "vlan 10 name MGMT by port"
 _VLAN_HDR_RE = re.compile(
-    r"^vlan\s+(?P<id>\d+)(?:\s+name\s+(?P<name>.+?)(?:\s+by\s+\w+)?)?$"
+    r"^vlan\s+(?P<id>\d+)(?:\s+name\s+(?P<name>.+?))?(?:\s+by\s+\w+)?$"
 )
 _TAGGED_RE = re.compile(r"^\s+tagged\s+(?P<ports>.+)", re.IGNORECASE)
 _UNTAGGED_RE = re.compile(r"^\s+untagged\s+(?P<ports>.+)", re.IGNORECASE)
