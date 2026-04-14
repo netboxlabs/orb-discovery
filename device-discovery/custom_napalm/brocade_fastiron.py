@@ -253,6 +253,15 @@ _IPV6_GLOBAL_RE = re.compile(
     re.MULTILINE | re.IGNORECASE,
 )
 
+# IPv6 format C (subnet line): "  2001:db8::1 [Preferred], subnet is 2001:db8::/64"
+# Some IronWare versions omit the /prefix from the address and put it in a trailing
+# "subnet is <network>/<prefix>" clause on the same line.
+_IPV6_SUBNET_RE = re.compile(
+    r"^\s+(?P<ip>[0-9a-fA-F:]+)\s+\[(?:Preferred|Deprecated)\]"
+    r".*?subnet\s+is\s+[0-9a-fA-F:]+/(?P<prefix>\d+)",
+    re.IGNORECASE,
+)
+
 # ---------------------------------------------------------------------------
 # Interface name normalisation
 # ---------------------------------------------------------------------------
@@ -449,7 +458,8 @@ class BrocadeFastIronDriver(_napalm_base.NetworkDriver):
         """
         Return IP addresses per interface.
 
-        Parses 'show ip interface' with regex for both IPv4 and IPv6.
+        Parses IPv4 from 'show ip interface' and IPv6 from
+        'show ipv6 interface' using regex.
         """
         interfaces_ip: dict = {}
 
@@ -509,10 +519,12 @@ class BrocadeFastIronDriver(_napalm_base.NetworkDriver):
         """
         Populate interfaces_ip with IPv6 addresses from 'show ipv6 interface'.
 
-        Supports two IronWare output formats:
-        - Format A (config-style): "  ipv6 address 2001:db8::1/64"
-        - Format B (detail block): "  2001:db8::1/64 [Preferred]"
+        Supports three IronWare output formats:
+        - Format A (config-style):  "  ipv6 address 2001:db8::1/64"
+        - Format B (detail block):  "  2001:db8::1/64 [Preferred]"
           (appears under "Global unicast address(es):" in standard IronWare output)
+        - Format C (subnet clause): "  2001:db8::1 [Preferred], subnet is 2001:db8::/64"
+          (some IronWare versions omit the /prefix from the address itself)
         """
         current_intf: str | None = None
         for line in raw.splitlines():
@@ -522,7 +534,11 @@ class BrocadeFastIronDriver(_napalm_base.NetworkDriver):
                 continue
             if current_intf is None:
                 continue
-            m_addr = _IPV6_ADDR_RE.match(line) or _IPV6_GLOBAL_RE.match(line)
+            m_addr = (
+                _IPV6_ADDR_RE.match(line)
+                or _IPV6_GLOBAL_RE.match(line)
+                or _IPV6_SUBNET_RE.match(line)
+            )
             if m_addr:
                 try:
                     prefix = int(m_addr.group("prefix"))
