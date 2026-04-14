@@ -35,9 +35,9 @@ _SANITIZE_PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 
-# Matches: set interface <name> ipv6-address <addr>/<prefix>
+# Matches Gaia config syntax: set interface <name> ipv6-address <addr> mask-length <len>
 _IPV6_CFG_RE = re.compile(
-    r"^set\s+interface\s+(\S+)\s+ipv6-address\s+([0-9a-f:]+)/(\d+)",
+    r"^set\s+interface\s+(\S+)\s+ipv6-address\s+([0-9a-f:]+)\s+mask-length\s+(\d+)",
     re.M | re.I,
 )
 
