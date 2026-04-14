@@ -12,7 +12,6 @@ templates (interface status, IPv4/IPv6 addresses).
 
 import logging
 import re
-import socket
 
 import napalm.base as _napalm_base
 from napalm.base import models
@@ -179,45 +178,43 @@ class AvayaERSDriver(_napalm_base.NetworkDriver):
 
     def get_facts(self) -> dict:
         """Return general device facts."""
+        facts = {
+            "hostname": "Unknown",
+            "vendor": "Avaya",
+            "model": "Avaya ERS",
+            "os_version": "Unknown",
+            "serial_number": "Unknown",
+            "uptime": -1.0,
+            "fqdn": "Unknown",
+            "interface_list": [],
+        }
+
         sys_output = self.device.send_command("show sys-info")
         parsed = parse_output(platform="avaya_ers", command="show sys-info", data=sys_output)
 
         if not parsed:
-            return {}
-
-        row = parsed[0]
-
-        uptime = _parse_uptime(row.get("sys_up_time", ""))
-        hostname = row.get("sys_name", "Unknown") or "Unknown"
-        serial = row.get("serial_number", "Unknown") or "Unknown"
-        os_version = row.get("operational_software", "Unknown") or "Unknown"
-
-        # Derive model from sysObjectID last OID arc when possible, otherwise
-        # fall back to a static "Avaya ERS" label since ERS sys-info does not
-        # expose a human-readable model string.
-        model = "Unknown"
+            logger.warning("Failed to parse 'show sys-info'; returning default facts")
+        else:
+            row = parsed[0]
+            facts["uptime"] = _parse_uptime(row.get("sys_up_time", ""))
+            facts["hostname"] = row.get("sys_name", "Unknown") or "Unknown"
+            facts["serial_number"] = row.get("serial_number", "Unknown") or "Unknown"
+            facts["os_version"] = row.get("operational_software", "Unknown") or "Unknown"
+            # ERS sys-info does not expose a human-readable model string; keep
+            # the "Avaya ERS" fallback set above.
 
         # Interface list comes from show interface name
         intf_output = self.device.send_command("show interface name")
         intf_parsed = parse_output(
             platform="avaya_ers", command="show interface name", data=intf_output
         )
-        interface_list = [
+        facts["interface_list"] = [
             row["port"]
             for row in intf_parsed
             if row.get("port") and not row["port"].startswith("-")
         ]
 
-        return {
-            "hostname": hostname,
-            "vendor": "Avaya",
-            "model": model,
-            "os_version": os_version,
-            "serial_number": serial,
-            "uptime": uptime,
-            "fqdn": "Unknown",
-            "interface_list": interface_list,
-        }
+        return facts
 
     def get_interfaces(self) -> dict:
         """
