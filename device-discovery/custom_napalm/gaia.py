@@ -35,6 +35,13 @@ _SANITIZE_PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 
+# Matches: set interface <name> ipv6-address <addr>/<prefix>
+_IPV6_CFG_RE = re.compile(
+    r"^set\s+interface\s+(\S+)\s+ipv6-address\s+([0-9a-f:]+)/(\d+)",
+    re.M | re.I,
+)
+
+
 def _sanitize_config(text: str) -> str:
     for pattern, replacement in _SANITIZE_PATTERNS:
         text = pattern.sub(replacement, text)
@@ -180,6 +187,14 @@ class GaiaDriver(_napalm_base.NetworkDriver):
         raw = self.device.send_command("show interfaces all")
         parsed = parse_output(platform="checkpoint_gaia", command="show interfaces all", data=raw)
 
+        # Build IPv6 prefix map from running config:
+        # "set interface <name> ipv6-address <addr>/<prefix>"
+        ipv6_prefix_map: dict[str, dict[str, int]] = {}
+        config_raw = self.device.send_command("show configuration")
+        for m in _IPV6_CFG_RE.finditer(config_raw):
+            intf_name, addr, prefix = m.group(1), m.group(2), int(m.group(3))
+            ipv6_prefix_map.setdefault(intf_name, {})[addr.lower()] = prefix
+
         interfaces_ip: dict = {}
         _NOT_CONFIGURED = {"not configured", ""}
 
@@ -199,9 +214,20 @@ class GaiaDriver(_napalm_base.NetworkDriver):
                 except (ValueError, AttributeError):
                     pass
 
-            # IPv6 — the ntc-template captures the bare address without a prefix length.
-            # Omit IPv6 entries rather than reporting a wrong /128, which would create
-            # incorrect Prefix entities in inventory.
+            # IPv6 — prefix sourced from running config; skip if unavailable
+            ipv6_addr = row.get("ipv6_address", "")
+            if ipv6_addr and ipv6_addr.lower() not in _NOT_CONFIGURED:
+                prefix_len = ipv6_prefix_map.get(intf, {}).get(ipv6_addr.lower())
+                if prefix_len is not None:
+                    interfaces_ip.setdefault(intf, {}).setdefault("ipv6", {})[ipv6_addr] = {
+                        "prefix_length": prefix_len
+                    }
+                else:
+                    logger.debug(
+                        "Skipping IPv6 address %s on %s: prefix length not found in config",
+                        ipv6_addr,
+                        intf,
+                    )
 
         return interfaces_ip
 
