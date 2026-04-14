@@ -100,7 +100,48 @@ class GaiaDriver(_napalm_base.NetworkDriver):
 
     def get_facts(self) -> dict:
         """Return general device facts."""
-        raise NotImplementedError
+        # --- version ---
+        ver_raw = self.device.send_command("show version all")
+        parsed_ver = parse_output(platform="checkpoint_gaia", command="show version all", data=ver_raw)
+        os_version = parsed_ver[0].get("version", "Unknown") if parsed_ver else "Unknown"
+
+        # --- model + serial ---
+        asset_raw = self.device.send_command("show asset all")
+        parsed_asset = parse_output(platform="checkpoint_gaia", command="show asset all", data=asset_raw)
+        model = "Unknown"
+        serial_number = "Unknown"
+        for row in parsed_asset:
+            if row.get("model") and model == "Unknown":
+                model = row["model"]
+            if row.get("serial") and serial_number == "Unknown":
+                serial_number = row["serial"]
+
+        # --- hostname ---
+        hostname_raw = self.device.send_command("show hostname")
+        m = re.match(r"^(\S+)", hostname_raw.strip())
+        hostname = m.group(1) if m else self.hostname
+
+        # --- fqdn ---
+        domain_raw = self.device.send_command("show domainname")
+        parsed_domain = parse_output(platform="checkpoint_gaia", command="show domainname", data=domain_raw)
+        domainname = parsed_domain[0].get("domainname", "") if parsed_domain else ""
+        fqdn = f"{hostname}.{domainname}" if domainname else hostname
+
+        # --- interface list ---
+        intf_raw = self.device.send_command("show interfaces all")
+        parsed_intf = parse_output(platform="checkpoint_gaia", command="show interfaces all", data=intf_raw)
+        interface_list = [row["interface"] for row in parsed_intf if row.get("interface")]
+
+        return {
+            "hostname": hostname,
+            "vendor": "Check Point",
+            "model": model,
+            "os_version": os_version,
+            "serial_number": serial_number,
+            "uptime": -1.0,
+            "fqdn": fqdn,
+            "interface_list": interface_list,
+        }
 
     def get_interfaces(self) -> dict:
         """Return interface details keyed by interface name."""
