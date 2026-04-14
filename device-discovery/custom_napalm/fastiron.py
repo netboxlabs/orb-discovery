@@ -112,16 +112,43 @@ def _parse_speed(speed_str: str) -> float:
 # ---------------------------------------------------------------------------
 
 # Tokens that appear in FastIron tagged/untagged port strings but are not port IDs.
-_NON_PORT_TOKENS = frozenset({"ethe", "ethernet", "to", "lag", "ve"})
+_NON_PORT_TOKENS = frozenset({"ethe", "ethernet", "lag", "ve"})
+
+_PORT_ID_RE = re.compile(r"^\d+(?:/\d+)*$")
+
+
+def _expand_port_range(start: str, end: str) -> list[str]:
+    """
+    Expand a FastIron port range into individual port IDs.
+
+    Only expands same-prefix ranges where just the last component varies
+    (e.g. "1/1/1 to 1/1/4" → ["1/1/1", "1/1/2", "1/1/3", "1/1/4"]).
+    Cross-module or cross-unit ranges fall back to returning only the
+    two endpoints.
+    """
+    s_parts = start.split("/")
+    e_parts = end.split("/")
+    if len(s_parts) != len(e_parts) or s_parts[:-1] != e_parts[:-1]:
+        return [start, end]
+    try:
+        s_num, e_num = int(s_parts[-1]), int(e_parts[-1])
+    except ValueError:
+        return [start, end]
+    prefix = "/".join(s_parts[:-1]) + "/"
+    return [f"{prefix}{p}" for p in range(s_num, e_num + 1)]
 
 
 def _split_port_list(port_str: str) -> list[str]:
     """
     Split a FastIron port list string into individual port IDs.
 
-    FastIron lists ports as: "ethe 1/1/1 ethe 1/1/2" or "1/1/1 1/1/2".
-    Range notation "ethe 1/1/1 to 1/1/4" is not expanded — only single ports
-    are returned; ranges are left as-is (two adjacent tokens bridged by "to").
+    Handles:
+    - Space-separated port IDs:  "1/1/1 1/1/2"
+    - Type-prefixed ports:       "ethe 1/1/1 ethe 1/1/2"
+    - Range notation:            "ethe 1/1/1 to 1/1/4"
+
+    Ranges with the same unit/module prefix are fully expanded.
+    Cross-module or cross-unit ranges yield only the two endpoints.
     """
     tokens = port_str.split()
     ports: list[str] = []
@@ -131,8 +158,16 @@ def _split_port_list(port_str: str) -> list[str]:
         if tok in _NON_PORT_TOKENS:
             i += 1
             continue
-        # Simple port ID (digits and slashes)
-        if re.match(r"^\d+(?:/\d+)*$", tokens[i]):
+        if tok == "to":
+            # Range: previous port is the start; next token is the end
+            if ports and i + 1 < len(tokens) and _PORT_ID_RE.match(tokens[i + 1]):
+                start = ports.pop()
+                ports.extend(_expand_port_range(start, tokens[i + 1]))
+                i += 2
+                continue
+            i += 1
+            continue
+        if _PORT_ID_RE.match(tokens[i]):
             ports.append(tokens[i])
         i += 1
     return ports
@@ -142,10 +177,12 @@ def _split_port_list(port_str: str) -> list[str]:
 # IP interface regex
 # ---------------------------------------------------------------------------
 
-# Matches: "Interface 1/1/1" or "Interface VE 10" or "Interface management1"
+# Matches "Interface <name>" where <name> may be a single token (1/1/1) or
+# a multi-word identifier (Ve 1, management 1, Loopback 1).  The full
+# remainder of the line is captured so that no part of the interface name
+# is silently dropped.
 _INTF_HDR_RE = re.compile(
-    r"^Interface\s+(?:(?:VE|ve|Ethernet|ethernet|ethe)\s+)?(?P<name>\S+)",
-    re.MULTILINE,
+    r"^Interface\s+(?P<name>\S+(?:\s+\S+)*)",
 )
 
 # Matches: "ip address: 192.168.1.1/24" or "  ip address 192.168.1.1/24"

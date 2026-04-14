@@ -6,5 +6,5 @@ vlan 10 name MANAGEMENT
  untagged ethe 1/1/2
 !
 vlan 20 name SERVERS
- tagged ethe 1/1/1 ethe 1/1/2
+ tagged ethe 1/1/1 to 1/1/4
 !
