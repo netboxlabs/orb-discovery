@@ -1,5 +1,0 @@
-Port   Link     Port-State   Dupl Speed Trunk Tag Priori MAC            Name           Type
-1/1    Up       Forward      Full 1G    None  Yes level0 0024.38a5.1c00 uplink-core     default-port
-1/2    Disabled None         None None  None  No  level0 0024.38a5.1c01                default-port
-ve2    Up       N/A          N/A  N/A   None  N/A N/A    0024.38a5.1c00 Main Ethernet V default-port
-lb1    Up       N/A          N/A  N/A   None  N/A N/A    N/A            MPLS Loopback  default-port
