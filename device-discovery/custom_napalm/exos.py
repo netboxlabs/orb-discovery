@@ -88,6 +88,17 @@ def _parse_interfaces_regex(output: str) -> dict:
     return interfaces
 
 
+def _parse_interface_list_regex(output: str) -> list:
+    """
+    Regex fallback for interface list from 'show ports information'.
+
+    Each data row starts with the port identifier (numeric or slot:port such as
+    '1:1') followed by whitespace.  Header and separator lines start with letters
+    or '=' so they are not matched.
+    """
+    return [m.group(1) for m in re.finditer(r"^([\d:]+)\s", output, re.M)]
+
+
 def _add_tagged_vlan_ports_regex(vlans: dict, ports_output: str) -> None:
     """Regex fallback for tagged VLAN port membership when ntc-template cannot parse."""
     for section in _PORT_SECTION_RE.split(ports_output):
@@ -210,7 +221,7 @@ class ExosDriver(_napalm_base.NetworkDriver):
         # is unavailable), so we always populate interface_list.
         # Guard against TextFSMError: on stacked devices ports are "slot:port"
         # (e.g. "1:1"), which the ntc-template's \d+ rule cannot match and
-        # raises TextFSMError.  Return an empty list rather than crashing.
+        # raises TextFSMError.  Fall back to regex rather than returning [].
         ports_output = self.device.send_command("show ports information")
         try:
             parsed_ports = parse_output(
@@ -218,8 +229,11 @@ class ExosDriver(_napalm_base.NetworkDriver):
             )
             interface_list = [row["interface"] for row in parsed_ports if row.get("interface")]
         except Exception:
-            logger.warning("exos: could not parse 'show ports information'; interface_list will be empty")
-            interface_list = []
+            logger.warning(
+                "exos: ntc-template failed for 'show ports information'; "
+                "falling back to regex (stacked port IDs?)"
+            )
+            interface_list = _parse_interface_list_regex(ports_output)
 
         return {
             "hostname": hostname,
