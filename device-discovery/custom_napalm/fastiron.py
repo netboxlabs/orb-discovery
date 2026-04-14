@@ -215,6 +215,8 @@ _VLAN_HDR_RE = re.compile(
 )
 _TAGGED_RE = re.compile(r"^\s+tagged\s+(?P<ports>.+)", re.IGNORECASE)
 _UNTAGGED_RE = re.compile(r"^\s+untagged\s+(?P<ports>.+)", re.IGNORECASE)
+# "router-interface ve <id>" — 08.x syntax attaching a VE as the L3 interface of a VLAN.
+_ROUTER_INTF_RE = re.compile(r"^\s+router-interface\s+ve\s+(?P<ve>\d+)", re.IGNORECASE)
 
 # ---------------------------------------------------------------------------
 # IP interface regex
@@ -579,7 +581,8 @@ class FastIronDriver(_napalm_base.NetworkDriver):
         Return VLAN information keyed by VLAN ID string.
 
         Parses 'show running-config vlan' with regex to handle all FastIron port
-        types: physical (ethe), LAG (lag), and routed VE (ve).  The ntc-template
+        types: physical (ethe), LAG (lag), routed VE (ve), and VE L3 bindings
+        declared via 'router-interface ve <id>' (08.x syntax).  The ntc-template
         for this command only captures physical ports, so regex is used here.
         """
         raw = self.device.send_command("show running-config vlan")
@@ -607,5 +610,12 @@ class FastIronDriver(_napalm_base.NetworkDriver):
                         if port not in entry["interfaces"]:
                             entry["interfaces"].append(port)
                     break
+
+            m_ri = _ROUTER_INTF_RE.match(line)
+            if m_ri:
+                ve = f"ve{m_ri.group('ve')}"
+                entry = vlans[current_id]
+                if ve not in entry["interfaces"]:
+                    entry["interfaces"].append(ve)
 
         return vlans

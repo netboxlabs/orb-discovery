@@ -14,9 +14,11 @@ vlan 30 name TRUNK by port
 !
 vlan 40 name "Data Center Core" by port
  tagged ethe 1/1/1
+ router-interface ve 40
 !
 vlan 50 by port
  tagged ethe 1/1/1 ethe 1/2/4:1
+ router-interface ve 50
 !
 vlan 60 name LAGS by port
  tagged lag 15 to 17
