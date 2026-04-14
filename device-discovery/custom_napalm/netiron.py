@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # Config sanitization
 # ---------------------------------------------------------------------------
 
-# "enable <level> <hash>" — level is a single digit
+# "enable <level> <hash>" — level is one or more digits
 _ENABLE_RE = re.compile(r"(\benable\s+\d+)\s+\S+", re.IGNORECASE)
 
 # "username <name> password <type> <hash>"
@@ -366,8 +366,10 @@ class NetIronDriver(_napalm_base.NetworkDriver):
                     "interfaces": [],
                 },
             )
+            seen: set[str] = set(entry["interfaces"])
             for intf in interfaces:
-                if intf not in entry["interfaces"]:
+                if intf not in seen:
+                    seen.add(intf)
                     entry["interfaces"].append(intf)
 
         return vlans
