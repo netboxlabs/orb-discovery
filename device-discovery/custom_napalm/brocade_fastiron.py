@@ -267,7 +267,7 @@ def _normalize_intf_name(name: str) -> str:
     return stripped
 
 
-class FastIronDriver(_napalm_base.NetworkDriver):
+class BrocadeFastIronDriver(_napalm_base.NetworkDriver):
     """Brocade FastIron IronWare NAPALM driver (read-only subset for device-discovery)."""
 
     def __init__(self, hostname, username, password, timeout=60, optional_args=None):
