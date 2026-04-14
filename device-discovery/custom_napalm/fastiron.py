@@ -190,8 +190,11 @@ def _split_port_list(port_str: str) -> list[str]:
 # VLAN config regex
 # ---------------------------------------------------------------------------
 
-# VLAN name may be multi-word (or quoted with spaces) — capture rest of line.
-_VLAN_HDR_RE = re.compile(r"^vlan\s+(?P<id>\d+)(?:\s+name\s+(?P<name>.+))?")
+# VLAN name may be multi-word; strip the optional "by port" / "by protocol"
+# qualifier that IronWare appends to VLAN header lines.
+_VLAN_HDR_RE = re.compile(
+    r"^vlan\s+(?P<id>\d+)(?:\s+name\s+(?P<name>.+?)(?:\s+by\s+\w+)?)?$"
+)
 _TAGGED_RE = re.compile(r"^\s+tagged\s+(?P<ports>.+)", re.IGNORECASE)
 _UNTAGGED_RE = re.compile(r"^\s+untagged\s+(?P<ports>.+)", re.IGNORECASE)
 

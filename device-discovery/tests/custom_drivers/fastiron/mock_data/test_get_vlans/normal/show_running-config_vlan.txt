@@ -1,17 +1,17 @@
-vlan 1 name DEFAULT-VLAN
+vlan 1 name DEFAULT-VLAN by port
  untagged ethe 1/1/2 ethe 1/1/3
 !
-vlan 10 name MANAGEMENT
+vlan 10 name MANAGEMENT by port
  tagged ethe 1/1/1
  untagged ethe 1/1/2
 !
-vlan 20 name SERVERS
+vlan 20 name SERVERS by port
  tagged ethe 1/1/1 to 1/1/4
 !
-vlan 30 name TRUNK
+vlan 30 name TRUNK by port
  tagged lag 1
  untagged ve 10
 !
-vlan 40 name "Data Center Core"
+vlan 40 name "Data Center Core" by port
  tagged ethe 1/1/1
 !
