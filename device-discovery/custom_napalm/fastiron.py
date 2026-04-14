@@ -1,6 +1,8 @@
 # Copyright 2026 NetBox Labs Inc
 """
-Custom Brocade FastIron (IronWare) NAPALM driver.
+Custom FastIron (IronWare) NAPALM driver.
+
+Covers hardware sold under both the Brocade and Ruckus ICX brand names.
 
 Implements only the methods used by device-discovery:
   get_facts, get_interfaces, get_interfaces_ip, get_config, get_vlans.
@@ -290,8 +292,8 @@ def _normalize_intf_name(name: str) -> str:
     return stripped
 
 
-class BrocadeFastIronDriver(_napalm_base.NetworkDriver):
-    """Brocade FastIron IronWare NAPALM driver (read-only subset for device-discovery)."""
+class FastIronDriver(_napalm_base.NetworkDriver):
+    """FastIron IronWare NAPALM driver (read-only subset for device-discovery)."""
 
     def __init__(self, hostname, username, password, timeout=60, optional_args=None):
         """Initialise driver state; no connection is opened yet."""
