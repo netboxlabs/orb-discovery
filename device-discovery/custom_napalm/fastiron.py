@@ -1,0 +1,449 @@
+# Copyright 2026 NetBox Labs Inc
+"""
+Custom Brocade FastIron (IronWare) NAPALM driver.
+
+Implements only the methods used by device-discovery:
+  get_facts, get_interfaces, get_interfaces_ip, get_config, get_vlans.
+
+Uses Netmiko (brocade_fastiron device type) for SSH connectivity and ntc-templates
+for structured parsing wherever templates exist; falls back to regex for commands
+that have no template (IP interface, hostname extraction).
+"""
+
+import logging
+import re
+
+import napalm.base as _napalm_base
+from napalm.base import models
+from napalm.base.helpers import mac as normalize_mac
+from napalm.base.netmiko_helpers import netmiko_args
+from ntc_templates.parse import parse_output
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Config sanitization — Brocade FastIron sensitive fields
+# ---------------------------------------------------------------------------
+
+# "enable super-user-password [<N>] <hash>", "enable password [<N>] <hash>",
+# "enable port-config-password [<N>] <hash>", "enable read-only-password [<N>] <hash>"
+_ENABLE_PWD_RE = re.compile(
+    r"(enable\s+(?:super-user-|port-config-|read-only-)?password)(?:\s+\d+)?\s+\S+",
+    re.IGNORECASE,
+)
+
+# "username <name> [privilege <N>] password [<N>] <hash>"
+_USERNAME_PWD_RE = re.compile(
+    r"(username\s+\S+(?:\s+privilege\s+\d+)?\s+password)(?:\s+\d+)?\s+\S+",
+    re.IGNORECASE,
+)
+
+# "snmp-server community <string> ..."
+_SNMP_COMMUNITY_RE = re.compile(
+    r"(snmp-server\s+community)\s+\S+",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_config(text: str) -> str:
+    text = _ENABLE_PWD_RE.sub(r"\1 <redacted>", text)
+    text = _USERNAME_PWD_RE.sub(r"\1 <redacted>", text)
+    text = _SNMP_COMMUNITY_RE.sub(r"\1 <redacted>", text)
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Uptime parsing
+# ---------------------------------------------------------------------------
+
+_DAY_SECONDS = 24 * 3600
+_HOUR_SECONDS = 3600
+_MINUTE_SECONDS = 60
+
+
+def _parse_uptime(days: str, hours: str, minutes: str, seconds: str = "0") -> float:
+    """Convert FastIron uptime components (lists from ntc-template) to seconds."""
+    try:
+        d = int(days) if days else 0
+    except (ValueError, TypeError):
+        d = 0
+    try:
+        h = int(hours) if hours else 0
+    except (ValueError, TypeError):
+        h = 0
+    try:
+        m = int(minutes) if minutes else 0
+    except (ValueError, TypeError):
+        m = 0
+    try:
+        s = int(seconds) if seconds else 0
+    except (ValueError, TypeError):
+        s = 0
+    return float(d * _DAY_SECONDS + h * _HOUR_SECONDS + m * _MINUTE_SECONDS + s)
+
+
+# ---------------------------------------------------------------------------
+# Speed conversion
+# ---------------------------------------------------------------------------
+
+_SPEED_MAP: dict[str, float] = {
+    "10M": 10.0,
+    "100M": 100.0,
+    "1G": 1000.0,
+    "2.5G": 2500.0,
+    "5G": 5000.0,
+    "10G": 10000.0,
+    "25G": 25000.0,
+    "40G": 40000.0,
+    "100G": 100000.0,
+    "400G": 400000.0,
+}
+
+
+def _parse_speed(speed_str: str) -> float:
+    """Convert a FastIron speed string (e.g. '1G', '10G', 'Auto') to Mbps."""
+    if not speed_str:
+        return -1.0
+    return _SPEED_MAP.get(speed_str.upper(), -1.0)
+
+
+# ---------------------------------------------------------------------------
+# Port list helpers
+# ---------------------------------------------------------------------------
+
+# Tokens that appear in FastIron tagged/untagged port strings but are not port IDs.
+_NON_PORT_TOKENS = frozenset({"ethe", "ethernet", "to", "lag", "ve"})
+
+
+def _split_port_list(port_str: str) -> list[str]:
+    """
+    Split a FastIron port list string into individual port IDs.
+
+    FastIron lists ports as: "ethe 1/1/1 ethe 1/1/2" or "1/1/1 1/1/2".
+    Range notation "ethe 1/1/1 to 1/1/4" is not expanded — only single ports
+    are returned; ranges are left as-is (two adjacent tokens bridged by "to").
+    """
+    tokens = port_str.split()
+    ports: list[str] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i].lower()
+        if tok in _NON_PORT_TOKENS:
+            i += 1
+            continue
+        # Simple port ID (digits and slashes)
+        if re.match(r"^\d+(?:/\d+)*$", tokens[i]):
+            ports.append(tokens[i])
+        i += 1
+    return ports
+
+
+# ---------------------------------------------------------------------------
+# IP interface regex
+# ---------------------------------------------------------------------------
+
+# Matches: "Interface 1/1/1" or "Interface VE 10" or "Interface management1"
+_INTF_HDR_RE = re.compile(
+    r"^Interface\s+(?:(?:VE|ve|Ethernet|ethernet|ethe)\s+)?(?P<name>\S+)",
+    re.MULTILINE,
+)
+
+# Matches: "ip address: 192.168.1.1/24" or "  ip address 192.168.1.1/24"
+_IP_ADDR_RE = re.compile(
+    r"^\s+ip\s+address[:\s]+(?P<ip>\d+\.\d+\.\d+\.\d+)/(?P<prefix>\d+)",
+    re.MULTILINE,
+)
+
+# IPv6: "  ipv6 address 2001:db8::1/64"
+_IPV6_ADDR_RE = re.compile(
+    r"^\s+ipv6\s+address\s+(?P<ip>[0-9a-fA-F:]+)/(?P<prefix>\d+)",
+    re.MULTILINE,
+)
+
+
+class FastIronDriver(_napalm_base.NetworkDriver):
+    """Brocade FastIron IronWare NAPALM driver (read-only subset for device-discovery)."""
+
+    def __init__(self, hostname, username, password, timeout=60, optional_args=None):
+        """Initialise driver state; no connection is opened yet."""
+        self.hostname = hostname
+        self.username = username
+        self.password = password
+        self.timeout = timeout
+        self.device = None
+
+        if optional_args is None:
+            optional_args = {}
+        self.netmiko_optional_args = netmiko_args(optional_args)
+        self.netmiko_optional_args.setdefault("port", 22)
+
+    def open(self):
+        """Open an SSH connection to the device via Netmiko."""
+        self.device = self._netmiko_open(
+            "brocade_fastiron", netmiko_optional_args=self.netmiko_optional_args
+        )
+
+    def close(self):
+        """Close the SSH connection."""
+        self._netmiko_close()
+
+    def is_alive(self):
+        """Return connection liveness."""
+        if self.device is None:
+            return {"is_alive": False}
+        try:
+            self.device.write_channel(chr(0))
+            return {"is_alive": self.device.remote_conn.transport.is_active()}
+        except (EOFError, OSError, AttributeError):
+            return {"is_alive": False}
+
+    # ------------------------------------------------------------------
+    # NAPALM getters
+    # ------------------------------------------------------------------
+
+    def _facts_from_version(self) -> tuple[str, str, str, float]:
+        """Return (os_version, model, serial_number, uptime) from 'show version'."""
+        os_version = model = serial_number = "Unknown"
+        uptime = 0.0
+        raw = self.device.send_command("show version")
+        try:
+            parsed = parse_output(platform="brocade_fastiron", command="show version", data=raw)
+            if parsed:
+                row = parsed[0]
+                sw_versions = [v for v in row.get("sw_version", []) if v]
+                if sw_versions:
+                    os_version = sw_versions[0]
+                models_list = [m for m in row.get("model", []) if m]
+                if models_list:
+                    model = models_list[0]
+                serials = [s for s in row.get("serial", []) if s]
+                if serials:
+                    serial_number = serials[0]
+                days_list = row.get("uptime_days", [])
+                hours_list = row.get("uptime_hours", [])
+                minutes_list = row.get("uptime_minutes", [])
+                seconds_list = row.get("uptime_seconds", [])
+                uptime = _parse_uptime(
+                    days_list[0] if days_list else "0",
+                    hours_list[0] if hours_list else "0",
+                    minutes_list[0] if minutes_list else "0",
+                    seconds_list[0] if seconds_list else "0",
+                )
+        except Exception:
+            logger.debug("Failed to parse 'show version' output", exc_info=True)
+        return os_version, model, serial_number, uptime
+
+    def _hostname_from_config(self) -> str:
+        """Return the hostname from 'show running-config', fallback to self.hostname."""
+        cfg_raw = self.device.send_command("show running-config")
+        for line in cfg_raw.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("hostname "):
+                return stripped.split("hostname ", 1)[1].strip()
+        return self.hostname
+
+    def _interface_list_from_brief(self) -> list[str]:
+        """Return interface names from 'show interfaces brief' (ntc-template)."""
+        interface_list: list[str] = []
+        try:
+            raw = self.device.send_command("show interfaces brief")
+            parsed = parse_output(
+                platform="brocade_fastiron", command="show interfaces brief", data=raw
+            )
+            for row in parsed:
+                intf = row.get("interface", "").strip()
+                if intf:
+                    interface_list.append(intf)
+        except Exception:
+            logger.debug("Failed to parse 'show interfaces brief' output", exc_info=True)
+        return interface_list
+
+    def get_facts(self) -> dict:
+        """
+        Return general device facts.
+
+        Facts are assembled from three commands:
+        - 'show version'          → os_version, model, serial, uptime (ntc-template)
+        - 'show running-config'   → hostname (regex on 'hostname' line)
+        - 'show interfaces brief' → interface_list (ntc-template)
+        """
+        os_version, model, serial_number, uptime = self._facts_from_version()
+        return {
+            "hostname": self._hostname_from_config(),
+            "vendor": "Brocade",
+            "model": model,
+            "os_version": os_version,
+            "serial_number": serial_number,
+            "uptime": uptime,
+            "fqdn": "Unknown",
+            "interface_list": self._interface_list_from_brief(),
+        }
+
+    def get_interfaces(self) -> dict:
+        """
+        Return interface details keyed by interface name.
+
+        Parses 'show interfaces brief' with the brocade_fastiron ntc-template.
+        """
+        interfaces: dict = {}
+        raw = self.device.send_command("show interfaces brief")
+        try:
+            parsed = parse_output(
+                platform="brocade_fastiron",
+                command="show interfaces brief",
+                data=raw,
+            )
+        except Exception:
+            logger.debug("Failed to parse 'show interfaces brief' output", exc_info=True)
+            return {}
+
+        for row in parsed:
+            intf = row.get("interface", "").strip()
+            if not intf:
+                continue
+
+            linkstate = row.get("linkstate", "").lower()
+            portstate = row.get("portstate", "").lower()
+
+            is_up = linkstate == "up" and portstate not in ("none", "disabled", "")
+            is_enabled = linkstate not in ("disable", "err-dis")
+
+            mac_raw = row.get("mac", "")
+            try:
+                mac_address = normalize_mac(mac_raw) if mac_raw else ""
+            except Exception:
+                mac_address = mac_raw
+
+            interfaces[intf] = {
+                "is_up": is_up,
+                "is_enabled": is_enabled,
+                "description": row.get("name", "").strip(),
+                "last_flapped": -1.0,
+                "mtu": -1,
+                "speed": _parse_speed(row.get("speed", "")),
+                "mac_address": mac_address,
+            }
+
+        return interfaces
+
+    def get_interfaces_ip(self) -> dict:
+        """
+        Return IP addresses per interface.
+
+        Parses 'show ip interface' with regex for both IPv4 and IPv6.
+        """
+        interfaces_ip: dict = {}
+
+        raw = self.device.send_command("show ip interface")
+        if raw:
+            self._parse_ip_interface(raw, interfaces_ip)
+
+        raw_v6 = self.device.send_command("show ipv6 interface")
+        if raw_v6:
+            self._parse_ipv6_interface(raw_v6, interfaces_ip)
+
+        return interfaces_ip
+
+    def _parse_ip_interface(self, raw: str, interfaces_ip: dict) -> None:
+        """Populate interfaces_ip with IPv4 addresses from 'show ip interface'."""
+        current_intf: str | None = None
+        for line in raw.splitlines():
+            m_hdr = _INTF_HDR_RE.match(line)
+            if m_hdr:
+                current_intf = m_hdr.group("name")
+                continue
+            if current_intf is None:
+                continue
+            m_addr = _IP_ADDR_RE.match(line)
+            if m_addr:
+                try:
+                    prefix = int(m_addr.group("prefix"))
+                except ValueError:
+                    continue
+                (
+                    interfaces_ip
+                    .setdefault(current_intf, {})
+                    .setdefault("ipv4", {})[m_addr.group("ip")]
+                ) = {"prefix_length": prefix}
+
+    def _parse_ipv6_interface(self, raw: str, interfaces_ip: dict) -> None:
+        """Populate interfaces_ip with IPv6 addresses from 'show ipv6 interface'."""
+        current_intf: str | None = None
+        for line in raw.splitlines():
+            m_hdr = _INTF_HDR_RE.match(line)
+            if m_hdr:
+                current_intf = m_hdr.group("name")
+                continue
+            if current_intf is None:
+                continue
+            m_addr = _IPV6_ADDR_RE.match(line)
+            if m_addr:
+                try:
+                    prefix = int(m_addr.group("prefix"))
+                except ValueError:
+                    continue
+                (
+                    interfaces_ip
+                    .setdefault(current_intf, {})
+                    .setdefault("ipv6", {})[m_addr.group("ip")]
+                ) = {"prefix_length": prefix}
+
+    def get_config(
+        self,
+        retrieve: str = "all",
+        full: bool = False,
+        sanitized: bool = False,
+        format: str = "text",
+    ) -> models.ConfigDict:
+        """Return device configuration (running and/or startup)."""
+        config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
+
+        if retrieve in ("all", "running"):
+            config["running"] = self.device.send_command("show running-config")
+        if retrieve in ("all", "startup"):
+            config["startup"] = self.device.send_command("show startup-config")
+
+        if sanitized:
+            for key in ("running", "candidate", "startup"):
+                if config[key]:
+                    config[key] = _sanitize_config(config[key])
+
+        return config
+
+    def get_vlans(self) -> dict:
+        """
+        Return VLAN information keyed by VLAN ID string.
+
+        Parses 'show running-config vlan' with the brocade_fastiron ntc-template.
+        Tagged and untagged port strings are split into individual port IDs.
+        """
+        raw = self.device.send_command("show running-config vlan")
+        try:
+            parsed = parse_output(
+                platform="brocade_fastiron",
+                command="show running-config vlan",
+                data=raw,
+            )
+        except Exception:
+            logger.debug("Failed to parse 'show running-config vlan' output", exc_info=True)
+            return {}
+
+        vlans: dict = {}
+        for row in parsed:
+            vlan_id = row.get("vlan_id", "")
+            if not vlan_id:
+                continue
+            entry = vlans.setdefault(
+                vlan_id,
+                {
+                    "name": row.get("vlan_name", "").strip() or vlan_id,
+                    "interfaces": [],
+                },
+            )
+            for port_str in (row.get("taggedports", ""), row.get("untaggedports", "")):
+                if port_str:
+                    for port in _split_port_list(port_str):
+                        if port not in entry["interfaces"]:
+                            entry["interfaces"].append(port)
+
+        return vlans

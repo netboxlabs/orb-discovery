@@ -4,6 +4,7 @@ from custom_napalm.aoscx import AOSCXDriver
 from custom_napalm.aoscx_ssh import AOSCXSSHDriver
 from custom_napalm.asa import ASADriver
 from custom_napalm.asa_ssh import ASASSHDriver
+from custom_napalm.fastiron import FastIronDriver
 from custom_napalm.ftd_ssh import FTDSSHDriver
 from custom_napalm.ftos import FTOSDriver
 from custom_napalm.hp_comware import ComwareDriver
@@ -20,6 +21,7 @@ __all__ = [
     "AOSCXSSHDriver",
     "ASADriver",
     "ASASSHDriver",
+    "FastIronDriver",
     "FTDSSHDriver",
     "FTOSDriver",
     "ComwareDriver",
