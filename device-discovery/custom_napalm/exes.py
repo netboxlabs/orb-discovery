@@ -1,0 +1,271 @@
+# Copyright 2026 NetBox Labs Inc
+"""
+Custom Extreme EXOS NAPALM driver.
+
+Implements only the methods used by device-discovery:
+  get_facts, get_interfaces, get_interfaces_ip, get_config, get_vlans.
+
+Uses Netmiko (extreme_exos device type) + ntc-templates for structured parsing.
+Falls back to regex for commands without templates (show version).
+"""
+
+import logging
+import re
+
+import napalm.base as _napalm_base
+from napalm.base import models
+from napalm.base.netmiko_helpers import netmiko_args
+from ntc_templates.parse import parse_output
+
+logger = logging.getLogger(__name__)
+
+# --- config sanitization -------------------------------------------------- #
+# "create account admin encrypted-secret "$1$xxx""
+_ENCRYPTED_SECRET_RE = re.compile(
+    r"(encrypted-secret)\s+\"[^\"]*\"",
+    re.IGNORECASE,
+)
+# "[keyword] encrypted "hash"" — covers shared-secret encrypted, etc.
+_ENCRYPTED_RE = re.compile(
+    r"(\S+\s+encrypted)\s+\"[^\"]*\"",
+    re.IGNORECASE,
+)
+# "configure snmp add community readonly/readwrite "string""
+_SNMP_COMMUNITY_RE = re.compile(
+    r"(configure\s+snmp\s+add\s+community\s+(?:readonly|readwrite))\s+\"[^\"]*\"",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_config(text: str) -> str:
+    text = _ENCRYPTED_SECRET_RE.sub(r'\1 "<redacted>"', text)
+    text = _ENCRYPTED_RE.sub(r'\1 "<redacted>"', text)
+    text = _SNMP_COMMUNITY_RE.sub(r'\1 "<redacted>"', text)
+    return text
+
+
+# --- uptime helpers -------------------------------------------------------- #
+_HOUR_SECONDS = 3_600
+_DAY_SECONDS = 24 * _HOUR_SECONDS
+_WEEK_SECONDS = 7 * _DAY_SECONDS
+_YEAR_SECONDS = 365 * _DAY_SECONDS
+
+
+def _parse_uptime(uptime_str: str) -> float:
+    """Convert an EXOS uptime string like '3 days 4 hours 22 minutes' to seconds."""
+    seconds = 0.0
+    for pattern, factor in (
+        (r"(\d+)\s+year", _YEAR_SECONDS),
+        (r"(\d+)\s+week", _WEEK_SECONDS),
+        (r"(\d+)\s+day", _DAY_SECONDS),
+        (r"(\d+)\s+hour", _HOUR_SECONDS),
+        (r"(\d+)\s+minute", 60),
+        (r"(\d+)\s+second", 1),
+    ):
+        m = re.search(pattern, uptime_str, re.IGNORECASE)
+        if m:
+            seconds += int(m.group(1)) * factor
+    return seconds
+
+
+class ExesDriver(_napalm_base.NetworkDriver):
+    """Extreme EXOS NAPALM driver (read-only subset for device-discovery)."""
+
+    def __init__(self, hostname, username, password, timeout=60, optional_args=None):
+        """Initialize the driver."""
+        self.hostname = hostname
+        self.username = username
+        self.password = password
+        self.timeout = timeout
+        self.device = None
+
+        if optional_args is None:
+            optional_args = {}
+        self.netmiko_optional_args = netmiko_args(optional_args)
+        self.netmiko_optional_args.setdefault("port", 22)
+
+    def open(self):
+        """Open an SSH connection to the device via Netmiko."""
+        self.device = self._netmiko_open(
+            "extreme_exos", netmiko_optional_args=self.netmiko_optional_args
+        )
+
+    def close(self):
+        """Close the connection."""
+        self._netmiko_close()
+
+    def is_alive(self):
+        """Return connection liveness."""
+        if self.device is None:
+            return {"is_alive": False}
+        try:
+            self.device.write_channel(chr(0))
+            return {"is_alive": self.device.remote_conn.transport.is_active()}
+        except (EOFError, OSError, AttributeError):
+            return {"is_alive": False}
+
+    # ---------------------------------------------------------------------- #
+    # NAPALM getters
+    # ---------------------------------------------------------------------- #
+
+    def get_facts(self) -> dict:
+        """Return general device facts."""
+        hostname = "Unknown"
+        model = "Unknown"
+        os_version = "Unknown"
+        serial_number = "Unknown"
+        uptime: float = -1.0
+
+        ver_output = self.device.send_command("show version")
+        if ver_output:
+            m = re.search(r"^SysName\s*:\s*(\S+)", ver_output, re.M)
+            if m:
+                hostname = m.group(1)
+
+            m = re.search(r"^System Type\s*:\s*(\S+)", ver_output, re.M)
+            if m:
+                model = m.group(1)
+
+            m = re.search(r"^Image\s*:\s*Version\s+(\S+)", ver_output, re.M)
+            if m:
+                os_version = m.group(1)
+
+            # Serial number embedded in the Switch line: e.g. "(800472-00-14)"
+            m = re.search(r"\((\d{6}-\d{2}-\d+)\)", ver_output)
+            if m:
+                serial_number = m.group(1)
+
+            # Uptime: "Up 3 days 4 hours 22 minutes ago"
+            m = re.search(r"\bUp\s+(.*?)\s+ago\b", ver_output)
+            if m:
+                uptime = _parse_uptime(m.group(1))
+
+        # Fetch interface list separately; this command succeeds even when
+        # `show version` returns nothing (e.g. on devices where the template
+        # is unavailable), so we always populate interface_list.
+        ports_output = self.device.send_command("show ports information")
+        parsed_ports = parse_output(
+            platform="extreme_exos", command="show ports information", data=ports_output
+        )
+        interface_list = [row["interface"] for row in parsed_ports if row.get("interface")]
+
+        return {
+            "hostname": hostname,
+            "vendor": "Extreme",
+            "model": model,
+            "os_version": os_version,
+            "serial_number": serial_number,
+            "uptime": uptime,
+            "fqdn": "Unknown",
+            "interface_list": interface_list,
+        }
+
+    def get_interfaces(self) -> dict:
+        """Return interface details keyed by port number."""
+        output = self.device.send_command("show ports information detail")
+        if not output:
+            return {}
+
+        parsed = parse_output(
+            platform="extreme_exos", command="show ports information detail", data=output
+        )
+        interfaces = {}
+        for row in parsed:
+            port = row.get("interface", "")
+            if not port:
+                continue
+            admin_state = row.get("admin_state", "")
+            link_state = row.get("link_state", "").lower()
+            interfaces[port] = {
+                "is_up": link_state == "active",
+                "is_enabled": admin_state.lower().startswith("enabled"),
+                "description": row.get("description", ""),
+                "last_flapped": -1.0,
+                "mtu": -1,
+                "speed": -1.0,
+                "mac_address": "",
+            }
+        return interfaces
+
+    def get_interfaces_ip(self) -> dict:
+        """Return IP addresses per VLAN interface."""
+        output = self.device.send_command("show ipconfig")
+        if not output:
+            return {}
+
+        parsed = parse_output(
+            platform="extreme_exos", command="show ipconfig", data=output
+        )
+        # The ntc-template emits one aggregated row with list-valued fields
+        # (INTERFACE, IP, SUBNET are all List values in a single record).
+        # We iterate over all rows defensively in case a future template version
+        # emits one row per interface instead.
+        interfaces_ip: dict = {}
+        for row in parsed:
+            for intf, ip, subnet in zip(
+                row.get("interface", []),
+                row.get("ip", []),
+                row.get("subnet", []),
+            ):
+                try:
+                    prefix_len = int(subnet.lstrip("/"))
+                except (ValueError, AttributeError):
+                    prefix_len = -1
+                interfaces_ip.setdefault(intf, {}).setdefault("ipv4", {})[ip] = {
+                    "prefix_length": prefix_len
+                }
+        return interfaces_ip
+
+    def get_config(
+        self,
+        retrieve: str = "all",
+        full: bool = False,
+        sanitized: bool = False,
+        format: str = "text",
+    ) -> models.ConfigDict:
+        """Return device configuration."""
+        config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
+
+        if retrieve in ("all", "running"):
+            config["running"] = self.device.send_command("show configuration")
+
+        if sanitized:
+            for key in ("running", "candidate", "startup"):
+                if config[key]:
+                    config[key] = _sanitize_config(config[key])
+
+        return config
+
+    def get_vlans(self) -> dict:
+        """Return VLAN information keyed by VLAN ID string, with port membership."""
+        vlan_output = self.device.send_command("show vlan description")
+        parsed_vlans = parse_output(
+            platform="extreme_exos", command="show vlan description", data=vlan_output
+        )
+
+        vlans: dict = {}
+        for row in parsed_vlans:
+            vlan_id = row.get("vlan_id", "")
+            if not vlan_id:
+                continue
+            vlans[vlan_id] = {
+                "name": row.get("vlan_name", vlan_id),
+                "interfaces": [],
+            }
+
+        if vlans:
+            ports_output = self.device.send_command("show ports information detail")
+            parsed_ports = parse_output(
+                platform="extreme_exos",
+                command="show ports information detail",
+                data=ports_output,
+            )
+            for row in parsed_ports:
+                port = row.get("interface", "")
+                if not port:
+                    continue
+                for vid in row.get("vlan_id", []):
+                    if vid in vlans and port not in vlans[vid]["interfaces"]:
+                        vlans[vid]["interfaces"].append(port)
+
+        return vlans
