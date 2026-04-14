@@ -41,6 +41,8 @@ _HASH2_RE = re.compile(r'(hash2?)\s+"[^"]*"', re.IGNORECASE)
 
 
 def _sanitize_config(text: str) -> str:
+    # SR-OS config stores secrets inside double quotes; preserve the enclosing
+    # quotes so the redacted output remains syntactically valid SR-OS config.
     text = _AUTH_KEY_RE.sub(r'\1 "<redacted>"', text)
     text = _HMAC_MD5_RE.sub(r'\1 "<redacted>"', text)
     text = _DES_KEY_RE.sub(r'\1 "<redacted>"', text)
@@ -107,7 +109,7 @@ class SROSSSHDriver(_napalm_base.NetworkDriver):
         try:
             self.device.write_channel(chr(0))
             return {"is_alive": self.device.remote_conn.transport.is_active()}
-        except (OSError, EOFError, AttributeError):
+        except (EOFError, OSError, AttributeError):  # socket.error is OSError in Python 3.3+
             return {"is_alive": False}
 
     # -----------------------------------------------------------------------
