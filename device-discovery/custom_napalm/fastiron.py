@@ -218,8 +218,11 @@ _IP_ADDR_CIDR_RE = re.compile(
 )
 
 # IPv4 mask:  "  ip address: 192.168.1.1 255.255.255.0"
+# Handles both "ip address: 1.2.3.4 255.255.255.0" and
+# "ip address: 1.2.3.4 subnet mask: 255.255.255.0" (documented IronWare format).
 _IP_ADDR_MASK_RE = re.compile(
-    r"^\s+ip\s+address[:\s]+(?P<ip>\d+\.\d+\.\d+\.\d+)\s+(?P<mask>[\d.]+)",
+    r"^\s+ip\s+address[:\s]+(?P<ip>\d+\.\d+\.\d+\.\d+)\s+"
+    r"(?:subnet\s+mask[:\s]+)?(?P<mask>[\d.]+)",
     re.MULTILINE,
 )
 
