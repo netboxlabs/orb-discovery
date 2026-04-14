@@ -136,7 +136,7 @@ def _mask_to_prefix(mask: str) -> int:
     return sum(bin(int(octet)).count("1") for octet in mask.split("."))
 
 
-class ERSDriver(_napalm_base.NetworkDriver):
+class AvayaERSDriver(_napalm_base.NetworkDriver):
     """Avaya ERS NAPALM driver (read-only subset for device-discovery)."""
 
     def __init__(self, hostname, username, password, timeout=60, optional_args=None):
