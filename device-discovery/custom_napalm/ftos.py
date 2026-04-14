@@ -342,7 +342,7 @@ class FTOSDriver(_napalm_base.NetworkDriver):
                 except ValueError:
                     continue
             else:
-                addr, prefix = ip_addr, 32  # template returns bare IP; /32 is the safe default
+                continue  # skip entries where prefix length cannot be determined
             interfaces_ip.setdefault(intf, {}).setdefault("ipv4", {})[addr] = {
                 "prefix_length": prefix
             }
