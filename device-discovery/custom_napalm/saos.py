@@ -17,7 +17,6 @@ Sanitizes config output for:
 
 import logging
 import re
-import socket
 
 import napalm.base as _napalm_base
 from napalm.base import models
@@ -175,17 +174,15 @@ class SAOSDriver(_napalm_base.NetworkDriver):
 
     def get_interfaces(self) -> dict:
         """Return interface details keyed by interface name."""
-        # Operational status + description + speed/MTU from port show status
-        status_raw = self.device.send_command("port show status")
-        status_parsed = parse_output(
-            platform="ciena_saos", command="port show status", data=status_raw
-        )
-
         # Admin (enabled/disabled) state from ethernet config
         eth_raw = self.device.send_command("port show ethernet-config")
-        eth_parsed = parse_output(
-            platform="ciena_saos", command="port show ethernet-config", data=eth_raw
-        )
+        try:
+            eth_parsed = parse_output(
+                platform="ciena_saos", command="port show ethernet-config", data=eth_raw
+            )
+        except Exception:
+            logger.warning("saos: ntc-template failed for 'port show ethernet-config'")
+            eth_parsed = []
 
         # Build admin-state lookup by port name
         admin_map: dict[str, bool] = {}
@@ -194,6 +191,55 @@ class SAOSDriver(_napalm_base.NetworkDriver):
             if name:
                 admin_map[name] = row.get("admin_status", "").lower() == "ena"
 
+        # Operational status + description + speed/MTU from port show status.
+        # Guard against TextFSMError: the ciena_saos template uses \S* for the
+        # description field and raises TextFSMError on descriptions with spaces
+        # (common in real configs).  Fall back to port show when this occurs.
+        status_raw = self.device.send_command("port show status")
+        try:
+            status_parsed = parse_output(
+                platform="ciena_saos", command="port show status", data=status_raw
+            )
+            return self._build_interfaces_from_status(status_parsed, admin_map)
+        except Exception:
+            logger.warning(
+                "saos: ntc-template failed for 'port show status' "
+                "(description with spaces?); falling back to 'port show'"
+            )
+
+        # Fallback: port show — has link and admin state but no description/MTU/speed
+        port_raw = self.device.send_command("port show")
+        try:
+            port_parsed = parse_output(
+                platform="ciena_saos", command="port show", data=port_raw
+            )
+        except Exception:
+            logger.warning("saos: ntc-template failed for 'port show'")
+            return {}
+
+        interfaces: dict = {}
+        for row in port_parsed:
+            name = row.get("name", "")
+            if not name:
+                continue
+            is_up = row.get("link", "").lower() == "up"
+            is_enabled = admin_map.get(name, row.get("admin_link", "").lower() == "ena")
+            speed = _speed_to_mbps(row.get("mode", ""))
+            interfaces[name] = {
+                "is_up": is_up,
+                "is_enabled": is_enabled,
+                "description": "",
+                "last_flapped": -1.0,
+                "mtu": -1,
+                "speed": speed,
+                "mac_address": "",
+            }
+        return interfaces
+
+    def _build_interfaces_from_status(
+        self, status_parsed: list, admin_map: dict[str, bool]
+    ) -> dict:
+        """Build the interfaces dict from a parsed 'port show status' result."""
         interfaces: dict = {}
         for row in status_parsed:
             name = row.get("name", "")
@@ -201,7 +247,6 @@ class SAOSDriver(_napalm_base.NetworkDriver):
                 continue
 
             is_up = row.get("link", "").lower() == "up"
-            # Prefer admin_map; fall back to True when not present (unknown)
             is_enabled = admin_map.get(name, True)
 
             speed_raw = row.get("speed_duplex", "")
@@ -222,7 +267,6 @@ class SAOSDriver(_napalm_base.NetworkDriver):
                 "speed": speed,
                 "mac_address": "",
             }
-
         return interfaces
 
     def get_interfaces_ip(self) -> dict:
@@ -230,8 +274,8 @@ class SAOSDriver(_napalm_base.NetworkDriver):
         Return IP addresses per interface.
 
         SAOS is a carrier-ethernet platform; IP interfaces are management-only
-        and have no ntc-templates coverage.  Returns an empty dict unless the
-        device provides output for known commands.
+        and this driver does not currently collect or parse interface IP
+        address information. Returns an empty dict.
         """
         return {}
 
