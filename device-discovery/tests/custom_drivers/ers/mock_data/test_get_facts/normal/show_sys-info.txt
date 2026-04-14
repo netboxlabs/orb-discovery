@@ -1,0 +1,26 @@
+
+System Information
+
+Operation Mode:         Switch
+Size Of Stack:          1
+Base Unit:              1
+MAC Address:            00-19-69-5B-20-A1
+PoE Module FW:
+Reset Count:            0
+Last Reset Type:        Power Cycle
+Autotopology:           Disabled
+Base Unit Selection:    Disabled
+Serial #:               SDNEMF18C0007
+Operational Software:   FW:5.5 SW:7.6.3.12
+Installed software:     FW:5.5 SW:7.6.3.12
+Operational license:    Default
+Installed license:      Default
+sysObjectID:            1.3.6.1.4.1.45.3.64.1
+sysUpTime:              0 day(s), 1 hour(s), 26 minute(s), 13 second(s)
+sysNtpTime:             Thu Jan 01 00:00:00 1970
+sysServices:            72
+sysContact:
+sysName:                ERS3626GTS-A
+sysLocation:
+Stack sysAssetId:       NA
+Unit sysAssetId:        NA

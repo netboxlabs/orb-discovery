@@ -1,0 +1,7 @@
+
+Port Name
+---- ---------------
+1    Uplink-to-Core
+2    Server-Port
+3    Desktop-1
+4    Desktop-2

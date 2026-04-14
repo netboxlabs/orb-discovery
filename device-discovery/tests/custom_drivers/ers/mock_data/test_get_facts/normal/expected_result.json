@@ -1,0 +1,15 @@
+{
+  "hostname": "ERS3626GTS-A",
+  "vendor": "Avaya",
+  "model": "Unknown",
+  "os_version": "7.6.3.12",
+  "serial_number": "SDNEMF18C0007",
+  "uptime": 5160.0,
+  "fqdn": "Unknown",
+  "interface_list": [
+    "1",
+    "2",
+    "3",
+    "4"
+  ]
+}
