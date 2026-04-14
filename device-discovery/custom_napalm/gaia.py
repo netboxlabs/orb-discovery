@@ -11,7 +11,6 @@ falls back to regex for commands without templates (hostname, uptime).
 
 import logging
 import re
-import socket
 
 import napalm.base as _napalm_base
 from napalm.base import models
@@ -32,7 +31,7 @@ _SANITIZE_PATTERNS: list[tuple[re.Pattern, str]] = [
     # set aaa tacacs-server <x> secret <s>
     (re.compile(r"^(set\s+aaa\s+tacacs-server\s+\S+\s+secret)\s+\S+", re.M | re.I), r"\1 <redacted>"),
     # set vpn ... pre-shared-secret <s>
-    (re.compile(r"(pre-shared-secret)\s+\S+", re.I), r"\1 <redacted>"),
+    (re.compile(r"^(.*pre-shared-secret)\s+\S+", re.M | re.I), r"\1 <redacted>"),
 ]
 
 
@@ -203,7 +202,9 @@ class GaiaDriver(_napalm_base.NetworkDriver):
             # IPv6 — field contains bare address (no prefix in this template)
             ipv6_addr = row.get("ipv6_address", "")
             if ipv6_addr and ipv6_addr.lower() not in _NOT_CONFIGURED:
-                ipv6_prefix = int(row.get("ipv6_ll_mask", "128") or "128")
+                # The ntc-template captures IPV6_ADDRESS without a prefix length field.
+                # IPV6_LL_MASK is the link-local mask, not applicable here; default to /128.
+                ipv6_prefix = 128
                 interfaces_ip.setdefault(intf, {}).setdefault("ipv6", {})[ipv6_addr] = {
                     "prefix_length": ipv6_prefix
                 }
@@ -220,7 +221,7 @@ class GaiaDriver(_napalm_base.NetworkDriver):
         """Return device configuration."""
         config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
 
-        if retrieve in ("all", "running"):
+        if retrieve.lower() in ("all", "running"):
             config["running"] = self.device.send_command("show configuration")
 
         if sanitized:
