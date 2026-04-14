@@ -145,7 +145,36 @@ class GaiaDriver(_napalm_base.NetworkDriver):
 
     def get_interfaces(self) -> dict:
         """Return interface details keyed by interface name."""
-        raise NotImplementedError
+        raw = self.device.send_command("show interfaces all")
+        parsed = parse_output(platform="checkpoint_gaia", command="show interfaces all", data=raw)
+
+        interfaces = {}
+        for row in parsed:
+            intf = row.get("interface", "")
+            if not intf:
+                continue
+
+            mac_raw = row.get("mac_address", "")
+            try:
+                mac_address = (
+                    normalize_mac(mac_raw)
+                    if mac_raw and mac_raw.lower() not in ("not configured", "")
+                    else ""
+                )
+            except Exception:
+                mac_address = mac_raw
+
+            interfaces[intf] = {
+                "is_up": "link up" in row.get("link_state", "").lower(),
+                "is_enabled": row.get("state", "").lower() == "on",
+                "description": "",
+                "last_flapped": -1.0,
+                "mtu": int(row["mtu"]) if row.get("mtu") else 0,
+                "speed": _parse_speed(row.get("speed", "")),
+                "mac_address": mac_address,
+            }
+
+        return interfaces
 
     def get_interfaces_ip(self) -> dict:
         """Return IP addresses per interface."""
