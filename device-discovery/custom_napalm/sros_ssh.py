@@ -87,6 +87,8 @@ class SROSSSHDriver(_napalm_base.NetworkDriver):
             optional_args = {}
         self.netmiko_optional_args = netmiko_args(optional_args)
         self.netmiko_optional_args.setdefault("port", 22)
+        # SR-OS users log in with privileged access; no enable command needed.
+        self.force_no_enable = True
 
     def open(self):
         """Open an SSH connection to the device via Netmiko."""
