@@ -59,7 +59,10 @@ _INTERNAL_TAG_RE = re.compile(r"Internal\s+Tag\s*=\s*(\d+)")
 _PORT_ADMIN_RE = re.compile(r"Admin\s+State\s*:\s*(\S+)", re.IGNORECASE)
 _PORT_LINK_RE = re.compile(r"Link\s+State\s*:\s*(\S+)", re.IGNORECASE)
 _PORT_DESC_RE = re.compile(r"Description\s+String\s*:\s*\"?(.*?)\"?\s*$", re.IGNORECASE | re.M)
-_PORT_VLANID_RE = re.compile(r"Port-specific\s+VLAN\s+ID\s*:\s*(\d+)", re.IGNORECASE)
+# Match "802.1Q Tag = <vid>" lines — the definitive indicator of tagged VLAN membership.
+# "Port-specific VLAN ID" is an optional PVID-override sub-line that is absent on many
+# trunk ports, so relying on it would miss VLANs for ports that carry multiple tagged VLANs.
+_PORT_8021Q_RE = re.compile(r"802\.1Q\s+Tag\s*=\s*(\d+)", re.IGNORECASE)
 
 
 def _parse_interfaces_regex(output: str) -> dict:
@@ -92,7 +95,7 @@ def _add_tagged_vlan_ports_regex(vlans: dict, ports_output: str) -> None:
         if not port_m:
             continue
         port = port_m.group(1)
-        for vid_m in _PORT_VLANID_RE.finditer(section):
+        for vid_m in _PORT_8021Q_RE.finditer(section):
             vid = vid_m.group(1)
             if vid in vlans and port not in vlans[vid]["interfaces"]:
                 vlans[vid]["interfaces"].append(port)
