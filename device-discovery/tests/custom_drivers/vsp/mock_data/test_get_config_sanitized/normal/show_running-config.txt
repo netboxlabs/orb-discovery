@@ -7,6 +7,7 @@ enable password level 2 EnAbleRawSecret
 !
 snmp-server community "MyReadCommunity" ro
 snmp-server community "MyWriteCommunity" rw
+snmp-server community UnquotedSecret ro
 !
 vlan create 1 name Default type port
 vlan create 10 name Management type port

@@ -38,16 +38,24 @@ _USERNAME_PASSWORD_RE = re.compile(
     re.IGNORECASE,
 )
 # SNMP community string: 'snmp-server community "<name>" ro|rw'
+# or unquoted: 'snmp-server community <name> ro|rw'
 _SNMP_COMMUNITY_RE = re.compile(
-    r'(snmp-server\s+community)\s+"[^"]*"',
+    r'(snmp-server\s+community)\s+("[^"]*"|\S+)',
     re.IGNORECASE,
 )
+
+
+def _sanitize_snmp_community(match: re.Match) -> str:
+    community = match.group(2)
+    if community.startswith('"') and community.endswith('"'):
+        return f'{match.group(1)} "<redacted>"'
+    return f"{match.group(1)} <redacted>"
 
 
 def _sanitize_config(text: str) -> str:
     text = _USERNAME_PASSWORD_RE.sub(r"\1 <redacted>", text)
     text = _PASSWORD_RE.sub(r"\1<redacted>", text)
-    text = _SNMP_COMMUNITY_RE.sub(r'\1 "<redacted>"', text)
+    text = _SNMP_COMMUNITY_RE.sub(_sanitize_snmp_community, text)
     return text
 
 
