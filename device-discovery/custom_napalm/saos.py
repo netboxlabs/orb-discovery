@@ -261,7 +261,9 @@ class SAOSDriver(_napalm_base.NetworkDriver):
                 continue
 
             is_up = row.get("link", "").lower() == "up"
-            is_enabled = admin_map.get(name, True)
+            # Fall back to link state when admin_map is empty (e.g. ethernet-config
+            # parse failed) — better than unconditionally marking every port enabled.
+            is_enabled = admin_map.get(name, is_up)
 
             speed_raw = row.get("speed_duplex", "")
             speed = _speed_to_mbps(speed_raw)
@@ -316,7 +318,11 @@ class SAOSDriver(_napalm_base.NetworkDriver):
     def get_vlans(self) -> dict:
         """Return VLAN information keyed by VLAN ID string."""
         raw = self.device.send_command("vlan show")
-        parsed = parse_output(platform="ciena_saos", command="vlan show", data=raw)
+        try:
+            parsed = parse_output(platform="ciena_saos", command="vlan show", data=raw)
+        except Exception:
+            logger.warning("saos: ntc-template failed for 'vlan show'")
+            return {}
 
         vlans: dict = {}
         for row in parsed:
