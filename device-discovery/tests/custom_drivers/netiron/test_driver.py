@@ -1,8 +1,8 @@
-"""Unit tests for custom_napalm.brocade_netiron.NetIronDriver."""
+"""Unit tests for custom_napalm.netiron.NetIronDriver."""
 
 from pathlib import Path
 
-from custom_napalm.brocade_netiron import NetIronDriver
+from custom_napalm.netiron import NetIronDriver
 from tests.custom_drivers.base_test import BaseDriverTest
 from tests.custom_drivers.mock_device import FakeCLIDevice
 
