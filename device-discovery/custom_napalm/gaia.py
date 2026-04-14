@@ -199,15 +199,9 @@ class GaiaDriver(_napalm_base.NetworkDriver):
                 except (ValueError, AttributeError):
                     pass
 
-            # IPv6 — field contains bare address (no prefix in this template)
-            ipv6_addr = row.get("ipv6_address", "")
-            if ipv6_addr and ipv6_addr.lower() not in _NOT_CONFIGURED:
-                # The ntc-template captures IPV6_ADDRESS without a prefix length field.
-                # IPV6_LL_MASK is the link-local mask, not applicable here; default to /128.
-                ipv6_prefix = 128
-                interfaces_ip.setdefault(intf, {}).setdefault("ipv6", {})[ipv6_addr] = {
-                    "prefix_length": ipv6_prefix
-                }
+            # IPv6 — the ntc-template captures the bare address without a prefix length.
+            # Omit IPv6 entries rather than reporting a wrong /128, which would create
+            # incorrect Prefix entities in inventory.
 
         return interfaces_ip
 
