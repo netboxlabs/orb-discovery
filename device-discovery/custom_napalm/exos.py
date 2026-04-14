@@ -357,27 +357,39 @@ class ExosDriver(_napalm_base.NetworkDriver):
         return vlans
 
     def _add_tagged_vlan_ports(self, vlans: dict, ports_output: str) -> None:
-        """Pass 1 — ntc-template: add tagged 802.1Q port memberships to *vlans*."""
+        """
+        Add tagged 802.1Q port memberships to *vlans*.
+
+        Pass 1a — ntc-template: reads the ``vlan_id`` field populated from
+        ``Port-specific VLAN ID`` lines (optional sub-line; absent on trunk ports
+        without a PVID override → empty list even when the template succeeds).
+
+        Pass 1b — regex (always runs): scans ``802.1Q Tag = <vid>`` lines which
+        are present for every tagged VLAN membership, covering the trunk-port gap.
+        Duplicates are prevented by the ``if port not in`` check.
+        """
         try:
             parsed_ports = parse_output(
                 platform="extreme_exos",
                 command="show ports information detail",
                 data=ports_output,
             )
+            for row in parsed_ports:
+                port = row.get("interface", "")
+                if not port:
+                    continue
+                for vid in row.get("vlan_id", []):
+                    if vid in vlans and port not in vlans[vid]["interfaces"]:
+                        vlans[vid]["interfaces"].append(port)
         except Exception:
             logger.warning(
                 "exos: ntc-template failed for 'show ports information detail' (tagged VLANs); "
-                "falling back to regex (stacked port IDs?)"
+                "regex pass will cover membership (stacked port IDs?)"
             )
-            _add_tagged_vlan_ports_regex(vlans, ports_output)
-            return
-        for row in parsed_ports:
-            port = row.get("interface", "")
-            if not port:
-                continue
-            for vid in row.get("vlan_id", []):
-                if vid in vlans and port not in vlans[vid]["interfaces"]:
-                    vlans[vid]["interfaces"].append(port)
+        # Always supplement with 802.1Q Tag regex: the ntc-template only captures
+        # Port-specific VLAN ID (an optional sub-line), so tagged VLANs on trunk
+        # ports without that sub-line are missed by the template pass alone.
+        _add_tagged_vlan_ports_regex(vlans, ports_output)
 
     def _add_untagged_vlan_ports(self, vlans: dict, ports_output: str) -> None:
         """Pass 2 — regex: add untagged/native VLAN memberships via Internal Tag lines."""
