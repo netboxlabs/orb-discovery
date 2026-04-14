@@ -201,7 +201,10 @@ def _parse_interfaces_ip(output: str) -> dict:
 # VLAN parsing  (show vlan)
 # ---------------------------------------------------------------------------
 # Matches rows: <vlan_id> <name> <status> <type> [mstp_instance]
-# Non-greedy capture for name allows space-separated VLAN names.
+# Non-greedy (.+?) captures multi-word VLAN names. Limitation: a name that
+# itself contains the word "Active" or "Suspend" will be truncated at that
+# word. VOSS restricts VLAN names to alphanumerics and hyphens in practice,
+# so this edge case is unlikely to appear in production configs.
 _VLAN_ROW_RE = re.compile(
     r"^(\d+)\s+(.+?)\s+(?:Active|Suspend)\s+\S+",
     re.MULTILINE,
@@ -288,6 +291,9 @@ class VSPDriver(_napalm_base.NetworkDriver):
             return
         row = parsed_sw[0]
         facts["os_version"] = row.get("primary_release") or row.get("backup_release") or "Unknown"
+        # VOSS release names encode the hardware platform family in the prefix
+        # (e.g. "VOSS8K.6.0.1.2.GA" → platform "8K").  This is a best-effort
+        # extraction; the prefix is not a precise hardware model identifier.
         m = re.match(r"VOSS(\S+?)\.", facts["os_version"], re.IGNORECASE)
         if m:
             facts["model"] = f"VSP {m.group(1).upper()}"
