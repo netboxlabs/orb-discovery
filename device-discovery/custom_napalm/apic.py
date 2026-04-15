@@ -60,8 +60,9 @@ _BARE_KEY_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
-# "key-string <v>" inside a Cisco key-chain block
-_KEY_STRING_RE = re.compile(r"^(\s*key-string)\s+\S+", re.IGNORECASE | re.MULTILINE)
+# "key-string [<type>] <v>" inside a Cisco key-chain block
+# ".*" consumes an optional type indicator (e.g. "7") followed by the actual secret.
+_KEY_STRING_RE = re.compile(r"^(\s*key-string)\s+\S+.*", re.IGNORECASE | re.MULTILINE)
 
 
 def _sanitize_config(text: str) -> str:

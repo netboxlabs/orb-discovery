@@ -20,6 +20,11 @@ tacacs-server host 10.0.0.20
  key T@c@csKey456
  key 7 H@shedKey789
 !
+key chain MYCHAIN
+ key 1
+  key-string Pl@inSecret
+  key-string 7 Typ3dS3cret
+!
 interface eth2-1
   ip address 10.0.1.1/24
   description OOB Management
