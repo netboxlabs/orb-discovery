@@ -267,18 +267,20 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
         if m:
             facts["hostname"] = m.group(1).strip()
 
-        # Model from "System Description: Dell Networking <Model>, ..."
+        # Model from "System Description: Dell [EMC] [Networking] <Model>, ..."
+        # Handles: "Dell Networking N2048", "Dell EMC N2048", "Dell EMC Networking N3048"
         m = re.search(
-            r"System\s+Description\s*:\s*Dell\s+(?:Networking\s+|EMC\s+)?(\S+)",
+            r"System\s+Description\s*:\s*Dell\s+(?:EMC\s+)?(?:Networking\s+)?(\S+)",
             raw,
             re.IGNORECASE,
         )
         if m:
             facts["model"] = m.group(1).strip().rstrip(",")
 
-        # OS version — prefer SW Version column from the unit table
-        # "  1         A00         10.5.2.4       CN07Q7..."
-        m = re.search(r"^\s+\d+\s+\S+\s+(\S+)\s+(\S+)", raw, re.MULTILINE)
+        # OS version — prefer SW Version column from the unit table.
+        # Allow optional leading whitespace: some firmware emits "1  A00  10.5.2.4  ..."
+        # without indentation.
+        m = re.search(r"^\s*\d+\s+\S+\s+(\S+)\s+(\S+)", raw, re.MULTILINE)
         if m:
             facts["os_version"] = m.group(1).strip()
             facts["serial_number"] = m.group(2).strip()
