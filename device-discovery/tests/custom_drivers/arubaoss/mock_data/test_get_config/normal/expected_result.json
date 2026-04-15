@@ -1,5 +1,5 @@
 {
-  "running": "; J9853A Configuration Editor; Created on release #WB.16.10.0014\n\nhostname \"ARUBAOSS-SW01\"\n\ninterface 1\n   name \"Uplink\"\n   exit\n\ninterface 2\n   exit\n\ninterface A1\n   name \"Server\"\n   exit\n\nvlan 1\n   name \"DEFAULT_VLAN\"\n   untagged 1-2,A1\n   ip address 10.1.1.1 255.255.255.0\n   exit\n\nvlan 10\n   name \"VLAN10\"\n   ip address 192.168.10.1 255.255.255.0\n   exit\n\nip default-gateway 10.1.1.254\n\nsnmp-server community public\nradius-server host 10.0.0.5 key MySuperSecretKey123\ntacacs-server host 10.0.0.6 key AnotherSecret456\npassword manager sha1 020000452f9b8e7c3a1d4f6b2e0c9d8a7f5e3b1c4a6d9e2f0b8c7a5d3e1f9b2c4a6\npassword operator sha1 010000652a8c9f7e4b3d2a1f6e5c4b3a2d1f0e9c8b7a6d5e4f3c2b1a0f9e8d7c6b5\n",
+  "running": "; J9853A Configuration Editor; Created on release #WB.16.10.0014\n\nhostname \"ARUBAOSS-SW01\"\n\ninterface 1\n   name \"Uplink\"\n   exit\n\ninterface 2\n   exit\n\ninterface A1\n   name \"Server\"\n   exit\n\nvlan 1\n   name \"DEFAULT_VLAN\"\n   ip address 10.1.1.1 255.255.255.0\n   exit\n\nvlan 10\n   name \"VLAN10\"\n   ip address 192.168.10.1 255.255.255.0\n   exit\n\nip default-gateway 10.1.1.254\n",
   "candidate": "",
-  "startup": ""
+  "startup": "; J9853A Startup Configuration\n\nhostname \"ARUBAOSS-SW01\"\n"
 }

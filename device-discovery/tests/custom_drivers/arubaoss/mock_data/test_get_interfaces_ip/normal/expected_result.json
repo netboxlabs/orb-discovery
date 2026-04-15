@@ -1,5 +1,5 @@
 {
-  "DEFAULT_VLAN": {
+  "VLAN1": {
     "ipv4": {
       "10.1.1.1": {
         "prefix_length": 24

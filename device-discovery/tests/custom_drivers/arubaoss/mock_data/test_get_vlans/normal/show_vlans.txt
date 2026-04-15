@@ -1,7 +1,0 @@
- Status and Counters - VLAN Information
-
-  VLAN ID Name             | Status    Voice Jumbo
-  ------- ---------------- + --------- ----- -----
-        1 DEFAULT_VLAN     | Port-based No    No
-       10 VLAN10           | Port-based No    No
-

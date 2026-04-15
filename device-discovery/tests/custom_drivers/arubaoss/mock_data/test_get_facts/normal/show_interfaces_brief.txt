@@ -1,9 +1,0 @@
- Status and Counters - Port Status
-
-                                                  |  Intrusion  MDI   Flow
-  Port     Type       |   Alert    Enabled  Status    Mode    Mode   Ctrl
-  -------- ---------- + --------- -------- -------- ------- ------- ------
-  1        100/1000T  |  No       Yes      Up       1000FDx Auto    off
-  2        100/1000T  |  No       Yes      Down     Auto    Auto    off
-  A1       10GbE-CX4  |  No       Yes      Up       10GigFDx Auto   off
-
