@@ -1,6 +1,7 @@
 
 username admin privilege 15 password 7 abc123def456
 enable password 7 xyz789uvw012
+enable secret 5 $1$abc123secrethash
 !
 snmp-server community public ro
 snmp-server community private rw

@@ -44,6 +44,9 @@ _RADIUS_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# "enable secret [<enc-type>] <hash>"
+_SECRET_RE = re.compile(r"(enable\s+secret)(?:\s+\d+)?\s+\S+", re.IGNORECASE)
+
 # "tacacs-server host <ip> key <key>"
 _TACACS_KEY_RE = re.compile(
     r"(tacacs-server\s+host\s+\S+\s+key)\s+\S+",
@@ -53,6 +56,7 @@ _TACACS_KEY_RE = re.compile(
 
 def _sanitize_config(text: str) -> str:
     text = _PASSWORD_RE.sub(r"\1 <redacted>", text)
+    text = _SECRET_RE.sub(r"\1 <redacted>", text)
     text = _SNMP_COMMUNITY_RE.sub(r"\1 <redacted>", text)
     text = _RADIUS_KEY_RE.sub(r"\1 <redacted>", text)
     text = _TACACS_KEY_RE.sub(r"\1 <redacted>", text)
@@ -66,41 +70,6 @@ def _sanitize_config(text: str) -> str:
 _MINUTE_SECONDS = 60
 _HOUR_SECONDS = 3600
 _DAY_SECONDS = 24 * _HOUR_SECONDS
-_WEEK_SECONDS = 7 * _DAY_SECONDS
-
-
-def _parse_uptime(uptime_str: str) -> float:
-    """
-    Convert a Dell PowerConnect uptime string to total seconds.
-
-    Handles formats such as:
-      "0d:2h:14m:33s"
-      "3 day(s) 4 hour(s) 22 minute(s) 5 second(s)"
-    """
-    uptime_str = uptime_str.strip()
-
-    # Compact form "Xd:Xh:Xm:Xs"
-    m = re.fullmatch(r"(\d+)d:(\d+)h:(\d+)m:(\d+)s", uptime_str)
-    if m:
-        return (
-            int(m.group(1)) * _DAY_SECONDS
-            + int(m.group(2)) * _HOUR_SECONDS
-            + int(m.group(3)) * _MINUTE_SECONDS
-            + int(m.group(4))
-        )
-
-    seconds = 0.0
-    for pattern, factor in (
-        (r"(\d+)\s*(?:week|wk)", _WEEK_SECONDS),
-        (r"(\d+)\s*day", _DAY_SECONDS),
-        (r"(\d+)\s*h(?:ou)?r", _HOUR_SECONDS),
-        (r"(\d+)\s*min", _MINUTE_SECONDS),
-        (r"(\d+)\s*sec", 1),
-    ):
-        hit = re.search(pattern, uptime_str, re.IGNORECASE)
-        if hit:
-            seconds += int(hit.group(1)) * factor
-    return seconds
 
 
 # ---------------------------------------------------------------------------
@@ -267,12 +236,38 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
             "interface_list": interface_list,
         }
 
+    def _description_map(self) -> dict[str, str]:
+        """Return a port→description mapping from 'show interfaces description' (ntc-template)."""
+        desc_map: dict[str, str] = {}
+        raw = self.device.send_command("show interfaces description")
+        if not raw:
+            return desc_map
+        try:
+            parsed = parse_output(
+                platform=_NTC_PLATFORM, command="show interfaces description", data=raw
+            )
+            for row in parsed:
+                intf = row.get("interface", "").strip()
+                if intf:
+                    desc_map[intf] = row.get("description", "").strip()
+        except Exception:
+            logger.debug(
+                "powerconnect: failed to parse 'show interfaces description'", exc_info=True
+            )
+        return desc_map
+
     def get_interfaces(self) -> dict:
         """
         Return interface details keyed by port name.
 
         Parses 'show interfaces status' (ntc-template) for port/speed/state and
         'show interfaces description' (ntc-template) for description.
+
+        ``is_enabled`` is derived from link state because the NTC template for
+        ``show interfaces status`` does not expose a separate admin-state column.
+        On PowerConnect hardware, ``shutdown`` collapses into link-state ``Down``,
+        so this proxy is correct for physical ports. Port-channels without
+        members ("Not Present") are skipped entirely.
         """
         raw_status = self.device.send_command("show interfaces status")
         if not raw_status:
@@ -286,37 +281,20 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
             logger.debug("powerconnect: failed to parse 'show interfaces status'", exc_info=True)
             return {}
 
-        # Build description map from second NTC template
-        desc_map: dict[str, str] = {}
-        raw_desc = self.device.send_command("show interfaces description")
-        if raw_desc:
-            try:
-                parsed_desc = parse_output(
-                    platform=_NTC_PLATFORM,
-                    command="show interfaces description",
-                    data=raw_desc,
-                )
-                for row in parsed_desc:
-                    intf = row.get("interface", "").strip()
-                    if intf:
-                        desc_map[intf] = row.get("description", "").strip()
-            except Exception:
-                logger.debug(
-                    "powerconnect: failed to parse 'show interfaces description'", exc_info=True
-                )
-
+        desc_map = self._description_map()
         interfaces: dict = {}
         for row in parsed_status:
             port = row.get("port", "").strip()
             if not port:
                 continue
             link_state = row.get("linkstate", "").strip().lower()
+            if link_state == "not present":
+                continue
             speed_raw = row.get("speed", "").strip()
             try:
                 speed = float(speed_raw) if speed_raw not in ("", "--") else -1.0
             except ValueError:
                 speed = -1.0
-
             interfaces[port] = {
                 "is_up": link_state == "up",
                 "is_enabled": link_state != "down",
