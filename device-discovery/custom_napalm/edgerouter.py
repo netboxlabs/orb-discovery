@@ -62,8 +62,6 @@ _MIN_S = 60
 def _parse_uptime(uptime_str: str) -> float:
     """Convert an EdgeOS uptime string to total seconds."""
     m = _UPTIME_RE.search(uptime_str)
-    if not m:
-        return 0.0
     years, weeks, days, hours, minutes, seconds = (int(v or 0) for v in m.groups())
     return float(
         years * _YEAR_S
@@ -95,6 +93,7 @@ class EdgeRouterDriver(_napalm_base.NetworkDriver):
         self.device = self._netmiko_open(
             "ubiquiti_edgerouter", netmiko_optional_args=self.netmiko_optional_args
         )
+        self._interfaces_cache: list[dict] | None = None
 
     def close(self):
         """Close the SSH connection."""
@@ -115,15 +114,17 @@ class EdgeRouterDriver(_napalm_base.NetworkDriver):
     # ------------------------------------------------------------------
 
     def _parse_interfaces_raw(self) -> list[dict]:
-        """Parse 'show interfaces' once; used by get_facts, get_interfaces, get_interfaces_ip."""
-        raw = self.device.send_command("show interfaces")
-        try:
-            return parse_output(
-                platform="ubiquiti_edgerouter", command="show interfaces", data=raw
-            )
-        except Exception:
-            logger.debug("Failed to parse 'show interfaces'", exc_info=True)
-            return []
+        """Parse 'show interfaces' and cache the result for the lifetime of this connection."""
+        if not hasattr(self, "_interfaces_cache") or self._interfaces_cache is None:
+            raw = self.device.send_command("show interfaces")
+            try:
+                self._interfaces_cache = parse_output(
+                    platform="ubiquiti_edgerouter", command="show interfaces", data=raw
+                )
+            except Exception:
+                logger.debug("Failed to parse 'show interfaces'", exc_info=True)
+                self._interfaces_cache = []
+        return self._interfaces_cache
 
     # ------------------------------------------------------------------
     # NAPALM getters
@@ -138,17 +139,21 @@ class EdgeRouterDriver(_napalm_base.NetworkDriver):
         - 'show system host-name'  → hostname (plain text)
         - 'show interfaces'        → interface_list (ntc-template)
         """
+        model = serial = os_version = "Unknown"
+        uptime_str = ""
         raw_ver = self.device.send_command("show version")
         try:
             parsed = parse_output(
                 platform="ubiquiti_edgerouter", command="show version", data=raw_ver
             )
+            if parsed:
+                row = parsed[0]
+                model = row.get("hardware_model", "Unknown").strip()
+                os_version = row.get("version", "Unknown").strip()
+                serial = row.get("serial_number", "Unknown").strip()
+                uptime_str = row.get("uptime", "")
         except Exception:
             logger.debug("Failed to parse 'show version'", exc_info=True)
-            return {}
-        if not parsed:
-            return {}
-        row = parsed[0]
 
         hostname_raw = self.device.send_command("show system host-name")
         hostname = hostname_raw.strip() or self.hostname
@@ -162,10 +167,10 @@ class EdgeRouterDriver(_napalm_base.NetworkDriver):
         return {
             "hostname": hostname,
             "vendor": "Ubiquiti",
-            "model": row.get("hardware_model", "Unknown").strip(),
-            "os_version": row.get("version", "Unknown").strip(),
-            "serial_number": row.get("serial_number", "Unknown").strip(),
-            "uptime": _parse_uptime(row.get("uptime", "")),
+            "model": model,
+            "os_version": os_version,
+            "serial_number": serial,
+            "uptime": _parse_uptime(uptime_str),
             "fqdn": "Unknown",
             "interface_list": interface_list,
         }

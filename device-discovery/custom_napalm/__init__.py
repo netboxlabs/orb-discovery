@@ -10,6 +10,7 @@ from custom_napalm.edgeswitch import EdgeSwitchDriver
 from custom_napalm.ers import ERSDriver
 from custom_napalm.exos import ExosDriver
 from custom_napalm.fastiron import FastIronDriver
+from custom_napalm.fortios_ssh import FortiOSSSHDriver
 from custom_napalm.ftd_ssh import FTDSSHDriver
 from custom_napalm.ftos import FTOSDriver
 from custom_napalm.gaia import GaiaDriver
@@ -32,13 +33,14 @@ __all__ = [
     "ASADriver",
     "ASASSHDriver",
     "ComwareDriver",
+    "ERSDriver",
     "EdgeRouterDriver",
     "EdgeSwitchDriver",
-    "ERSDriver",
     "ExosDriver",
-    "FastIronDriver",
     "FTDSSHDriver",
     "FTOSDriver",
+    "FastIronDriver",
+    "FortiOSSSHDriver",
     "GaiaDriver",
     "NetIronDriver",
     "PANOSDriver",
@@ -48,8 +50,8 @@ __all__ = [
     "SAOSDriver",
     "SROSSSHDriver",
     "UniFiSwitchDriver",
-    "ViptelaSSHDriver",
     "VRPDriver",
     "VSPDriver",
+    "ViptelaSSHDriver",
     "WLCDriver",
 ]

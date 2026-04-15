@@ -95,6 +95,21 @@ _IP_INTF_RE = re.compile(
 # VLAN membership parsing — 'show running-config'
 # ---------------------------------------------------------------------------
 
+def _expand_vlan_tokens(token_str: str) -> list[str]:
+    """Expand a comma-separated VLAN list (with optional ranges) into VLAN ID strings."""
+    vids: list[str] = []
+    for token in token_str.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if "-" in token:
+            start, _, end = token.partition("-")
+            vids.extend(str(v) for v in range(int(start), int(end) + 1))
+        else:
+            vids.append(token)
+    return vids
+
+
 def _parse_vlan_members(config: str) -> dict[str, list[str]]:
     """
     Extract VLAN → interface membership from EdgeSwitch running-config.
@@ -120,10 +135,8 @@ def _parse_vlan_members(config: str) -> dict[str, list[str]]:
         if current_intf:
             m_vlan = re.match(r"^vlan\s+participation\s+include\s+(.+)$", stripped)
             if m_vlan:
-                for vid in m_vlan.group(1).split(","):
-                    vid = vid.strip()
-                    if vid:
-                        result.setdefault(vid, []).append(current_intf)
+                for vid in _expand_vlan_tokens(m_vlan.group(1)):
+                    result.setdefault(vid, []).append(current_intf)
     return result
 
 
@@ -147,6 +160,7 @@ class EdgeSwitchDriver(_napalm_base.NetworkDriver):
         self.device = self._netmiko_open(
             "ubiquiti_edgeswitch", netmiko_optional_args=self.netmiko_optional_args
         )
+        self._intf_status_raw: str | None = None
 
     def close(self):
         """Close the SSH connection."""
@@ -173,6 +187,12 @@ class EdgeSwitchDriver(_napalm_base.NetworkDriver):
             if stripped.startswith("hostname "):
                 return stripped.split("hostname ", 1)[1].strip()
         return self.hostname
+
+    def _get_intf_status_raw(self) -> str:
+        """Fetch 'show interfaces status all' once and cache for this connection."""
+        if not hasattr(self, "_intf_status_raw") or self._intf_status_raw is None:
+            self._intf_status_raw = self.device.send_command("show interfaces status all")
+        return self._intf_status_raw
 
     # ------------------------------------------------------------------
     # NAPALM getters
@@ -208,8 +228,7 @@ class EdgeSwitchDriver(_napalm_base.NetworkDriver):
         hostname = self._hostname_from_config(config_raw)
 
         interface_list: list[str] = []
-        raw_intfs = self.device.send_command("show interfaces status all")
-        for line in raw_intfs.splitlines():
+        for line in self._get_intf_status_raw().splitlines():
             m = _ES_INTF_LINE_RE.match(line)
             if m:
                 interface_list.append(m.group("intf"))
@@ -234,8 +253,7 @@ class EdgeSwitchDriver(_napalm_base.NetworkDriver):
         speed:      parsed from Physical Mode column (e.g. 'Full-100M' → 100.0 Mbps)
         """
         interfaces: dict = {}
-        raw = self.device.send_command("show interfaces status all")
-        for line in raw.splitlines():
+        for line in self._get_intf_status_raw().splitlines():
             m = _ES_INTF_LINE_RE.match(line)
             if not m:
                 continue
