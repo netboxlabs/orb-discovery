@@ -15,12 +15,14 @@ from custom_napalm.ftd_ssh import FTDSSHDriver
 from custom_napalm.ftos import FTOSDriver
 from custom_napalm.gaia import GaiaDriver
 from custom_napalm.huawei_vrp import VRPDriver
+from custom_napalm.ipos import IPOSDriver
 from custom_napalm.netiron import NetIronDriver
 from custom_napalm.panos import PANOSDriver
 from custom_napalm.panos_ssh import PANOSSHDriver
 from custom_napalm.procurve import ProcurveDriver
 from custom_napalm.ros import ROSDriver
 from custom_napalm.saos import SAOSDriver
+from custom_napalm.sros import SROSDriver
 from custom_napalm.sros_ssh import SROSSSHDriver
 from custom_napalm.unifiswitch import UniFiSwitchDriver
 from custom_napalm.viptela_ssh import ViptelaSSHDriver
@@ -42,12 +44,14 @@ __all__ = [
     "FastIronDriver",
     "FortiOSSSHDriver",
     "GaiaDriver",
+    "IPOSDriver",
     "NetIronDriver",
     "PANOSDriver",
     "PANOSSHDriver",
     "ProcurveDriver",
     "ROSDriver",
     "SAOSDriver",
+    "SROSDriver",
     "SROSSSHDriver",
     "UniFiSwitchDriver",
     "VRPDriver",
