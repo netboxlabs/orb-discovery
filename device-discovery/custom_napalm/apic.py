@@ -103,9 +103,11 @@ def _parse_uptime(uptime_str: str) -> float:
 # ---------------------------------------------------------------------------
 
 # Opening line: "Interface eth2-1 is up, line protocol is up"
-# The optional "administratively " qualifier appears before "down" for admin-shutdown interfaces.
+# group(2) captures the full admin-state token, including the optional "administratively " prefix,
+# so callers can distinguish "administratively down" (is_enabled=False) from plain "down"
+# (link-down only, is_enabled=True).
 _INTF_HEADER_RE = re.compile(
-    r"^(?:Interface\s+)?(\S+)\s+is\s+(?:administratively\s+)?(up|down).*?line\s+protocol\s+is\s+(up|down)",
+    r"^(?:Interface\s+)?(\S+)\s+is\s+((?:administratively\s+)?(?:up|down)).*?line\s+protocol\s+is\s+(up|down)",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -174,9 +176,10 @@ def _parse_interfaces(raw: str) -> list[dict]:
         if not header:
             continue
         name = header.group(1)
-        # group(2): admin state (is_enabled) — "up" or "down", optionally preceded by "administratively"
-        # group(3): line protocol state (is_up) — "up" or "down"
-        admin_up = header.group(2).lower() == "up"
+        # group(2): full admin-state token — "up", "down", or "administratively down"
+        # group(3): line protocol state — "up" or "down"
+        admin_token = header.group(2).lower()
+        admin_up = "administratively" not in admin_token  # False only for admin-shutdown ports
         proto_up = header.group(3).lower() == "up"
 
         mac_m = _MAC_RE.search(stanza)
@@ -252,6 +255,7 @@ class APICDriver(_napalm_base.NetworkDriver):
 
     def open(self):
         """Open an SSH connection to the APIC via Netmiko."""
+        self._intf_cache = None  # invalidate any stale cache from a previous session
         self.device = self._netmiko_open(
             _PLATFORM, netmiko_optional_args=self.netmiko_optional_args
         )
@@ -406,6 +410,7 @@ class APICDriver(_napalm_base.NetworkDriver):
         those keys are always returned as empty strings.
         """
         config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
+        retrieve = retrieve.lower()
 
         if retrieve in ("all", "running"):
             config["running"] = self._send("show running-config")
@@ -443,7 +448,9 @@ class APICDriver(_napalm_base.NetworkDriver):
             logger.debug("Failed to parse 'fabric show vlan extended' output", exc_info=True)
             return {}
 
-        result: dict = {}
+        # Build intermediate result with sets for O(1) port deduplication.
+        # Each value is {"name": str, "ports": set[str]}.
+        intermediate: dict = {}
         for row in rows:
             vlan_id = row.get("vlan_id", "").strip()
             if not vlan_id:
@@ -451,15 +458,23 @@ class APICDriver(_napalm_base.NetworkDriver):
 
             raw_name = row.get("vlan_name")
             vlan_name = (raw_name[0].strip() if isinstance(raw_name, list) and raw_name else str(raw_name or "").strip()) or vlan_id
-            entry = result.setdefault(vlan_id, {"name": vlan_name, "interfaces": []})
+
+            entry = intermediate.setdefault(vlan_id, {"name": vlan_id, "ports": set()})
+
+            # Update the name when a better (non-placeholder) name is found in a later row.
+            if vlan_name and vlan_name != vlan_id:
+                entry["name"] = vlan_name
 
             # VLAN_PORTS is a List in the template; each element may be a
-            # comma-separated string — normalise to a flat, deduplicated list.
+            # comma-separated string — normalise to a flat deduplicated set.
             raw_ports: list = row.get("vlan_ports") or []
             for port_token in raw_ports:
                 for port in re.split(r"[,\s]+", port_token):
                     port = port.strip().rstrip(",")
-                    if port and port not in entry["interfaces"]:
-                        entry["interfaces"].append(port)
+                    if port:
+                        entry["ports"].add(port)
 
-        return result
+        return {
+            vid: {"name": e["name"], "interfaces": sorted(e["ports"])}
+            for vid, e in intermediate.items()
+        }
