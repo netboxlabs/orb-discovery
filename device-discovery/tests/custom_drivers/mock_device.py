@@ -160,7 +160,8 @@ class FakeNetconfConn:
     Mock ncclient manager for NETCONF-based driver unit tests.
 
     Each test method has its own mock_dir. ``get()`` reads ``response.xml`` from
-    that directory; ``get_config()`` reads ``running_config.xml``.
+    that directory; ``get_config(source)`` reads ``{source}_config.xml``
+    (e.g. ``running_config.xml``, ``candidate_config.xml``).
 
     Examples:
         test_get_facts/normal/response.xml
@@ -182,7 +183,7 @@ class FakeNetconfConn:
         self._mock_dir = mock_dir
 
     @property
-    def server_capabilities(self) -> list:
+    def server_capabilities(self) -> list[str]:
         """Return empty capabilities — driver treats this as a modern (non-R19) device."""
         return []
 
@@ -193,8 +194,8 @@ class FakeNetconfConn:
         return self._Response(xml)
 
     def get_config(self, source: str = "running", **kwargs) -> "_Response":
-        """Return ``running_config.xml`` from the mock directory."""
-        path = self._mock_dir / "running_config.xml"
+        """Return ``{source}_config.xml`` from the mock directory."""
+        path = self._mock_dir / f"{source}_config.xml"
         xml = path.read_text(encoding="utf-8") if path.exists() else "<data/>"
         return self._Response(xml)
 

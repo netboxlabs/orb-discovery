@@ -222,6 +222,19 @@ def _parse_xml(data_xml: str | bytes) -> etree._Element:
     return etree.fromstring(data_xml, parser=_SAFE_XML_PARSER)
 
 
+def _with_defaults_kwarg(capabilities: list[str]) -> dict:
+    """
+    Return ``{"with_defaults": "report-all"}`` only when the server advertises it.
+
+    ncclient raises ``MissingCapabilityError`` if ``with_defaults`` is passed to a
+    server that has not announced the ``:with-defaults`` capability, so we must
+    gate the argument on the negotiated capability set.
+    """
+    if any("with-defaults" in c for c in capabilities):
+        return {"with_defaults": "report-all"}
+    return {}
+
+
 def _find_txt(xml_tree: etree._Element, xpath: str, default: str = "") -> str:
     """Extract the text of the first XPath match; return *default* on miss."""
     try:
@@ -488,9 +501,8 @@ class SROSDriver(_napalm_base.NetworkDriver):
                 ns_conf=_NS_CONF,
                 oper_state_tag=oper_state_tag,
             )
-            result = _parse_xml(
-                self.conn.get(filter=nc_filter, with_defaults="report-all").data_xml
-            )
+            get_kwargs = _with_defaults_kwarg(self.conn.server_capabilities)
+            result = _parse_xml(self.conn.get(filter=nc_filter, **get_kwargs).data_xml)
             interfaces: dict = {}
 
             # --- Physical ports ---
@@ -596,9 +608,8 @@ class SROSDriver(_napalm_base.NetworkDriver):
         prefixed as ``{service_name}/{if_name}``.
         """
         try:
-            result = _parse_xml(
-                self.conn.get(filter=_FILTER_INTERFACES_IP, with_defaults="report-all").data_xml
-            )
+            get_kwargs = _with_defaults_kwarg(self.conn.server_capabilities)
+            result = _parse_xml(self.conn.get(filter=_FILTER_INTERFACES_IP, **get_kwargs).data_xml)
             interfaces_ip: dict = {}
 
             # Router interfaces (Base router + named VRF routers)
