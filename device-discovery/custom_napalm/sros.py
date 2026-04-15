@@ -21,7 +21,7 @@ Modernisations over the community napalm-sros driver:
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 
 import napalm.base as _napalm_base
 from lxml import etree
@@ -322,28 +322,43 @@ def _extract_if_addrs(interface: etree._Element) -> dict:
     return entry
 
 
+def _merge_if_addrs(interfaces_ip: dict, key: str, entry: dict) -> None:
+    """Merge *entry* address families into *interfaces_ip[key]*."""
+    if not entry:
+        return
+    existing = interfaces_ip.setdefault(key, {})
+    for family, addrs in entry.items():
+        existing.setdefault(family, {}).update(addrs)
+
+
+# strptime format fallbacks for Nokia last-oper-change timestamps.
+# %f accepts 1–6 fractional-second digits (unlike Python 3.10 fromisoformat),
+# so ".0" and ".123" are both handled correctly.
+# %z accepts "+HHMM" / "+HH:MM" forms; "Z" is normalised to "+0000" before parsing.
+_FLAP_FMTS = (
+    "%Y-%m-%dT%H:%M:%S.%f%z",  # with fractional seconds  (e.g. 2021-06-01T08:00:00.0Z)
+    "%Y-%m-%dT%H:%M:%S%z",     # without fractional seconds (e.g. 2021-06-01T08:00:00Z)
+)
+
+
 def _parse_last_flapped(flap_str: str) -> float:
     """
     Convert a Nokia last-oper-change timestamp to a UTC epoch float.
 
-    Accepts any RFC 3339 / ISO 8601 variant emitted by SR-OS, including forms
-    with or without fractional seconds and with either a ``Z`` suffix or a
-    numeric UTC offset (``+00:00``).  Examples:
-
-    - ``2021-06-01T08:00:00Z``
-    - ``2021-06-01T08:00:00.123456Z``
-    - ``2021-06-01T08:00:00+00:00``
+    Accepts RFC 3339 variants with or without fractional seconds, and with
+    either a ``Z`` suffix or a numeric UTC offset.
     """
     if not flap_str:
         return -1.0
-    # datetime.fromisoformat() handles numeric offsets on Python 3.10+ but
-    # does not accept the 'Z' suffix until Python 3.11.  Normalise it first.
-    normalised = flap_str[:-1] + "+00:00" if flap_str.endswith("Z") else flap_str
-    try:
-        return datetime.fromisoformat(normalised).timestamp()
-    except ValueError:
-        logger.debug("Cannot parse last-oper-change: %s", flap_str)
-        return -1.0
+    # strptime %z needs "+HHMM"; normalise the UTC "Z" designator.
+    s = flap_str[:-1] + "+0000" if flap_str.endswith("Z") else flap_str
+    for fmt in _FLAP_FMTS:
+        try:
+            return datetime.strptime(s, fmt).timestamp()
+        except ValueError:
+            continue
+    logger.debug("Cannot parse last-oper-change: %s", flap_str)
+    return -1.0
 
 
 class SROSDriver(_napalm_base.NetworkDriver):
@@ -553,31 +568,40 @@ class SROSDriver(_napalm_base.NetworkDriver):
         }
 
     def get_interfaces_ip(self) -> dict:
-        """Return all configured IP addresses per interface (configure tree)."""
+        """
+        Return all configured IP addresses per interface (configure tree).
+
+        Keys use the same scoping convention as ``get_interfaces()``: Base router
+        interfaces are keyed by bare interface-name; non-Base router VRF interfaces
+        are prefixed as ``{router_name}/{if_name}``; VPRN service interfaces are
+        prefixed as ``{service_name}/{if_name}``.
+        """
         try:
             result = _parse_xml(
                 self.conn.get(filter=_FILTER_INTERFACES_IP, with_defaults="report-all").data_xml
             )
             interfaces_ip: dict = {}
 
-            xpath_filter = (
-                "configure_ns:configure/configure_ns:router/configure_ns:interface"
-                " | configure_ns:configure/configure_ns:service"
-                "/configure_ns:vprn/configure_ns:interface"
-            )
-            for interface in result.xpath(xpath_filter, namespaces=_NSMAP):
-                if_name = _find_txt(interface, "configure_ns:interface-name")
-                if not if_name:
-                    continue
-                entry = _extract_if_addrs(interface)
-                if entry:
-                    # Merge into any existing entry for this interface-name.
-                    # The same logical name can appear in both the Base router and one or more
-                    # VPRN services; merging prevents later entries from silently overwriting
-                    # earlier ones.
-                    existing = interfaces_ip.setdefault(if_name, {})
-                    for family, addrs in entry.items():
-                        existing.setdefault(family, {}).update(addrs)
+            # Router interfaces (Base router + named VRF routers)
+            for router in result.xpath("configure_ns:configure/configure_ns:router", namespaces=_NSMAP):
+                router_name = _find_txt(router, "configure_ns:router-name")
+                for iface in router.xpath("configure_ns:interface", namespaces=_NSMAP):
+                    if_name = _find_txt(iface, "configure_ns:interface-name")
+                    if not if_name:
+                        continue
+                    key = if_name if router_name == "Base" else f"{router_name}/{if_name}"
+                    _merge_if_addrs(interfaces_ip, key, _extract_if_addrs(iface))
+
+            # VPRN service interfaces
+            for vprn in result.xpath(
+                "configure_ns:configure/configure_ns:service/configure_ns:vprn", namespaces=_NSMAP
+            ):
+                svc_name = _find_txt(vprn, "configure_ns:service-name")
+                for iface in vprn.xpath("configure_ns:interface", namespaces=_NSMAP):
+                    if_name = _find_txt(iface, "configure_ns:interface-name")
+                    if not if_name:
+                        continue
+                    _merge_if_addrs(interfaces_ip, f"{svc_name}/{if_name}", _extract_if_addrs(iface))
 
             return interfaces_ip
         except Exception:
