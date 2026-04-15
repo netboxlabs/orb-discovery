@@ -199,7 +199,7 @@ class FXOSDriver(_napalm_base.NetworkDriver):
           (regex; FXOS format differs from NX-OS).
         * ``show inventory``  — serial_number fallback; parsed with
           ntc-templates cisco_nxos platform.
-        * ``show ip interface brief``  — interface_list; parsed with
+        * ``show interface``  — interface_list; parsed with
           ntc-templates cisco_nxos platform.
         """
         ver_raw = self.device.send_command("show version")
