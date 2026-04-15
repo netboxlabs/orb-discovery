@@ -1,0 +1,33 @@
+!Command: show running-config
+!Running configuration last done at: Tue Apr 15 10:15:22 2025
+!Time: Tue Apr 15 10:15:22 2025
+
+version 2.12
+hostname fpr4110-lab
+ip domain-name example.com
+
+enable password 7 094F471A1A0A4640
+username admin password 0 MyAdminSecret123
+username monitor secret 5 $1$GlF7$IB.zNR5uKXEMKp.
+
+interface Ethernet1/1
+  description FPR-outside
+  no shutdown
+
+interface mgmt0
+  vrf member management
+  ip address 10.10.10.100/24
+  no shutdown
+
+snmp-server community public ro
+snmp-server community private rw
+
+key chain BGPKEY
+  key 1
+    key-string MyBgpKeyString
+
+pre-shared-key MyIpsecPsk
+
+tacacs-server host 10.0.0.5 key TacacsSecret
+
+aaa authentication login default local
