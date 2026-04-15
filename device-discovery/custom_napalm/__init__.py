@@ -1,10 +1,10 @@
 """Custom NAPALM drivers shipped with device-discovery."""
 
 from custom_napalm.aos import AOSDriver
-from custom_napalm.arubaos import ArubaOSDriver
-from custom_napalm.arubaoss import ArubaOSSDriver
 from custom_napalm.aoscx import AOSCXDriver
 from custom_napalm.aoscx_ssh import AOSCXSSHDriver
+from custom_napalm.arubaos import ArubaOSDriver
+from custom_napalm.arubaoss import ArubaOSSDriver
 from custom_napalm.asa import ASADriver
 from custom_napalm.asa_ssh import ASASSHDriver
 from custom_napalm.comware import ComwareDriver
@@ -26,6 +26,7 @@ from custom_napalm.panos_ssh import PANOSSHDriver
 from custom_napalm.procurve import ProcurveDriver
 from custom_napalm.ros import ROSDriver
 from custom_napalm.saos import SAOSDriver
+from custom_napalm.slxos import SLXOSDriver
 from custom_napalm.sros import SROSDriver
 from custom_napalm.sros_ssh import SROSSSHDriver
 from custom_napalm.unifiswitch import UniFiSwitchDriver
@@ -59,6 +60,7 @@ __all__ = [
     "ProcurveDriver",
     "ROSDriver",
     "SAOSDriver",
+    "SLXOSDriver",
     "SROSDriver",
     "SROSSSHDriver",
     "UniFiSwitchDriver",
