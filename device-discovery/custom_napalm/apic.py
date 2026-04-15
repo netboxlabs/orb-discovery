@@ -269,6 +269,10 @@ _TABULAR_CTRL_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# Serial number from "show inventory" output:
+#   PID: APIC-M2, VID: V01, SN: FOX2516P100
+_INVENTORY_SERIAL_RE = re.compile(r"\bSN:\s*(\S+)", re.IGNORECASE)
+
 _SERIAL_PLACEHOLDERS = frozenset({"none", "n/a", "na", "null", "unknown", "-"})
 
 
@@ -334,74 +338,97 @@ class APICDriver(_napalm_base.NetworkDriver):
     # NAPALM getters
     # -----------------------------------------------------------------------
 
+    def _parse_show_version(self, raw: str) -> dict:
+        """
+        Parse ``show version`` raw text into a facts dict.
+
+        Tries key-value format first, then falls back to the tabular
+        ``controller <pod> <node> <name> <version>`` row.  Returns a dict
+        with keys: hostname, os_version, model, serial_number, uptime.
+        Missing fields are returned as their ``"Unknown"`` / ``0.0`` defaults.
+        """
+        hostname = self.hostname
+        os_version = "Unknown"
+        model = "Unknown"
+        serial_number = "Unknown"
+        uptime = 0.0
+
+        # Key-value format (primary)
+        hostname_val = _extract(raw, _HOSTNAME_RE)
+        if hostname_val:
+            hostname = hostname_val
+        version_val = _extract(raw, _VERSION_RE)
+        if version_val:
+            os_version = version_val
+        model_val = _extract(raw, _MODEL_RE)
+        if model_val:
+            model = model_val
+        serial_val = _extract(raw, _SERIAL_RE)
+        if serial_val and serial_val.lower() not in _SERIAL_PLACEHOLDERS:
+            serial_number = serial_val
+        uptime_line = _extract(raw, _UPTIME_LINE_RE)
+        if uptime_line:
+            uptime = _parse_uptime(uptime_line)
+
+        # Tabular format fallback
+        if os_version == "Unknown":
+            tab_m = _TABULAR_CTRL_RE.search(raw)
+            if tab_m:
+                if hostname == self.hostname:
+                    hostname = tab_m.group(1)
+                os_version = tab_m.group(2)
+
+        return {
+            "hostname": hostname,
+            "os_version": os_version,
+            "model": model,
+            "serial_number": serial_number,
+            "uptime": uptime,
+        }
+
+    def _fetch_serial_from_inventory(self) -> str:
+        """
+        Return serial number from ``show inventory``, or ``"Unknown"`` if unavailable.
+
+        Called as a fallback when ``show version`` does not carry a serial (e.g.
+        in the tabular format).  ``discover_device_driver()`` rejects drivers
+        whose ``get_facts()`` returns ``"Unknown"`` for serial_number, so this
+        call is important for auto-discovery to work.
+        """
+        inv_raw = self._send("show inventory")
+        if inv_raw:
+            inv_m = _INVENTORY_SERIAL_RE.search(inv_raw)
+            if inv_m and inv_m.group(1).lower() not in _SERIAL_PLACEHOLDERS:
+                return inv_m.group(1)
+        return "Unknown"
+
     def get_facts(self) -> dict:
         """
         Return general device facts from ``show version`` and ``show interface``.
 
         Hostname, OS version, model, and serial number are regex-parsed from
-        ``show version``.  Two output formats are handled:
-
-        *Key-value* (older APIC firmware or per-controller context)::
-
-            Hostname: apic1
-            Software Version: 6.0(3f)
-            Model: APIC-M2
-
-        *Tabular* (some APIC versions, fabric-wide table)::
-
-            Role        Pod  Node  Name   Version
-            ----------  ---  ----  -----  -------
-            controller  1    1     apic1  6.0(3f)
-
-        Key-value patterns are tried first; the tabular fallback fills in
-        any fields that remain ``"Unknown"`` after key-value parsing.
-        The interface list is derived from ``show interface``.
+        ``show version`` (key-value or tabular format).  When the serial is
+        absent from ``show version`` output, ``show inventory`` is queried as a
+        fallback.  The interface list is derived from ``show interface``.
         """
-        hostname = self.hostname
-        vendor = "Cisco"
-        model = "Unknown"
-        os_version = "Unknown"
-        serial_number = "Unknown"
-        uptime = 0.0
-
         ver_raw = self._send("show version")
-        if ver_raw:
-            # --- Key-value format (primary) ---
-            hostname_val = _extract(ver_raw, _HOSTNAME_RE)
-            if hostname_val:
-                hostname = hostname_val
+        ver_facts = self._parse_show_version(ver_raw) if ver_raw else {}
 
-            version_val = _extract(ver_raw, _VERSION_RE)
-            if version_val:
-                os_version = version_val
+        hostname = ver_facts.get("hostname", self.hostname)
+        os_version = ver_facts.get("os_version", "Unknown")
+        model = ver_facts.get("model", "Unknown")
+        serial_number = ver_facts.get("serial_number", "Unknown")
+        uptime = ver_facts.get("uptime", 0.0)
 
-            model_val = _extract(ver_raw, _MODEL_RE)
-            if model_val:
-                model = model_val
-
-            serial_val = _extract(ver_raw, _SERIAL_RE)
-            if serial_val and serial_val.lower() not in _SERIAL_PLACEHOLDERS:
-                serial_number = serial_val
-
-            uptime_line = _extract(ver_raw, _UPTIME_LINE_RE)
-            if uptime_line:
-                uptime = _parse_uptime(uptime_line)
-
-            # --- Tabular format fallback ---
-            # When key-value parsing yields nothing, try the controller row.
-            if os_version == "Unknown":
-                tab_m = _TABULAR_CTRL_RE.search(ver_raw)
-                if tab_m:
-                    if hostname == self.hostname:  # not yet overridden by key-value
-                        hostname = tab_m.group(1)
-                    os_version = tab_m.group(2)
+        if serial_number == "Unknown":
+            serial_number = self._fetch_serial_from_inventory()
 
         parsed_intfs = self._parsed_interfaces()
         interface_list = sorted({r["name"] for r in parsed_intfs if r.get("name")})
 
         return {
             "hostname": hostname,
-            "vendor": vendor,
+            "vendor": "Cisco",
             "model": model,
             "os_version": os_version,
             "serial_number": serial_number,
