@@ -185,6 +185,19 @@ class IPOSDriver(_napalm_base.NetworkDriver):
                     uptime_str = m.group(1).strip()
             uptime = _parse_uptime(uptime_str)
 
+        # Regex fallback for os_version when the template is unavailable.
+        # Matches the version token in "Ericsson IPOS Version IPOS-v<ver>-Release".
+        if os_version == "Unknown":
+            m = re.search(r"IPOS-v([\d.]+)", ver_output)
+            if m:
+                os_version = m.group(1)
+
+        # Regex fallback for uptime when the template returned nothing.
+        if uptime == 0.0 and not parsed:
+            m = _UPTIME_LINE_RE.search(ver_output)
+            if m:
+                uptime = _parse_uptime(m.group(1).strip())
+
         # The CLI prompt is the router hostname on IPOS.
         # Netmiko stores the prompt without the trailing '#' in base_prompt.
         hostname = getattr(self.device, "base_prompt", None) or self.hostname
@@ -207,8 +220,7 @@ class IPOSDriver(_napalm_base.NetworkDriver):
         output = self.device.send_command("show port")
         if not output:
             return []
-        # Match IPOS port identifiers: slot/port or slot/module/port (e.g. 1/1, 2/1/3)
-        return re.findall(r"^\s+(\d+/\d+(?:/\d+)?)\s", output, re.MULTILINE)
+        return [m.group("port") for m in _PORT_ROW_RE.finditer(output)]
 
     def get_interfaces(self) -> dict:
         """
