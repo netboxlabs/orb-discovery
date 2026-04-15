@@ -14,7 +14,6 @@ the NX-OS equivalent.
 
 import logging
 import re
-import socket
 
 import napalm.base as _napalm_base
 from napalm.base import models
@@ -48,7 +47,7 @@ _SNMP_COMMUNITY_RE = re.compile(
     re.M | re.I,
 )
 _KEY_STRING_RE = re.compile(
-    r"^(\s*key-string)\s+\S+",
+    r"^(\s*key-string(?:\s+\d+)?)\s+\S+",
     re.M | re.I,
 )
 _PRE_SHARED_KEY_RE = re.compile(
@@ -56,7 +55,7 @@ _PRE_SHARED_KEY_RE = re.compile(
     re.M | re.I,
 )
 _TACACS_KEY_RE = re.compile(
-    r"^(\s*(?:tacacs-server\b[^\n]*?\bkey|radius-server\s+key))\s+\S+",
+    r"^(\s*(?:tacacs-server\b[^\n]*?\bkey|radius-server\b[^\n]*?\bkey))\s+\S+",
     re.M | re.I,
 )
 
@@ -216,14 +215,17 @@ class FXOSDriver(_napalm_base.NetworkDriver):
         ip_brief_raw = self.device.send_command("show ip interface brief")
         interface_list: list[str] = []
         if ip_brief_raw:
-            ip_parsed = parse_output(
-                platform="cisco_nxos",
-                command="show ip interface brief",
-                data=ip_brief_raw,
-            )
-            interface_list = sorted(
-                r["interface"] for r in ip_parsed if r.get("interface")
-            )
+            try:
+                ip_parsed = parse_output(
+                    platform="cisco_nxos",
+                    command="show ip interface brief",
+                    data=ip_brief_raw,
+                )
+                interface_list = sorted(
+                    r["interface"] for r in ip_parsed if r.get("interface")
+                )
+            except _PARSE_ERRORS:
+                logger.debug("Failed to parse show ip interface brief; interface_list will be empty")
 
         return {
             "hostname": hostname,
@@ -241,9 +243,13 @@ class FXOSDriver(_napalm_base.NetworkDriver):
         inv_raw = self.device.send_command("show inventory")
         if not inv_raw:
             return "Unknown", current_model
-        inv_parsed = parse_output(
-            platform="cisco_nxos", command="show inventory", data=inv_raw
-        )
+        try:
+            inv_parsed = parse_output(
+                platform="cisco_nxos", command="show inventory", data=inv_raw
+            )
+        except _PARSE_ERRORS:
+            logger.debug("Failed to parse show inventory; serial_number will be Unknown")
+            return "Unknown", current_model
         chassis = next(
             (r for r in inv_parsed if "chassis" in r.get("name", "").lower()),
             inv_parsed[0] if inv_parsed else None,

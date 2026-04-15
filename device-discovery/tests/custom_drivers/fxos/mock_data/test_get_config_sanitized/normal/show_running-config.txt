@@ -25,9 +25,12 @@ snmp-server community private rw
 key chain BGPKEY
   key 1
     key-string MyBgpKeyString
+  key 2
+    key-string 7 MyEncryptedBgpKey
 
 pre-shared-key MyIpsecPsk
 
 tacacs-server host 10.0.0.5 key TacacsSecret
+radius-server host 10.0.0.6 key RadiusSecret
 
 aaa authentication login default local
