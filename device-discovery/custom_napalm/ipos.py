@@ -89,6 +89,12 @@ def _parse_uptime(uptime_str: str) -> float:
     return seconds
 
 
+# Fallback: extract the full uptime string directly from show version output.
+# Matches "Router Up Time - <value>" regardless of how many time components
+# are present, covering the case where the ntc-template requires exactly three
+# pairs and returns empty for freshly rebooted devices (e.g. "3 minutes 5 seconds").
+_UPTIME_LINE_RE = re.compile(r"Up\s+Time\s+-\s+(.+)", re.IGNORECASE)
+
 # ---------------------------------------------------------------------------
 # Interface / IP parsing helpers (module-level for efficiency)
 # ---------------------------------------------------------------------------
@@ -169,12 +175,15 @@ class IPOSDriver(_napalm_base.NetworkDriver):
         if parsed:
             row = parsed[0]
             os_version = row.get("version", "Unknown")
-            # Note: the ericsson_ipos ntc-template only captures uptime strings
-            # with exactly three time components (e.g. "N hours N minutes N
-            # seconds").  Devices with shorter uptime (e.g. "N minutes N
-            # seconds" after a fresh reboot) will not match the template and
-            # uptime will be 0.0.
-            uptime = _parse_uptime(row.get("uptime", ""))
+            # The ntc-template only captures uptime strings with exactly three
+            # time components.  Fall back to a direct regex on the raw output
+            # for freshly rebooted devices (e.g. "3 minutes 5 seconds").
+            uptime_str = row.get("uptime", "")
+            if not uptime_str:
+                m = _UPTIME_LINE_RE.search(ver_output)
+                if m:
+                    uptime_str = m.group(1).strip()
+            uptime = _parse_uptime(uptime_str)
 
         # The CLI prompt is the router hostname on IPOS.
         # Netmiko stores the prompt without the trailing '#' in base_prompt.
