@@ -104,7 +104,10 @@ def _expand_vlan_tokens(token_str: str) -> list[str]:
             continue
         if "-" in token:
             start, _, end = token.partition("-")
-            vids.extend(str(v) for v in range(int(start), int(end) + 1))
+            try:
+                vids.extend(str(v) for v in range(int(start.strip()), int(end.strip()) + 1))
+            except ValueError:
+                logger.warning("Skipping malformed VLAN range token %r", token)
         else:
             vids.append(token)
     return vids
