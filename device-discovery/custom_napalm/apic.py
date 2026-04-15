@@ -259,7 +259,7 @@ def _parse_interfaces(raw: str) -> list[dict]:
 
 _HOSTNAME_RE = re.compile(r"^(?:hostname|Hostname)\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
 _VERSION_RE = re.compile(
-    r"(?:Software\s+Version|System\s+Version|Firmware\s+Version|^Version)\s*:\s*(\S+)",
+    r"^\s*(?:Software\s+Version|System\s+Version|Firmware\s+Version|Version)\s*:\s*(\S+)",
     re.IGNORECASE | re.MULTILINE,
 )
 _MODEL_RE = re.compile(r"^(?:Model|APIC\s+Model|Platform)\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
