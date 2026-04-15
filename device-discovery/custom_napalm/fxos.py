@@ -20,13 +20,23 @@ import napalm.base as _napalm_base
 from napalm.base import models
 from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
-from ntc_templates.parse import parse_output
+from ntc_templates.parse import ParsingException, parse_output
+from textfsm.parser import TextFSMError
+
+_PARSE_ERRORS = (TextFSMError, ParsingException)
 
 logger = logging.getLogger(__name__)
 
 # --- config sanitization (Cisco FXOS / NX-OS-lineage sensitive fields) ---
-_ENABLE_SECRET_RE = re.compile(
-    r"^(\s*(?:enable\s+)?(?:password|secret)(?:\s+\d+)?)\s+\S+",
+# enable password / enable secret — require the "enable" keyword so that
+# directives like "password strength-check" or "password policy" are not touched.
+_ENABLE_PASSWORD_RE = re.compile(
+    r"^(\s*enable\s+(?:password|secret)(?:\s+\d+)?)\s+\S+",
+    re.M | re.I,
+)
+# Standalone "secret <N> <hash>" lines (e.g. inside username / role blocks).
+_SECRET_RE = re.compile(
+    r"^(\s*secret(?:\s+\d+)?)\s+\S+",
     re.M | re.I,
 )
 _USERNAME_RE = re.compile(
@@ -52,7 +62,8 @@ _TACACS_KEY_RE = re.compile(
 
 
 def _sanitize_config(text: str) -> str:
-    text = _ENABLE_SECRET_RE.sub(r"\1 <redacted>", text)
+    text = _ENABLE_PASSWORD_RE.sub(r"\1 <redacted>", text)
+    text = _SECRET_RE.sub(r"\1 <redacted>", text)
     text = _USERNAME_RE.sub(r"\1 <redacted>", text)
     text = _SNMP_COMMUNITY_RE.sub(r"\1 <redacted>", text)
     text = _KEY_STRING_RE.sub(r"\1 <redacted>", text)
@@ -61,7 +72,7 @@ def _sanitize_config(text: str) -> str:
     return text
 
 
-def _parse_uptime(uptime_str: str) -> int:
+def _parse_uptime(uptime_str: str) -> float:
     """Convert FXOS uptime string to total seconds."""
     seconds = 0
     for pattern, factor in (
@@ -75,7 +86,7 @@ def _parse_uptime(uptime_str: str) -> int:
         m = re.search(pattern, uptime_str, re.IGNORECASE)
         if m:
             seconds += int(m.group(1)) * factor
-    return seconds
+    return float(seconds)
 
 
 def _parse_speed(speed_raw: str) -> float:
@@ -108,6 +119,9 @@ def _parse_show_version(ver_raw: str, default_hostname: str) -> tuple[str, str, 
         hostname = m.group(1)
 
     m = re.search(r"FXOS\)\s+Software,\s+Version\s+(\S+)", ver_raw)
+    if not m:
+        # Fallback for banner text variations
+        m = re.search(r"\bVersion\s+([\d.()]+)", ver_raw)
     if m:
         os_version = m.group(1)
 
@@ -124,7 +138,7 @@ def _parse_show_version(ver_raw: str, default_hostname: str) -> tuple[str, str, 
 
     m = re.search(r"Kernel uptime is\s+(.+?)$", ver_raw, re.M)
     if m:
-        uptime = float(_parse_uptime(m.group(1)))
+        uptime = _parse_uptime(m.group(1))
 
     return hostname, model, os_version, serial_number, uptime
 
@@ -237,7 +251,8 @@ class FXOSDriver(_napalm_base.NetworkDriver):
         if not chassis:
             return "Unknown", current_model
         serial = chassis.get("sn") or "Unknown"
-        model = chassis.get("pid") or current_model if current_model == "Unknown" else current_model
+        # Only fall back to the inventory PID for model when show version didn't provide one.
+        model = (chassis.get("pid") or "Unknown") if current_model == "Unknown" else current_model
         return serial, model
 
     def get_interfaces(self) -> dict:
@@ -250,7 +265,13 @@ class FXOSDriver(_napalm_base.NetworkDriver):
         if not raw:
             return {}
 
-        parsed = parse_output(platform="cisco_nxos", command="show interface", data=raw)
+        try:
+            parsed = parse_output(
+                platform="cisco_nxos", command="show interface", data=raw
+            )
+        except _PARSE_ERRORS:
+            logger.debug("Failed to parse show interface; returning empty dict")
+            return {}
         interfaces = {}
         for row in parsed:
             intf = row.get("interface", "")
@@ -304,7 +325,13 @@ class FXOSDriver(_napalm_base.NetworkDriver):
         if not raw:
             return {}
 
-        parsed = parse_output(platform="cisco_nxos", command="show interface", data=raw)
+        try:
+            parsed = parse_output(
+                platform="cisco_nxos", command="show interface", data=raw
+            )
+        except _PARSE_ERRORS:
+            logger.debug("Failed to parse show interface for IPs; returning empty dict")
+            return {}
         interfaces_ip: dict = {}
         for row in parsed:
             intf = row.get("interface", "")
