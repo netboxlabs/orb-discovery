@@ -81,12 +81,13 @@ def _parse_version(raw: str) -> dict[str, str]:
 # Same column layout as EdgeSwitch:
 #    0/1    Copper  Enabled     Forwarding  Up      Full-100M   Full-100M   Copper
 _INTF_LINE_RE = re.compile(
-    r"^\s+"
-    r"(?P<intf>\S+)\s+"      # channel/interface
-    r"\S+\s+"                 # Type (Copper, Fiber)
-    r"(?P<neg>\S+)\s+"        # Neg/admin (Enabled/Disabled)
-    r"(?P<state>\S+)\s+"      # Port state (Forwarding, Disabled, Blocking, …)
-    r"(?P<link>\S+)"           # Link state (Up/Down)
+    r"^\s*"
+    r"(?P<intf>\S+)\s+"                       # channel/interface
+    r"\S+\s+"                                  # Type (Copper, Fiber)
+    r"(?P<neg>Enabled|Disabled)\s+"            # Neg/admin — anchors against headers
+    r"(?P<state>\S+)\s+"                       # Port state (Forwarding, Disabled, Blocking, …)
+    r"(?P<link>\S+)",                           # Link state (Up/Down)
+    re.IGNORECASE,
 )
 
 # "Full-100M" → 100.0 Mbps, "Full-1000M" → 1000.0, "Full-10G" → 10000.0

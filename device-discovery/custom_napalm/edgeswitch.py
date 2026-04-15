@@ -55,13 +55,17 @@ def _sanitize_config(text: str) -> str:
 # Output columns (example):
 #    0/1    Copper  Enabled     Forwarding  Up      Full-100M   Full-100M   Copper
 # Ch = channel (0/1, 1/0/1, lag1, etc.)
+# Leading whitespace is optional: some firmware variants start rows at column 1.
+# Anchoring on Enabled|Disabled for the Neg column prevents false matches on
+# header ("Neg") and separator ("---") lines when no indent is present.
 _ES_INTF_LINE_RE = re.compile(
-    r"^\s+"
-    r"(?P<intf>\S+)\s+"      # channel/interface
-    r"\S+\s+"                 # Type (Copper, Fiber)
-    r"(?P<neg>\S+)\s+"        # Neg/admin (Enabled/Disabled)
-    r"(?P<state>\S+)\s+"      # Port state (Forwarding, Disabled, Blocking, …)
-    r"(?P<link>\S+)"           # Link state (Up/Down)
+    r"^\s*"
+    r"(?P<intf>\S+)\s+"                       # channel/interface
+    r"\S+\s+"                                  # Type (Copper, Fiber)
+    r"(?P<neg>Enabled|Disabled)\s+"            # Neg/admin — anchors against headers
+    r"(?P<state>\S+)\s+"                       # Port state (Forwarding, Disabled, …)
+    r"(?P<link>\S+)",                          # Link state (Up/Down)
+    re.IGNORECASE,
 )
 
 # "Full-100M" → 100.0 Mbps, "Full-1000M" → 1000.0, "Full-10G" → 10000.0
