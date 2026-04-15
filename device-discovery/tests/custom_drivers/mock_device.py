@@ -127,8 +127,8 @@ class FakeHTTPSession:
         cli("show running-config")      → cli_show_running-config.json
         cli("show config")              → cli_show_config.json
 
-    Missing files: GET returns ``{"ok": False, "status_code": 404}``;
-    the mock response has ``ok=False`` and ``status_code=404``.
+    Missing files: returns a ``_MockResponse`` with ``status_code=404`` and
+    ``ok=False``; ``json()`` returns an empty dict ``{}``.
     """
 
     class _MockResponse:

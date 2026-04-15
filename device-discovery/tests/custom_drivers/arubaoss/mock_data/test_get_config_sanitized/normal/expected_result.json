@@ -1,5 +1,5 @@
 {
-  "running": "; J9853A Configuration Editor; Created on release #WB.16.10.0014\n\nhostname \"ARUBAOSS-SW01\"\n\nsnmp-server community <redacted>\nradius-server host 10.0.0.5 key <redacted>\ntacacs-server host 10.0.0.6 key <redacted>\npassword manager <redacted>\npassword operator <redacted>\n",
+  "running": "hostname \"ARUBAOSS-SW01\"\n\nsnmp-server community <redacted>\nradius-server host 10.0.0.5 key <redacted>\ntacacs-server host 10.0.0.6 key <redacted>\npassword manager <redacted>\npassword operator <redacted>",
   "candidate": "",
-  "startup": "; J9853A Startup Configuration\n\nhostname \"ARUBAOSS-SW01\"\n"
+  "startup": "hostname \"ARUBAOSS-SW01\""
 }

@@ -67,6 +67,25 @@ def _decode_cli(response_json: dict) -> str:
         return ""
 
 
+def _strip_config_header(text: str) -> str:
+    """
+    Strip the ArubaOS-Switch '; ... Configuration Editor; ...' preamble.
+
+    ProCurve/ArubaOS-Switch prepends a banner line and semicolon comment lines
+    before the actual config body. Strip them so callers receive clean config text.
+    """
+    parts = re.split(r"^;.*Configuration Editor.*$", text, maxsplit=1, flags=re.MULTILINE)
+    body = parts[-1]
+    lines = body.splitlines()
+    start = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped and not stripped.startswith(";"):
+            start = i
+            break
+    return "\n".join(lines[start:]).strip()
+
+
 def _mask_to_prefix(netmask: str) -> int:
     """Convert dotted-decimal subnet mask to prefix length integer."""
     try:
@@ -178,7 +197,15 @@ class ArubaOSSDriver(_napalm_base.NetworkDriver):
             raise ConnectionException(
                 f"Login failed: HTTP {resp.status_code} from {self.hostname}"
             )
-        session.headers["cookie"] = resp.json()["cookie"]
+        try:
+            cookie = resp.json()["cookie"]
+            if not cookie:
+                raise ValueError("empty cookie")
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ConnectionException(
+                f"Login failed: invalid login response from {self.hostname}"
+            ) from exc
+        session.headers["cookie"] = cookie
         self.device = _ArubaOSSDevice(session, self._base_url, self.timeout)
 
     def close(self):
@@ -336,9 +363,9 @@ class ArubaOSSDriver(_napalm_base.NetworkDriver):
         config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
 
         if retrieve.lower() in ("running", "all"):
-            config["running"] = self.device.cli("show running-config")
+            config["running"] = _strip_config_header(self.device.cli("show running-config"))
         if retrieve.lower() in ("startup", "all"):
-            config["startup"] = self.device.cli("show config")
+            config["startup"] = _strip_config_header(self.device.cli("show config"))
 
         if sanitized:
             for key in ("running", "candidate", "startup"):

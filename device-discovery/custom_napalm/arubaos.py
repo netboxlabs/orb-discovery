@@ -225,8 +225,8 @@ class ArubaOSDriver(_napalm_base.NetworkDriver):
             admin = row.get("admin", "").lower()
             protocol = row.get("protocol", "").lower()
             interfaces[intf] = {
-                "is_up": "up" in protocol,
-                "is_enabled": "up" in admin,
+                "is_up": protocol == "up",
+                "is_enabled": admin == "up",
                 "description": "",
                 "last_flapped": -1.0,
                 "mtu": -1,
@@ -299,7 +299,13 @@ class ArubaOSDriver(_napalm_base.NetworkDriver):
         sanitized: bool = False,
         format: str = "text",
     ) -> models.ConfigDict:
-        """Return device configuration."""
+        """
+        Return device configuration.
+
+        ArubaOS mobility controllers maintain a single active configuration
+        (committed to flash on write); there is no separate startup config.
+        ``startup`` is always returned as an empty string.
+        """
         config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
 
         if retrieve.lower() in ("running", "all"):
