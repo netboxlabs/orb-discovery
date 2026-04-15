@@ -12,8 +12,10 @@ enable secret 5 $1$abc$XYZhashvalue123
 !
 snmp-server community public ro
 snmp-server community private rw
+snmp-server community 7 C0mmStr1ng ro
 !
 radius-server host 10.0.0.10 key R@d1usKey123
+radius-server host 10.0.0.11 key 7 R@d1usKey456
 tacacs-server host 10.0.0.20
  key T@c@csKey456
 !

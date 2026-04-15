@@ -37,14 +37,18 @@ _INLINE_PASSWORD_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
-# RADIUS / TACACS+ "... key <value>" at end of line
+# RADIUS / TACACS+ "... key [<type>] <value>" — ".*" consumes optional type indicator + secret
 _KEY_LINE_RE = re.compile(
-    r"^(\s*(?:radius-server|tacacs-server)\b.*\bkey)\s+\S+",
+    r"^(\s*(?:radius-server|tacacs-server)\b.*\bkey)\s+\S+.*",
     re.IGNORECASE | re.MULTILINE,
 )
 
-# SNMP community string
-_COMMUNITY_RE = re.compile(r"^(\s*snmp-server\s+community)\s+\S+", re.IGNORECASE | re.MULTILINE)
+# SNMP community — optional type indicator digit before the actual community string
+# e.g. "snmp-server community public ro" or "snmp-server community 7 ABC123 ro"
+_COMMUNITY_RE = re.compile(
+    r"^(\s*snmp-server\s+community)(?:\s+\d+)?\s+\S+",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 # Standalone "key <value>" — excludes key-chain identifiers ("key chain X", "key 1")
 _BARE_KEY_RE = re.compile(
