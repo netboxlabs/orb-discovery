@@ -26,6 +26,7 @@ from custom_napalm.panos import PANOSDriver
 from custom_napalm.panos_ssh import PANOSSHDriver
 from custom_napalm.procurve import ProcurveDriver
 from custom_napalm.ros import ROSDriver
+from custom_napalm.s300 import S300Driver
 from custom_napalm.saos import SAOSDriver
 from custom_napalm.sros import SROSDriver
 from custom_napalm.sros_ssh import SROSSSHDriver
@@ -60,6 +61,7 @@ __all__ = [
     "PANOSSHDriver",
     "ProcurveDriver",
     "ROSDriver",
+    "S300Driver",
     "SAOSDriver",
     "SROSDriver",
     "SROSSSHDriver",
