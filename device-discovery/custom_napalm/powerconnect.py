@@ -92,6 +92,52 @@ _NTC_PLATFORM = "dell_powerconnect"
 # Shared helpers for interface parsing
 # ---------------------------------------------------------------------------
 
+def _parse_port_descriptions_fallback(raw: str) -> dict[str, str]:
+    r"""
+    Regex fallback for Port section descriptions when the NTC template fails.
+
+    Handles descriptions that contain spaces (the template's ``DESCRIPTION
+    (\S*)`` capture rejects them and triggers ``^. -> Error``).
+    """
+    desc: dict[str, str] = {}
+    in_data = False
+    for line in raw.splitlines():
+        if re.match(r"^-+", line.strip()):
+            in_data = True
+            continue
+        if not in_data:
+            continue
+        if re.match(r"^Ch\s+Description", line, re.IGNORECASE):
+            break
+        m = re.match(r"^(\S+)\s*(.*?)\s*$", line)
+        if m:
+            desc[m.group(1)] = m.group(2)
+    return desc
+
+
+def _parse_ch_descriptions(raw: str) -> dict[str, str]:
+    """
+    Parse port-channel descriptions from the Ch section of 'show interfaces description'.
+
+    The NTC template ends with ``^Ch ... -> End`` so ch descriptions are never
+    included in its output; this function fills that gap.
+    """
+    desc: dict[str, str] = {}
+    in_ch = False
+    for line in raw.splitlines():
+        if re.match(r"^Ch\s+Description", line, re.IGNORECASE):
+            in_ch = True
+            continue
+        if not in_ch:
+            continue
+        if re.match(r"^-+", line.strip()) or not line.strip():
+            continue
+        m = re.match(r"^(ch\d+)\s*(.*?)\s*$", line, re.IGNORECASE)
+        if m:
+            desc[m.group(1)] = m.group(2)
+    return desc
+
+
 def _parse_ch_rows(raw: str) -> list[dict]:
     """
     Parse port-channel (ch) rows from 'show interfaces status' output.
@@ -307,21 +353,10 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
                 "falling back to regex parser",
                 exc_info=True,
             )
-            # Regex fallback: handle descriptions that contain spaces.
-            # Data rows begin after the first separator line (------).
-            in_data = False
-            for line in raw.splitlines():
-                if re.match(r"^-+", line.strip()):
-                    in_data = True
-                    continue
-                if not in_data:
-                    continue
-                # Stop at a second header block (Ch / port-channel section).
-                if re.match(r"^(?:Ch|Port)\s+Description", line, re.IGNORECASE):
-                    break
-                m = re.match(r"^(\S+)\s+(.*?)\s*$", line)
-                if m:
-                    desc_map[m.group(1)] = m.group(2)
+            desc_map = _parse_port_descriptions_fallback(raw)
+
+        # The NTC template ends with ^Ch...-> End; supplement with ch descriptions.
+        desc_map.update(_parse_ch_descriptions(raw))
         return desc_map
 
     def get_interfaces(self) -> dict:
@@ -510,9 +545,10 @@ def _expand_ports(ports_raw: str) -> list[str]:
     Expand a Dell PowerConnect port-list string into individual port names.
 
     Examples::
-        "g1-4,g6,ch1-4"    →  ["g1", "g2", "g3", "g4", "g6", "ch1", "ch2", "ch3", "ch4"]
-        "1/g1-1/g4,1/g6"   →  ["1/g1", "1/g2", "1/g3", "1/g4", "1/g6"]
-        ""                  →  []
+        "g1-4,g6,ch1-4"      →  ["g1", "g2", "g3", "g4", "g6", "ch1", "ch2", "ch3", "ch4"]
+        "1/g1-1/g4,1/g6"     →  ["1/g1", "1/g2", "1/g3", "1/g4", "1/g6"]
+        "Gi1/0/1-48,Te1/0/1" →  ["Gi1/0/1", ..., "Gi1/0/48", "Te1/0/1"]
+        ""                    →  []
     """
     if not ports_raw or ports_raw in ("--", ""):
         return []
@@ -521,6 +557,13 @@ def _expand_ports(ports_raw: str) -> list[str]:
     for token in ports_raw.split(","):
         token = token.strip()
         if not token:
+            continue
+        # Three-level range: <prefix><a>/<b>/<start>-<end>  e.g. "Gi1/0/1-48"
+        # Used on Dell N-series (PowerConnect successor) for GE/10GE ports.
+        m = re.fullmatch(r"([a-zA-Z]+\d+/\d+/)(\d+)-(\d+)", token)
+        if m:
+            prefix, start, end = m.group(1), int(m.group(2)), int(m.group(3))
+            result.extend(f"{prefix}{i}" for i in range(start, end + 1))
             continue
         # Stacked-unit range: <unit>/<prefix><start>-<unit>/<prefix><end>
         # e.g. "1/g1-1/g48" on stacked PowerConnect units.
