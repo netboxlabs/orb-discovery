@@ -158,6 +158,40 @@ def _parse_ch_rows(raw: str) -> list[dict]:
     return rows
 
 
+def _parse_physical_rows(raw: str) -> list[dict]:
+    r"""
+    Regex fallback for the physical-port table in 'show interfaces status'.
+
+    Used when the NTC template raises, e.g. on firmware that emits
+    ``Not Present`` for physical stack slots (the template only accepts
+    ``Up``\|``Down`` for the physical table).  Only lines after the first
+    dashes-separator are processed; the Ch/Po section must already have
+    been truncated from *raw* before calling this function.
+    """
+    rows = []
+    in_data = False
+    for line in raw.splitlines():
+        if re.match(r"^-+", line.strip()):
+            in_data = True
+            continue
+        if not in_data:
+            continue
+        m = re.match(
+            r"^([a-zA-Z]+\d+(?:[:/]\d+)*)\s+\S+\s+\S+\s+(\S+)\s+\S+\s+\S+\s+(Up|Down|Not\s+Present)",
+            line,
+            re.IGNORECASE,
+        )
+        if m:
+            rows.append(
+                {
+                    "port": m.group(1),
+                    "speed": "" if m.group(2) == "--" else m.group(2),
+                    "linkstate": m.group(3).strip(),
+                }
+            )
+    return rows
+
+
 def _find_vlan_columns(raw: str) -> tuple[int | None, int | None, int | None]:
     """
     Return (col_name, col_ports, col_type) column offsets from the VLAN header line.
@@ -323,13 +357,14 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
             parsed = parse_output(
                 platform=_NTC_PLATFORM, command="show interfaces status", data=raw_for_ntc
             )
-            interface_list = [
-                row["port"]
-                for row in parsed
-                if row.get("port") and row.get("linkstate", "").strip().lower() != "not present"
-            ]
         except Exception:
             logger.debug("powerconnect: failed to parse 'show interfaces status'", exc_info=True)
+            parsed = _parse_physical_rows(raw_for_ntc)
+        interface_list = [
+            row["port"]
+            for row in parsed
+            if row.get("port") and row.get("linkstate", "").strip().lower() != "not present"
+        ]
         # NTC template stops before the Ch section; add ch interfaces separately.
         # Use dict.fromkeys to deduplicate while preserving order.
         ch_list = [
@@ -410,7 +445,7 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
             )
         except Exception:
             logger.debug("powerconnect: failed to parse 'show interfaces status'", exc_info=True)
-            return {}
+            parsed_status = _parse_physical_rows(raw_for_ntc)
 
         desc_map = self._description_map()
         interfaces: dict = {}
