@@ -285,13 +285,16 @@ class FXOSDriver(_napalm_base.NetworkDriver):
                 continue
 
             link_status = row.get("link_status", "").lower()
-            is_up = link_status == "up"
-            # Interface is disabled only when explicitly brought down by an admin action.
-            # "down (Link not connected)" still means admin-enabled but physically idle.
             admin_state = row.get("admin_state", "").lower()
-            is_enabled = (
-                "disable" not in admin_state and "administratively" not in link_status
-            )
+            # is_up: physical link AND line-protocol must both be up.
+            # "X is up, line protocol is down" → admin_state="down" via the template rule
+            # "^${INTF} is ${LINK_STATUS}, line protocol is ${ADMIN_STATE}".
+            is_up = link_status == "up" and admin_state != "down"
+            # is_enabled: interface has not been explicitly shut down by an admin action.
+            # "admin" appears in link_status for both "down (admin down)" (FXOS) and
+            # "administratively down" (standard NX-OS form), covering both shutdown variants.
+            # "down (Link not connected)" contains no "admin" → correctly treated as enabled.
+            is_enabled = "admin" not in link_status and "disable" not in admin_state
 
             mac_raw = row.get("mac_address", "")
             try:
