@@ -384,19 +384,24 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
         Parses 'show interfaces status' (ntc-template) for port/speed/state and
         'show interfaces description' (ntc-template) for description.
 
-        ``is_enabled`` is derived from link state because the NTC template for
-        ``show interfaces status`` does not expose a separate admin-state column.
-        On PowerConnect hardware, ``shutdown`` collapses into link-state ``Down``,
-        so this proxy is correct for physical ports. Port-channels without
-        members ("Not Present") are skipped entirely.
+        ``is_enabled`` is always ``True`` because ``show interfaces status``
+        exposes only operational link state, not administrative state.
+        Port-channels without members ("Not Present") are skipped entirely.
         """
         raw_status = self.device.send_command("show interfaces status")
         if not raw_status:
             return {}
 
+        # Truncate at the Ch/Po section header so the NTC template only sees
+        # the physical-port table.  _parse_ch_rows handles the rest on the
+        # full output.
+        raw_for_ntc = re.split(
+            r"^(?:Ch|Po)\s+", raw_status, maxsplit=1, flags=re.MULTILINE
+        )[0]
+
         try:
             parsed_status = parse_output(
-                platform=_NTC_PLATFORM, command="show interfaces status", data=raw_status
+                platform=_NTC_PLATFORM, command="show interfaces status", data=raw_for_ntc
             )
         except Exception:
             logger.debug("powerconnect: failed to parse 'show interfaces status'", exc_info=True)
