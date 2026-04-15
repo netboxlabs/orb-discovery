@@ -11,8 +11,8 @@ from custom_napalm.fastiron import FastIronDriver
 from custom_napalm.ftd_ssh import FTDSSHDriver
 from custom_napalm.ftos import FTOSDriver
 from custom_napalm.gaia import GaiaDriver
-from custom_napalm.ipos import IPOSDriver
 from custom_napalm.huawei_vrp import VRPDriver
+from custom_napalm.ipos import IPOSDriver
 from custom_napalm.netiron import NetIronDriver
 from custom_napalm.panos import PANOSDriver
 from custom_napalm.panos_ssh import PANOSSHDriver
