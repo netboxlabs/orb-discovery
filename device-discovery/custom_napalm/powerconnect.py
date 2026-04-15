@@ -26,10 +26,10 @@ logger = logging.getLogger(__name__)
 # Config sanitization — Dell PowerConnect sensitive fields
 # ---------------------------------------------------------------------------
 
-# "username <name> privilege <n> password [<enc-type>] <value>"
+# "username <name> [privilege <n>] password [<enc-type>] <value>"
 # "enable password [<enc-type>] <value>"
 _PASSWORD_RE = re.compile(
-    r"((?:username\s+\S+\s+privilege\s+\d+\s+)?(?:enable\s+)?password(?:\s+\d+)?)\s+\S+",
+    r"((?:username\s+\S+(?:\s+privilege\s+\d+)?\s+password|enable\s+password)(?:\s+\d+)?)\s+\S+",
     re.IGNORECASE,
 )
 
@@ -39,18 +39,18 @@ _SNMP_COMMUNITY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# "radius-server host <ip> key <key>"
+# "radius-server host <ip> key [<enc-type>] <key>"
 _RADIUS_KEY_RE = re.compile(
-    r"(radius-server\s+host\s+\S+\s+key)\s+\S+",
+    r"(radius-server\s+host\s+\S+\s+key)(?:\s+\d+)?\s+\S+",
     re.IGNORECASE,
 )
 
 # "enable secret [<enc-type>] <hash>"
 _SECRET_RE = re.compile(r"(enable\s+secret)(?:\s+\d+)?\s+\S+", re.IGNORECASE)
 
-# "tacacs-server host <ip> key <key>"
+# "tacacs-server host <ip> key [<enc-type>] <key>"
 _TACACS_KEY_RE = re.compile(
-    r"(tacacs-server\s+host\s+\S+\s+key)\s+\S+",
+    r"(tacacs-server\s+host\s+\S+\s+key)(?:\s+\d+)?\s+\S+",
     re.IGNORECASE,
 )
 
@@ -155,6 +155,19 @@ def _parse_ch_rows(raw: str) -> list[dict]:
             {"port": m.group(1), "speed": m.group(2), "linkstate": m.group(3).strip()}
         )
     return rows
+
+
+def _find_vlan_columns(raw: str) -> tuple[int | None, int | None, int | None]:
+    """
+    Return (col_name, col_ports, col_type) column offsets from the VLAN header line.
+
+    Returns ``(None, None, None)`` when no header is found.
+    """
+    for line in raw.splitlines():
+        hm = re.match(r"\s*(VLAN)\s+(Name)\s+(Ports?)\s+(Type)", line, re.IGNORECASE)
+        if hm:
+            return hm.start(2), hm.start(3), hm.start(4)
+    return None, None, None
 
 
 def _make_interface_entry(link_state: str, speed_raw: str, description: str) -> dict:
@@ -310,11 +323,13 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
         except Exception:
             logger.debug("powerconnect: failed to parse 'show interfaces status'", exc_info=True)
         # NTC template stops before the Ch section; add ch interfaces separately.
-        interface_list += [
+        # Use dict.fromkeys to deduplicate while preserving order.
+        ch_list = [
             row["port"]
             for row in _parse_ch_rows(raw_status)
             if row["linkstate"].lower() != "not present"
         ]
+        interface_list = list(dict.fromkeys(interface_list + ch_list))
 
         return {
             "hostname": facts["hostname"],
@@ -499,20 +514,28 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
 
         # Discover column start positions from the header line so that
         # multi-word VLAN names (e.g. "Voice VLAN") are parsed correctly.
-        # Allow optional leading whitespace (\s*) — some firmware left-pads headers.
-        col_name = col_ports = col_type = None
-        for line in raw.splitlines():
-            hm = re.match(r"\s*(VLAN)\s+(Name)\s+(Ports?)\s+(Type)", line, re.IGNORECASE)
-            if hm:
-                col_name = hm.start(2)
-                col_ports = hm.start(3)
-                col_type = hm.start(4)
-                break
+        col_name, col_ports, col_type = _find_vlan_columns(raw)
 
         vlans: dict = {}
+        current_vlan_id: str | None = None
         for line in raw.splitlines():
             # Allow leading whitespace — classic PowerConnect left-pads VLAN IDs.
             if not re.match(r"^\s*\d+\s", line):
+                # Continuation line: port list wraps onto the next line.
+                # Detected when content exists only under the Ports column and
+                # the VLAN-ID area (before col_name) is all whitespace.
+                if (
+                    current_vlan_id is not None
+                    and col_name is not None
+                    and col_ports is not None
+                    and col_type is not None
+                    and line.strip()
+                    and not re.match(r"^[-\s]+$", line)
+                    and line[:col_name].strip() == ""
+                ):
+                    extra = line[col_ports:col_type].strip()
+                    if extra:
+                        vlans[current_vlan_id]["interfaces"].extend(_expand_ports(extra))
                 continue
 
             if col_name is not None and col_ports is not None and col_type is not None:
@@ -534,6 +557,7 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
                 "name": vlan_name or vlan_id,
                 "interfaces": _expand_ports(ports_raw),
             }
+            current_vlan_id = vlan_id
 
         return vlans
 
