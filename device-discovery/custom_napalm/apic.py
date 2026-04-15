@@ -50,9 +50,13 @@ _COMMUNITY_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
-# Standalone "key <value>" — excludes key-chain identifiers ("key chain X", "key 1")
+# Standalone "key <value>" — excludes "key chain X" and bare key-chain identifiers ("key 1")
+# but redacts typed keys ("key 7 <hash>") by treating the leading digit as an optional type
+# indicator.  The (?!\d+\s*$) lookahead only fires when a lone digit ends the line, so
+# "key 7 HashedSecret" is matched and "key 1" (a key-chain entry number) is excluded.
+# ".*" at the end consumes the type indicator + secret in a single pass.
 _BARE_KEY_RE = re.compile(
-    r"^(\s*key)\s+(?!chain\b)(?!\d+\b)\S+",
+    r"^(\s*key)\s+(?!chain\b)(?!\d+\s*$)\S+.*",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -302,6 +306,11 @@ class APICDriver(_napalm_base.NetworkDriver):
         self.device = self._netmiko_open(
             _PLATFORM, netmiko_optional_args=self.netmiko_optional_args
         )
+        # Derive the connected controller's name from the SSH prompt so that
+        # _tabular_controller_row() can identify the local node in multi-controller
+        # fabrics.  self.hostname is typically an IP in device-discovery policies.
+        prompt = self.device.find_prompt().strip()
+        self._prompt_hostname = re.sub(r"[\s#>$%:]+$", "", prompt) or self.hostname
 
     def close(self):
         """Close the SSH connection."""
@@ -339,13 +348,16 @@ class APICDriver(_napalm_base.NetworkDriver):
         """
         Return the best-matching controller row from a tabular ``show version``.
 
-        Prefers the row whose name matches ``self.hostname`` (so that sessions
-        to apic2/apic3 are not mis-identified as apic1 in multi-controller
-        fabrics).  Falls back to the first row when no name matches.
+        Uses ``_prompt_hostname`` (the name extracted from the SSH prompt at
+        ``open()`` time) to identify the local node, because ``self.hostname``
+        is typically an IP address in device-discovery policies and will not
+        match the controller name column in the table.  Falls back to the first
+        row when no name matches.
         Returns a regex match object or ``None`` if the table is absent.
         """
+        local_name = getattr(self, "_prompt_hostname", self.hostname)
         for m in _TABULAR_CTRL_RE.finditer(raw):
-            if m.group(1).lower() == self.hostname.lower():
+            if m.group(1).lower() == local_name.lower():
                 return m
         return _TABULAR_CTRL_RE.search(raw)
 
