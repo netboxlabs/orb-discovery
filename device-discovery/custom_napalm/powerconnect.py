@@ -499,9 +499,10 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
 
         # Discover column start positions from the header line so that
         # multi-word VLAN names (e.g. "Voice VLAN") are parsed correctly.
+        # Allow optional leading whitespace (\s*) — some firmware left-pads headers.
         col_name = col_ports = col_type = None
         for line in raw.splitlines():
-            hm = re.match(r"(VLAN)\s+(Name)\s+(Ports?)\s+(Type)", line, re.IGNORECASE)
+            hm = re.match(r"\s*(VLAN)\s+(Name)\s+(Ports?)\s+(Type)", line, re.IGNORECASE)
             if hm:
                 col_name = hm.start(2)
                 col_ports = hm.start(3)
@@ -510,7 +511,8 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
 
         vlans: dict = {}
         for line in raw.splitlines():
-            if not re.match(r"^\d+\s", line):
+            # Allow leading whitespace — classic PowerConnect left-pads VLAN IDs.
+            if not re.match(r"^\s*\d+\s", line):
                 continue
 
             if col_name is not None and col_ports is not None and col_type is not None:
@@ -519,7 +521,7 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
                 ports_raw = line[col_ports:col_type].strip()
             else:
                 # Fallback when header is absent: single-token name, type-anchored.
-                fm = re.match(r"^(\d+)\s+(\S+)\s*(.*?)\s+\S+\s*$", line)
+                fm = re.match(r"^\s*(\d+)\s+(\S+)\s*(.*?)\s+\S+\s*$", line)
                 if not fm:
                     continue
                 vlan_id, vlan_name, ports_raw = fm.group(1), fm.group(2), fm.group(3).strip()
@@ -557,6 +559,13 @@ def _expand_ports(ports_raw: str) -> list[str]:
     for token in ports_raw.split(","):
         token = token.strip()
         if not token:
+            continue
+        # Parenthesized range: <prefix>(<start>-<end>)  e.g. "g(1-24)" or "ch(1-8)"
+        # Used in older PowerConnect VLAN membership output.
+        m = re.fullmatch(r"([a-zA-Z]+)\((\d+)-(\d+)\)", token)
+        if m:
+            prefix, start, end = m.group(1), int(m.group(2)), int(m.group(3))
+            result.extend(f"{prefix}{i}" for i in range(start, end + 1))
             continue
         # Three-level range: <prefix><a>/<b>/<start>-<end>  e.g. "Gi1/0/1-48"
         # Used on Dell N-series (PowerConnect successor) for GE/10GE ports.
