@@ -133,6 +133,10 @@ class _ArubaOSSDevice:
             return ""
         return _decode_cli(resp.json())
 
+    def close(self) -> None:
+        """Close the underlying HTTP session."""
+        self._session.close()
+
 
 # ---------------------------------------------------------------------------
 # NAPALM driver
@@ -216,7 +220,7 @@ class ArubaOSSDriver(_napalm_base.NetworkDriver):
             except Exception:
                 pass
             try:
-                self.device._session.close()
+                self.device.close()
             except Exception:
                 pass
             self.device = None

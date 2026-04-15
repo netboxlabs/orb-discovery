@@ -17,7 +17,7 @@ import re
 import napalm.base as _napalm_base
 from napalm.base import models
 from napalm.base.netmiko_helpers import netmiko_args
-from ntc_templates.parse import parse_output
+from ntc_templates.parse import ParsingException, parse_output
 from textfsm.parser import TextFSMError
 
 logger = logging.getLogger(__name__)
@@ -150,7 +150,7 @@ class ArubaOSDriver(_napalm_base.NetworkDriver):
             parsed_hn = parse_output(
                 platform="aruba_os", command="show hostname", data=hostname_out
             )
-        except TextFSMError:
+        except (TextFSMError, ParsingException):
             logger.warning("Failed to parse show hostname output")
             parsed_hn = []
         if parsed_hn:
@@ -162,7 +162,7 @@ class ArubaOSDriver(_napalm_base.NetworkDriver):
             parsed_ver = parse_output(
                 platform="aruba_os", command="show version", data=ver_out
             )
-        except TextFSMError:
+        except (TextFSMError, ParsingException):
             logger.warning("Failed to parse show version output")
             parsed_ver = []
         if parsed_ver:
@@ -174,7 +174,7 @@ class ArubaOSDriver(_napalm_base.NetworkDriver):
             parsed_inv = parse_output(
                 platform="aruba_os", command="show inventory", data=inv_out
             )
-        except TextFSMError:
+        except (TextFSMError, ParsingException):
             logger.warning("Failed to parse show inventory output")
             parsed_inv = []
         if parsed_inv:
@@ -191,7 +191,7 @@ class ArubaOSDriver(_napalm_base.NetworkDriver):
             parsed_ip = parse_output(
                 platform="aruba_os", command="show ip interface brief", data=ip_brief_out
             )
-        except TextFSMError:
+        except (TextFSMError, ParsingException):
             logger.warning("Failed to parse show ip interface brief output")
             parsed_ip = []
         interface_list = [row["interface"] for row in parsed_ip if row.get("interface")]
@@ -214,7 +214,7 @@ class ArubaOSDriver(_napalm_base.NetworkDriver):
             parsed = parse_output(
                 platform="aruba_os", command="show ip interface brief", data=ip_brief_out
             )
-        except TextFSMError:
+        except (TextFSMError, ParsingException):
             logger.warning("Failed to parse show ip interface brief output")
             parsed = []
         interfaces = {}
@@ -249,7 +249,7 @@ class ArubaOSDriver(_napalm_base.NetworkDriver):
             parsed = parse_output(
                 platform="aruba_os", command="show ip interface brief", data=ip_brief_out
             )
-        except TextFSMError:
+        except (TextFSMError, ParsingException):
             logger.warning("Failed to parse show ip interface brief output")
             return
         for row in parsed:
@@ -272,7 +272,7 @@ class ArubaOSDriver(_napalm_base.NetworkDriver):
             parsed = parse_output(
                 platform="aruba_os", command="show ipv6 interface brief", data=ipv6_brief_out
             )
-        except TextFSMError:
+        except (TextFSMError, ParsingException):
             logger.warning("Failed to parse show ipv6 interface brief output")
             return
         for row in parsed:
@@ -323,7 +323,7 @@ class ArubaOSDriver(_napalm_base.NetworkDriver):
         vlan_out = self.device.send_command("show vlan")
         try:
             parsed = parse_output(platform="aruba_os", command="show vlan", data=vlan_out)
-        except TextFSMError:
+        except (TextFSMError, ParsingException):
             logger.warning("Failed to parse show vlan output")
             parsed = []
 

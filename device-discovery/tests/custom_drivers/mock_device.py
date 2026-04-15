@@ -127,8 +127,12 @@ class FakeHTTPSession:
         cli("show running-config")      → cli_show_running-config.json
         cli("show config")              → cli_show_config.json
 
-    Missing files: returns a ``_MockResponse`` with ``status_code=404`` and
-    ``ok=False``; ``json()`` returns an empty dict ``{}``.
+    Missing files for GET/POST: returns a ``_MockResponse`` with ``status_code=404``
+    and ``ok=False``; ``json()`` returns an empty dict ``{}``.
+
+    Missing files for CLI: returns ``""`` (empty string). ``cli()`` uses
+    ``missing_status=200`` so the response is still ``ok=True``; the base64 field
+    will be absent and the method returns ``""`` gracefully without error.
     """
 
     class _MockResponse:
