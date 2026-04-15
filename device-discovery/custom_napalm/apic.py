@@ -267,12 +267,12 @@ _SERIAL_RE = re.compile(r"^(?:Serial\s+Number|Serial)\s*:\s*(\S+)", re.IGNORECAS
 _UPTIME_LINE_RE = re.compile(r"^(?:System\s+uptime|Uptime)\s*:\s*(.+)", re.IGNORECASE | re.MULTILINE)
 
 # Tabular format emitted by some APIC versions for "show version":
-#   Role         Pod  Node  Name    Version
-#   -----------  ---  ----  ------  --------
-#   controller   1    1     apic1   6.0(3f)
+#   Two-column ID form (Pod + Node):  controller  1  1  apic1  6.0(3f)
+#   Single-column ID form (Id only):  controller  1  apic1     6.0(3f)
+# The second numeric column is optional so both table layouts are matched.
 # group(1) = node name, group(2) = version string
 _TABULAR_CTRL_RE = re.compile(
-    r"^\s*controller\s+\d+\s+\d+\s+(\S+)\s+(\S+)",
+    r"^\s*controller\s+\d+\s+(?:\d+\s+)?(\S+)\s+(\S+)",
     re.IGNORECASE | re.MULTILINE,
 )
 
