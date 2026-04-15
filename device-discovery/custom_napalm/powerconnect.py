@@ -348,15 +348,17 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
             return {}
 
         interfaces_ip: dict = {}
-        # Match "Vlan <id>   <ip>/<mask-or-prefix>"
+        # Match both slash-notation and space-separated (tabular) output forms:
+        #   Vlan 1   192.168.1.1/255.255.255.0   (slash form)
+        #   Vlan 1   192.168.1.1   255.255.255.0  (tabular form)
         for m in re.finditer(
-            r"^(\S+(?:\s+\d+)?)\s+(\d+\.\d+\.\d+\.\d+)/(\S+)",
+            r"^(\S+(?:\s+\d+)?)\s+(\d+\.\d+\.\d+\.\d+)(?:/(\S+)|\s+(\d+\.\d+\.\d+\.\d+))",
             raw,
             re.MULTILINE,
         ):
             intf = m.group(1).strip()
             ip_addr = m.group(2).strip()
-            mask_or_prefix = m.group(3).strip()
+            mask_or_prefix = (m.group(3) or m.group(4) or "").strip()
 
             # Determine prefix length
             if "." in mask_or_prefix:
@@ -464,8 +466,9 @@ def _expand_ports(ports_raw: str) -> list[str]:
     Expand a Dell PowerConnect port-list string into individual port names.
 
     Examples::
-        "g1-4,g6,ch1-4"  →  ["g1", "g2", "g3", "g4", "g6", "ch1", "ch2", "ch3", "ch4"]
-        ""                →  []
+        "g1-4,g6,ch1-4"    →  ["g1", "g2", "g3", "g4", "g6", "ch1", "ch2", "ch3", "ch4"]
+        "1/g1-1/g4,1/g6"   →  ["1/g1", "1/g2", "1/g3", "1/g4", "1/g6"]
+        ""                  →  []
     """
     if not ports_raw or ports_raw in ("--", ""):
         return []
@@ -475,11 +478,22 @@ def _expand_ports(ports_raw: str) -> list[str]:
         token = token.strip()
         if not token:
             continue
-        # Match range: <prefix><start>-<end>  e.g. "g1-4" or "ch1-4"
+        # Stacked-unit range: <unit>/<prefix><start>-<unit>/<prefix><end>
+        # e.g. "1/g1-1/g48" on stacked PowerConnect units.
+        m = re.fullmatch(r"(\d+)/([a-zA-Z]+)(\d+)-(\d+)/([a-zA-Z]+)(\d+)", token)
+        if m:
+            unit1, pfx1, start = m.group(1), m.group(2), int(m.group(3))
+            unit2, pfx2, end = m.group(4), m.group(5), int(m.group(6))
+            if unit1 == unit2 and pfx1 == pfx2:
+                result.extend(f"{unit1}/{pfx1}{i}" for i in range(start, end + 1))
+            else:
+                result.append(token)
+            continue
+        # Simple range: <prefix><start>-<end>  e.g. "g1-4" or "ch1-4"
         m = re.fullmatch(r"([a-zA-Z]+)(\d+)-(\d+)", token)
         if m:
             prefix, start, end = m.group(1), int(m.group(2)), int(m.group(3))
             result.extend(f"{prefix}{i}" for i in range(start, end + 1))
-        else:
-            result.append(token)
+            continue
+        result.append(token)
     return result
