@@ -90,6 +90,7 @@ _FILTER_INTERFACES_TMPL = """\
             </ethernet>
         </port>
         <router>
+            <router-name/>
             <interface>
                 <interface-name/>
                 <oper-ip-mtu/>
@@ -113,6 +114,7 @@ _FILTER_INTERFACES_TMPL = """\
             </ethernet>
         </port>
         <router>
+            <router-name/>
             <interface>
                 <interface-name/>
                 <admin-state/>
@@ -129,6 +131,7 @@ _FILTER_INTERFACES_IP = f"""
 <filter xmlns="{_NS_NC}">
     <configure xmlns="{_NS_CONF}">
         <router>
+            <router-name/>
             <interface>
                 <interface-name/>
                 <ipv4>
@@ -264,7 +267,13 @@ def _xpath_one(xml_tree: etree._Element, xpath: str) -> etree._Element | None:
 
 
 def _port_ref_from_cfg(cfg_block: etree._Element | None) -> str:
-    """Extract the bare port-id from a configure/router/interface block (strips .1q tag)."""
+    """
+    Extract the bare port-id from a configure/router/interface block.
+
+    SR-OS encodes sub-interface references as ``port-id:channel`` (e.g. ``1/1/1:0``).
+    The channel suffix after the colon is stripped so the result matches the
+    top-level port-id key used in the state tree.
+    """
     if cfg_block is None:
         return ""
     port_ref = _find_txt(cfg_block, "configure_ns:port")
