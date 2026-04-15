@@ -88,6 +88,46 @@ def _mask_to_prefix(mask: str) -> int:
 _NTC_PLATFORM = "dell_powerconnect"
 
 
+# ---------------------------------------------------------------------------
+# Shared helpers for interface parsing
+# ---------------------------------------------------------------------------
+
+def _parse_ch_rows(raw: str) -> list[dict]:
+    """
+    Parse port-channel (ch) rows from 'show interfaces status' output.
+
+    The NTC template stops at the Ch section header (``^Ch ... -> EOF``), so
+    ch/LAG interfaces must be extracted separately with a regex.
+    """
+    rows = []
+    for m in re.finditer(
+        r"^(ch\d+)\s+\S+\s+\S+\s+(\S+)\s+\S+\s+\S+\s+(Not\s+Present|Up|Down)\s*$",
+        raw,
+        re.MULTILINE | re.IGNORECASE,
+    ):
+        rows.append(
+            {"port": m.group(1), "speed": m.group(2), "linkstate": m.group(3).strip()}
+        )
+    return rows
+
+
+def _make_interface_entry(link_state: str, speed_raw: str, description: str) -> dict:
+    """Build a NAPALM interface dict from parsed field values."""
+    try:
+        speed = float(speed_raw) if speed_raw not in ("", "--") else -1.0
+    except ValueError:
+        speed = -1.0
+    return {
+        "is_up": link_state == "up",
+        "is_enabled": link_state != "down",
+        "description": description,
+        "last_flapped": -1.0,
+        "mtu": -1,
+        "speed": speed,
+        "mac_address": "",
+    }
+
+
 class PowerConnectDriver(_napalm_base.NetworkDriver):
     """Dell PowerConnect NAPALM driver (read-only subset for device-discovery)."""
 
@@ -209,7 +249,7 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
         raw_version = self.device.send_command("show version")
         facts = self._parse_version_facts(raw_version)
 
-        # Interface list from ntc-template
+        # Interface list: physical ports via ntc-template + ch ports via regex
         raw_status = self.device.send_command("show interfaces status")
         interface_list: list[str] = []
         try:
@@ -223,6 +263,12 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
             ]
         except Exception:
             logger.debug("powerconnect: failed to parse 'show interfaces status'", exc_info=True)
+        # NTC template stops before the Ch section; add ch interfaces separately.
+        interface_list += [
+            row["port"]
+            for row in _parse_ch_rows(raw_status)
+            if row["linkstate"].lower() != "not present"
+        ]
 
         return {
             "hostname": facts["hostname"],
@@ -312,20 +358,18 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
             link_state = row.get("linkstate", "").strip().lower()
             if link_state == "not present":
                 continue
-            speed_raw = row.get("speed", "").strip()
-            try:
-                speed = float(speed_raw) if speed_raw not in ("", "--") else -1.0
-            except ValueError:
-                speed = -1.0
-            interfaces[port] = {
-                "is_up": link_state == "up",
-                "is_enabled": link_state != "down",
-                "description": desc_map.get(port, ""),
-                "last_flapped": -1.0,
-                "mtu": -1,
-                "speed": speed,
-                "mac_address": "",
-            }
+            interfaces[port] = _make_interface_entry(
+                link_state, row.get("speed", "").strip(), desc_map.get(port, "")
+            )
+
+        # NTC template stops before the Ch section; add ch interfaces separately.
+        for row in _parse_ch_rows(raw_status):
+            link_state = row["linkstate"].lower()
+            if link_state == "not present":
+                continue
+            interfaces[row["port"]] = _make_interface_entry(
+                link_state, row["speed"], desc_map.get(row["port"], "")
+            )
 
         return interfaces
 
