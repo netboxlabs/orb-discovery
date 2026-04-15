@@ -103,11 +103,11 @@ def _mask_to_prefix(mask: str) -> int:
 # ---------------------------------------------------------------------------
 
 def _ntc_parse(platform: str, command: str, data: str) -> list:
-    """Call ``parse_output`` and return an empty list on ``TextFSMError``."""
+    """Call ``parse_output`` and return an empty list on any parse error."""
     try:
         return parse_output(platform=platform, command=command, data=data)
     except Exception:
-        logger.warning("aos: ntc-template parse failed for command %r", command)
+        logger.debug("aos: ntc-template parse failed for command %r", command, exc_info=True)
         return []
 
 
@@ -131,7 +131,7 @@ def _parse_ipv4_interfaces(output: str, result: dict) -> None:
         m = _IPV4_ROW_RE.match(line)
         if not m:
             continue
-        intf_name, ip_addr, subnet_mask = m.group(1).strip(), m.group(2), m.group(3)
+        intf_name, ip_addr, subnet_mask = m.group(1).strip().lower(), m.group(2), m.group(3)
         if ip_addr == "0.0.0.0":
             continue
         result.setdefault(intf_name, {}).setdefault("ipv4", {})[ip_addr] = {
@@ -152,7 +152,7 @@ def _parse_ipv6_interfaces(output: str, result: dict) -> None:
         m = _IPV6_ROW_RE.match(line)
         if not m:
             continue
-        intf_name = m.group(1).strip()
+        intf_name = m.group(1).strip().lower()
         cidr = m.group(2)
         ipv6_addr, _, prefix_str = cidr.rpartition("/")
         if not ipv6_addr:

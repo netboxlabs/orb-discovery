@@ -1,8 +1,13 @@
 {
-  "Loopback": {
+  "loopback": {
     "ipv4": {
       "127.0.0.1": {
         "prefix_length": 32
+      }
+    },
+    "ipv6": {
+      "::1": {
+        "prefix_length": 128
       }
     }
   },
@@ -13,14 +18,7 @@
       }
     }
   },
-  "loopback": {
-    "ipv6": {
-      "::1": {
-        "prefix_length": 128
-      }
-    }
-  },
-  "EMP-CMMA-CHAS1": {
+  "emp-cmma-chas1": {
     "ipv6": {
       "fe80::eae7:32ff:feab:1f32": {
         "prefix_length": 64
