@@ -32,10 +32,17 @@ _SET_PASS_RE = re.compile(
     r"\s+(?:'[^']*'|\S+)",
     re.IGNORECASE,
 )
+# "set service snmp community <name> ..."
+_SNMP_COMMUNITY_RE = re.compile(
+    r"(set\s+service\s+snmp\s+community)\s+\S+",
+    re.IGNORECASE,
+)
 
 
 def _sanitize_config(text: str) -> str:
-    return _SET_PASS_RE.sub(r"\1 <redacted>", text)
+    text = _SET_PASS_RE.sub(r"\1 <redacted>", text)
+    text = _SNMP_COMMUNITY_RE.sub(r"\1 <redacted>", text)
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -61,16 +68,19 @@ _MIN_S = 60
 
 def _parse_uptime(uptime_str: str) -> float:
     """Convert an EdgeOS uptime string to total seconds."""
-    m = _UPTIME_RE.search(uptime_str)
-    years, weeks, days, hours, minutes, seconds = (int(v or 0) for v in m.groups())
-    return float(
-        years * _YEAR_S
-        + weeks * _WEEK_S
-        + days * _DAY_S
-        + hours * _HOUR_S
-        + minutes * _MIN_S
-        + seconds
-    )
+    for m in _UPTIME_RE.finditer(uptime_str):
+        if not any(v is not None for v in m.groups()):
+            continue
+        years, weeks, days, hours, minutes, seconds = (int(v or 0) for v in m.groups())
+        return float(
+            years * _YEAR_S
+            + weeks * _WEEK_S
+            + days * _DAY_S
+            + hours * _HOUR_S
+            + minutes * _MIN_S
+            + seconds
+        )
+    return 0.0
 
 
 class EdgeRouterDriver(_napalm_base.NetworkDriver):

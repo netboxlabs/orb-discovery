@@ -153,6 +153,11 @@ def _expand_vlan_tokens(token_str: str) -> list[str]:
                 continue
             vids.extend(str(v) for v in range(start_vid, end_vid + 1))
         else:
+            try:
+                int(token)
+            except ValueError:
+                logger.warning("Skipping malformed VLAN token %r", token)
+                continue
             vids.append(token)
     return vids
 
