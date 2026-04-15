@@ -1,0 +1,14 @@
+ Internet (IP) Service
+
+  Default Gateway  : 10.1.1.254
+  Default TTL      : 64
+  Arp Age          : 20
+  Domain Suffix    :
+  DNS server       :
+
+                   | Proxy ARP                     Local Proxy
+ VLAN              | IP Config  IP Address      Subnet Mask     ARP        ARP
+ ------------------+-----------+---------------+----------------+-----------+---
+ DEFAULT_VLAN      | Manual     10.1.1.1        255.255.255.0   No         No
+ VLAN10            | Manual     192.168.10.1    255.255.255.0   No         No
+
