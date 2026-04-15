@@ -176,8 +176,10 @@ _FILTER_INTERFACES_IP = f"""
 # ---------------------------------------------------------------------------
 # Config sanitization — Nokia SR-OS YANG XML sensitive element content
 # ---------------------------------------------------------------------------
-# Pattern: (<tag>)[^<]*(</tag>)  →  \1<redacted>\2
+# Pattern: (<tag>)[^<]*(</tag>)  →  \1REDACTED\2
 # Covers both plain-text and encrypted values inside XML elements.
+# Note: replacement is the plain word REDACTED (not XML tags) so the output
+# remains well-formed XML and can be re-parsed without errors.
 
 _AUTH_KEY_RE = re.compile(r"(<authentication-key>)[^<]*(</authentication-key>)", re.IGNORECASE)
 _HMAC_MD5_RE = re.compile(r"(<hmac-md5-key>)[^<]*(</hmac-md5-key>)", re.IGNORECASE)
@@ -191,16 +193,16 @@ _PSK_RE = re.compile(r"(<pre-shared-key>)[^<]*(</pre-shared-key>)", re.IGNORECAS
 
 
 def _sanitize_config(text: str) -> str:
-    """Redact Nokia SR-OS YANG XML secret values, replacing content with <redacted>."""
-    text = _AUTH_KEY_RE.sub(r"\1<redacted>\2", text)
-    text = _HMAC_MD5_RE.sub(r"\1<redacted>\2", text)
-    text = _DES_KEY_RE.sub(r"\1<redacted>\2", text)
-    text = _AES_KEY_RE.sub(r"\1<redacted>\2", text)
-    text = _PASSWORD_RE.sub(r"\1<redacted>\2", text)
-    text = _SECRET_RE.sub(r"\1<redacted>\2", text)
-    text = _COMMUNITY_STR_RE.sub(r"\1<redacted>\2", text)
-    text = _PRIVATE_KEY_RE.sub(r"\1<redacted>\2", text)
-    text = _PSK_RE.sub(r"\1<redacted>\2", text)
+    """Redact Nokia SR-OS YANG XML secret values, replacing content with REDACTED."""
+    text = _AUTH_KEY_RE.sub(r"\1REDACTED\2", text)
+    text = _HMAC_MD5_RE.sub(r"\1REDACTED\2", text)
+    text = _DES_KEY_RE.sub(r"\1REDACTED\2", text)
+    text = _AES_KEY_RE.sub(r"\1REDACTED\2", text)
+    text = _PASSWORD_RE.sub(r"\1REDACTED\2", text)
+    text = _SECRET_RE.sub(r"\1REDACTED\2", text)
+    text = _COMMUNITY_STR_RE.sub(r"\1REDACTED\2", text)
+    text = _PRIVATE_KEY_RE.sub(r"\1REDACTED\2", text)
+    text = _PSK_RE.sub(r"\1REDACTED\2", text)
     return text
 
 
@@ -208,11 +210,16 @@ def _sanitize_config(text: str) -> str:
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Safe XML parser — disables external entity expansion and network access to prevent
+# XXE (XML External Entity) injection attacks on untrusted NETCONF responses.
+_SAFE_XML_PARSER = etree.XMLParser(resolve_entities=False, no_network=True)
+
+
 def _parse_xml(data_xml: str | bytes) -> etree._Element:
     """Parse a NETCONF data_xml payload into an lxml Element."""
     if isinstance(data_xml, str):
         data_xml = data_xml.encode("utf-8")
-    return etree.fromstring(data_xml)
+    return etree.fromstring(data_xml, parser=_SAFE_XML_PARSER)
 
 
 def _find_txt(xml_tree: etree._Element, xpath: str, default: str = "") -> str:
@@ -281,6 +288,40 @@ def _resolve_if_speed(result: etree._Element, cfg_block: etree._Element | None) 
     return convert(float, _find_txt(port_state, "state_ns:ethernet/state_ns:oper-speed"), default=-1.0)
 
 
+def _extract_if_addrs(interface: etree._Element) -> dict:
+    """Build the IP address dict for a single configure/interface element."""
+    entry: dict = {}
+
+    # IPv4 primary
+    ipv4_primary = _find_txt(interface, "configure_ns:ipv4/configure_ns:primary/configure_ns:address")
+    if ipv4_primary:
+        entry.setdefault("ipv4", {})[ipv4_primary] = {
+            "prefix_length": convert(
+                int,
+                _find_txt(interface, "configure_ns:ipv4/configure_ns:primary/configure_ns:prefix-length"),
+                default=0,
+            )
+        }
+
+    # IPv4 secondaries (can be multiple)
+    for secondary in interface.xpath("configure_ns:ipv4/configure_ns:secondary", namespaces=_NSMAP):
+        sec_addr = _find_txt(secondary, "configure_ns:address")
+        if sec_addr:
+            entry.setdefault("ipv4", {})[sec_addr] = {
+                "prefix_length": convert(int, _find_txt(secondary, "configure_ns:prefix-length"), default=0)
+            }
+
+    # IPv6 addresses (can be multiple)
+    for ipv6_entry in interface.xpath("configure_ns:ipv6/configure_ns:address", namespaces=_NSMAP):
+        ipv6_addr = _find_txt(ipv6_entry, "configure_ns:ipv6-address")
+        if ipv6_addr:
+            entry.setdefault("ipv6", {})[ipv6_addr] = {
+                "prefix_length": convert(int, _find_txt(ipv6_entry, "configure_ns:prefix-length"), default=0)
+            }
+
+    return entry
+
+
 def _parse_last_flapped(flap_str: str) -> float:
     """Convert Nokia ISO 8601 last-oper-change timestamp to a UTC epoch float."""
     if not flap_str:
@@ -306,6 +347,7 @@ class SROSDriver(_napalm_base.NetworkDriver):
         if optional_args is None:
             optional_args = {}
         self.port: int = int(optional_args.get("port", 830))
+        self.hostkey_verify: bool = bool(optional_args.get("host_key_verify", False))
         # R19 = True for SR-OS < 21.x (older YANG revision 2016-07-06)
         self.R19: bool = False
 
@@ -318,15 +360,18 @@ class SROSDriver(_napalm_base.NetworkDriver):
             port=self.port,
             username=self.username,
             password=self.password,
-            hostkey_verify=False,  # Nokia devices rarely present verifiable host keys
+            hostkey_verify=self.hostkey_verify,
             timeout=self.timeout,
         )
-        # Detect legacy R19 YANG revision (SR-OS < 21.x firmware)
-        _rev_re = re.compile(r".*&revision=(.*)")
+        # Detect legacy R19 YANG revision (SR-OS < 21.x firmware).
+        # Capability URIs look like: urn:...nokia-state?module=nokia-state&revision=YYYY-MM-DD
+        # Use a non-greedy match anchored to the revision parameter to avoid capturing
+        # any subsequent query parameters (e.g. &features=...).
+        _rev_re = re.compile(r"[?&]revision=([^&]+)")
         revisions = [
             m.group(1)
             for c in self.conn.server_capabilities
-            if "nokia-state" in c and (m := _rev_re.match(c))
+            if "nokia-state" in c and (m := _rev_re.search(c))
         ]
         self.R19 = "2016-07-06" in revisions
 
@@ -384,9 +429,10 @@ class SROSDriver(_napalm_base.NetworkDriver):
         """
         Return interface details keyed by name (physical ports + logical router interfaces).
 
-        Note: covers the Base router VRF and physical ports only. L3 interfaces inside VPRN
-        service instances are accessible via get_interfaces_ip() but are not enumerated here,
-        as they lack port-state (speed/MAC) data in the YANG model.
+        Physical ports and logical interfaces from all router VRFs (Base router and named VRFs)
+        are included. VPRN service interfaces are not enumerated here because they lack
+        port-state (speed/MAC) data in the YANG model; their IP addresses are available via
+        get_interfaces_ip().
         """
         try:
             oper_state_tag = "<if-oper-status/>" if self.R19 else "<oper-state/>"
@@ -426,14 +472,14 @@ class SROSDriver(_napalm_base.NetworkDriver):
                     "speed": convert(
                         float,
                         _find_txt(port, "state_ns:ethernet/state_ns:oper-speed"),
-                        default=0.0,
+                        default=-1.0,
                     ),
                     "mtu": convert(
                         int,
                         _find_txt(cfg_block, "configure_ns:ethernet/configure_ns:mtu")
                         if cfg_block is not None
                         else "",
-                        default=0,
+                        default=-1,
                     ),
                     "mac_address": _find_txt(port, "state_ns:hardware-mac-address"),
                 }
@@ -494,56 +540,15 @@ class SROSDriver(_napalm_base.NetworkDriver):
                 if_name = _find_txt(interface, "configure_ns:interface-name")
                 if not if_name:
                     continue
-
-                entry: dict = {}
-
-                # IPv4 primary
-                ipv4_primary = _find_txt(
-                    interface,
-                    "configure_ns:ipv4/configure_ns:primary/configure_ns:address",
-                )
-                if ipv4_primary:
-                    entry.setdefault("ipv4", {})[ipv4_primary] = {
-                        "prefix_length": convert(
-                            int,
-                            _find_txt(
-                                interface,
-                                "configure_ns:ipv4/configure_ns:primary/configure_ns:prefix-length",
-                            ),
-                            default=0,
-                        )
-                    }
-
-                # IPv4 secondaries (can be multiple)
-                for secondary in interface.xpath(
-                    "configure_ns:ipv4/configure_ns:secondary", namespaces=_NSMAP
-                ):
-                    sec_addr = _find_txt(secondary, "configure_ns:address")
-                    if sec_addr:
-                        entry.setdefault("ipv4", {})[sec_addr] = {
-                            "prefix_length": convert(
-                                int,
-                                _find_txt(secondary, "configure_ns:prefix-length"),
-                                default=0,
-                            )
-                        }
-
-                # IPv6 addresses (can be multiple)
-                for ipv6_entry in interface.xpath(
-                    "configure_ns:ipv6/configure_ns:address", namespaces=_NSMAP
-                ):
-                    ipv6_addr = _find_txt(ipv6_entry, "configure_ns:ipv6-address")
-                    if ipv6_addr:
-                        entry.setdefault("ipv6", {})[ipv6_addr] = {
-                            "prefix_length": convert(
-                                int,
-                                _find_txt(ipv6_entry, "configure_ns:prefix-length"),
-                                default=0,
-                            )
-                        }
-
+                entry = _extract_if_addrs(interface)
                 if entry:
-                    interfaces_ip[if_name] = entry
+                    # Merge into any existing entry for this interface-name.
+                    # The same logical name can appear in both the Base router and one or more
+                    # VPRN services; merging prevents later entries from silently overwriting
+                    # earlier ones.
+                    existing = interfaces_ip.setdefault(if_name, {})
+                    for family, addrs in entry.items():
+                        existing.setdefault(family, {}).update(addrs)
 
             return interfaces_ip
         except Exception:
