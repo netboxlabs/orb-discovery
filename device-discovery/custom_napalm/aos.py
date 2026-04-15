@@ -323,11 +323,15 @@ class AOSDriver(_napalm_base.NetworkDriver):
                 interfaces[port]["speed"] = speed
                 interfaces[port]["mtu"] = mtu
             else:
-                # Port appeared in ethernet output but not in alias output
+                # Port appeared in ethernet output but not in alias output.
+                # Use admin_status when the template provides it (tabular format);
+                # fall back to True when it is absent (verbose per-port format).
                 status_raw = row.get("status", "").lower()
+                admin_raw = row.get("admin_status", "").lower()
+                is_enabled = (admin_raw != "disabled") if admin_raw else True
                 interfaces[port] = {
                     "is_up": status_raw == "up",
-                    "is_enabled": True,
+                    "is_enabled": is_enabled,
                     "description": "",
                     "last_flapped": -1.0,
                     "speed": speed,
@@ -394,8 +398,8 @@ class AOSDriver(_napalm_base.NetworkDriver):
             port = row.get("port", "")
             if not vlan_id or not port:
                 continue
-            if vlan_id in vlans:
-                if port not in vlans[vlan_id]["interfaces"]:
-                    vlans[vlan_id]["interfaces"].append(port)
+            vlan = vlans.setdefault(vlan_id, {"name": vlan_id, "interfaces": []})
+            if port not in vlan["interfaces"]:
+                vlan["interfaces"].append(port)
 
         return vlans
