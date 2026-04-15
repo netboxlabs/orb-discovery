@@ -280,9 +280,12 @@ class UniFiSwitchDriver(_napalm_base.NetworkDriver):
         """
         Return interface details from 'show interfaces status all'.
 
-        is_enabled: Neg == 'Enabled' AND State != 'Disabled'
+        is_enabled: Port State != 'Disabled' (Disabled = admin-shutdown)
         is_up:      Link State == 'Up'
         speed:      parsed from Physical Mode column (e.g. 'Full-100M' → 100.0 Mbps)
+
+        Note: the Neg column reflects auto-negotiation, not admin state.
+        Admin-shutdown ports show Port State == 'Disabled' regardless of Neg.
         """
         interfaces: dict = {}
         for line in self._get_intf_status_raw().splitlines():
@@ -290,7 +293,6 @@ class UniFiSwitchDriver(_napalm_base.NetworkDriver):
             if not m:
                 continue
             intf = m.group("intf")
-            neg = m.group("neg").lower()
             state = m.group("state").lower()
             link = m.group("link").lower()
 
@@ -300,7 +302,7 @@ class UniFiSwitchDriver(_napalm_base.NetworkDriver):
 
             interfaces[intf] = {
                 "is_up": link == "up",
-                "is_enabled": neg == "enabled" and state != "disabled",
+                "is_enabled": state != "disabled",
                 "description": "",
                 "last_flapped": -1.0,
                 "mtu": -1,
