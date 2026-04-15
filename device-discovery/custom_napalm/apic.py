@@ -443,7 +443,11 @@ class APICDriver(_napalm_base.NetworkDriver):
         serial_number = ver_facts.get("serial_number", "Unknown")
         uptime = ver_facts.get("uptime", 0.0)
 
-        if serial_number == "Unknown":
+        # Only query inventory when show version positively identified this device as an
+        # APIC (os_version resolved).  If both remain Unknown the driver should not
+        # claim the device, so we skip the inventory call to avoid accepting non-APIC
+        # Cisco devices that happen to expose a parseable serial via show inventory.
+        if serial_number == "Unknown" and os_version != "Unknown":
             serial_number = self._fetch_serial_from_inventory()
 
         parsed_intfs = self._parsed_interfaces()
