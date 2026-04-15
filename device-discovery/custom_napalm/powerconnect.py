@@ -11,6 +11,7 @@ ntc-templates for structured parsing of 'show interfaces status' and
 templates (show version, show ip interface, show vlan).
 """
 
+import ipaddress
 import logging
 import re
 
@@ -79,13 +80,7 @@ _DAY_SECONDS = 24 * _HOUR_SECONDS
 def _mask_to_prefix(mask: str) -> int:
     """Convert dotted-decimal subnet mask to prefix length integer."""
     try:
-        octets = mask.split(".")
-        if len(octets) != 4:
-            return -1
-        bits = 0
-        for octet in octets:
-            bits += bin(int(octet)).count("1")
-        return bits
+        return ipaddress.IPv4Network(f"0.0.0.0/{mask}", strict=False).prefixlen
     except (ValueError, AttributeError):
         return -1
 
@@ -221,7 +216,11 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
             parsed = parse_output(
                 platform=_NTC_PLATFORM, command="show interfaces status", data=raw_status
             )
-            interface_list = [row["port"] for row in parsed if row.get("port")]
+            interface_list = [
+                row["port"]
+                for row in parsed
+                if row.get("port") and row.get("linkstate", "").strip().lower() != "not present"
+            ]
         except Exception:
             logger.debug("powerconnect: failed to parse 'show interfaces status'", exc_info=True)
 
@@ -391,13 +390,13 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
         if not raw:
             return {}
 
-        # Match VLAN data rows. The Type column (Default/Static/Dynamic/Permanent)
-        # is always the last token; anchoring on it prevents the Type value from
-        # being mistaken for a port when a VLAN has no member ports.
+        # Match VLAN data rows. The Type column is always the last token on the
+        # line; anchoring the final \S+ to end-of-line prevents the Type value
+        # from being mistaken for a port when a VLAN has no member ports.
         # Group 3 (ports) is deliberately non-greedy and may be empty.
         vlans: dict = {}
         for m in re.finditer(
-            r"^(\d+)\s+(\S+)\s*(.*?)\s+(?:Default|Static|Dynamic|Permanent)\s*$",
+            r"^(\d+)\s+(\S+)\s*(.*?)\s+\S+\s*$",
             raw,
             re.MULTILINE | re.IGNORECASE,
         ):
