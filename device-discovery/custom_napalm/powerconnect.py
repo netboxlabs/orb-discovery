@@ -311,12 +311,17 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
         raw_version = self.device.send_command("show version")
         facts = self._parse_version_facts(raw_version)
 
-        # Interface list: physical ports via ntc-template + ch ports via regex
+        # Interface list: physical ports via ntc-template + ch/po ports via regex
         raw_status = self.device.send_command("show interfaces status")
+        # Truncate at the Ch/Po section header so the NTC template only sees
+        # the physical-port table (mirrors the same guard in get_interfaces).
+        raw_for_ntc = re.split(
+            r"^(?:Ch|Po)\s+", raw_status, maxsplit=1, flags=re.MULTILINE
+        )[0]
         interface_list: list[str] = []
         try:
             parsed = parse_output(
-                platform=_NTC_PLATFORM, command="show interfaces status", data=raw_status
+                platform=_NTC_PLATFORM, command="show interfaces status", data=raw_for_ntc
             )
             interface_list = [
                 row["port"]
