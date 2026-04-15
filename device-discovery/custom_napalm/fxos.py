@@ -55,7 +55,7 @@ _PRE_SHARED_KEY_RE = re.compile(
     re.M | re.I,
 )
 _TACACS_KEY_RE = re.compile(
-    r"^(\s*(?:tacacs-server\b[^\n]*?\bkey|radius-server\b[^\n]*?\bkey))\s+\S+",
+    r"^(\s*(?:tacacs-server\b[^\n]*?\bkey|radius-server\b[^\n]*?\bkey)(?:\s+\d+)?)\s+\S+",
     re.M | re.I,
 )
 

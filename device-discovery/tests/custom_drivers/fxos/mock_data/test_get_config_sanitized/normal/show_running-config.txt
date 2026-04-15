@@ -31,6 +31,8 @@ key chain BGPKEY
 pre-shared-key MyIpsecPsk
 
 tacacs-server host 10.0.0.5 key TacacsSecret
+tacacs-server host 10.0.0.7 key 7 EncryptedTacacsKey
 radius-server host 10.0.0.6 key RadiusSecret
+radius-server host 10.0.0.8 key 0 PlaintextRadiusKey
 
 aaa authentication login default local
