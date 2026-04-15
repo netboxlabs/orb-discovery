@@ -111,17 +111,18 @@ def _parse_uptime(uptime_str: str) -> float:
 # ---------------------------------------------------------------------------
 
 # Opening line: "Interface eth2-1 is up, line protocol is up"  (IOS style)
-#           or: "Ethernet1/1 is up"  (NX-OS / APIC leaf style, proto state on a body line)
-# group(2) captures the full admin-state token including optional "administratively " prefix.
-# group(3) captures line-protocol state when it appears on the header line; it is None when
-# the output uses the NX-OS style and the state must be found in the stanza body instead.
+#           or: "Ethernet1/1 is up"  (NX-OS / APIC leaf style)
+# group(2) captures the operational/admin-state token including optional "administratively " prefix.
+#   IOS:   group(2) = admin state; group(3) = line-protocol (operational) state on the header.
+#   NX-OS: group(2) = operational state (header token); admin state is in the stanza body.
+# group(3) is None in NX-OS style — its absence signals that the NX-OS parsing path should be used.
 _INTF_HEADER_RE = re.compile(
     r"^(?:Interface\s+)?(\S+)\s+is\s+((?:administratively\s+)?(?:up|down))"
     r"(?:.*?line\s+protocol\s+is\s+(up|down))?",
     re.IGNORECASE | re.MULTILINE,
 )
 
-# "admin state is up/down" — NX-OS alternative for operational state
+# "admin state is up/down" — NX-OS stanza body line for the administrative (enabled) state
 _ADMIN_STATE_BODY_RE = re.compile(r"admin\s+state\s+is\s+(up|down)", re.IGNORECASE)
 
 # MAC address — "address is <mac>" (IOS) or "address: <mac>" (NX-OS)
@@ -266,7 +267,7 @@ _UPTIME_LINE_RE = re.compile(r"^(?:System\s+uptime|Uptime)\s*:\s*(.+)", re.IGNOR
 #   controller   1    1     apic1   6.0(3f)
 # group(1) = node name, group(2) = version string
 _TABULAR_CTRL_RE = re.compile(
-    r"^controller\s+\d+\s+\d+\s+(\S+)\s+(\S+)",
+    r"^\s*controller\s+\d+\s+\d+\s+(\S+)\s+(\S+)",
     re.IGNORECASE | re.MULTILINE,
 )
 
