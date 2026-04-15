@@ -1,0 +1,23 @@
+{
+  "1": {
+    "name": "default",
+    "interfaces": [
+      "g1",
+      "g2",
+      "g3",
+      "g5"
+    ]
+  },
+  "10": {
+    "name": "MGMT",
+    "interfaces": [
+      "g4"
+    ]
+  },
+  "100": {
+    "name": "SERVERS",
+    "interfaces": [
+      "g5"
+    ]
+  }
+}

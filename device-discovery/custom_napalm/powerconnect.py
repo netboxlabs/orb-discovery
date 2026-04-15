@@ -1,0 +1,467 @@
+# Copyright 2026 NetBox Labs Inc
+"""
+Custom Dell PowerConnect NAPALM driver.
+
+Implements only the methods used by device-discovery:
+  get_facts, get_interfaces, get_interfaces_ip, get_config, get_vlans.
+
+Uses Netmiko (dell_powerconnect device type) for SSH connectivity and
+ntc-templates for structured parsing of 'show interfaces status' and
+'show interfaces description'; falls back to regex for commands without
+templates (show version, show ip interface, show vlan).
+"""
+
+import logging
+import re
+
+import napalm.base as _napalm_base
+from napalm.base import models
+from napalm.base.netmiko_helpers import netmiko_args
+from ntc_templates.parse import parse_output
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Config sanitization — Dell PowerConnect sensitive fields
+# ---------------------------------------------------------------------------
+
+# "username <name> privilege <n> password [<enc-type>] <value>"
+# "enable password [<enc-type>] <value>"
+_PASSWORD_RE = re.compile(
+    r"((?:username\s+\S+\s+privilege\s+\d+\s+)?(?:enable\s+)?password(?:\s+\d+)?)\s+\S+",
+    re.IGNORECASE,
+)
+
+# "snmp-server community <string> ..."
+_SNMP_COMMUNITY_RE = re.compile(
+    r"(snmp-server\s+community)\s+\S+",
+    re.IGNORECASE,
+)
+
+# "radius-server host <ip> key <key>"
+_RADIUS_KEY_RE = re.compile(
+    r"(radius-server\s+host\s+\S+\s+key)\s+\S+",
+    re.IGNORECASE,
+)
+
+# "tacacs-server host <ip> key <key>"
+_TACACS_KEY_RE = re.compile(
+    r"(tacacs-server\s+host\s+\S+\s+key)\s+\S+",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_config(text: str) -> str:
+    text = _PASSWORD_RE.sub(r"\1 <redacted>", text)
+    text = _SNMP_COMMUNITY_RE.sub(r"\1 <redacted>", text)
+    text = _RADIUS_KEY_RE.sub(r"\1 <redacted>", text)
+    text = _TACACS_KEY_RE.sub(r"\1 <redacted>", text)
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Uptime parsing
+# ---------------------------------------------------------------------------
+
+_MINUTE_SECONDS = 60
+_HOUR_SECONDS = 3600
+_DAY_SECONDS = 24 * _HOUR_SECONDS
+_WEEK_SECONDS = 7 * _DAY_SECONDS
+
+
+def _parse_uptime(uptime_str: str) -> float:
+    """
+    Convert a Dell PowerConnect uptime string to total seconds.
+
+    Handles formats such as:
+      "0d:2h:14m:33s"
+      "3 day(s) 4 hour(s) 22 minute(s) 5 second(s)"
+    """
+    uptime_str = uptime_str.strip()
+
+    # Compact form "Xd:Xh:Xm:Xs"
+    m = re.fullmatch(r"(\d+)d:(\d+)h:(\d+)m:(\d+)s", uptime_str)
+    if m:
+        return (
+            int(m.group(1)) * _DAY_SECONDS
+            + int(m.group(2)) * _HOUR_SECONDS
+            + int(m.group(3)) * _MINUTE_SECONDS
+            + int(m.group(4))
+        )
+
+    seconds = 0.0
+    for pattern, factor in (
+        (r"(\d+)\s*(?:week|wk)", _WEEK_SECONDS),
+        (r"(\d+)\s*day", _DAY_SECONDS),
+        (r"(\d+)\s*h(?:ou)?r", _HOUR_SECONDS),
+        (r"(\d+)\s*min", _MINUTE_SECONDS),
+        (r"(\d+)\s*sec", 1),
+    ):
+        hit = re.search(pattern, uptime_str, re.IGNORECASE)
+        if hit:
+            seconds += int(hit.group(1)) * factor
+    return seconds
+
+
+# ---------------------------------------------------------------------------
+# Interface IP parsing helpers
+# ---------------------------------------------------------------------------
+
+def _mask_to_prefix(mask: str) -> int:
+    """Convert dotted-decimal subnet mask to prefix length integer."""
+    try:
+        octets = mask.split(".")
+        if len(octets) != 4:
+            return -1
+        bits = 0
+        for octet in octets:
+            bits += bin(int(octet)).count("1")
+        return bits
+    except (ValueError, AttributeError):
+        return -1
+
+
+_NTC_PLATFORM = "dell_powerconnect"
+
+
+class PowerConnectDriver(_napalm_base.NetworkDriver):
+    """Dell PowerConnect NAPALM driver (read-only subset for device-discovery)."""
+
+    def __init__(self, hostname, username, password, timeout=60, optional_args=None):
+        """Initialise driver state; no connection is opened yet."""
+        self.hostname = hostname
+        self.username = username
+        self.password = password
+        self.timeout = timeout
+        self.device = None
+
+        if optional_args is None:
+            optional_args = {}
+        self.netmiko_optional_args = netmiko_args(optional_args)
+        self.netmiko_optional_args.setdefault("port", 22)
+
+    def open(self):
+        """Open an SSH connection to the device via Netmiko."""
+        self.device = self._netmiko_open(
+            "dell_powerconnect", netmiko_optional_args=self.netmiko_optional_args
+        )
+
+    def close(self):
+        """Close the SSH connection."""
+        self._netmiko_close()
+
+    def is_alive(self):
+        """Return connection liveness."""
+        if self.device is None:
+            return {"is_alive": False}
+        try:
+            self.device.write_channel(chr(0))
+            return {"is_alive": self.device.remote_conn.transport.is_active()}
+        except (EOFError, OSError, AttributeError):
+            return {"is_alive": False}
+
+    # ------------------------------------------------------------------
+    # NAPALM getters
+    # ------------------------------------------------------------------
+
+    def _parse_version_facts(self, raw: str) -> dict:
+        """
+        Extract hostname, os_version, model, serial_number, and uptime from 'show version'.
+
+        Parses 'show version' output using regex.
+
+        Example 'show version' output::
+
+            System Description:        Dell Networking N2048, 1.0, Linux 3.6.5-1
+            System Up Time (days,hour:min:sec):  0,02:14:33
+            System Contact:
+            System Name:               switch01
+            System Location:
+            System Object ID:          1.3.6.1.4.1.674.10895.3048
+            System Information
+              Hardware Version:        A00
+              Number of Ports:         48
+            ...
+            Active-image: file=/flash/N2048v1-SI-10.5.2.4.stk  checksum=...
+            ...
+            Unit ID  HW Version  SW Version     Serial Number
+            --------  ----------  -------------  ------------
+             1         A00         10.5.2.4       CN07Q7ABCE0123
+        """
+        facts: dict = {
+            "hostname": "Unknown",
+            "os_version": "Unknown",
+            "model": "Unknown",
+            "serial_number": "Unknown",
+            "uptime": 0.0,
+        }
+
+        if not raw:
+            return facts
+
+        # Hostname: "System Name: <name>"
+        m = re.search(r"System\s+Name\s*:\s*(\S+)", raw, re.IGNORECASE)
+        if m:
+            facts["hostname"] = m.group(1).strip()
+
+        # Model from "System Description: Dell Networking <Model>, ..."
+        m = re.search(
+            r"System\s+Description\s*:\s*Dell\s+(?:Networking\s+|EMC\s+)?(\S+)",
+            raw,
+            re.IGNORECASE,
+        )
+        if m:
+            facts["model"] = m.group(1).strip().rstrip(",")
+
+        # OS version — prefer SW Version column from the unit table
+        # "  1         A00         10.5.2.4       CN07Q7..."
+        m = re.search(r"^\s+\d+\s+\S+\s+(\S+)\s+(\S+)", raw, re.MULTILINE)
+        if m:
+            facts["os_version"] = m.group(1).strip()
+            facts["serial_number"] = m.group(2).strip()
+
+        # Uptime: "System Up Time (days,hour:min:sec):  0,02:14:33"
+        m = re.search(
+            r"System\s+Up\s+Time.*?:\s+(\d+),(\d+):(\d+):(\d+)",
+            raw,
+            re.IGNORECASE,
+        )
+        if m:
+            days, hours, minutes, secs = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+            facts["uptime"] = float(
+                days * _DAY_SECONDS + hours * _HOUR_SECONDS + minutes * _MINUTE_SECONDS + secs
+            )
+
+        return facts
+
+    def get_facts(self) -> dict:
+        """
+        Return general device facts.
+
+        Facts are assembled from two commands:
+        - 'show version'           → hostname, os_version, model, serial_number, uptime (regex)
+        - 'show interfaces status' → interface_list (ntc-template)
+        """
+        raw_version = self.device.send_command("show version")
+        facts = self._parse_version_facts(raw_version)
+
+        # Interface list from ntc-template
+        raw_status = self.device.send_command("show interfaces status")
+        interface_list: list[str] = []
+        try:
+            parsed = parse_output(
+                platform=_NTC_PLATFORM, command="show interfaces status", data=raw_status
+            )
+            interface_list = [row["port"] for row in parsed if row.get("port")]
+        except Exception:
+            logger.debug("powerconnect: failed to parse 'show interfaces status'", exc_info=True)
+
+        return {
+            "hostname": facts["hostname"],
+            "vendor": "Dell",
+            "model": facts["model"],
+            "os_version": facts["os_version"],
+            "serial_number": facts["serial_number"],
+            "uptime": facts["uptime"],
+            "fqdn": "Unknown",
+            "interface_list": interface_list,
+        }
+
+    def get_interfaces(self) -> dict:
+        """
+        Return interface details keyed by port name.
+
+        Parses 'show interfaces status' (ntc-template) for port/speed/state and
+        'show interfaces description' (ntc-template) for description.
+        """
+        raw_status = self.device.send_command("show interfaces status")
+        if not raw_status:
+            return {}
+
+        try:
+            parsed_status = parse_output(
+                platform=_NTC_PLATFORM, command="show interfaces status", data=raw_status
+            )
+        except Exception:
+            logger.debug("powerconnect: failed to parse 'show interfaces status'", exc_info=True)
+            return {}
+
+        # Build description map from second NTC template
+        desc_map: dict[str, str] = {}
+        raw_desc = self.device.send_command("show interfaces description")
+        if raw_desc:
+            try:
+                parsed_desc = parse_output(
+                    platform=_NTC_PLATFORM,
+                    command="show interfaces description",
+                    data=raw_desc,
+                )
+                for row in parsed_desc:
+                    intf = row.get("interface", "").strip()
+                    if intf:
+                        desc_map[intf] = row.get("description", "").strip()
+            except Exception:
+                logger.debug(
+                    "powerconnect: failed to parse 'show interfaces description'", exc_info=True
+                )
+
+        interfaces: dict = {}
+        for row in parsed_status:
+            port = row.get("port", "").strip()
+            if not port:
+                continue
+            link_state = row.get("linkstate", "").strip().lower()
+            speed_raw = row.get("speed", "").strip()
+            try:
+                speed = float(speed_raw) if speed_raw not in ("", "--") else -1.0
+            except ValueError:
+                speed = -1.0
+
+            interfaces[port] = {
+                "is_up": link_state == "up",
+                "is_enabled": link_state != "down",
+                "description": desc_map.get(port, ""),
+                "last_flapped": -1.0,
+                "mtu": -1,
+                "speed": speed,
+                "mac_address": "",
+            }
+
+        return interfaces
+
+    def get_interfaces_ip(self) -> dict:
+        """
+        Return IP addresses per interface.
+
+        Parses 'show ip interface' output with regex.  Example output::
+
+            IP address and subnet mask:
+            Vlan 1              192.168.1.1/255.255.255.0
+            Vlan 10             10.0.10.1/255.255.255.0
+
+        or CIDR form::
+
+            Vlan 1              192.168.1.1/24
+        """
+        raw = self.device.send_command("show ip interface")
+        if not raw:
+            return {}
+
+        interfaces_ip: dict = {}
+        # Match "Vlan <id>   <ip>/<mask-or-prefix>"
+        for m in re.finditer(
+            r"^(\S+(?:\s+\d+)?)\s+(\d+\.\d+\.\d+\.\d+)/(\S+)",
+            raw,
+            re.MULTILINE,
+        ):
+            intf = m.group(1).strip()
+            ip_addr = m.group(2).strip()
+            mask_or_prefix = m.group(3).strip()
+
+            # Determine prefix length
+            if "." in mask_or_prefix:
+                prefix_length = _mask_to_prefix(mask_or_prefix)
+            else:
+                try:
+                    prefix_length = int(mask_or_prefix)
+                except ValueError:
+                    continue
+
+            if prefix_length < 0:
+                continue
+
+            interfaces_ip.setdefault(intf, {}).setdefault("ipv4", {})[ip_addr] = {
+                "prefix_length": prefix_length
+            }
+
+        return interfaces_ip
+
+    def get_config(
+        self,
+        retrieve: str = "all",
+        full: bool = False,
+        sanitized: bool = False,
+        format: str = "text",
+    ) -> models.ConfigDict:
+        """Return device configuration (running and/or startup)."""
+        config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
+
+        if retrieve in ("all", "running"):
+            config["running"] = self.device.send_command("show running-config")
+        if retrieve in ("all", "startup"):
+            config["startup"] = self.device.send_command("show startup-config")
+
+        if sanitized:
+            for key in ("running", "candidate", "startup"):
+                if config[key]:
+                    config[key] = _sanitize_config(config[key])
+
+        return config
+
+    def get_vlans(self) -> dict:
+        """
+        Return VLAN information keyed by VLAN ID string.
+
+        Parses 'show vlan' output with regex.  Example output::
+
+            VLAN  Name                 Ports                Type
+            ----  -------------------  -------------------  ---------------
+            1     default              g1-4,g6,ch1-4        Default
+            10    MGMT                 g5,g8                Static
+        """
+        raw = self.device.send_command("show vlan")
+        if not raw:
+            return {}
+
+        vlans: dict = {}
+        for m in re.finditer(
+            r"^(\d+)\s+(\S+)\s+(\S*)",
+            raw,
+            re.MULTILINE,
+        ):
+            vlan_id = m.group(1).strip()
+            vlan_name = m.group(2).strip()
+            ports_raw = m.group(3).strip()
+
+            if not vlan_id:
+                continue
+
+            # Expand port ranges like "g1-4,g6,ch1-4" into individual port names
+            interfaces: list[str] = _expand_ports(ports_raw)
+
+            vlans[vlan_id] = {
+                "name": vlan_name or vlan_id,
+                "interfaces": interfaces,
+            }
+
+        return vlans
+
+
+# ---------------------------------------------------------------------------
+# Port range expansion helper
+# ---------------------------------------------------------------------------
+
+def _expand_ports(ports_raw: str) -> list[str]:
+    """
+    Expand a Dell PowerConnect port-list string into individual port names.
+
+    Examples::
+        "g1-4,g6,ch1-4"  →  ["g1", "g2", "g3", "g4", "g6", "ch1", "ch2", "ch3", "ch4"]
+        ""                →  []
+    """
+    if not ports_raw or ports_raw in ("--", ""):
+        return []
+
+    result: list[str] = []
+    for token in ports_raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        # Match range: <prefix><start>-<end>  e.g. "g1-4" or "ch1-4"
+        m = re.fullmatch(r"([a-zA-Z]+)(\d+)-(\d+)", token)
+        if m:
+            prefix, start, end = m.group(1), int(m.group(2)), int(m.group(3))
+            result.extend(f"{prefix}{i}" for i in range(start, end + 1))
+        else:
+            result.append(token)
+    return result
