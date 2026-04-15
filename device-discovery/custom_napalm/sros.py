@@ -323,12 +323,24 @@ def _extract_if_addrs(interface: etree._Element) -> dict:
 
 
 def _parse_last_flapped(flap_str: str) -> float:
-    """Convert Nokia ISO 8601 last-oper-change timestamp to a UTC epoch float."""
+    """
+    Convert a Nokia last-oper-change timestamp to a UTC epoch float.
+
+    Accepts any RFC 3339 / ISO 8601 variant emitted by SR-OS, including forms
+    with or without fractional seconds and with either a ``Z`` suffix or a
+    numeric UTC offset (``+00:00``).  Examples:
+
+    - ``2021-06-01T08:00:00Z``
+    - ``2021-06-01T08:00:00.123456Z``
+    - ``2021-06-01T08:00:00+00:00``
+    """
     if not flap_str:
         return -1.0
+    # datetime.fromisoformat() handles numeric offsets on Python 3.10+ but
+    # does not accept the 'Z' suffix until Python 3.11.  Normalise it first.
+    normalised = flap_str[:-1] + "+00:00" if flap_str.endswith("Z") else flap_str
     try:
-        dt = datetime.strptime(flap_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
-        return dt.timestamp()
+        return datetime.fromisoformat(normalised).timestamp()
     except ValueError:
         logger.debug("Cannot parse last-oper-change: %s", flap_str)
         return -1.0
@@ -491,37 +503,54 @@ class SROSDriver(_napalm_base.NetworkDriver):
             )
             oper_state_xpath = "state_ns:if-oper-status" if self.R19 else "state_ns:oper-state"
 
-            for if_state in result.xpath(
-                "state_ns:state/state_ns:router/state_ns:interface", namespaces=_NSMAP
-            ):
-                if_name = _find_txt(if_state, "state_ns:interface-name")
-                if not if_name:
-                    continue
-                cfg_block = _xpath_one(
-                    result,
-                    f"configure_ns:configure/configure_ns:router"
-                    f'/configure_ns:interface[configure_ns:interface-name="{if_name}"]',
-                )
-                interfaces[if_name] = {
-                    "is_up": _find_txt(if_state, oper_state_xpath) == "up",
-                    "is_enabled": _find_txt(cfg_block, "configure_ns:admin-state") == "enable"
-                    if cfg_block is not None
-                    else False,
-                    "description": _find_txt(cfg_block, "configure_ns:description")
-                    if cfg_block is not None
-                    else "",
-                    "last_flapped": _parse_last_flapped(
-                        _find_txt(if_state, "state_ns:last-oper-change")
-                    ),
-                    "speed": _resolve_if_speed(result, cfg_block),
-                    "mtu": convert(int, _find_txt(if_state, "state_ns:oper-ip-mtu"), default=0),
-                    "mac_address": _resolve_if_mac(result, cfg_block, if_name, chassis_mac),
-                }
+            for router_state in result.xpath("state_ns:state/state_ns:router", namespaces=_NSMAP):
+                router_name = _find_txt(router_state, "state_ns:router-name")
+                for if_state in router_state.xpath("state_ns:interface", namespaces=_NSMAP):
+                    self._add_router_if(
+                        interfaces, if_state, result, router_name, oper_state_xpath, chassis_mac
+                    )
 
             return interfaces
         except Exception:
             logger.exception("get_interfaces failed")
             return {}
+
+    def _add_router_if(
+        self,
+        interfaces: dict,
+        if_state: "etree._Element",
+        result: "etree._Element",
+        router_name: str,
+        oper_state_xpath: str,
+        chassis_mac: str,
+    ) -> None:
+        """Populate *interfaces* with one logical router interface entry."""
+        if_name = _find_txt(if_state, "state_ns:interface-name")
+        if not if_name:
+            return
+        # Qualify config lookup by router-name to avoid cross-router collisions.
+        cfg_block = _xpath_one(
+            result,
+            f"configure_ns:configure/configure_ns:router"
+            f'[configure_ns:router-name="{router_name}"]'
+            f'/configure_ns:interface[configure_ns:interface-name="{if_name}"]',
+        )
+        # Key by plain interface-name for Base router; prefix with router-name for
+        # named VRF routers so same-named interfaces across contexts don't collide.
+        key = if_name if router_name == "Base" else f"{router_name}/{if_name}"
+        interfaces[key] = {
+            "is_up": _find_txt(if_state, oper_state_xpath) == "up",
+            "is_enabled": _find_txt(cfg_block, "configure_ns:admin-state") == "enable"
+            if cfg_block is not None
+            else False,
+            "description": _find_txt(cfg_block, "configure_ns:description")
+            if cfg_block is not None
+            else "",
+            "last_flapped": _parse_last_flapped(_find_txt(if_state, "state_ns:last-oper-change")),
+            "speed": _resolve_if_speed(result, cfg_block),
+            "mtu": convert(int, _find_txt(if_state, "state_ns:oper-ip-mtu"), default=0),
+            "mac_address": _resolve_if_mac(result, cfg_block, if_name, chassis_mac),
+        }
 
     def get_interfaces_ip(self) -> dict:
         """Return all configured IP addresses per interface (configure tree)."""
