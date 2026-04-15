@@ -402,6 +402,14 @@ class APICDriver(_napalm_base.NetworkDriver):
                     hostname = tab_m.group(1)
                 os_version = tab_m.group(2)
 
+        # If the device was not identified as an APIC (os_version still Unknown),
+        # discard any serial extracted by _SERIAL_RE: generic "Serial Number:" lines
+        # appear in non-APIC Cisco "show version" output, and returning a non-Unknown
+        # serial here would cause discover_device_driver() to accept this driver for
+        # the wrong device type.
+        if os_version == "Unknown":
+            serial_number = "Unknown"
+
         return {
             "hostname": hostname,
             "os_version": os_version,
