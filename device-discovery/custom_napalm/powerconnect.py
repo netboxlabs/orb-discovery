@@ -107,7 +107,7 @@ def _parse_port_descriptions_fallback(raw: str) -> dict[str, str]:
             continue
         if not in_data:
             continue
-        if re.match(r"^Ch\s+Description", line, re.IGNORECASE):
+        if re.match(r"^(?:Ch|Po)\s+Description", line, re.IGNORECASE):
             break
         m = re.match(r"^(\S+)\s*(.*?)\s*$", line)
         if m:
