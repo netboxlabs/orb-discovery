@@ -409,8 +409,27 @@ class SROSDriver(_napalm_base.NetworkDriver):
             self.conn = None
 
     def is_alive(self) -> dict:
-        """Return connection liveness."""
-        return {"is_alive": self.conn is not None}
+        """Return NETCONF session liveness by probing ncclient's connection state."""
+        if self.conn is None:
+            return {"is_alive": False}
+
+        connected = getattr(self.conn, "connected", None)
+        if connected is not None:
+            return {"is_alive": bool(connected)}
+
+        session = getattr(self.conn, "_session", None)
+        if session is not None:
+            session_connected = getattr(session, "connected", None)
+            if session_connected is not None:
+                return {"is_alive": bool(session_connected)}
+
+            transport = getattr(session, "_transport", None)
+            if transport is not None:
+                is_active = getattr(transport, "is_active", None)
+                if callable(is_active):
+                    return {"is_alive": bool(is_active())}
+
+        return {"is_alive": False}
 
     # -----------------------------------------------------------------------
     # NAPALM getters
