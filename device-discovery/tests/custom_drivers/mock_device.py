@@ -171,6 +171,9 @@ class FakeHTTPSession:
         """Stub DELETE — always succeeds (used for logout)."""
         return self._MockResponse({}, 204)
 
+    def close(self) -> None:
+        """No-op stub — no real session to close."""
+
     def cli(self, cmd: str) -> str:
         """Run a mock CLI command and return decoded text output."""
         import base64
