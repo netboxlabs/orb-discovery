@@ -177,7 +177,7 @@ def _parse_physical_rows(raw: str) -> list[dict]:
         if not in_data:
             continue
         m = re.match(
-            r"^([a-zA-Z]+\d+(?:[:/]\d+)*)\s+\S+\s+\S+\s+(\S+)\s+\S+\s+\S+\s+(Up|Down|Not\s+Present)",
+            r"^((?:\d+/)?[a-zA-Z]+\d+(?:[:/]\d+)*)\s+\S+\s+\S+\s+(\S+)\s+\S+\s+\S+\s+(Up|Down|Not\s+Present)",
             line,
             re.IGNORECASE,
         )
@@ -547,21 +547,19 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
         Return VLAN information keyed by VLAN ID string.
 
         Parses 'show vlan' output using column offsets derived from the header
-        line, which correctly handles VLAN names that contain spaces.  Example
-        output::
+        line.  Example output::
 
             VLAN  Name                 Ports                Type
             ----  -------------------  -------------------  ---------------
             1     default              g1-4,g6,ch1-4        Default
             10    MGMT                 g5,g8                Static
-            20    Voice VLAN           g9-12                Static
+            20    Voice                g9-12                Static
         """
         raw = self.device.send_command("show vlan")
         if not raw:
             return {}
 
-        # Discover column start positions from the header line so that
-        # multi-word VLAN names (e.g. "Voice VLAN") are parsed correctly.
+        # Discover column start positions from the header line.
         col_name, col_ports, col_type = _find_vlan_columns(raw)
 
         vlans: dict = {}
