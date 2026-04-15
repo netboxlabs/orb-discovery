@@ -37,3 +37,11 @@ Ethernet1/5 is administratively down
   Encapsulation ARPA
   full-duplex, 10 Gb/s
   Beacon is turned off
+
+Ethernet1/6 is up, line protocol is down (suspended)
+  Hardware: Ethernet, address: 70ea.1a7b.e005 (bia 70ea.1a7b.e005)
+  MTU 9216 bytes,  BW 10000000 Kbit, DLY 10 usec
+  reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA
+  full-duplex, 10 Gb/s
+  Beacon is turned off

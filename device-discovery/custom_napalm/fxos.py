@@ -211,21 +211,24 @@ class FXOSDriver(_napalm_base.NetworkDriver):
         if serial_number == "Unknown":
             serial_number, model = self._serial_from_inventory(model)
 
-        # interface list from show ip interface brief (ntc-templates cisco_nxos)
-        ip_brief_raw = self.device.send_command("show ip interface brief")
+        # interface list from show interface (ntc-templates cisco_nxos).
+        # Using show interface (not show ip interface brief) ensures names are in the
+        # same canonical long form as get_interfaces() / get_interfaces_ip() output
+        # (e.g. "Ethernet1/1" not the abbreviated "Eth1/1").
+        intf_raw = self.device.send_command("show interface")
         interface_list: list[str] = []
-        if ip_brief_raw:
+        if intf_raw:
             try:
-                ip_parsed = parse_output(
+                intf_parsed = parse_output(
                     platform="cisco_nxos",
-                    command="show ip interface brief",
-                    data=ip_brief_raw,
+                    command="show interface",
+                    data=intf_raw,
                 )
                 interface_list = sorted(
-                    r["interface"] for r in ip_parsed if r.get("interface")
+                    r["interface"] for r in intf_parsed if r.get("interface")
                 )
             except _PARSE_ERRORS:
-                logger.debug("Failed to parse show ip interface brief; interface_list will be empty")
+                logger.debug("Failed to parse show interface for interface_list; will be empty")
 
         return {
             "hostname": hostname,
@@ -289,7 +292,8 @@ class FXOSDriver(_napalm_base.NetworkDriver):
             # is_up: physical link AND line-protocol must both be up.
             # "X is up, line protocol is down" → admin_state="down" via the template rule
             # "^${INTF} is ${LINK_STATUS}, line protocol is ${ADMIN_STATE}".
-            is_up = link_status == "up" and admin_state != "down"
+            # Use startswith("down") to also catch decorated variants like "down (suspended)".
+            is_up = link_status == "up" and not admin_state.startswith("down")
             # is_enabled: interface has not been explicitly shut down by an admin action.
             # "admin" appears in link_status for both "down (admin down)" (FXOS) and
             # "administratively down" (standard NX-OS form), covering both shutdown variants.

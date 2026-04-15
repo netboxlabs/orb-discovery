@@ -43,5 +43,14 @@
     "mtu": 9216,
     "speed": 10000.0,
     "mac_address": "70:EA:1A:7B:E0:04"
+  },
+  "Ethernet1/6": {
+    "is_up": false,
+    "is_enabled": true,
+    "description": "",
+    "last_flapped": -1.0,
+    "mtu": 9216,
+    "speed": 10000.0,
+    "mac_address": "70:EA:1A:7B:E0:05"
   }
 }

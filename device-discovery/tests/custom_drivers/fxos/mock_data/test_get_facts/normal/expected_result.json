@@ -7,8 +7,8 @@
   "uptime": 512063.0,
   "fqdn": "Unknown",
   "interface_list": [
-    "Eth1/1",
-    "Eth1/2",
+    "Ethernet1/1",
+    "Ethernet1/2",
     "mgmt0"
   ]
 }
