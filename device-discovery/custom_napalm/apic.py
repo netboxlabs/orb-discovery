@@ -79,10 +79,10 @@ _HOUR_SECONDS = 3600
 _MINUTE_SECONDS = 60
 
 _UPTIME_RE = re.compile(
-    r"(?:(?P<days>\d+)\s+days?(?:,\s*)?)?"
-    r"(?:(?P<hours>\d+)\s+hours?(?:,\s*)?)?"
-    r"(?:(?P<minutes>\d+)\s+minutes?(?:,\s*)?)?"
-    r"(?:(?P<seconds>\d+)\s+seconds?)?",
+    r"(?:(?P<days>\d+)\s+days?(?:\(s\))?(?:,\s*)?)?"
+    r"(?:(?P<hours>\d+)\s+hours?(?:\(s\))?(?:,\s*)?)?"
+    r"(?:(?P<minutes>\d+)\s+minutes?(?:\(s\))?(?:,\s*)?)?"
+    r"(?:(?P<seconds>\d+)\s+seconds?(?:\(s\))?)?",
     re.IGNORECASE,
 )
 
@@ -116,9 +116,6 @@ _INTF_HEADER_RE = re.compile(
     r"(?:.*?line\s+protocol\s+is\s+(up|down))?",
     re.IGNORECASE | re.MULTILINE,
 )
-
-# Line-protocol state when it appears in the stanza body (NX-OS style)
-_PROTO_BODY_RE = re.compile(r"line\s+protocol\s+is\s+(up|down)", re.IGNORECASE)
 
 # "admin state is up/down" — NX-OS alternative for operational state
 _ADMIN_STATE_BODY_RE = re.compile(r"admin\s+state\s+is\s+(up|down)", re.IGNORECASE)
@@ -338,6 +335,20 @@ class APICDriver(_napalm_base.NetworkDriver):
     # NAPALM getters
     # -----------------------------------------------------------------------
 
+    def _tabular_controller_row(self, raw: str):
+        """
+        Return the best-matching controller row from a tabular ``show version``.
+
+        Prefers the row whose name matches ``self.hostname`` (so that sessions
+        to apic2/apic3 are not mis-identified as apic1 in multi-controller
+        fabrics).  Falls back to the first row when no name matches.
+        Returns a regex match object or ``None`` if the table is absent.
+        """
+        for m in _TABULAR_CTRL_RE.finditer(raw):
+            if m.group(1).lower() == self.hostname.lower():
+                return m
+        return _TABULAR_CTRL_RE.search(raw)
+
     def _parse_show_version(self, raw: str) -> dict:
         """
         Parse ``show version`` raw text into a facts dict.
@@ -372,7 +383,7 @@ class APICDriver(_napalm_base.NetworkDriver):
 
         # Tabular format fallback
         if os_version == "Unknown":
-            tab_m = _TABULAR_CTRL_RE.search(raw)
+            tab_m = self._tabular_controller_row(raw)
             if tab_m:
                 if hostname == self.hostname:
                     hostname = tab_m.group(1)
