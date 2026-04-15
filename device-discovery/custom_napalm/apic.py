@@ -142,11 +142,16 @@ _IPV6_RE = re.compile(r"IPv6\s+address:\s+([0-9a-fA-F:]+/\d+)", re.IGNORECASE)
 # MTU
 _MTU_RE = re.compile(r"MTU\s+(\d+)\s+bytes", re.IGNORECASE)
 
-# Speed: "Speed: 1000 Mbps" or "1000 Gbps"
-_SPEED_RE = re.compile(r"Speed[:\s]+(\d+(?:\.\d+)?)\s*([MmGgKk]bps?)", re.IGNORECASE)
+# Speed: "Speed: 1000 Mbps", "1000 Gbps", or APIC leaf "full-duplex, 40 Gb/s, ..."
+# The "Speed:" prefix is optional so the bare "<value> <unit>" form is also matched.
+# Units accept both condensed (Gbps/Mbps/Kbps) and slash-separated (Gb/s/Mb/s/Kb/s) forms.
+_SPEED_RE = re.compile(
+    r"(?:Speed[:\s]+)?(\d+(?:\.\d+)?)\s*([MmGgKk]b(?:ps?|/s))",
+    re.IGNORECASE,
+)
 
-# Interface description
-_DESC_RE = re.compile(r"Description:\s+(.+)", re.IGNORECASE)
+# Interface description: "Description: <text>" (IOS) or "Port description is <text>" (APIC NX-OS)
+_DESC_RE = re.compile(r"(?:Description:|Port\s+description\s+is)\s+(.+)", re.IGNORECASE)
 
 
 def _split_cidr(cidr: str) -> tuple[str, int]:
