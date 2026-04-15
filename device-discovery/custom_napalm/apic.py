@@ -106,17 +106,30 @@ def _parse_uptime(uptime_str: str) -> float:
 # Interface parsing helpers
 # ---------------------------------------------------------------------------
 
-# Opening line: "Interface eth2-1 is up, line protocol is up"
-# group(2) captures the full admin-state token, including the optional "administratively " prefix,
-# so callers can distinguish "administratively down" (is_enabled=False) from plain "down"
-# (link-down only, is_enabled=True).
+# Opening line: "Interface eth2-1 is up, line protocol is up"  (IOS style)
+#           or: "Ethernet1/1 is up"  (NX-OS / APIC leaf style, proto state on a body line)
+# group(2) captures the full admin-state token including optional "administratively " prefix.
+# group(3) captures line-protocol state when it appears on the header line; it is None when
+# the output uses the NX-OS style and the state must be found in the stanza body instead.
 _INTF_HEADER_RE = re.compile(
-    r"^(?:Interface\s+)?(\S+)\s+is\s+((?:administratively\s+)?(?:up|down)).*?line\s+protocol\s+is\s+(up|down)",
+    r"^(?:Interface\s+)?(\S+)\s+is\s+((?:administratively\s+)?(?:up|down))"
+    r"(?:.*?line\s+protocol\s+is\s+(up|down))?",
     re.IGNORECASE | re.MULTILINE,
 )
 
-# MAC address
-_MAC_RE = re.compile(r"address\s+is\s+([0-9a-f]{2}(?:[:.][0-9a-f]{2}){5})", re.IGNORECASE)
+# Line-protocol state when it appears in the stanza body (NX-OS style)
+_PROTO_BODY_RE = re.compile(r"line\s+protocol\s+is\s+(up|down)", re.IGNORECASE)
+
+# "admin state is up/down" — NX-OS alternative for operational state
+_ADMIN_STATE_BODY_RE = re.compile(r"admin\s+state\s+is\s+(up|down)", re.IGNORECASE)
+
+# MAC address — "address is <mac>" (IOS) or "address: <mac>" (NX-OS)
+# \s* allows for "address:" with no intervening space before the colon.
+# Matches colon-separated (00:11:22:aa:bb:cc) and Cisco dotted (7c69.f60f.aa60) formats.
+_MAC_RE = re.compile(
+    r"address\s*(?:is\s+|:\s*)([0-9a-f]{2}(?:[:.][0-9a-f]{2}){5}|[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4})",
+    re.IGNORECASE,
+)
 
 # IPv4 address in CIDR notation
 _IPV4_RE = re.compile(r"Internet\s+address\s+is\s+(\d+\.\d+\.\d+\.\d+/\d+)", re.IGNORECASE)
@@ -180,11 +193,26 @@ def _parse_interfaces(raw: str) -> list[dict]:
         if not header:
             continue
         name = header.group(1)
-        # group(2): full admin-state token — "up", "down", or "administratively down"
-        # group(3): line protocol state — "up" or "down"
-        admin_token = header.group(2).lower()
-        admin_up = "administratively" not in admin_token  # False only for admin-shutdown ports
-        proto_up = header.group(3).lower() == "up"
+
+        if header.group(3) is not None:
+            # IOS / APIC controller style:
+            #   "Interface X is [administratively] <admin> ... line protocol is <proto>"
+            # group(2) = admin state, group(3) = line-protocol (operational) state
+            admin_token = header.group(2).lower()
+            admin_up = "administratively" not in admin_token
+            proto_up = header.group(3).lower() == "up"
+        else:
+            # NX-OS / APIC leaf style:
+            #   "EthernetX/Y is <oper>"  followed by "  admin state is <admin>" in body
+            # group(2) = operational state; admin state is in the stanza body
+            proto_up = header.group(2).lower() == "up"
+            admin_body_m = _ADMIN_STATE_BODY_RE.search(stanza)
+            if admin_body_m:
+                admin_up = admin_body_m.group(1).lower() == "up"
+            else:
+                # No body admin-state line; fall back to treating "administratively" in
+                # the header token as the admin-down indicator
+                admin_up = "administratively" not in header.group(2).lower()
 
         mac_m = _MAC_RE.search(stanza)
         mac = mac_m.group(1) if mac_m else ""
