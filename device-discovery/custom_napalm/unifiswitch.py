@@ -142,9 +142,15 @@ def _expand_vlan_tokens(token_str: str) -> list[str]:
         if "-" in token:
             start, _, end = token.partition("-")
             try:
-                vids.extend(str(v) for v in range(int(start.strip()), int(end.strip()) + 1))
+                start_vid = int(start.strip())
+                end_vid = int(end.strip())
             except ValueError:
                 logger.warning("Skipping malformed VLAN range token %r", token)
+                continue
+            if start_vid > end_vid:
+                logger.warning("Skipping reversed VLAN range token %r", token)
+                continue
+            vids.extend(str(v) for v in range(start_vid, end_vid + 1))
         else:
             vids.append(token)
     return vids
@@ -156,13 +162,13 @@ def _parse_vlan_members(config: str) -> dict[str, list[str]]:
 
     Returns {vlan_id_str: [interface_names]}.
     """
-    result: dict = {}
+    result: dict[str, list[str]] = {}
     current_intf: str | None = None
     for line in config.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
-        m_intf = re.match(r"^interface\s+(\S+)$", stripped)
+        m_intf = re.match(r"^interface\s+(.+)$", stripped)
         if m_intf:
             current_intf = m_intf.group(1)
             continue

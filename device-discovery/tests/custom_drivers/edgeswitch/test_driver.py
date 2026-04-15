@@ -1,4 +1,4 @@
-"""Unit tests for custom_napalm.ubiquiti_edgeswitch.EdgeSwitchDriver."""
+"""Unit tests for custom_napalm.edgeswitch.EdgeSwitchDriver."""
 
 from pathlib import Path
 
