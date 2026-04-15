@@ -28,7 +28,7 @@
   },
   "g4": {
     "is_up": false,
-    "is_enabled": false,
+    "is_enabled": true,
     "description": "TO_SRV04_[DRAC]",
     "last_flapped": -1.0,
     "mtu": -1,

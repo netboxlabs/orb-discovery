@@ -125,14 +125,14 @@ def _parse_ch_descriptions(raw: str) -> dict[str, str]:
     desc: dict[str, str] = {}
     in_ch = False
     for line in raw.splitlines():
-        if re.match(r"^Ch\s+Description", line, re.IGNORECASE):
+        if re.match(r"^(?:Ch|Po)\s+Description", line, re.IGNORECASE):
             in_ch = True
             continue
         if not in_ch:
             continue
         if re.match(r"^-+", line.strip()) or not line.strip():
             continue
-        m = re.match(r"^(ch\d+)\s*(.*?)\s*$", line, re.IGNORECASE)
+        m = re.match(r"^((?:ch|po)\d+)\s*(.*?)\s*$", line, re.IGNORECASE)
         if m:
             desc[m.group(1)] = m.group(2)
     return desc
@@ -140,14 +140,15 @@ def _parse_ch_descriptions(raw: str) -> dict[str, str]:
 
 def _parse_ch_rows(raw: str) -> list[dict]:
     """
-    Parse port-channel (ch) rows from 'show interfaces status' output.
+    Parse port-channel rows from 'show interfaces status' output.
 
-    The NTC template stops at the Ch section header (``^Ch ... -> EOF``), so
-    ch/LAG interfaces must be extracted separately with a regex.
+    The NTC template stops at the Ch/Po section header (``^Ch ... -> EOF``), so
+    LAG interfaces must be extracted separately with a regex.  Both ``ch`` and
+    ``po``/``Po`` naming styles are supported.
     """
     rows = []
     for m in re.finditer(
-        r"^(ch\d+)\s+\S+\s+\S+\s+(\S+)\s+\S+\s+\S+\s+(Not\s+Present|Up|Down)\s*$",
+        r"^((?:ch|po)\d+)\s+\S+\s+\S+\s+(\S+)\s+\S+\s+\S+\s+(Not\s+Present|Up|Down)\s*$",
         raw,
         re.MULTILINE | re.IGNORECASE,
     ):
@@ -178,7 +179,7 @@ def _make_interface_entry(link_state: str, speed_raw: str, description: str) -> 
         speed = -1.0
     return {
         "is_up": link_state == "up",
-        "is_enabled": link_state != "down",
+        "is_enabled": True,
         "description": description,
         "last_flapped": -1.0,
         "mtu": -1,
