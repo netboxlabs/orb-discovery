@@ -236,7 +236,13 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
         }
 
     def _description_map(self) -> dict[str, str]:
-        """Return a port→description mapping from 'show interfaces description' (ntc-template)."""
+        r"""
+        Return a port→description mapping from 'show interfaces description'.
+
+        Tries the ntc-template first.  Falls back to a regex line parser when
+        the template raises (e.g. descriptions that contain spaces, which the
+        ``DESCRIPTION (\S*)`` capture group cannot handle).
+        """
         desc_map: dict[str, str] = {}
         raw = self.device.send_command("show interfaces description")
         if not raw:
@@ -251,8 +257,25 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
                     desc_map[intf] = row.get("description", "").strip()
         except Exception:
             logger.debug(
-                "powerconnect: failed to parse 'show interfaces description'", exc_info=True
+                "powerconnect: 'show interfaces description' template failed, "
+                "falling back to regex parser",
+                exc_info=True,
             )
+            # Regex fallback: handle descriptions that contain spaces.
+            # Data rows begin after the first separator line (------).
+            in_data = False
+            for line in raw.splitlines():
+                if re.match(r"^-+", line.strip()):
+                    in_data = True
+                    continue
+                if not in_data:
+                    continue
+                # Stop at a second header block (Ch / port-channel section).
+                if re.match(r"^(?:Ch|Port)\s+Description", line, re.IGNORECASE):
+                    break
+                m = re.match(r"^(\S+)\s+(.*?)\s*$", line)
+                if m:
+                    desc_map[m.group(1)] = m.group(2)
         return desc_map
 
     def get_interfaces(self) -> dict:
@@ -379,40 +402,54 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
         """
         Return VLAN information keyed by VLAN ID string.
 
-        Parses 'show vlan' output with regex.  Example output::
+        Parses 'show vlan' output using column offsets derived from the header
+        line, which correctly handles VLAN names that contain spaces.  Example
+        output::
 
             VLAN  Name                 Ports                Type
             ----  -------------------  -------------------  ---------------
             1     default              g1-4,g6,ch1-4        Default
             10    MGMT                 g5,g8                Static
+            20    Voice VLAN           g9-12                Static
         """
         raw = self.device.send_command("show vlan")
         if not raw:
             return {}
 
-        # Match VLAN data rows. The Type column is always the last token on the
-        # line; anchoring the final \S+ to end-of-line prevents the Type value
-        # from being mistaken for a port when a VLAN has no member ports.
-        # Group 3 (ports) is deliberately non-greedy and may be empty.
+        # Discover column start positions from the header line so that
+        # multi-word VLAN names (e.g. "Voice VLAN") are parsed correctly.
+        col_name = col_ports = col_type = None
+        for line in raw.splitlines():
+            hm = re.match(r"(VLAN)\s+(Name)\s+(Ports?)\s+(Type)", line, re.IGNORECASE)
+            if hm:
+                col_name = hm.start(2)
+                col_ports = hm.start(3)
+                col_type = hm.start(4)
+                break
+
         vlans: dict = {}
-        for m in re.finditer(
-            r"^(\d+)\s+(\S+)\s*(.*?)\s+\S+\s*$",
-            raw,
-            re.MULTILINE | re.IGNORECASE,
-        ):
-            vlan_id = m.group(1).strip()
-            vlan_name = m.group(2).strip()
-            ports_raw = m.group(3).strip()
+        for line in raw.splitlines():
+            if not re.match(r"^\d+\s", line):
+                continue
+
+            if col_name is not None and col_ports is not None and col_type is not None:
+                vlan_id = line[:col_name].strip()
+                vlan_name = line[col_name:col_ports].strip()
+                ports_raw = line[col_ports:col_type].strip()
+            else:
+                # Fallback when header is absent: single-token name, type-anchored.
+                fm = re.match(r"^(\d+)\s+(\S+)\s*(.*?)\s+\S+\s*$", line)
+                if not fm:
+                    continue
+                vlan_id, vlan_name, ports_raw = fm.group(1), fm.group(2), fm.group(3).strip()
 
             if not vlan_id:
                 continue
 
             # Expand port ranges like "g1-4,g6,ch1-4" into individual port names
-            interfaces: list[str] = _expand_ports(ports_raw)
-
             vlans[vlan_id] = {
                 "name": vlan_name or vlan_id,
-                "interfaces": interfaces,
+                "interfaces": _expand_ports(ports_raw),
             }
 
         return vlans
