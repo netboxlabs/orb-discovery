@@ -18,12 +18,24 @@ from napalm.base import models
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
+# socket.error is an alias for OSError in Python 3; no socket import needed.
+
 logger = logging.getLogger(__name__)
 
 # --- config sanitization -------------------------------------------------- #
-# "username admin password encrypted <hash>"
+# "username admin password encrypted <hash>" or "password encrypted <hash>"
 _PASSWORD_ENCRYPTED_RE = re.compile(
     r"((?:password|passwd)\s+encrypted)\s+\S+",
+    re.IGNORECASE,
+)
+# "username admin password 7 <hash>" (type-7 / obfuscated, optional "privilege N" before password)
+_PASSWORD_TYPE_RE = re.compile(
+    r"(username\s+\S+(?:\s+privilege\s+\d+)?\s+password\s+\d+)\s+\S+",
+    re.IGNORECASE,
+)
+# "enable password <value>" (cleartext form)
+_ENABLE_PASSWORD_RE = re.compile(
+    r"(enable\s+password)\s+\S+",
     re.IGNORECASE,
 )
 # "enable secret sha256 <hash>" / "enable secret 8 <hash>"
@@ -36,24 +48,38 @@ _SNMP_COMMUNITY_RE = re.compile(
     r"(snmp-server\s+community)\s+\S+(\s+(?:ro|rw))",
     re.IGNORECASE,
 )
-# "radius-server host <ip> ... key <key>"
-_RADIUS_KEY_RE = re.compile(
+# "radius-server host <ip> ... key <key>" (per-host)
+_RADIUS_HOST_KEY_RE = re.compile(
     r"(\bradius-server\s+host\s+\S+.*?\bkey)\s+\S+",
     re.IGNORECASE,
 )
-# "tacacs-server host <ip> ... key <key>"
-_TACACS_KEY_RE = re.compile(
+# "radius-server key <key>" (global)
+_RADIUS_GLOBAL_KEY_RE = re.compile(
+    r"(\bradius-server\s+key)\s+\S+",
+    re.IGNORECASE,
+)
+# "tacacs-server host <ip> ... key <key>" (per-host)
+_TACACS_HOST_KEY_RE = re.compile(
     r"(\btacacs-server\s+host\s+\S+.*?\bkey)\s+\S+",
+    re.IGNORECASE,
+)
+# "tacacs-server key <key>" (global)
+_TACACS_GLOBAL_KEY_RE = re.compile(
+    r"(\btacacs-server\s+key)\s+\S+",
     re.IGNORECASE,
 )
 
 
 def _sanitize_config(text: str) -> str:
     text = _PASSWORD_ENCRYPTED_RE.sub(r"\1 <redacted>", text)
+    text = _PASSWORD_TYPE_RE.sub(r"\1 <redacted>", text)
+    text = _ENABLE_PASSWORD_RE.sub(r"\1 <redacted>", text)
     text = _ENABLE_SECRET_RE.sub(r"\1 <redacted>", text)
     text = _SNMP_COMMUNITY_RE.sub(r"\1 <redacted>\2", text)
-    text = _RADIUS_KEY_RE.sub(r"\1 <redacted>", text)
-    text = _TACACS_KEY_RE.sub(r"\1 <redacted>", text)
+    text = _RADIUS_HOST_KEY_RE.sub(r"\1 <redacted>", text)
+    text = _RADIUS_GLOBAL_KEY_RE.sub(r"\1 <redacted>", text)
+    text = _TACACS_HOST_KEY_RE.sub(r"\1 <redacted>", text)
+    text = _TACACS_GLOBAL_KEY_RE.sub(r"\1 <redacted>", text)
     return text
 
 
@@ -86,6 +112,26 @@ def _parse_uptime(uptime_str: str) -> float:
     return seconds
 
 
+def _speed_mbps(token: str) -> float:
+    """
+    Convert a speed token from 'show interface brief' to Mbps.
+
+    Examples: "10G" → 10000.0, "1G" → 1000.0, "100M" → 100.0, "-" → -1.0.
+    """
+    token = token.upper()
+    if token.endswith("G"):
+        try:
+            return float(token[:-1]) * 1000
+        except ValueError:
+            pass
+    elif token.endswith("M"):
+        try:
+            return float(token[:-1])
+        except ValueError:
+            pass
+    return -1.0
+
+
 # --- interface brief parsing ----------------------------------------------- #
 # Matches SLX-OS "show interface brief" rows:
 #   "Ethernet 0/1    up    10G"
@@ -93,19 +139,21 @@ def _parse_uptime(uptime_str: str) -> float:
 #   "Port-channel 1  up    -"
 #   "Loopback 1      up    -"
 #   "Ve 10           up    -"
+# Group 1: interface name, Group 2: link state, Group 3: speed token
 _INTF_BRIEF_RE = re.compile(
     r"^((?:Ethernet|Management|Port-channel|Loopback|Ve)\s+\S+)\s+(up|down)\s+(\S+)",
     re.M | re.IGNORECASE,
 )
 
 # --- vlan brief parsing ---------------------------------------------------- #
-# Matches leading VLAN row: "1     Default         active   Eth 0/1 Eth 0/2"
-# The VLAN ID and name are captured; ports are on the same line or continuation lines.
+# Matches leading VLAN row; name may contain spaces so we capture greedily up to
+# the state keyword (active|inactive), then gather port tokens from the remainder.
+# Example: "10    Voice User      active   Eth 0/1 Eth 0/2"
 _VLAN_ROW_RE = re.compile(
-    r"^(\d+)\s+(\S+)\s+(?:active|inactive)\s*(.*)?$",
+    r"^(\d+)\s+(.*?)\s+(?:active|inactive)\s*(.*)?$",
     re.M,
 )
-# Port tokens like "Eth 0/1" appearing in VLAN output
+# Port tokens like "Eth 0/1" or "Po 1" appearing in VLAN output
 _VLAN_PORT_RE = re.compile(r"((?:Eth|Po)\s*\S+)")
 
 
@@ -196,9 +244,9 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
             if m:
                 uptime = _parse_uptime(m.group(1))
 
-        # Interface list: reuse show ip interface brief (ntc-template)
-        ip_brief_output = self.device.send_command("show ip interface brief")
-        interface_list = self._parse_interface_list(ip_brief_output)
+        # Interface list from "show interface brief" — all interfaces, not just IP ones.
+        brief_output = self.device.send_command("show interface brief")
+        interface_list = [m.group(1).strip() for m in _INTF_BRIEF_RE.finditer(brief_output)]
 
         return {
             "hostname": hostname,
@@ -220,14 +268,17 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
         interfaces = {}
         for m in _INTF_BRIEF_RE.finditer(output):
             name = m.group(1).strip()
-            state = m.group(2).lower()
+            is_up = m.group(2).lower() == "up"
             interfaces[name] = {
-                "is_up": state == "up",
-                "is_enabled": state == "up",
+                "is_up": is_up,
+                # "show interface brief" only exposes operational state.
+                # Default is_enabled to True (admin-up) since we cannot
+                # distinguish admin-down from oper-down without an extra command.
+                "is_enabled": True,
                 "description": "",
                 "last_flapped": -1.0,
                 "mtu": -1,
-                "speed": -1.0,
+                "speed": _speed_mbps(m.group(3)),
                 "mac_address": "",
             }
         return interfaces
@@ -299,30 +350,8 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
         vlans: dict = {}
         for m in _VLAN_ROW_RE.finditer(output):
             vlan_id = m.group(1)
-            name = m.group(2)
+            name = m.group(2).strip()
             port_str = m.group(3) or ""
             ports = [tok.strip() for tok in _VLAN_PORT_RE.findall(port_str)]
             vlans[vlan_id] = {"name": name, "interfaces": ports}
         return vlans
-
-    # ---------------------------------------------------------------------- #
-    # Helpers
-    # ---------------------------------------------------------------------- #
-
-    def _parse_interface_list(self, output: str) -> list:
-        """Extract interface names from 'show ip interface brief' via ntc-template."""
-        if not output:
-            return []
-        try:
-            parsed = parse_output(
-                platform="extreme_slxos",
-                command="show ip interface brief",
-                data=output,
-            )
-            return [row["interface"].strip() for row in parsed if row.get("interface")]
-        except Exception:
-            logger.warning(
-                "slxos: ntc-template failed for 'show ip interface brief' (interface list); "
-                "falling back to regex"
-            )
-            return [m.group(1).strip() for m in _INTF_BRIEF_RE.finditer(output)]

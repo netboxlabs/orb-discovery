@@ -7,7 +7,11 @@
   "uptime": 8250.0,
   "fqdn": "Unknown",
   "interface_list": [
+    "Management 1",
     "Ethernet 0/1",
+    "Ethernet 0/2",
+    "Ethernet 0/3",
+    "Port-channel 1",
     "Loopback 1",
     "Ve 10"
   ]

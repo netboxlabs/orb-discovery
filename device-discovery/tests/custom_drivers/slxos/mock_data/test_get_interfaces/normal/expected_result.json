@@ -5,7 +5,7 @@
     "description": "",
     "last_flapped": -1.0,
     "mtu": -1,
-    "speed": -1.0,
+    "speed": 1000.0,
     "mac_address": ""
   },
   "Ethernet 0/1": {
@@ -14,25 +14,25 @@
     "description": "",
     "last_flapped": -1.0,
     "mtu": -1,
-    "speed": -1.0,
+    "speed": 10000.0,
     "mac_address": ""
   },
   "Ethernet 0/2": {
     "is_up": false,
-    "is_enabled": false,
+    "is_enabled": true,
     "description": "",
     "last_flapped": -1.0,
     "mtu": -1,
-    "speed": -1.0,
+    "speed": 1000.0,
     "mac_address": ""
   },
   "Ethernet 0/3": {
     "is_up": false,
-    "is_enabled": false,
+    "is_enabled": true,
     "description": "",
     "last_flapped": -1.0,
     "mtu": -1,
-    "speed": -1.0,
+    "speed": 1000.0,
     "mac_address": ""
   },
   "Port-channel 1": {
