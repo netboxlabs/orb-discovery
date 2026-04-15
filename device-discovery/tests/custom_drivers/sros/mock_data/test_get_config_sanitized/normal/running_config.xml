@@ -33,6 +33,8 @@
                 </access>
                 <authentication>
                     <authentication-key>MyAuthKey123</authentication-key>
+                    <private-key>MyPrivateKey456</private-key>
+                    <pre-shared-key>MyPSK789</pre-shared-key>
                 </authentication>
             </snmp>
         </system>

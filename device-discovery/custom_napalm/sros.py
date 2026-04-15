@@ -63,7 +63,11 @@ _FILTER_FACTS = f"""
                 <version-number/>
             </version>
         </system>
+        <port>
+            <port-id/>
+        </port>
         <router>
+            <router-name/>
             <interface>
                 <interface-name/>
             </interface>
@@ -387,7 +391,11 @@ class SROSDriver(_napalm_base.NetworkDriver):
         if optional_args is None:
             optional_args = {}
         self.port: int = int(optional_args.get("port", 830))
-        self.hostkey_verify: bool = bool(optional_args.get("host_key_verify", False))
+        # Accept both the ncclient-canonical "hostkey_verify" and the underscore
+        # form "host_key_verify" so that either convention works in optional_args.
+        self.hostkey_verify: bool = bool(
+            optional_args.get("hostkey_verify", optional_args.get("host_key_verify", False))
+        )
         # R19 = True for SR-OS < 21.x (older YANG revision 2016-07-06)
         self.R19: bool = False
 
@@ -456,14 +464,26 @@ class SROSDriver(_napalm_base.NetworkDriver):
             uptime_ms_str = _find_txt(result, "state_ns:state/state_ns:system/state_ns:up-time")
             # Nokia YANG up-time is milliseconds (integer string)
             uptime = convert(float, uptime_ms_str, default=0.0) / 1000.0 if uptime_ms_str else 0.0
-            interface_list = [
-                el.text.strip()
-                for el in result.xpath(
-                    "state_ns:state/state_ns:router/state_ns:interface/state_ns:interface-name",
-                    namespaces=_NSMAP,
-                )
-                if el.text
-            ]
+            # Build interface list using the same scoping as get_interfaces():
+            # Base router → bare name, non-Base routers → "{router}/{if_name}".
+            # Physical port-ids are also included.
+            interface_names: set[str] = set()
+            for router_el in result.xpath("state_ns:state/state_ns:router", namespaces=_NSMAP):
+                router_name = _find_txt(router_el, "state_ns:router-name")
+                for if_el in router_el.xpath("state_ns:interface", namespaces=_NSMAP):
+                    if_name = _find_txt(if_el, "state_ns:interface-name")
+                    if not if_name:
+                        continue
+                    if router_name and router_name != "Base":
+                        interface_names.add(f"{router_name}/{if_name}")
+                    else:
+                        interface_names.add(if_name)
+            for port_el in result.xpath(
+                "state_ns:state/state_ns:port/state_ns:port-id", namespaces=_NSMAP
+            ):
+                if port_el.text:
+                    interface_names.add(port_el.text.strip())
+            interface_list = sorted(interface_names)
             return {
                 "hostname": hostname,
                 "vendor": "Nokia",
@@ -594,7 +614,7 @@ class SROSDriver(_napalm_base.NetworkDriver):
             else "",
             "last_flapped": _parse_last_flapped(_find_txt(if_state, "state_ns:last-oper-change")),
             "speed": _resolve_if_speed(result, cfg_block),
-            "mtu": convert(int, _find_txt(if_state, "state_ns:oper-ip-mtu"), default=0),
+            "mtu": convert(int, _find_txt(if_state, "state_ns:oper-ip-mtu"), default=-1),
             "mac_address": _resolve_if_mac(result, cfg_block, if_name, chassis_mac),
         }
 

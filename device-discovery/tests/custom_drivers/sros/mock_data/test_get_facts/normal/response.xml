@@ -5,6 +5,9 @@
                 <serial-number>NS1921F1814</serial-number>
             </hardware-data>
         </chassis>
+        <port>
+            <port-id>1/1/1</port-id>
+        </port>
         <router>
             <router-name>Base</router-name>
             <interface>

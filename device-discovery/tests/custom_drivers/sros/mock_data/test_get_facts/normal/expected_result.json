@@ -7,8 +7,9 @@
   "uptime": 3802044.41,
   "fqdn": "PE-1",
   "interface_list": [
+    "1/1/1",
+    "management/management",
     "system",
-    "to_RTR-01",
-    "management"
+    "to_RTR-01"
   ]
 }
