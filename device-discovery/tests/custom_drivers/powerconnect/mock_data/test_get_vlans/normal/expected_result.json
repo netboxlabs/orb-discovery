@@ -19,5 +19,9 @@
     "interfaces": [
       "g5"
     ]
+  },
+  "200": {
+    "name": "ISOLATED",
+    "interfaces": []
   }
 }

@@ -391,11 +391,15 @@ class PowerConnectDriver(_napalm_base.NetworkDriver):
         if not raw:
             return {}
 
+        # Match VLAN data rows. The Type column (Default/Static/Dynamic/Permanent)
+        # is always the last token; anchoring on it prevents the Type value from
+        # being mistaken for a port when a VLAN has no member ports.
+        # Group 3 (ports) is deliberately non-greedy and may be empty.
         vlans: dict = {}
         for m in re.finditer(
-            r"^(\d+)\s+(\S+)\s+(\S*)",
+            r"^(\d+)\s+(\S+)\s*(.*?)\s+(?:Default|Static|Dynamic|Permanent)\s*$",
             raw,
-            re.MULTILINE,
+            re.MULTILINE | re.IGNORECASE,
         ):
             vlan_id = m.group(1).strip()
             vlan_name = m.group(2).strip()
