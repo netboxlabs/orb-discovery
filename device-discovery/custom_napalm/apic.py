@@ -227,6 +227,16 @@ _MODEL_RE = re.compile(r"^(?:Model|APIC\s+Model|Platform)\s*:\s*(\S+)", re.IGNOR
 _SERIAL_RE = re.compile(r"^(?:Serial\s+Number|Serial)\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
 _UPTIME_LINE_RE = re.compile(r"^(?:System\s+uptime|Uptime)\s*:\s*(.+)", re.IGNORECASE | re.MULTILINE)
 
+# Tabular format emitted by some APIC versions for "show version":
+#   Role         Pod  Node  Name    Version
+#   -----------  ---  ----  ------  --------
+#   controller   1    1     apic1   6.0(3f)
+# group(1) = node name, group(2) = version string
+_TABULAR_CTRL_RE = re.compile(
+    r"^controller\s+\d+\s+\d+\s+(\S+)\s+(\S+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 _SERIAL_PLACEHOLDERS = frozenset({"none", "n/a", "na", "null", "unknown", "-"})
 
 
@@ -297,8 +307,23 @@ class APICDriver(_napalm_base.NetworkDriver):
         Return general device facts from ``show version`` and ``show interface``.
 
         Hostname, OS version, model, and serial number are regex-parsed from
-        ``show version``.  The interface list is derived from ``show interface``.
-        Uptime is parsed from the ``System uptime`` line in ``show version``.
+        ``show version``.  Two output formats are handled:
+
+        *Key-value* (older APIC firmware or per-controller context)::
+
+            Hostname: apic1
+            Software Version: 6.0(3f)
+            Model: APIC-M2
+
+        *Tabular* (some APIC versions, fabric-wide table)::
+
+            Role        Pod  Node  Name   Version
+            ----------  ---  ----  -----  -------
+            controller  1    1     apic1  6.0(3f)
+
+        Key-value patterns are tried first; the tabular fallback fills in
+        any fields that remain ``"Unknown"`` after key-value parsing.
+        The interface list is derived from ``show interface``.
         """
         hostname = self.hostname
         vendor = "Cisco"
@@ -309,6 +334,7 @@ class APICDriver(_napalm_base.NetworkDriver):
 
         ver_raw = self._send("show version")
         if ver_raw:
+            # --- Key-value format (primary) ---
             hostname_val = _extract(ver_raw, _HOSTNAME_RE)
             if hostname_val:
                 hostname = hostname_val
@@ -328,6 +354,15 @@ class APICDriver(_napalm_base.NetworkDriver):
             uptime_line = _extract(ver_raw, _UPTIME_LINE_RE)
             if uptime_line:
                 uptime = _parse_uptime(uptime_line)
+
+            # --- Tabular format fallback ---
+            # When key-value parsing yields nothing, try the controller row.
+            if os_version == "Unknown":
+                tab_m = _TABULAR_CTRL_RE.search(ver_raw)
+                if tab_m:
+                    if hostname == self.hostname:  # not yet overridden by key-value
+                        hostname = tab_m.group(1)
+                    os_version = tab_m.group(2)
 
         parsed_intfs = self._parsed_interfaces()
         interface_list = sorted({r["name"] for r in parsed_intfs if r.get("name")})
