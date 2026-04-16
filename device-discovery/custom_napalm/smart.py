@@ -39,9 +39,13 @@ class _SmartAXSSH(HuaweiSmartAXSSH):
     prompt_pattern = r"[>#$]"
 
 
-CLASS_MAPPER[_NETMIKO_DEVICE_TYPE] = _SmartAXSSH
-if _NETMIKO_DEVICE_TYPE not in platforms:
-    platforms.append(_NETMIKO_DEVICE_TYPE)
+def _ensure_netmiko_device_type_registered() -> None:
+    """Register the custom Netmiko device type only when it is actually needed."""
+    if _NETMIKO_DEVICE_TYPE not in CLASS_MAPPER:
+        CLASS_MAPPER[_NETMIKO_DEVICE_TYPE] = _SmartAXSSH
+    if _NETMIKO_DEVICE_TYPE not in platforms:
+        platforms.append(_NETMIKO_DEVICE_TYPE)
+
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +58,7 @@ _PSK_CIPHER_RE = re.compile(r"(psk\s+cipher)\s+\S+", re.IGNORECASE)
 _KEY_CIPHER_RE = re.compile(r"(key\s+cipher)\s+\S+", re.IGNORECASE)
 _SECRET_RE = re.compile(r"(\bsecret\s+\d+)\s+\S+", re.IGNORECASE)
 _SNMP_COMMUNITY_RE = re.compile(
-    r"(snmp-agent\s+community\s+(?:read|write))\s+\S+", re.IGNORECASE
+    r"(snmp-agent\s+community\s+(?:read|write))\s+.+", re.IGNORECASE
 )
 
 
@@ -136,6 +140,7 @@ class SmartDriver(_napalm_base.NetworkDriver):
 
     def open(self):
         """Open an SSH connection to the device via Netmiko."""
+        _ensure_netmiko_device_type_registered()
         self.device = self._netmiko_open(
             _NETMIKO_DEVICE_TYPE, netmiko_optional_args=self.netmiko_optional_args
         )
@@ -170,7 +175,7 @@ class SmartDriver(_napalm_base.NetworkDriver):
                     (row.get("product", "Unknown") or "Unknown").strip(),
                 )
         except Exception:
-            logger.debug("ntc-templates failed for 'display version'; falling back to regex")
+            logger.debug("ntc-templates failed for 'display version'; falling back to regex", exc_info=True)
         m_ver = re.search(r"VERSION\s*:\s*(\S+)", raw)
         m_prod = re.search(r"PRODUCT\s*:\s*(\S+)", raw)
         return (
@@ -189,7 +194,7 @@ class SmartDriver(_napalm_base.NetworkDriver):
                 if row.get("serial_number"):
                     return row["serial_number"]
         except Exception:
-            logger.debug("ntc-templates failed for 'display board serial-number'; using regex")
+            logger.debug("ntc-templates failed for 'display board serial-number'; using regex", exc_info=True)
         m_sn = re.search(r"\b0\s+\w+\s+(\w+)", raw)
         return m_sn.group(1) if m_sn else "Unknown"
 
@@ -396,7 +401,7 @@ class SmartDriver(_napalm_base.NetworkDriver):
                 if not vlan_id:
                     continue
                 fsp = row.get("fsp", "").strip()
-                port_type = row.get("port_type", "").strip()
+                port_type = row.get("port_type", "").strip().upper()
                 intf = f"{port_type}{fsp}" if port_type and fsp else fsp
                 entry = vlans.setdefault(
                     vlan_id,
@@ -406,7 +411,8 @@ class SmartDriver(_napalm_base.NetworkDriver):
                     entry["interfaces"].append(intf)
         except Exception:
             logger.debug(
-                "ntc-templates failed for 'display service-port all'; skipping"
+                "ntc-templates failed for 'display service-port all'; skipping",
+                exc_info=True,
             )
 
         # --- vlan names from display vlan (regex) ---
