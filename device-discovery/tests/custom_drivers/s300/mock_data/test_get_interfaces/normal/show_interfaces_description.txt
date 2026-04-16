@@ -8,4 +8,5 @@ gi27      Fiber-Trunk
 
 Ch        Description
 -------   -----------
-Po1
+Po1       LAG-Uplink
+Po2

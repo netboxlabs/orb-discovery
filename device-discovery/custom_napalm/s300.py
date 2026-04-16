@@ -86,6 +86,61 @@ _VLAN_ROW_RE = re.compile(r"^\s*(\d+)\s")
 _INTF_TOKEN_RE = re.compile(r"\b((?:fa|gi|te|po)\d+(?:-\d+)?)\b", re.IGNORECASE)
 
 
+def _parse_portchannel_status_raw(raw: str) -> dict[str, dict]:
+    """
+    Extract port-channel (``Po*``) rows from raw ``show interfaces status`` output.
+
+    The cisco_s300 ntc-template transitions to ``End`` when it hits the
+    ``Ch Type Duplex Speed Neg control State`` section header, so port-channel
+    rows are never returned by ``parse_output``. This function parses the
+    port-channel section directly so that active LAGs appear in
+    ``get_interfaces`` and ``get_facts``.
+
+    Port-channels with state ``Not Present`` (no member ports assigned) are
+    included in the return value so callers can apply their own filtering.
+
+    """
+    result: dict[str, dict] = {}
+    in_section = False
+
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if re.match(r"^Ch\s+Type\s+Duplex", stripped):
+            in_section = True
+            continue
+        if not in_section:
+            continue
+        if not stripped or re.match(r"^-+", stripped) or re.match(r"^\s+", line):
+            continue
+        if not stripped.startswith("Po"):
+            break  # out of the port-channel section
+
+        parts = stripped.split()
+        if len(parts) < 2:
+            continue
+
+        po_name = parts[0]
+        # State is "Up", "Down", or the two-word "Not Present"
+        if len(parts) >= 2 and parts[-2:] == ["Not", "Present"]:
+            linkstate = "not present"
+        else:
+            linkstate = parts[-1].lower()
+
+        speed_raw = parts[3] if len(parts) > 3 else "--"
+        try:
+            speed = float(speed_raw) if speed_raw != "--" else -1.0
+        except ValueError:
+            speed = -1.0
+
+        result[po_name] = {
+            "is_up": linkstate == "up",
+            "is_enabled": linkstate != "not present",
+            "speed": speed,
+        }
+
+    return result
+
+
 def _parse_vlan_ports_raw(raw: str) -> dict[str, list[str]]:
     """
     Extract VLAN → expanded port list from raw ``show vlan`` output.
@@ -193,6 +248,9 @@ class S300Driver(_napalm_base.NetworkDriver):
             for row in parsed_status
             if row.get("port") and row.get("linkstate", "").lower() != "not present"
         ]
+        # ntc-template stops before the port-channel section; add configured LAGs.
+        po_status = _parse_portchannel_status_raw(status_out)
+        interface_list += [po for po, data in po_status.items() if data["is_enabled"]]
 
         return {
             "hostname": hostname,
@@ -238,6 +296,21 @@ class S300Driver(_napalm_base.NetworkDriver):
                 "last_flapped": -1.0,
                 "mtu": -1,
                 "speed": speed,
+                "mac_address": "",
+            }
+
+        # ntc-template stops before the port-channel section; add configured LAGs.
+        po_status = _parse_portchannel_status_raw(status_out)
+        for po_name, po_data in po_status.items():
+            if not po_data["is_enabled"]:
+                continue  # skip "Not Present" port-channels
+            interfaces[po_name] = {
+                "is_up": po_data["is_up"],
+                "is_enabled": True,
+                "description": desc_map.get(po_name, ""),
+                "last_flapped": -1.0,
+                "mtu": -1,
+                "speed": po_data["speed"],
                 "mac_address": "",
             }
 

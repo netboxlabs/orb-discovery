@@ -10,4 +10,5 @@ gi27     1G-Combo-F   Full    1000  Disabled Off  Up          Disabled Off
                                           Flow    Link
 Ch       Type    Duplex  Speed  Neg      control  State
 -------- ------- ------  -----  -------- -------  -----------
-Po1         --     --      --      --       --    Not Present
+Po1      --      Full    1000    --       --    Up
+Po2         --     --      --      --       --    Not Present

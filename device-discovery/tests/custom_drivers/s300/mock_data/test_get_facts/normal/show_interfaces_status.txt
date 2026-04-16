@@ -9,4 +9,5 @@ gi4      1G-Copper      --      --     --     --  Down           --     --
                                           Flow    Link
 Ch       Type    Duplex  Speed  Neg      control  State
 -------- ------- ------  -----  -------- -------  -----------
-Po1         --     --      --      --       --    Not Present
+Po1      --      Full    1000    --       --    Up
+Po2         --     --      --      --       --    Not Present
