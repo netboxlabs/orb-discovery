@@ -189,23 +189,41 @@ def _parse_intf_status_header(output: str) -> dict[str, int]:
     """
     Return a mapping of uppercase column name → character start position.
 
-    Uses character positions (not token indices) so that pre-status columns
-    containing embedded spaces (e.g. a ``Description`` field) do not shift
-    the indexing for subsequent columns.  Accepts headers containing ``Oper``
-    with or without ``Admin``, including combined ``Admin/Oper`` tokens where
-    both names are mapped to the same character position.  Returns an empty
-    dict when not found.
+    When a separator line (``----- ------- ...``) follows the header, its
+    dash-group start positions are used as column boundaries — this is more
+    robust than header token positions because it matches the actual column
+    widths the device used to format the data rows, even when values are
+    right-aligned or wider than the header label.
+
+    Falls back to header token start positions when no separator is present.
+    Accepts combined ``Admin/Oper`` tokens (both parts mapped to the same
+    position).  Returns an empty dict when no header is found.
     """
-    for line in output.splitlines():
-        if re.search(r"\bOper\b", line, re.IGNORECASE):
-            col_map: dict[str, int] = {}
+    lines = output.splitlines()
+    for i, line in enumerate(lines):
+        if not re.search(r"\bOper\b", line, re.IGNORECASE):
+            continue
+
+        col_map: dict[str, int] = {}
+        # Check for a separator line immediately after the header
+        sep = lines[i + 1] if i + 1 < len(lines) else ""
+        if "-" in sep and re.match(r"[\s\-=|]+$", sep):
+            # Map each dash-group's start position to the overlapping header token
+            for dash_m in re.finditer(r"-+", sep):
+                col_start = dash_m.start()
+                for tok_m in re.finditer(r"\S+", line):
+                    # Token overlaps with this dash group
+                    if tok_m.start() <= dash_m.end() and tok_m.end() >= col_start:
+                        for part in tok_m.group().split("/"):
+                            col_map[part.upper()] = col_start
+                        break
+        else:
+            # No separator: fall back to header token start positions
             for m in re.finditer(r"\S+", line):
-                token = m.group()
-                pos = m.start()
-                # Handle combined tokens like "Admin/Oper" or "Oper/Admin"
-                for part in token.split("/"):
-                    col_map[part.upper()] = pos
-            return col_map
+                for part in m.group().split("/"):
+                    col_map[part.upper()] = m.start()
+
+        return col_map
     return {}
 
 
