@@ -231,15 +231,28 @@ class CumulusDriver(_napalm_base.NetworkDriver):
 
         eeprom = _parse_decode_syseeprom(self.device.send_command("decode-syseeprom"))
         model = eeprom.get("product_name") or eeprom.get("part_number") or "Unknown"
-        serial_number = eeprom.get("serial_number") or "Unknown"
+        # Use the EEPROM vendor when present; Nvidia is the default for ONIE/Cumulus hardware.
+        vendor = eeprom.get("manufacturer") or "Nvidia"
+        # Prefer EEPROM serial; fall back to DMI sysfs (available on VMs without decode-syseeprom).
+        serial_number = eeprom.get("serial_number") or ""
+        if not serial_number:
+            dmi_serial = self.device.send_command("cat /sys/class/dmi/id/product_serial").strip()
+            if dmi_serial and dmi_serial.lower() not in ("", "none", "not specified", "unknown"):
+                serial_number = dmi_serial
+        if not serial_number:
+            serial_number = "Unknown"
 
         link_out = self.device.send_command("ip link show")
-        parsed_links = parse_output(platform="linux", command="ip link show", data=link_out)
-        interface_list = [row["interface"] for row in parsed_links if row.get("interface")]
+        try:
+            parsed_links = parse_output(platform="linux", command="ip link show", data=link_out)
+            interface_list = [row["interface"] for row in parsed_links if row.get("interface")]
+        except Exception:
+            logger.debug("Failed to parse 'ip link show' for interface_list", exc_info=True)
+            interface_list = []
 
         return {
             "hostname": hostname,
-            "vendor": "Nvidia",
+            "vendor": vendor,
             "model": model,
             "os_version": os_version,
             "serial_number": serial_number,
@@ -251,7 +264,11 @@ class CumulusDriver(_napalm_base.NetworkDriver):
     def get_interfaces(self) -> dict:
         """Return interface details keyed by interface name (speed is reported as -1.0, not exposed by `ip link show`)."""
         link_out = self.device.send_command("ip link show")
-        parsed = parse_output(platform="linux", command="ip link show", data=link_out)
+        try:
+            parsed = parse_output(platform="linux", command="ip link show", data=link_out)
+        except Exception:
+            logger.debug("Failed to parse 'ip link show'", exc_info=True)
+            return {}
 
         interfaces: dict = {}
         for row in parsed:
@@ -295,7 +312,11 @@ class CumulusDriver(_napalm_base.NetworkDriver):
     def get_interfaces_ip(self) -> dict:
         """Return IPv4/IPv6 addresses per interface, parsed from `ip address show` via ntc-templates."""
         addr_out = self.device.send_command("ip address show")
-        parsed = parse_output(platform="linux", command="ip address show", data=addr_out)
+        try:
+            parsed = parse_output(platform="linux", command="ip address show", data=addr_out)
+        except Exception:
+            logger.debug("Failed to parse 'ip address show'", exc_info=True)
+            return {}
 
         interfaces_ip: dict = {}
         for row in parsed:
