@@ -543,9 +543,11 @@ def _parse_vlan_output(output: str) -> dict:
             }
             continue
 
-        # --- Format B: VLANID  Status  Q  Ports (Dell SONiC show vlan) ---
+        # --- Format B: VLANID  Status  [Q  Ports] (Dell SONiC show vlan) ---
+        # The Q indicator and member ports are optional; inactive VLANs with no
+        # members print as "30 Inactive Enable" (no Q/Ports token).
         m_b = re.match(
-            r"\s*(\d+)\s+(active|suspend|inactive)\s+[ATUS+]\s*(.*)",
+            r"\s*(\d+)\s+(active|suspend|inactive)(?:\s+[ATUS+]\s*(.*))?$",
             line,
             re.IGNORECASE,
         )
@@ -554,7 +556,7 @@ def _parse_vlan_output(output: str) -> dict:
             # No VLAN name in this format; use ID as name.
             # Extract only recognised interface names from the ports field;
             # extra columns (Autostate, Dynamic, …) are ignored.
-            ports_raw = m_b.group(3).strip()
+            ports_raw = (m_b.group(3) or "").strip()
             vlans[last_vlan_id] = {
                 "name": last_vlan_id,
                 "interfaces": re.findall(_INTF_RE, ports_raw) if ports_raw else [],
