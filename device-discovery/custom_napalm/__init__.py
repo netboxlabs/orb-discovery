@@ -9,6 +9,7 @@ from custom_napalm.arubaoss import ArubaOSSDriver
 from custom_napalm.asa import ASADriver
 from custom_napalm.asa_ssh import ASASSHDriver
 from custom_napalm.comware import ComwareDriver
+from custom_napalm.cumulus import CumulusDriver
 from custom_napalm.edgerouter import EdgeRouterDriver
 from custom_napalm.edgeswitch import EdgeSwitchDriver
 from custom_napalm.ers import ERSDriver
@@ -48,6 +49,7 @@ __all__ = [
     "ASADriver",
     "ASASSHDriver",
     "ComwareDriver",
+    "CumulusDriver",
     "ERSDriver",
     "EdgeRouterDriver",
     "EdgeSwitchDriver",
