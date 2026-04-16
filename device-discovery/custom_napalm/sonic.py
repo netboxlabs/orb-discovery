@@ -432,11 +432,23 @@ class SONiCDriver(_napalm_base.NetworkDriver):
         return vlans
 
 
+_CLI_ERROR_RE = re.compile(
+    r"^\s*(%\s+|Error:|Invalid input|Command not found|Incomplete command)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
 def _send_first_nonempty(device, commands: tuple[str, ...]) -> str:
-    """Send *commands* in order and return the first non-empty response."""
+    """
+    Send *commands* in order and return the first non-error, non-empty response.
+
+    Unsupported commands on SONiC return non-empty error text (e.g.
+    ``% Invalid input detected``).  Such responses are treated as empty so
+    the next command in *commands* is tried.
+    """
     for cmd in commands:
         out = device.send_command(cmd)
-        if out:
+        if out and not _CLI_ERROR_RE.search(out):
             return out
     return ""
 
