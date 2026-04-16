@@ -73,8 +73,17 @@ _YEAR_SECONDS = 365 * _DAY_SECONDS
 
 # Regex for interface names in SONiC CLI output.
 # Covers canonical names (Ethernet0, PortChannel1, Vlan100, Loopback0, Management0),
-# lowercase variants (eth0), and standard Dell SONiC slot/port notation (Eth1/30).
-_INTF_RE = r"(Ethernet\d+|PortChannel\d+|Vlan\d+|Loopback\d+|Management\d+|Eth\d+/\d+|eth\d+)"
+# lowercase variants (eth0), standard Dell SONiC slot/port notation (Eth1/30),
+# and subinterfaces (Eth1/1.100, Ethernet0.10).
+_INTF_RE = (
+    r"(Ethernet\d+(?:\.\d+)?"
+    r"|PortChannel\d+(?:\.\d+)?"
+    r"|Vlan\d+"
+    r"|Loopback\d+"
+    r"|Management\d+"
+    r"|Eth\d+/\d+(?:\.\d+)?"
+    r"|eth\d+(?:\.\d+)?)"
+)
 
 # Map of ``show version`` field names to extraction regexes.
 # Each tuple: (field_key, compiled regex).  The first capture group is the value.
@@ -87,6 +96,18 @@ _VERSION_PATTERNS = [
     ("uptime", re.compile(r"(?:Up\s*[Tt]ime|Uptime)\s*[:\-]\s*(.+)", re.IGNORECASE)),
     ("hostname", re.compile(r"Hostname\s*[:\-]\s*(.+)", re.IGNORECASE)),
 ]
+
+# Sentinel returned by get_facts() when show version produces no output.
+_EMPTY_FACTS: dict = {
+    "hostname": "Unknown",
+    "vendor": "Dell",
+    "model": "Unknown",
+    "os_version": "Unknown",
+    "serial_number": "Unknown",
+    "uptime": -1.0,
+    "fqdn": "Unknown",
+    "interface_list": [],
+}
 
 
 def _parse_uptime(uptime_str: str) -> float:
@@ -147,14 +168,14 @@ def _parse_intf_status_header(output: str) -> dict[str, int]:
     """
     Return a mapping of uppercase column name → token index (after interface name).
 
-    Parses the first header line that contains both ``Admin`` and ``Oper``
-    labels so callers can look up the exact column position of each field,
-    handling both ``Admin Oper`` and ``Oper Admin`` orderings.  Returns an
-    empty dict when no header is found.
+    Accepts headers that contain ``Oper`` with or without ``Admin``, handling
+    formats like ``Name Oper Reason`` (no Admin column) and both
+    ``Admin Oper`` and ``Oper Admin`` orderings.  Returns an empty dict when
+    no recognisable header line is found.
     """
     for line in output.splitlines():
         stripped = line.strip()
-        if re.search(r"\bAdmin\b", stripped, re.IGNORECASE) and re.search(r"\bOper\b", stripped, re.IGNORECASE):
+        if re.search(r"\bOper\b", stripped, re.IGNORECASE):
             tokens = stripped.split()
             # Skip the first token (Name/Interface label itself)
             return {t.upper(): i for i, t in enumerate(tokens[1:])}
@@ -167,26 +188,32 @@ def _parse_interface_line(fields: list[str], col_map: dict[str, int]) -> dict | 
 
     Uses *col_map* (derived from the header row) to locate the Admin, Oper,
     and Speed columns by name, so any column ordering is handled correctly.
-    Falls back to scanning for ``up``/``down``/``N/A`` tokens when the header
-    is unavailable.  Returns ``None`` when status columns cannot be found.
+    When ``Admin`` is absent from the header (e.g. ``Name Oper Reason`` format),
+    ``is_enabled`` mirrors ``is_up``.  Falls back to scanning for status tokens
+    when no header is available.  Returns ``None`` when status cannot be determined.
     """
-    admin_col = col_map.get("ADMIN", -1)
     oper_col = col_map.get("OPER", -1)
+    admin_col = col_map.get("ADMIN", -1)
     speed_col = col_map.get("SPEED", -1)
 
-    # --- Admin / Oper status ---
-    if admin_col >= 0 and oper_col >= 0 and max(admin_col, oper_col) < len(fields):
-        admin_status = _parse_status(fields[admin_col])
+    # --- Oper / Admin status ---
+    if oper_col >= 0 and oper_col < len(fields):
         oper_status = _parse_status(fields[oper_col])
-        after_status = max(admin_col, oper_col) + 1
+        # Admin column is optional; default to same value as oper when absent
+        admin_status = _parse_status(fields[admin_col]) if admin_col >= 0 and admin_col < len(fields) else oper_status
+        after_status = max(c for c in (oper_col, admin_col) if c >= 0) + 1
     else:
-        # Fallback: first two up/down/N/A tokens
+        # Fallback: first two up/down/N/A tokens (first=admin, second=oper)
         status_indices = [i for i, t in enumerate(fields) if _STATUS_RE.match(t)]
-        if len(status_indices) < 2:
+        if len(status_indices) < 1:
             return None
-        admin_status = _parse_status(fields[status_indices[0]])
-        oper_status = _parse_status(fields[status_indices[1]])
-        after_status = status_indices[1] + 1
+        if len(status_indices) == 1:
+            oper_status = admin_status = _parse_status(fields[status_indices[0]])
+            after_status = status_indices[0] + 1
+        else:
+            admin_status = _parse_status(fields[status_indices[0]])
+            oper_status = _parse_status(fields[status_indices[1]])
+            after_status = status_indices[1] + 1
 
     # --- Speed ---
     if speed_col >= 0 and speed_col < len(fields):
@@ -281,7 +308,7 @@ class SONiCDriver(_napalm_base.NetworkDriver):
         """Return general device facts."""
         output = self.device.send_command("show version")
         if not output:
-            return {}
+            return dict(_EMPTY_FACTS)
 
         fields = _parse_version_fields(output)
 
@@ -316,9 +343,8 @@ class SONiCDriver(_napalm_base.NetworkDriver):
         col_map = _parse_intf_status_header(output)
         interfaces = {}
         for line in output.splitlines():
-            # Tolerant parser: match interface name, then delegate to
-            # _parse_interface_line which uses col_map for correct ordering.
-            m = re.match(_INTF_RE + r"\s+(.+)", line)
+            # Allow optional leading whitespace before the interface name.
+            m = re.match(r"^\s*" + _INTF_RE + r"\s+(.+)", line)
             if not m:
                 continue
             parsed = _parse_interface_line(m.group(2).split(), col_map)
@@ -331,21 +357,25 @@ class SONiCDriver(_napalm_base.NetworkDriver):
         """Return IP addresses per interface."""
         interfaces_ip: dict = {}
 
-        # --- IPv4 ---
-        ipv4_out = self.device.send_command("show ip interface")
+        # --- IPv4: try plural form first (Dell SONiC), fall back to singular ---
+        ipv4_out = self.device.send_command("show ip interfaces")
+        if not ipv4_out:
+            ipv4_out = self.device.send_command("show ip interface")
         if ipv4_out:
             for line in ipv4_out.splitlines():
-                m = re.match(_INTF_RE + r"\s+(\d+\.\d+\.\d+\.\d+)/(\d+)", line)
+                m = re.match(r"^\s*" + _INTF_RE + r"\s+(\d+\.\d+\.\d+\.\d+)/(\d+)", line)
                 if m:
                     interfaces_ip.setdefault(m.group(1), {}).setdefault("ipv4", {})[m.group(2)] = {
                         "prefix_length": int(m.group(3))
                     }
 
-        # --- IPv6 ---
-        ipv6_out = self.device.send_command("show ipv6 interface")
+        # --- IPv6: try plural form first (Dell SONiC), fall back to singular ---
+        ipv6_out = self.device.send_command("show ipv6 interfaces")
+        if not ipv6_out:
+            ipv6_out = self.device.send_command("show ipv6 interface")
         if ipv6_out:
             for line in ipv6_out.splitlines():
-                m = re.match(_INTF_RE + r"\s+([0-9a-fA-F:]+)/(\d+)", line)
+                m = re.match(r"^\s*" + _INTF_RE + r"\s+([0-9a-fA-F:]+)/(\d+)", line)
                 if m:
                     interfaces_ip.setdefault(m.group(1), {}).setdefault("ipv6", {})[m.group(2)] = {
                         "prefix_length": int(m.group(3))
@@ -402,7 +432,8 @@ def _extract_interface_names(output: str) -> list[str]:
     names = []
     if output:
         for line in output.splitlines():
-            m = re.match(_INTF_RE + r"\s", line)
+            # Allow optional leading whitespace before the interface name.
+            m = re.match(r"\s*" + _INTF_RE + r"\s", line)
             if m:
                 names.append(m.group(1))
     return names
