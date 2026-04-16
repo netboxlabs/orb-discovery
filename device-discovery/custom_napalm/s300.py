@@ -14,7 +14,7 @@ import re
 import napalm.base as _napalm_base
 from napalm.base import models
 from napalm.base.netmiko_helpers import netmiko_args
-from ntc_templates.parse import parse_output
+from ntc_templates.parse import parse_output as _parse_output_raw
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,15 @@ def _sanitize_config(text: str) -> str:
     text = _ENABLE_PASSWORD_RE.sub(r"\1 <redacted>", text)
     text = _SNMP_COMMUNITY_RE.sub(r"\1 <redacted>", text)
     return text
+
+
+def _ntc_parse(platform: str, command: str, data: str) -> list:
+    """Wrap parse_output with error handling so a bad template never crashes discovery."""
+    try:
+        return _parse_output_raw(platform=platform, command=command, data=data)
+    except Exception:
+        logger.debug("ntc-templates failed to parse %r on %r", command, platform, exc_info=True)
+        return []
 
 
 def _parse_uptime(uptime_str: str) -> float:
@@ -236,7 +245,7 @@ class S300Driver(_napalm_base.NetworkDriver):
     def get_facts(self) -> dict:
         """Return general device facts."""
         sys_out = self.device.send_command("show system")
-        parsed_sys = parse_output(platform="cisco_s300", command="show system", data=sys_out)
+        parsed_sys = _ntc_parse("cisco_s300", "show system", sys_out)
 
         hostname = "Unknown"
         model = "Unknown"
@@ -249,21 +258,19 @@ class S300Driver(_napalm_base.NetworkDriver):
             uptime = _parse_uptime(row.get("up_time", ""))
 
         ver_out = self.device.send_command("show version")
-        parsed_ver = parse_output(platform="cisco_s300", command="show version", data=ver_out)
+        parsed_ver = _ntc_parse("cisco_s300", "show version", ver_out)
         os_version = "Unknown"
         if parsed_ver:
             os_version = parsed_ver[0].get("sw_version", "Unknown") or "Unknown"
 
         id_out = self.device.send_command("show system id")
-        parsed_id = parse_output(platform="cisco_s300", command="show system id", data=id_out)
+        parsed_id = _ntc_parse("cisco_s300", "show system id", id_out)
         serial_number = "Unknown"
         if parsed_id:
             serial_number = parsed_id[0].get("serial_number", "Unknown") or "Unknown"
 
         status_out = self.device.send_command("show interfaces status")
-        parsed_status = parse_output(
-            platform="cisco_s300", command="show interfaces status", data=status_out
-        )
+        parsed_status = _ntc_parse("cisco_s300", "show interfaces status", status_out)
         interface_list = [
             row["port"]
             for row in parsed_status
@@ -287,14 +294,10 @@ class S300Driver(_napalm_base.NetworkDriver):
     def get_interfaces(self) -> dict:
         """Return interface details keyed by interface name."""
         status_out = self.device.send_command("show interfaces status")
-        parsed_status = parse_output(
-            platform="cisco_s300", command="show interfaces status", data=status_out
-        )
+        parsed_status = _ntc_parse("cisco_s300", "show interfaces status", status_out)
 
         desc_out = self.device.send_command("show interfaces description")
-        parsed_desc = parse_output(
-            platform="cisco_s300", command="show interfaces description", data=desc_out
-        )
+        parsed_desc = _ntc_parse("cisco_s300", "show interfaces description", desc_out)
         desc_map = {row["interface"]: row.get("description", "") for row in parsed_desc}
 
         interfaces = {}
@@ -340,7 +343,7 @@ class S300Driver(_napalm_base.NetworkDriver):
     def get_interfaces_ip(self) -> dict:
         """Return IP addresses per interface."""
         ip_out = self.device.send_command("show ip interface")
-        parsed = parse_output(platform="cisco_s300", command="show ip interface", data=ip_out)
+        parsed = _ntc_parse("cisco_s300", "show ip interface", ip_out)
 
         interfaces_ip: dict = {}
         for row in parsed:
@@ -387,7 +390,7 @@ class S300Driver(_napalm_base.NetworkDriver):
 
         # ntc-templates provides VLAN ID and name but silently drops ports from
         # wrapped continuation lines (the template comment acknowledges this).
-        parsed = parse_output(platform="cisco_s300", command="show vlan", data=vlan_out)
+        parsed = _ntc_parse("cisco_s300", "show vlan", vlan_out)
         name_map = {
             row["vlan_id"]: row.get("vlan_name", "") or row["vlan_id"]
             for row in parsed
