@@ -5,6 +5,7 @@ hostname slx9640
 !
 username admin privilege 0 password encrypted $1$abc123xyz
 username operator privilege 0 password 7 0823487654A
+username monitor password PlainTextSecret
 !
 enable password MyEnablePass
 enable password 7 0822455D0A16

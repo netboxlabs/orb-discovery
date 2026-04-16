@@ -29,9 +29,12 @@ _PASSWORD_ENCRYPTED_RE = re.compile(
     r"((?:password|passwd)\s+encrypted)\s+\S+",
     re.IGNORECASE,
 )
-# "username admin password 7 <hash>" (type-7 / obfuscated, optional "privilege N" before password)
+# "username admin password 7 <hash>" or "username admin password <hash>" (bare form)
+# The encryption-type digit (e.g. 0, 7) is optional — SLX-OS also emits it without a type prefix.
+# Negative lookahead (?!encrypted\b) prevents matching the "password encrypted <hash>" form,
+# which is already handled by _PASSWORD_ENCRYPTED_RE above.
 _PASSWORD_TYPE_RE = re.compile(
-    r"(username\s+\S+(?:\s+privilege\s+\d+)?\s+password\s+\d+)\s+\S+",
+    r"(username\s+\S+(?:\s+privilege\s+\d+)?\s+password(?:\s+\d+)?)\s+(?!encrypted\b)\S+",
     re.IGNORECASE,
 )
 # "enable password <value>" / "enable password 7 <hash>" (optional encryption-type token)
