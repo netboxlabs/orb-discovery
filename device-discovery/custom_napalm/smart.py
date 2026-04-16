@@ -319,8 +319,8 @@ class SmartDriver(_napalm_base.NetworkDriver):
 
         # --- IPv4: display ip interface ---
         ipv4_out = self.device.send_command("display ip interface")
-        separator = r"(^(?!Line protocol).*current state.*$)"
-        re_intf_name = r"^(?!Line protocol)(?P<intf_name>\S+).+current state"
+        separator = r"(^(?!\s*Line protocol).*current state.*$)"
+        re_intf_name = r"^(?!\s*Line protocol)(?P<intf_name>\S+).+current state"
         re_intf_ip = r"Internet Address is\s+(\d+\.\d+\.\d+\.\d+)\/(\d+)"
 
         for section in _separate_section(separator, ipv4_out):
@@ -335,8 +335,8 @@ class SmartDriver(_napalm_base.NetworkDriver):
 
         # --- IPv6: display ipv6 interface ---
         ipv6_out = self.device.send_command("display ipv6 interface")
-        separator_v6 = r"(^(?!IPv6 protocol).*current state.*$)"
-        re_intf_name_v6 = r"^(?!IPv6 protocol)(?P<intf_name>\S+).+current state"
+        separator_v6 = r"(^(?!\s*IPv6 protocol).*current state.*$)"
+        re_intf_name_v6 = r"^(?!\s*IPv6 protocol)(?P<intf_name>\S+).+current state"
         re_intf_ip_v6 = r"(?P<ip>\S+), subnet is.+\/(?P<prefix>\d+)"
 
         for section in _separate_section(separator_v6, ipv6_out):
