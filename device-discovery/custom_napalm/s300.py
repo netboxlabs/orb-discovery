@@ -80,6 +80,43 @@ def _expand_interface_range(range_str: str) -> list[str]:
     return result
 
 
+# Matches a single interface token (with optional range) in `show vlan` output.
+# Used by _parse_vlan_ports_raw to extract ports from wrapped continuation lines.
+_VLAN_ROW_RE = re.compile(r"^\s*(\d+)\s")
+_INTF_TOKEN_RE = re.compile(r"\b((?:fa|gi|te|po)\d+(?:-\d+)?)\b", re.IGNORECASE)
+
+
+def _parse_vlan_ports_raw(raw: str) -> dict[str, list[str]]:
+    """
+    Extract VLAN → expanded port list from raw ``show vlan`` output.
+
+    The cisco_s300 ntc-template only captures the first line of the port column;
+    when VLANs have many members the device wraps the port list across several
+    continuation lines and those extra ports are silently discarded by the template.
+    This function scans every line of the raw output and appends any interface
+    tokens found on continuation lines to the last-seen VLAN, giving a complete
+    membership list regardless of how many ports a VLAN has.
+
+    """
+    vlan_ports: dict[str, list[str]] = {}
+    current_id: str | None = None
+
+    for line in raw.splitlines():
+        m = _VLAN_ROW_RE.match(line)
+        if m:
+            current_id = m.group(1)
+        if current_id is None:
+            continue
+        for token in _INTF_TOKEN_RE.findall(line):
+            expanded = _expand_interface_range(token)
+            entry = vlan_ports.setdefault(current_id, [])
+            for intf in expanded:
+                if intf not in entry:
+                    entry.append(intf)
+
+    return vlan_ports
+
+
 class S300Driver(_napalm_base.NetworkDriver):
     """Cisco Small Business S300 NAPALM driver (read-only subset for device-discovery)."""
 
@@ -251,19 +288,24 @@ class S300Driver(_napalm_base.NetworkDriver):
     def get_vlans(self) -> dict:
         """Return VLAN information keyed by VLAN ID string."""
         vlan_out = self.device.send_command("show vlan")
+
+        # ntc-templates provides VLAN ID and name but silently drops ports from
+        # wrapped continuation lines (the template comment acknowledges this).
         parsed = parse_output(platform="cisco_s300", command="show vlan", data=vlan_out)
+        name_map = {
+            row["vlan_id"]: row.get("vlan_name", "") or row["vlan_id"]
+            for row in parsed
+            if row.get("vlan_id")
+        }
+
+        # Raw line scan captures every port token including wrapped continuations.
+        port_map = _parse_vlan_ports_raw(vlan_out)
 
         vlans: dict = {}
-        for row in parsed:
-            vlan_id = row.get("vlan_id", "")
-            if not vlan_id:
-                continue
-            vlan_name = row.get("vlan_name", "") or vlan_id
-            raw_interfaces = row.get("interfaces", "") or ""
-            interfaces = _expand_interface_range(raw_interfaces)
-            entry = vlans.setdefault(vlan_id, {"name": vlan_name, "interfaces": []})
-            for intf in interfaces:
-                if intf not in entry["interfaces"]:
-                    entry["interfaces"].append(intf)
+        for vlan_id in sorted(set(name_map) | set(port_map), key=lambda x: int(x)):
+            vlans[vlan_id] = {
+                "name": name_map.get(vlan_id, vlan_id),
+                "interfaces": port_map.get(vlan_id, []),
+            }
 
         return vlans
