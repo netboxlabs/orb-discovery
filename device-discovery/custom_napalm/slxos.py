@@ -33,9 +33,9 @@ _PASSWORD_TYPE_RE = re.compile(
     r"(username\s+\S+(?:\s+privilege\s+\d+)?\s+password\s+\d+)\s+\S+",
     re.IGNORECASE,
 )
-# "enable password <value>" (cleartext form)
+# "enable password <value>" / "enable password 7 <hash>" (optional encryption-type token)
 _ENABLE_PASSWORD_RE = re.compile(
-    r"(enable\s+password)\s+\S+",
+    r"(enable\s+password)(?:\s+\d+)?\s+\S+",
     re.IGNORECASE,
 )
 # "enable secret sha256 <hash>" / "enable secret 8 <hash>"
@@ -48,32 +48,32 @@ _SNMP_COMMUNITY_RE = re.compile(
     r"(snmp-server\s+community)\s+\S+(\s+(?:ro|rw))",
     re.IGNORECASE,
 )
-# "radius-server host <ip> ... key <key>" (per-host)
+# "radius-server host <ip> ... key <key>" / "... key 7 <hash>" (per-host)
 _RADIUS_HOST_KEY_RE = re.compile(
-    r"(\bradius-server\s+host\s+\S+.*?\bkey)\s+\S+",
+    r"(\bradius-server\s+host\s+\S+.*?\bkey)(?:\s+\d+)?\s+\S+",
     re.IGNORECASE,
 )
-# "radius-server key <key>" (global)
+# "radius-server key <key>" / "radius-server key 7 <hash>" (global)
 _RADIUS_GLOBAL_KEY_RE = re.compile(
-    r"(\bradius-server\s+key)\s+\S+",
+    r"(\bradius-server\s+key)(?:\s+\d+)?\s+\S+",
     re.IGNORECASE,
 )
-# "tacacs-server host <ip> ... key <key>" (per-host)
+# "tacacs-server host <ip> ... key <key>" / "... key 7 <hash>" (per-host)
 _TACACS_HOST_KEY_RE = re.compile(
-    r"(\btacacs-server\s+host\s+\S+.*?\bkey)\s+\S+",
+    r"(\btacacs-server\s+host\s+\S+.*?\bkey)(?:\s+\d+)?\s+\S+",
     re.IGNORECASE,
 )
-# "tacacs-server key <key>" (global)
+# "tacacs-server key <key>" / "tacacs-server key 7 <hash>" (global)
 _TACACS_GLOBAL_KEY_RE = re.compile(
-    r"(\btacacs-server\s+key)\s+\S+",
+    r"(\btacacs-server\s+key)(?:\s+\d+)?\s+\S+",
     re.IGNORECASE,
 )
-# Standalone indented "key <secret>" lines emitted when SLX-OS writes AAA host
-# blocks in hierarchical form (e.g. "radius-server host … use-vrf …\n key <v>").
+# Standalone indented "key <secret>" / "key 7 <hash>" lines emitted when SLX-OS
+# writes AAA host blocks in hierarchical form.
 # Matches only indented lines so that top-level "key" keywords (already covered
 # by the per-host regexes above) are not double-substituted.
 _AAA_KEY_STANDALONE_RE = re.compile(
-    r"^(\s+key)\s+\S+",
+    r"^(\s+key)(?:\s+\d+)?\s+\S+",
     re.IGNORECASE | re.M,
 )
 
