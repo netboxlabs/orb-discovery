@@ -111,7 +111,21 @@ _EMPTY_FACTS: dict = {
 
 
 def _parse_uptime(uptime_str: str) -> float:
-    """Convert a SONiC uptime string to total seconds."""
+    """
+    Convert a SONiC uptime string to total seconds.
+
+    Handles several formats including::
+
+        15 days, 03:25:10
+        04:53:36 up 2:05, 1 user, ...   (Linux procps — strip wall-clock prefix)
+        04:53:36 up 2 days, 03:25:10
+    """
+    # When the string contains 'up' (Linux procps format), restrict parsing to
+    # the portion after 'up' so the leading wall-clock time is not mistaken
+    # for device uptime.
+    m_up = re.search(r"\bup\b\s*(.*)", uptime_str, re.IGNORECASE)
+    parse_str = m_up.group(1) if m_up else uptime_str
+
     seconds = 0.0
 
     for pattern, factor in (
@@ -122,16 +136,23 @@ def _parse_uptime(uptime_str: str) -> float:
         (r"(\d+)\s+minute", 60),
         (r"(\d+)\s+second", 1),
     ):
-        m = re.search(pattern, uptime_str, re.IGNORECASE)
+        m = re.search(pattern, parse_str, re.IGNORECASE)
         if m:
             seconds += int(m.group(1)) * factor
 
-    # HH:MM:SS component (alternative format)
-    m = re.search(r"(\d+):(\d+):(\d+)", uptime_str)
-    if m:
-        seconds += int(m.group(1)) * _HOUR_SECONDS
-        seconds += int(m.group(2)) * 60
-        seconds += int(m.group(3))
+    # HH:MM:SS — only if no word-based components already captured hours
+    if not re.search(r"\d+\s+hour", parse_str, re.IGNORECASE):
+        m = re.search(r"(\d+):(\d+):(\d+)", parse_str)
+        if m:
+            seconds += int(m.group(1)) * _HOUR_SECONDS
+            seconds += int(m.group(2)) * 60
+            seconds += int(m.group(3))
+        else:
+            # HH:MM (Linux short format when uptime < 1 day)
+            m = re.search(r"(\d+):(\d+)", parse_str)
+            if m:
+                seconds += int(m.group(1)) * _HOUR_SECONDS
+                seconds += int(m.group(2)) * 60
 
     return seconds
 
