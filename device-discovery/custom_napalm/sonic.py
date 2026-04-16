@@ -72,9 +72,9 @@ _WEEK_SECONDS = 7 * _DAY_SECONDS
 _YEAR_SECONDS = 365 * _DAY_SECONDS
 
 # Regex for interface names in SONiC CLI output.
-# Covers canonical names (Ethernet0, PortChannel1, Vlan100, Loopback0, Management0)
-# and lowercase variants (eth0) used in some SONiC builds.
-_INTF_RE = r"(Ethernet\d+|PortChannel\d+|Vlan\d+|Loopback\d+|Management\d+|eth\d+)"
+# Covers canonical names (Ethernet0, PortChannel1, Vlan100, Loopback0, Management0),
+# lowercase variants (eth0), and standard Dell SONiC slot/port notation (Eth1/30).
+_INTF_RE = r"(Ethernet\d+|PortChannel\d+|Vlan\d+|Loopback\d+|Management\d+|Eth\d+/\d+|eth\d+)"
 
 # Map of ``show version`` field names to extraction regexes.
 # Each tuple: (field_key, compiled regex).  The first capture group is the value.
@@ -139,18 +139,27 @@ def _parse_speed(speed_str: str) -> float:
     return val
 
 
+_STATUS_RE = re.compile(r"^(up|down|N/A)$", re.IGNORECASE)
+_SPEED_RE = re.compile(r"^\d+(?:\.\d+)?[GTMgtm]?$")
+
+
 def _parse_interface_line(fields: list[str]) -> dict | None:
     """
     Parse the column tokens after the interface name into a dict.
 
-    Returns ``None`` when *fields* doesn't contain the minimum required
-    admin + oper status columns.
+    Scans for the first two status tokens (``up``/``down``/``N/A``) rather
+    than assuming fixed column positions, so formats that include extra
+    columns before the status fields (e.g. Lanes/Alias) are handled
+    correctly.  Returns ``None`` when fewer than two status tokens are found.
     """
-    if len(fields) < 2:
+    # Collect indices of status tokens (up/down/N/A)
+    status_indices = [i for i, t in enumerate(fields) if _STATUS_RE.match(t)]
+    if len(status_indices) < 2:
         return None
 
-    admin_status = _parse_status(fields[0])
-    oper_status = _parse_status(fields[1])
+    admin_idx, oper_idx = status_indices[0], status_indices[1]
+    admin_status = _parse_status(fields[admin_idx])
+    oper_status = _parse_status(fields[oper_idx])
 
     # MTU is the last numeric-only token > 64
     mtu = -1
@@ -159,17 +168,18 @@ def _parse_interface_line(fields: list[str]) -> dict | None:
             mtu = int(token)
             break
 
-    # Speed is the first token after admin/oper that looks like 100G/10G/25G/1G
+    # Speed is the first speed-like token after the two status fields
     speed = -1.0
     speed_idx = -1
-    for i, token in enumerate(fields[2:], start=2):
-        if re.fullmatch(r"\d+(?:\.\d+)?[GTMgtm]?", token) and token != str(mtu):
+    after_status = max(admin_idx, oper_idx) + 1
+    for i, token in enumerate(fields[after_status:], start=after_status):
+        if _SPEED_RE.match(token) and token != str(mtu):
             speed = _parse_speed(token)
             speed_idx = i
             break
 
-    # Description is everything between speed and MTU columns
-    start = (speed_idx + 1) if speed_idx >= 0 else 2
+    # Description is the tokens between speed and MTU
+    start = (speed_idx + 1) if speed_idx >= 0 else after_status
     desc_tokens = [t for t in fields[start:] if t != str(mtu)]
     description = " ".join(desc_tokens)
 
