@@ -104,11 +104,19 @@ _IPV6_ADDR_RE = re.compile(r"IPv6 addr\s+:\s+([^\s\/]+)\/(\d+)", re.IGNORECASE)
 # Separator lines between interfaces (dashes or equals)
 _SEPARATOR_RE = re.compile(r"^[-=]{10,}")
 
+# SR Linux CLI context/prompt line at end of output: "--{ running }--[  ]--"
+_SRL_PROMPT_RE = re.compile(r"^--\{[^}]*\}--.*$", re.MULTILINE)
+
 # MTU line: "    MTU      : 1500"
 _MTU_RE = re.compile(r"MTU\s*:\s*(\d+)", re.IGNORECASE)
 
 # Description line: "    Description  : some text"
 _DESC_RE = re.compile(r"Description\s*:\s*(.*)", re.IGNORECASE)
+
+
+def _strip_prompt(text: str) -> str:
+    """Remove SR Linux CLI context/prompt lines (``--{ running }--[  ]--``) from output."""
+    return _SRL_PROMPT_RE.sub("", text).rstrip()
 
 
 def _make_intf_entry(m) -> dict:
@@ -121,7 +129,6 @@ def _make_intf_entry(m) -> dict:
         "speed": _parse_speed(m.group(4)) if m.group(4) else -1.0,
         "mtu": -1,
         "description": "",
-        "subinterface": None,
         "ipv4": [],
         "ipv6": [],
     }
@@ -145,7 +152,7 @@ def _parse_interface_output(output: str) -> list[dict]:
     Parse ``show interface all`` output into a list of interface dicts.
 
     Each dict has: name, is_up, is_enabled, speed, mtu, description,
-    subinterface, ipv4 (list of (addr, prefix_len)), ipv6 (same).
+    ipv4 (list of (addr, prefix_len)), ipv6 (same).
     """
     interfaces: list[dict] = []
     current: dict | None = None
@@ -173,7 +180,6 @@ def _parse_interface_output(output: str) -> list[dict]:
         m_sub = _SUB_INTF_RE.match(line)
         if m_sub:
             current_sub = m_sub.group(1)
-            current["subinterface"] = current_sub
             continue
 
         m_mtu = _MTU_RE.search(line)
@@ -269,6 +275,12 @@ class SRLDriver(_napalm_base.NetworkDriver):
             if m:
                 serial_number = m.group(1).strip()
 
+        # Fallback: parse serial from show version if still unknown
+        if serial_number == "Unknown" and ver_out:
+            m = re.search(r"Serial Number\s*:\s*(.+)", ver_out, re.IGNORECASE)
+            if m:
+                serial_number = m.group(1).strip()
+
         # --- show interface all: interface list ---
         intf_out = self.device.send_command("show interface all")
         parsed = _parse_interface_output(intf_out) if intf_out else []
@@ -338,7 +350,7 @@ class SRLDriver(_napalm_base.NetworkDriver):
         config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
 
         if retrieve in ("all", "running"):
-            config["running"] = self.device.send_command("admin display-config")
+            config["running"] = _strip_prompt(self.device.send_command("admin display-config"))
 
         if sanitized:
             for key in ("running", "candidate", "startup"):
