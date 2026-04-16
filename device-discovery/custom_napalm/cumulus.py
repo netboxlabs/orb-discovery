@@ -237,7 +237,9 @@ class CumulusDriver(_napalm_base.NetworkDriver):
         serial_number = eeprom.get("serial_number") or ""
         if not serial_number:
             dmi_serial = self.device.send_command("cat /sys/class/dmi/id/product_serial").strip()
-            if dmi_serial and dmi_serial.lower() not in ("", "none", "not specified", "unknown"):
+            # Only accept clean serial-like strings (alphanumeric + hyphens/dots, no whitespace).
+            # Rejects shell error output ("No such file or directory", "Permission denied", etc.)
+            if dmi_serial and re.match(r'^[\w\-\.]+$', dmi_serial) and dmi_serial.lower() not in ("none", "not specified", "unknown"):
                 serial_number = dmi_serial
         if not serial_number:
             serial_number = "Unknown"
