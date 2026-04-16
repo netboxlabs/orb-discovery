@@ -69,13 +69,21 @@ _SNMPD_COM2SEC_RE = re.compile(
     r"(^\s*com2sec6?\s+\S+\s+\S+)\s+\S+",
     re.IGNORECASE | re.MULTILINE,
 )
-# TACACS+ and RADIUS shared secrets, including the NCLU / FRR `aaa` forms.
+# TACACS+ shared secrets.
 _TACACS_KEY_RE = re.compile(
     r"(tacacs(?:[-+]server)?\s+(?:host\s+\S+\s+)?key)\s+\S+",
     re.IGNORECASE,
 )
+# RADIUS shared secrets — covers:
+#   `radius-server host X key <secret>`
+#   `net add dot1x radius shared-secret <secret>`
+#   `net add dot1x radius das-client-secret <secret>`
 _RADIUS_KEY_RE = re.compile(
     r"(radius(?:-server)?\s+(?:host\s+\S+\s+)?key)\s+\S+",
+    re.IGNORECASE,
+)
+_RADIUS_SHARED_SECRET_RE = re.compile(
+    r"((?:radius\s+)?(?:shared-secret|das-client-secret))\s+\S+",
     re.IGNORECASE,
 )
 # Wireguard keys: `PrivateKey = ...` / `PresharedKey = ...` (wg-quick)
@@ -117,6 +125,7 @@ def _sanitize_config(text: str) -> str:
     text = _KEY_STRING_RE.sub(r"\1 <redacted>", text)
     text = _TACACS_KEY_RE.sub(r"\1 <redacted>", text)
     text = _RADIUS_KEY_RE.sub(r"\1 <redacted>", text)
+    text = _RADIUS_SHARED_SECRET_RE.sub(r"\1 <redacted>", text)
     text = _SNMP_COMMUNITY_RE.sub(r"\1 <redacted>", text)
     text = _SNMP_SERVER_COMMUNITY_RE.sub(r"\1 <redacted>", text)
     text = _SNMPD_ROCOMM_RE.sub(r"\1 <redacted>", text)

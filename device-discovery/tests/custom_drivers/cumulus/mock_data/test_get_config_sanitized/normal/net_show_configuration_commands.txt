@@ -16,4 +16,6 @@ net add snmp-server readonly-community public-ro-community access any
 net add snmp-server readwrite-community private-rw-community access any
 net add snmp-server trap-destination-community trap-comm-secret
 net add snmp-server community public-legacy
+net add dot1x radius shared-secret Dot1xSharedSecretXYZ
+net add dot1x radius das-client-secret DasClientSecretABC
 net commit
