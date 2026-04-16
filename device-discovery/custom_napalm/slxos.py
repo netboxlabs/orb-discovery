@@ -149,14 +149,15 @@ def _speed_mbps(token: str) -> float:
 
 # --- interface brief parsing ----------------------------------------------- #
 # Matches SLX-OS "show interface brief" rows:
-#   "Ethernet 0/1    up    10G"
-#   "Management 1    up    1G"
-#   "Port-channel 1  up    -"
-#   "Loopback 1      up    -"
-#   "Ve 10           up    -"
-# Group 1: interface name, Group 2: link state, Group 3: speed token
+#   "Ethernet 0/1    up        10G"
+#   "Management 1    up        1G"
+#   "Port-channel 1  up        -"
+#   "Loopback 1      up        -"
+#   "Ve 10           up        -"
+#   "Ethernet 0/4    Disabled  -"   (admin-down)
+# Group 1: interface name, Group 2: link/admin state, Group 3: speed token
 _INTF_BRIEF_RE = re.compile(
-    r"^((?:Ethernet|Management|Port-channel|Loopback|Ve)\s+\S+)\s+(up|down)\s+(\S+)",
+    r"^((?:Ethernet|Management|Port-channel|Loopback|Ve)\s+\S+)\s+(\S+)\s+(\S+)",
     re.M | re.IGNORECASE,
 )
 
@@ -351,13 +352,13 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
         interfaces = {}
         for m in _INTF_BRIEF_RE.finditer(output):
             name = m.group(1).strip()
-            is_up = m.group(2).lower() == "up"
+            state = m.group(2).lower()
+            is_up = state == "up"
+            # "Disabled" state means admin-down; "up"/"down" are admin-enabled.
+            is_enabled = state != "disabled"
             interfaces[name] = {
                 "is_up": is_up,
-                # "show interface brief" only exposes operational state.
-                # Default is_enabled to True (admin-up) since we cannot
-                # distinguish admin-down from oper-down without an extra command.
-                "is_enabled": True,
+                "is_enabled": is_enabled,
                 "description": "",
                 "last_flapped": -1.0,
                 "mtu": -1,

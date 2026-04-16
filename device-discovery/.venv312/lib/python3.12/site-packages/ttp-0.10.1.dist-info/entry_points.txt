@@ -1,0 +1,3 @@
+[console_scripts]
+ttp=ttp.ttp:cli_tool
+

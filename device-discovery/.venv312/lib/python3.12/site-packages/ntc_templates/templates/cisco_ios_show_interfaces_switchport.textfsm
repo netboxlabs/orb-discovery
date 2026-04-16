@@ -1,0 +1,92 @@
+Value Required INTERFACE (\S+)
+Value SWITCHPORT (.+?)
+Value SWITCHPORT_MONITOR (.+?)
+Value SWITCHPORT_NEGOTIATION (.+?)
+Value MODE (.+?)
+Value ADMIN_MODE (.+?)
+Value ACCESS_VLAN (\d+|unassigned)
+Value NATIVE_VLAN (\d+)
+Value VOICE_VLAN (\S+)
+Value List TRUNKING_VLANS (\d+|\d+\-\d+|ALL|NONE)
+
+Start
+  ^Name: -> Continue.Record
+  ^Name:\s+${INTERFACE}
+  ^\s*Switchport:\s+${SWITCHPORT}$$
+  ^\s*Switchport\s+Monitor:\s+${SWITCHPORT_MONITOR}$$
+  ^\s*Operational\s+Mode:\s+${MODE}$$
+  ^\s*Negotiation\s+of\s+Trunking:\s+${SWITCHPORT_NEGOTIATION}$$
+  ^\s*Access\s+Mode\s+VLAN:\s+${ACCESS_VLAN}
+  ^\s*Trunking\s+Native\s+Mode\s+VLAN:\s+${NATIVE_VLAN}
+  ^\s*Voice\s+VLAN:\s+${VOICE_VLAN}
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){1}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){2}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){3}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){4}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){5}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){6}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){7}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){8}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){9}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){10}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){11}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){12}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){13}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){14}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){15}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){16}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){17}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){18}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){19}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),){20}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),)+${TRUNKING_VLANS}\s*$$
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+((\d+|\d+\-\d+),)+\s*$$ -> Trunk
+  ^\s*Trunking\s+VLANs\s+Enabled:\s+${TRUNKING_VLANS}$$
+  ^\s*Trunking\s+VLANs\s+Active
+  ^\s*Administrative\s+Mode:\s+${ADMIN_MODE}$$
+  ^\s*(?:Operational|Administrative)\s+(?:Trunking|Native\s+VLAN|private-vlan)
+  ^\s*Voice\s+VLAN:
+  ^\s*Pruning\s+VLANs
+  ^\s*Capture\s+(?:Mode|VLANs)
+  ^\s*Autostate\s+mode\s+exclude
+  ^\s*Protected
+  ^\s*Unknown\s+(unicast|multicast)
+  ^\s*Vepa\s+Enabled
+  ^\s*App\s+Interface
+  ^\s*Appliance\s+trust
+  ^\s*Operational\s+Dot1q\s+Ethertype
+  ^\s*Priority\s+for\s+untagged\s+frame
+  ^\s*Override\s+vlan\s+tag\s+priority
+  ^\s*$$
+  # Capture time-stamp if vty line has command time-stamping turned on
+  ^Load\s+for\s+
+  ^Time\s+source\s+is
+  ^. -> Error
+
+Trunk
+  ^\s+${TRUNKING_VLANS},\S+$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){1}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){2}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){3}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){4}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){5}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){6}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){7}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){8}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){9}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){10}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){11}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){12}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){13}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){14}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){15}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){16}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){17}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){18}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){19}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),){20}${TRUNKING_VLANS},\S*$$ -> Continue
+  ^\s+((\d+|\d+\-\d+),)+${TRUNKING_VLANS}\s*$$ -> Start
+  ^\s+((\d+|\d+\-\d+),)+(\d+|\d+\-\d+),\s*$$ -> Trunk
+  ^\s+${TRUNKING_VLANS}$$ -> Start
+  ^. -> Error

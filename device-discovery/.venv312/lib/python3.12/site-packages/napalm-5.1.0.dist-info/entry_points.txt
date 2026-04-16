@@ -1,0 +1,5 @@
+[console_scripts]
+cl_napalm_configure = napalm.base.clitools.cl_napalm_configure:main
+cl_napalm_test = napalm.base.clitools.cl_napalm_test:main
+cl_napalm_validate = napalm.base.clitools.cl_napalm_validate:main
+napalm = napalm.base.clitools.cl_napalm:main

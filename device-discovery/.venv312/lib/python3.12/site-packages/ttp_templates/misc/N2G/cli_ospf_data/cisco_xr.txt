@@ -1,0 +1,19 @@
+<doc>
+Template to parse Cisco IOSXR OSPF database content.
+
+</doc>
+
+<input load="python">
+commands = [
+    "show ospf database router",
+    "show ospf database summary",
+    "show ospf database external",
+]
+kwargs = {"strip_prompt": False}
+method = "send_command"
+platform = ["cisco_xr"]
+</input>
+
+<extend template="ttp://platform/cisco_xr_show_ospf_database_router.txt"/>
+<extend template="ttp://platform/cisco_xr_show_ospf_database_external.txt"/>
+<extend template="ttp://platform/cisco_xr_show_ospf_database_summary.txt"/>

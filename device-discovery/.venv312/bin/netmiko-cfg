@@ -1,0 +1,8 @@
+#!/Users/lparente/git/tmp/1/orb-discovery/device-discovery/.venv312/bin/python3
+# -*- coding: utf-8 -*-
+import re
+import sys
+from netmiko.cli_tools.netmiko_cfg import main_ep
+if __name__ == '__main__':
+    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+    sys.exit(main_ep())

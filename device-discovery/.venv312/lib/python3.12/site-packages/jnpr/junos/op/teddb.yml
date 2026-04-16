@@ -1,0 +1,53 @@
+### ------------------------------------------------------
+#### show ted database
+#### ------------------------------------------------------
+
+TedTable:
+ rpc: get-ted-database-information
+ args:
+   extensive: True
+ item: ted-database
+ key: ted-database-id
+ view: TedView
+
+TedView:
+ fields:
+  type: ted-database-type
+  age: { ted-database-age : int }
+  link-in: { ted-database-link-in : int }
+  link-out: { ted-database-link-out : int }
+  protocol: ted-database-protocol
+  srgb-base: { ted-spring-capability/ted-spring-srgb-block/ted-spring-srgb-block-start : int }
+  srgb-range: { ted-spring-capability/ted-spring-srgb-block/ted-spring-srgb-block-range : int }
+  srgb-flag: ted-spring-capability/ted-spring-srgb-block/ted-spring-srgb-block-flags
+  link: _linkTable
+
+_linkTable:
+ item: ted-link
+ key: ted-link-local-ifindex
+ view: _linkView
+
+_linkView:
+ fields:
+  remoteRTR: ted-link-to
+  remoteIfI: { ted-link-remote-ifindex : int }
+  remoteADD: ted-link-remote-address
+  localIfI: { ted-link-local-ifindex : int }
+  localADD: ted-link-local-address
+  metric: { ted-link-metric : int }
+  color: admin-groups/color
+  sr-adj-sid-label: {ted-adj-sids/ted-link-p2p-adj-sid/ted-link-p2p-adj-sid-label : int}
+  sr-adj-sid-weight: {ted-adj-sids/ted-link-p2p-adj-sid/ted-link-p2p-adj-sid-weight : int}
+  sr-adj-sid-afi: ted-adj-sids/ted-link-p2p-adj-sid/ted-link-p2p-adj-sid-af
+  sr-adj-sid-flags: ted-adj-sids/ted-link-p2p-adj-sid/ted-link-p2p-adj-sid-flags
+
+
+TedSummaryTable:
+  rpc: get-ted-database-information
+  item: ted-database-summary
+  view: TedSummaryView
+
+TedSummaryView:
+  fields:
+    iso-count: { ted-database-iso-count : int }
+    inet-count: { ted-database-inet-count : int }

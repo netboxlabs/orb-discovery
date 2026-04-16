@@ -1,0 +1,2 @@
+[console_scripts]
+diode-replay-dryrun = netboxlabs.diode.scripts.dryrun_replay:main

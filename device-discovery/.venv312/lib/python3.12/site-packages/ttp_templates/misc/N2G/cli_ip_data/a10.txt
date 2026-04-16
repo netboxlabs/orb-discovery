@@ -1,0 +1,33 @@
+<template name="a10" results="per_template">
+
+<doc>
+Template to parse A10 devices interfaces configuration and IP ARP cache.
+</doc>
+
+<input load="python">
+commands = [
+    "show running-config",
+    "show arp all",
+]
+kwargs = {"strip_prompt": False}
+method = "send_command"
+platform = ["a10"]
+</input>
+
+<vars>local_hostname="gethostname"</vars>
+
+<!-- Interfaces configuration group -->
+<group name="{{ local_hostname }}.interfaces.{{ interface }}">
+interface {{ interface | PHRASE | resuball("IfsNormalize") }}
+  description {{ port_description | re(".+") }}
+  <group name="ip_addresses*" chain="add_network()" method="table">
+  ip address {{ ip | IP }} {{ netmask }}
+  </group>
+</group>
+
+<!-- ARP cache group -->
+<group name="{{ local_hostname }}.interfaces.{{ interface }}.arp*" method="table">
+{{ ip | IP }}  {{ mac | MAC | mac_eui }}  Dynamic  {{ age }}    {{ interface | PHRASE | resuball("IfsNormalize") }}  {{ vlan }} 
+</group>
+
+</template>

@@ -1,0 +1,104 @@
+Value Required INTERFACE (\S*)
+Value LINK_STATUS (.*)
+Value PROTOCOL_STATUS (\S*|\S*\s+\(\w+\))
+Value INTERFACE_DESCRIPTION (.*)
+Value LINK_TYPE (\S+)
+Value PORT_TYPE (\S*)
+Value VLAN_ID (\d+)
+Value TPID (\S+)
+Value MTU (\d+)
+Value HOLD_TIMER (\d+)
+Value IP_ADDRESS (\S*)
+Value IP_STATUS (disabled|enabled)
+Value MAC_ADDRESS (\S{4}-\S{4}-\S{4})
+Value LAST_PHYSICAL_UP_TIME (\S.+\S)
+Value LAST_PHYSICAL_DOWN_TIME (\S.+\S)
+Value LAST_LINE_PROTOCOL_UPTIME (\S.+\S)
+Value CURRENT_SYSTEM_TIME (\S.+\S)
+Value PORT_MODE ([\S\s]*)
+Value CURRENT_WORK_MODE (\S.+\S|\S+)
+Value SPEED (\d*)
+Value LOOPBACK (\S*)
+Value DUPLEX (HALF|FULL)
+Value NEGOTIATION (DISABLE|ENABLE)
+Value List AGGREGATED_INTERFACES (\S+)
+
+Start
+  ^\s*\S*\s+current\s+state\s+:.*$$ -> Continue.Record
+  ^\s*${INTERFACE}\s+current\s+state\s+:\s+${LINK_STATUS}\s*$$
+  ^\s*Line\s+protocol\s+current\s+state\s+:\s+${PROTOCOL_STATUS}\s*$$
+  ^\s*Last\s+line\s+protocol\s+up\s+time\s*:\s*(-|${LAST_LINE_PROTOCOL_UPTIME})\s*$$
+  ^\s*Description:${INTERFACE_DESCRIPTION}\s*$$
+  ^\s*${PORT_TYPE}\s+Port,\s*Link-type\s*:\s*${LINK_TYPE},\s*$$
+  ^\s*${PORT_TYPE}\s+Port,\s*The\s+(MTU|Maximum\s+Transmit\s+Unit)\s+is\s+${MTU}(,\s*Hold\s+timer\s+is\s+${HOLD_TIMER}\(sec\))?\s*$$
+  ^\s*${PORT_TYPE}\s+Port,(\s*PVID\s*:\s*${VLAN_ID},)?\s*TPID\s*:\s*${TPID},\s*The\s+Maximum\s+(Frame\s+Length|Transmit\s+Unit)\s+is\s+${MTU}\s*$$
+  ^\s*TPID\s*:\s*${TPID},\s*The\s+Maximum\s+Frame\s+Length\s+is\s+${MTU}\s*$$
+  ^\s*PVID\s*:\s+${VLAN_ID},(\s*[^,]+,){0,}\s+The\s+Maximum\s+Frame\s+Length\s+is\s+${MTU}
+  ^\s*Internet\s+Address\s+is\s+allocated\s+by\s+DHCP,\s+${IP_ADDRESS}\s*$$
+  ^\s*Internet\s+Address\s+is\s+negotiated,\s+${IP_ADDRESS}\s*$$
+  ^\s*Internet\s+Address\s+is\s+${IP_ADDRESS}\s*$$
+  ^\s*.*,\s+Hardware\s+address\s+is\s+${MAC_ADDRESS}\s*$$
+  ^\s*Internet\s+protocol\s+processing\s+:\s+${IP_STATUS}\s*$$
+  ^\s*Encapsulation\s+is\s.+\s*$$
+  ^\s*Tunnel\s+source\s+\S+\s+\(.+\),\s+destination\s+\S+\s*$$
+  ^\s*Tunnel\s+protocol\/transport\s+GRE\/IP,\s+key\s.+\s*$$
+  ^\s*keepalive\s+\S+\s*$$
+  ^\s*Checksumming\s+of\s+packets\s+\S+\s*$$
+  ^\s*Last\s+physical\s+up\s+time\s*:\s+(-|${LAST_PHYSICAL_UP_TIME})\s*
+  ^\s*Last\s+physical\s+down\s+time\s+:\s+(-|${LAST_PHYSICAL_DOWN_TIME})\s*
+  ^\s*IP\s+Sending\s+Frames'\s+Format\s+is\s+\S+\s*,\s+Hardware\s+address\s+is\s+\S+\s*$$
+  ^\s*Current\s+system\s+time:\s+${CURRENT_SYSTEM_TIME}\s*
+  ^\s*Modem\s+State:\s+.+\s*$$
+  ^\s*Model\s+=\s+.+\s*$$
+  ^\s*Current\s+Network\s+Connection\s+=\s.+\s*$$
+  ^\s*Current\s+RSSI\s+<?=\s+(-)?\d+\s+dBm.*$$
+  ^\s*Current\s+SINR\s+([<>])?=\s+(-)?\d+\s+dB\s+\(.+\)\s*$$
+  ^\s+(In|Out)put\s+bandwidth\s+utilization(\s+threshold)?\s*:.*$$
+  ^\s*Port\s+Mode:\s+${PORT_MODE}\s*$$
+  ^\s*Current\s+Work\s+Mode:\s+${CURRENT_WORK_MODE}\s*$$
+  ^\s*Speed\s+:\s+${SPEED},\s*Loopback:\s+${LOOPBACK}\s*$$
+  ^\s*Duplex:\s+${DUPLEX},\s*Negotiation:\s+${NEGOTIATION}\s*$$
+  ^\s*Mdi\s*:\s+\S+,\s*Clock\s*:\s+\S+\s*$$
+  ^\s*Port\s+PHY\s+type\s+:\s+\S+\s*$$
+  ^\s*Last\s\d+\sseconds\s(input|output)\srate\s(\d+\sbytes\/sec(,)?\s)?\d+\sbits\/sec(,)?\s\d+\spackets\/sec\s*$$
+  ^\s*(Input|Output)\speak\srate\s\d+\sbits\/sec\s*,\s*Record\stime:\s+.*$$
+  ^\s*Link\s+layer\s+protocol\s+is.*$$
+  ^\s*LCP\s+initial\s*$$
+  ^\s*Physical\s+is.*$$
+  ^\s*Bound\s+to.*$$
+  ^\s*LCP\s\S+,\s+IPCP\s\S+(,\s+IP6CP\s\S+)?\s*$$
+  ^\s*Packets\s+statistics:\s*$$
+  ^\s+(Input|Output)\spackets\s*:\s*\d+,\s+\d+\sbytes\s*$$
+  ^\s+FCS\serror\spackets:\s*\d+\s*$$
+  ^\s+Address\serror\spackets:\s*\d+\s*$$
+  ^\s+Control\sfield\scontrol\serror\spackets:\s*\d+\s*$$
+  ^\s+Control\sfield\scontrol\serror\spackets:\s*\d+\s*$$
+  ^\s*(Input|Output)\s*:\s*\d+\spackets,\s+\d+\sbytes\s*$$
+  ^\s+Unicast:\s+(\d|-)+,\s+(Multicast:\s+\d+|Ununicast:\s+(\d|-)+)\s*$$
+  ^\s+Broadcast:\s+(\d|-)+,\s+Jumbo:\s+(\d|-)+\s*$$
+  ^\s+Discard:\s+(\d|-)+,\s+Total\sError:\s+(\d|-)+\s*$$
+  ^\s+CRC:\s+(\d|-)+,\s+Giants:\s+(\d|-)+\s*$$
+  ^\s+Jabbers:\s+(\d|-)+,\s+Throttles:\s+(\d|-)+\s*$$
+  ^\s+Runts:\s+(\d|-)+,\s+Symbols:\s+(\d|-)+\s*$$
+  ^\s+Ignoreds:\s+(\d|-)+,\s+Frames:\s+(\d|-)+\s*$$
+  ^\s+Collisions:\s+(\d|-)+,\s+ExcessiveCollisions:\s+(\d|-)+\s*$$
+  ^\s+Late\sCollisions:\s+(\d|-)+,\s+Deferreds:\s+(\d|-)+\s*$$
+  ^\s+OAM\sCells:\s+(\d|-)+,\s+ASM\sCells:\s+(\d|-)+\s*$$
+  ^\s+Packet\sErrors:\s+(\d|-)+,\s+Packet\sDiscards:\s+(\d|-)+\s*$$
+  ^\s+Cell\sErrors:\s+(\d|-)+\s*$$
+  ^\s*Last\s+\d+\s+seconds
+  ^\s*Input:\s+\d+\s+Packets,\s+\d+\s+Bytes
+  ^\s*Output:\s+\d+\s+Packets,\s+\d+\s+Bytes
+  ^\s*Mdi\s+:\s+
+  ^-{6}
+  ^\s*PortName -> Trunk
+  ^\s+
+  ^. -> Error
+
+Trunk
+  ^\s*-{6}
+  ^\s*${AGGREGATED_INTERFACES}\s+\S+\s+\d+\s*$$
+  ^\s*The\s+Number\s+of\s+Ports\s+in\s+Trunk\s*:\s*\d+\s*$$
+  ^\s*The\s+Number\s+of\s+UP\s+Ports\s+in\s+Trunk\s*:\s*\d+\s*$$
+  ^\s*$$ -> Start
+  ^. -> Error

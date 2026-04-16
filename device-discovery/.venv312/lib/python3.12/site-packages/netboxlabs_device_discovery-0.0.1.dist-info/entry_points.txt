@@ -1,0 +1,2 @@
+[console_scripts]
+device-discovery = device_discovery.main:main

@@ -1,0 +1,27 @@
+Value Required ID (\d+)
+Value Required INTERFACE ([^:]+)
+Value Required FLAGS (\S+)
+Value Required MTU (\d+)
+Value Required QDISC (\S+)
+Value Required STATE (\S+)
+Value MODE (\S+)
+Value GROUP (\S+)
+Value QLEN (\d+)
+Value MASTER (\S+)
+Value Required TYPE (\S+)
+Value MAC_ADDRESS ([a-fA-F0-9]{2}:[a-fA-F0-9]{2}:[a-fA-F0-9]{2}:[a-fA-F0-9]{2}:[a-fA-F0-9]{2}:[a-fA-F0-9]{2})
+Value BROADCAST ([a-fA-F0-9]{2}:[a-fA-F0-9]{2}:[a-fA-F0-9]{2}:[a-fA-F0-9]{2}:[a-fA-F0-9]{2}:[a-fA-F0-9]{2})
+Value PERMANENT_MAC ([a-fA-F0-9]{2}:[a-fA-F0-9]{2}:[a-fA-F0-9]{2}:[a-fA-F0-9]{2}:[a-fA-F0-9]{2}:[a-fA-F0-9]{2})
+Value ALIAS (.+)
+
+Start
+  ^\d+ -> Continue.Record
+  ^${ID}:\s+${INTERFACE}:\s+<${FLAGS}>\s+mtu\s+${MTU}\s+qdisc\s+${QDISC}(?:\s+master\s+${MASTER})?\s+state\s+${STATE}(?:\s+mode\s+${MODE})?(?:\s+group\s+${GROUP})?(?:\s+qlen\s+${QLEN})?\s*$$ -> Continue
+  # Link type and MAC address
+  ^\s+link/${TYPE}\s*$$
+  ^\s+link/${TYPE}\s+${MAC_ADDRESS}\s+brd\s+${BROADCAST}(?:\s+permaddr\s+${PERMANENT_MAC})?\s*$$
+  ^\s+alias\s+${ALIAS}$$
+  ^\d+
+  ^\s+
+  ^. -> Error
+
