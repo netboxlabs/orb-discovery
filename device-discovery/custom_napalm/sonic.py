@@ -143,44 +143,73 @@ _STATUS_RE = re.compile(r"^(up|down|N/A)$", re.IGNORECASE)
 _SPEED_RE = re.compile(r"^\d+(?:\.\d+)?[GTMgtm]?$")
 
 
-def _parse_interface_line(fields: list[str]) -> dict | None:
+def _parse_intf_status_header(output: str) -> dict[str, int]:
+    """
+    Return a mapping of uppercase column name → token index (after interface name).
+
+    Parses the first header line that contains both ``Admin`` and ``Oper``
+    labels so callers can look up the exact column position of each field,
+    handling both ``Admin Oper`` and ``Oper Admin`` orderings.  Returns an
+    empty dict when no header is found.
+    """
+    for line in output.splitlines():
+        stripped = line.strip()
+        if re.search(r"\bAdmin\b", stripped, re.IGNORECASE) and re.search(r"\bOper\b", stripped, re.IGNORECASE):
+            tokens = stripped.split()
+            # Skip the first token (Name/Interface label itself)
+            return {t.upper(): i for i, t in enumerate(tokens[1:])}
+    return {}
+
+
+def _parse_interface_line(fields: list[str], col_map: dict[str, int]) -> dict | None:
     """
     Parse the column tokens after the interface name into a dict.
 
-    Scans for the first two status tokens (``up``/``down``/``N/A``) rather
-    than assuming fixed column positions, so formats that include extra
-    columns before the status fields (e.g. Lanes/Alias) are handled
-    correctly.  Returns ``None`` when fewer than two status tokens are found.
+    Uses *col_map* (derived from the header row) to locate the Admin, Oper,
+    and Speed columns by name, so any column ordering is handled correctly.
+    Falls back to scanning for ``up``/``down``/``N/A`` tokens when the header
+    is unavailable.  Returns ``None`` when status columns cannot be found.
     """
-    # Collect indices of status tokens (up/down/N/A)
-    status_indices = [i for i, t in enumerate(fields) if _STATUS_RE.match(t)]
-    if len(status_indices) < 2:
-        return None
+    admin_col = col_map.get("ADMIN", -1)
+    oper_col = col_map.get("OPER", -1)
+    speed_col = col_map.get("SPEED", -1)
 
-    admin_idx, oper_idx = status_indices[0], status_indices[1]
-    admin_status = _parse_status(fields[admin_idx])
-    oper_status = _parse_status(fields[oper_idx])
+    # --- Admin / Oper status ---
+    if admin_col >= 0 and oper_col >= 0 and max(admin_col, oper_col) < len(fields):
+        admin_status = _parse_status(fields[admin_col])
+        oper_status = _parse_status(fields[oper_col])
+        after_status = max(admin_col, oper_col) + 1
+    else:
+        # Fallback: first two up/down/N/A tokens
+        status_indices = [i for i, t in enumerate(fields) if _STATUS_RE.match(t)]
+        if len(status_indices) < 2:
+            return None
+        admin_status = _parse_status(fields[status_indices[0]])
+        oper_status = _parse_status(fields[status_indices[1]])
+        after_status = status_indices[1] + 1
 
-    # MTU is the last numeric-only token > 64
+    # --- Speed ---
+    if speed_col >= 0 and speed_col < len(fields):
+        speed = _parse_speed(fields[speed_col])
+        desc_start = max(after_status, speed_col + 1)
+    else:
+        speed = -1.0
+        desc_start = after_status
+        for i, token in enumerate(fields[after_status:], start=after_status):
+            if _SPEED_RE.match(token):
+                speed = _parse_speed(token)
+                desc_start = i + 1
+                break
+
+    # --- MTU: last numeric-only token > 64 ---
     mtu = -1
     for token in reversed(fields):
         if re.fullmatch(r"\d+", token) and int(token) > 64:
             mtu = int(token)
             break
 
-    # Speed is the first speed-like token after the two status fields
-    speed = -1.0
-    speed_idx = -1
-    after_status = max(admin_idx, oper_idx) + 1
-    for i, token in enumerate(fields[after_status:], start=after_status):
-        if _SPEED_RE.match(token) and token != str(mtu):
-            speed = _parse_speed(token)
-            speed_idx = i
-            break
-
-    # Description is the tokens between speed and MTU
-    start = (speed_idx + 1) if speed_idx >= 0 else after_status
-    desc_tokens = [t for t in fields[start:] if t != str(mtu)]
+    # --- Description: tokens between speed and MTU ---
+    desc_tokens = [t for t in fields[desc_start:] if t != str(mtu)]
     description = " ".join(desc_tokens)
 
     return {
@@ -283,15 +312,16 @@ class SONiCDriver(_napalm_base.NetworkDriver):
         if not output:
             return {}
 
+        # Parse header once to learn column order (Admin/Oper/Speed may vary)
+        col_map = _parse_intf_status_header(output)
         interfaces = {}
         for line in output.splitlines():
-            # Tolerant parser: match interface name, then extract known
-            # fields from the remaining columns.  Accepts admin/oper states
-            # of up/down/N/A and allows extra columns (lanes, alias, etc.).
+            # Tolerant parser: match interface name, then delegate to
+            # _parse_interface_line which uses col_map for correct ordering.
             m = re.match(_INTF_RE + r"\s+(.+)", line)
             if not m:
                 continue
-            parsed = _parse_interface_line(m.group(2).split())
+            parsed = _parse_interface_line(m.group(2).split(), col_map)
             if parsed is not None:
                 interfaces[m.group(1)] = parsed
 
