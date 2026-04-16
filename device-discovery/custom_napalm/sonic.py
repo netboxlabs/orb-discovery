@@ -317,10 +317,11 @@ class SONiCDriver(_napalm_base.NetworkDriver):
 
         uptime = _parse_uptime(fields["uptime"]) if "uptime" in fields else -1.0
 
-        # Build interface list from show interfaces status
-        interface_list = _extract_interface_names(
-            self.device.send_command("show interfaces status")
+        # Build interface list — try both plural and singular command forms
+        intf_status_output = _send_first_nonempty(
+            self.device, ("show interfaces status", "show interface status")
         )
+        interface_list = _extract_interface_names(intf_status_output)
 
         return {
             "hostname": fields.get("hostname", "Unknown"),
@@ -335,7 +336,10 @@ class SONiCDriver(_napalm_base.NetworkDriver):
 
     def get_interfaces(self) -> dict:
         """Return interface details keyed by interface name."""
-        output = self.device.send_command("show interfaces status")
+        # Try both plural and singular command forms
+        output = _send_first_nonempty(
+            self.device, ("show interfaces status", "show interface status")
+        )
         if not output:
             return {}
 
@@ -409,9 +413,11 @@ class SONiCDriver(_napalm_base.NetworkDriver):
 
         vlans: dict = {}
         for line in output.splitlines():
-            # Tolerate both space-delimited and pipe-delimited table formats
+            # Tolerate both space-delimited (2+ spaces as separator) and
+            # pipe-delimited formats; use non-greedy name capture so VLAN
+            # names that contain embedded spaces are matched correctly.
             m = re.match(
-                r"\s*\|?\s*(\d+)\s*\|?\s*(\S+)\s*\|?\s*(.*?)\s*\|?\s*(active|suspend)\s*\|?\s*$",
+                r"\s*\|?\s*(\d+)\s*(?:\|\s*|\s{2,})(.+?)\s*(?:\|\s*|\s{2,})(.*?)\s*(?:\|\s*|\s{2,})(active|suspend)\s*\|?\s*$",
                 line,
                 re.IGNORECASE,
             )
@@ -424,6 +430,15 @@ class SONiCDriver(_napalm_base.NetworkDriver):
                 }
 
         return vlans
+
+
+def _send_first_nonempty(device, commands: tuple[str, ...]) -> str:
+    """Send *commands* in order and return the first non-empty response."""
+    for cmd in commands:
+        out = device.send_command(cmd)
+        if out:
+            return out
+    return ""
 
 
 def _extract_interface_names(output: str) -> list[str]:
