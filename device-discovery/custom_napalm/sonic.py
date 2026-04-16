@@ -469,39 +469,87 @@ class SONiCDriver(_napalm_base.NetworkDriver):
 
     def get_vlans(self) -> dict:
         """Return VLAN information keyed by VLAN ID string."""
-        output = self.device.send_command("show vlan brief")
+        output = _send_first_nonempty(self.device, ("show vlan brief", "show vlan"))
         if not output:
             return {}
+        return _parse_vlan_output(output)
 
-        vlans: dict = {}
-        last_vlan_id: str | None = None
-        for line in output.splitlines():
-            # Tolerate both space-delimited (2+ spaces as separator) and
-            # pipe-delimited formats; use non-greedy name capture so VLAN
-            # names that contain embedded spaces are matched correctly.
-            m = re.match(
-                r"\s*\|?\s*(\d+)\s*(?:\|\s*|\s{2,})(.+?)\s*(?:\|\s*|\s{2,})(.*?)\s*(?:\|\s*|\s{2,})(active|suspend)\s*\|?\s*$",
-                line,
-                re.IGNORECASE,
-            )
-            if m:
-                name = m.group(2).strip()
-                members_str = m.group(3).strip()
-                last_vlan_id = m.group(1)
-                vlans[last_vlan_id] = {
-                    "name": name,
-                    "interfaces": [i.strip() for i in members_str.split(",") if i.strip()] if members_str else [],
-                }
-            elif last_vlan_id:
-                # Continuation line: extra member ports wrapped from the previous row
-                stripped = line.strip().strip("|").strip()
-                if re.search(r"\b(?:Ethernet|PortChannel|Vlan|Loopback|Management|Eth)\d", stripped):
-                    extras = [i.strip() for i in stripped.split(",") if i.strip()]
-                    vlans[last_vlan_id]["interfaces"].extend(extras)
-                else:
-                    last_vlan_id = None  # non-member continuation resets context
 
-        return vlans
+def _members_from_str(members_str: str) -> list[str]:
+    """Split a comma-separated member-ports string into a clean list."""
+    return [i.strip() for i in members_str.split(",") if i.strip()]
+
+
+def _parse_vlan_output(output: str) -> dict:
+    """
+    Parse ``show vlan brief`` or ``show vlan`` output into a VLAN dict.
+
+    Handles two formats:
+
+    **Format A** (``show vlan brief``) — four columns with status last::
+
+        VLAN ID  VLAN Name   Member Ports            Status
+        100      Servers     Ethernet0,Ethernet4     active
+
+    **Format B** (``show vlan``) — ``VLANID Status Q Ports`` layout used
+    by Dell Enterprise SONiC, with optional wrapped port continuation lines::
+
+        VLAN  Status    Q  Ports
+        100   Active    A  Ethernet0
+                        T  Ethernet4
+        200   Active    T  Management0
+
+    Both formats tolerate pipe delimiters and wrapped member lines.
+    """
+    vlans: dict = {}
+    last_vlan_id: str | None = None
+
+    for line in output.splitlines():
+        # --- Format A: VLANID  [Name]  [Members]  active|suspend ---
+        m_a = re.match(
+            r"\s*\|?\s*(\d+)\s*(?:\|\s*|\s{2,})(.+?)\s*(?:\|\s*|\s{2,})(.*?)\s*(?:\|\s*|\s{2,})(active|suspend)\s*\|?\s*$",
+            line,
+            re.IGNORECASE,
+        )
+        if m_a:
+            last_vlan_id = m_a.group(1)
+            vlans[last_vlan_id] = {
+                "name": m_a.group(2).strip(),
+                "interfaces": _members_from_str(m_a.group(3)),
+            }
+            continue
+
+        # --- Format B: VLANID  Status  Q  Ports (Dell SONiC show vlan) ---
+        m_b = re.match(
+            r"\s*(\d+)\s+(active|suspend|inactive)\s+[ATUS+]\s*(.*)",
+            line,
+            re.IGNORECASE,
+        )
+        if m_b:
+            last_vlan_id = m_b.group(1)
+            # No VLAN name in this format; use ID as name
+            ports_raw = m_b.group(3).strip()
+            vlans[last_vlan_id] = {
+                "name": last_vlan_id,
+                "interfaces": _members_from_str(ports_raw) if ports_raw else [],
+            }
+            continue
+
+        # --- Continuation line: wrapped member ports from previous row ---
+        if last_vlan_id:
+            stripped = line.strip().strip("|").strip()
+            # Format B continuation: optional Q indicator then interface name(s)
+            m_cont = re.match(r"[ATUS+]\s+(.*)", stripped)
+            if m_cont:
+                stripped = m_cont.group(1).strip()
+            if stripped and re.search(
+                r"\b(?:Ethernet|PortChannel|Vlan|Loopback|Management|Eth)\d", stripped
+            ):
+                vlans[last_vlan_id]["interfaces"].extend(_members_from_str(stripped))
+            elif stripped and not re.match(r"[-=+|*]", stripped):
+                last_vlan_id = None  # non-member, non-separator line resets context
+
+    return vlans
 
 
 _CLI_ERROR_RE = re.compile(
