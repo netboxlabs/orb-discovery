@@ -414,7 +414,11 @@ class SONiCDriver(_napalm_base.NetworkDriver):
         # command is valid, and an unsupported command returns error text (non-empty)
         # rather than an empty string, so checking for emptiness alone is unreliable.
         # Parsing both and merging ensures coverage regardless of device variant.
-        ipv4_re = re.compile(r"^\s*" + _INTF_RE + r"\s+(\d+\.\d+\.\d+\.\d+)/(\d+)")
+        # Optional non-IP token between interface name and address handles
+        # VRF/Master columns (e.g. "Loopback11 Vrf-red 11.1.1.1/32").
+        ipv4_re = re.compile(
+            r"^\s*" + _INTF_RE + r"\s+(?:\S+\s+)?(\d+\.\d+\.\d+\.\d+)/(\d+)"
+        )
         for cmd in ("show ip interfaces", "show ip interface"):
             for line in self.device.send_command(cmd).splitlines():
                 m = ipv4_re.match(line)
@@ -423,7 +427,9 @@ class SONiCDriver(_napalm_base.NetworkDriver):
                         "prefix_length": int(m.group(3))
                     }
 
-        ipv6_re = re.compile(r"^\s*" + _INTF_RE + r"\s+([0-9a-fA-F:]+)/(\d+)")
+        ipv6_re = re.compile(
+            r"^\s*" + _INTF_RE + r"\s+(?:\S+\s+)?([0-9a-fA-F:]+)/(\d+)"
+        )
         for cmd in ("show ipv6 interfaces", "show ipv6 interface"):
             for line in self.device.send_command(cmd).splitlines():
                 m = ipv6_re.match(line)
@@ -527,27 +533,35 @@ def _parse_vlan_output(output: str) -> dict:
         )
         if m_b:
             last_vlan_id = m_b.group(1)
-            # No VLAN name in this format; use ID as name
+            # No VLAN name in this format; use ID as name.
+            # Extract only recognised interface names from the ports field;
+            # extra columns (Autostate, Dynamic, …) are ignored.
             ports_raw = m_b.group(3).strip()
             vlans[last_vlan_id] = {
                 "name": last_vlan_id,
-                "interfaces": _members_from_str(ports_raw) if ports_raw else [],
+                "interfaces": re.findall(_INTF_RE, ports_raw) if ports_raw else [],
             }
             continue
 
         # --- Continuation line: wrapped member ports from previous row ---
         if last_vlan_id:
             stripped = line.strip().strip("|").strip()
-            # Format B continuation: optional Q indicator then interface name(s)
+            # Skip blank lines and table-separator lines but keep context
+            if not stripped or re.match(r"^[-=+|*\s]+$", stripped):
+                continue
+            # Format B continuation: strip optional Q indicator prefix (A/T/U/S/+)
             m_cont = re.match(r"[ATUS+]\s+(.*)", stripped)
             if m_cont:
                 stripped = m_cont.group(1).strip()
-            if stripped and re.search(
-                r"\b(?:Ethernet|PortChannel|Vlan|Loopback|Management|Eth)\d", stripped
-            ):
-                vlans[last_vlan_id]["interfaces"].extend(_members_from_str(stripped))
-            elif stripped and not re.match(r"[-=+|*]", stripped):
-                last_vlan_id = None  # non-member, non-separator line resets context
+            # Collect any recognised interface names on this line; if none are
+            # found don't reset context — extra-column continuation lines like
+            # "Vxlan_tunnel0" or "Enable No" simply contribute nothing.
+            intfs = re.findall(_INTF_RE, stripped)
+            if intfs:
+                vlans[last_vlan_id]["interfaces"].extend(intfs)
+            elif re.match(r"^\d+\s", stripped):
+                # A new VLAN ID row is about to be processed in the next iteration
+                last_vlan_id = None
 
     return vlans
 
