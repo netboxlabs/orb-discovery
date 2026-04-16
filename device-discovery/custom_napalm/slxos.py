@@ -155,12 +155,13 @@ _INTF_BRIEF_RE = re.compile(
 )
 
 # --- vlan brief parsing ---------------------------------------------------- #
-# Matches leading VLAN row; name may contain spaces so we capture greedily up to
-# the state keyword (ACTIVE|INACTIVE — case-insensitive), then gathers port
-# tokens from the remainder of the line.
+# Matches leading VLAN row.  The name capture uses a greedy (.+) so that VLAN
+# names that themselves contain the word "active" or "inactive" (e.g.
+# "User active zone") are captured in full: the greedy match backtracks to the
+# LAST occurrence of the state keyword, which is the actual State column.
 # Example: "10    Voice User      ACTIVE   Eth 0/1(u) Eth 0/2(u)"
 _VLAN_ROW_RE = re.compile(
-    r"^(\d+)\s+(.*?)\s+(?:active|inactive)\s*(.*)?$",
+    r"^(\d+)\s+(.+)\s+(?:active|inactive)\s*(.*)?$",
     re.M | re.IGNORECASE,
 )
 # Port tokens like "Eth 0/1" or "Po 1" (with optional trailing "(u)"/"(t)" suffix)
@@ -178,6 +179,34 @@ _MGMT_IP_RE = re.compile(
     r"^\s*(Management\s+\S+)\s+(\d[\d.]+(?:/\d+)?)\s",
     re.IGNORECASE,
 )
+# Regex fallback covering all known interface types, used when ntc-template
+# parse_output() fails entirely so no interface address is silently dropped.
+_INTF_IP_FALLBACK_RE = re.compile(
+    r"^\s*((?:Ethernet|Management|Port-channel|Loopback|Ve)\s+\S+)\s+(\d[\d.]+(?:/\d+)?)\s",
+    re.IGNORECASE,
+)
+
+
+def _record_ip(interfaces_ip: dict, intf: str, ip_addr: str) -> None:
+    """
+    Insert one IP address entry into the interfaces_ip accumulator.
+
+    Silently skips unassigned or malformed entries.
+    """
+    if not intf or not ip_addr or ip_addr == "unassigned":
+        return
+    if "/" in ip_addr:
+        ip, prefix_str = ip_addr.split("/", 1)
+        try:
+            prefix_len = int(prefix_str)
+        except ValueError:
+            logger.warning("slxos: unparseable prefix %r on %s; skipping", ip_addr, intf)
+            return
+    else:
+        ip, prefix_len = ip_addr, 32
+    interfaces_ip.setdefault(intf, {}).setdefault("ipv4", {})[ip] = {
+        "prefix_length": prefix_len
+    }
 
 
 def _expand_vlan_port(token: str) -> str:
@@ -350,37 +379,29 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
         except Exception:
             logger.warning(
                 "slxos: ntc-template failed for 'show ip interface brief'; "
-                "continuing with Management-line fallback only",
+                "falling back to regex for all interface types",
                 exc_info=True,
             )
-            parsed = []
+            parsed = None  # signals full regex fallback below
 
         interfaces_ip: dict = {}
 
-        def _add_ip(intf: str, ip_addr: str) -> None:
-            if not intf or not ip_addr or ip_addr == "unassigned":
-                return
-            if "/" in ip_addr:
-                ip, prefix_str = ip_addr.split("/", 1)
-                try:
-                    prefix_len = int(prefix_str)
-                except ValueError:
-                    logger.warning("slxos: unparseable prefix %r on %s; skipping", ip_addr, intf)
-                    return
-            else:
-                ip, prefix_len = ip_addr, 32
-            interfaces_ip.setdefault(intf, {}).setdefault("ipv4", {})[ip] = {
-                "prefix_length": prefix_len
-            }
+        if parsed is None:
+            # TextFSM failed: fall back to regex so no interface type is dropped.
+            for line in lines:
+                m = _INTF_IP_FALLBACK_RE.match(line)
+                if m:
+                    _record_ip(interfaces_ip, m.group(1).strip(), m.group(2).strip())
+        else:
+            for row in parsed:
+                _record_ip(interfaces_ip, row.get("interface", "").strip(), row.get("ip_address", "").strip())
 
-        for row in parsed:
-            _add_ip(row.get("interface", "").strip(), row.get("ip_address", "").strip())
-
-        # Collect Management interface IPs parsed separately.
-        for line in lines:
-            m = _MGMT_IP_RE.match(line)
-            if m:
-                _add_ip(m.group(1).strip(), m.group(2).strip())
+            # Collect Management interface IPs parsed separately (ntc-template
+            # strips them to avoid TextFSMError on those rows).
+            for line in lines:
+                m = _MGMT_IP_RE.match(line)
+                if m:
+                    _record_ip(interfaces_ip, m.group(1).strip(), m.group(2).strip())
 
         return interfaces_ip
 
