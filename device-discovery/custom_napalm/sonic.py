@@ -22,31 +22,31 @@ logger = logging.getLogger(__name__)
 # Config sanitisation — Dell SONiC sensitive patterns
 # ---------------------------------------------------------------------------
 _PASSWORD_RE = re.compile(
-    r"((?:encrypted-password|password|auth-password)\s+)\S+",
+    r"((?:encrypted-password|password|auth-password)\s+)(?:\d+\s+)?\S+",
     re.IGNORECASE,
 )
 _TACACS_KEY_RE = re.compile(
-    r"(tacacs-server\s+.*\s+key\s+)\S+",
+    r"(tacacs-server\s+.*\s+key\s+)(?:\d+\s+)?\S+",
     re.IGNORECASE,
 )
 _RADIUS_KEY_RE = re.compile(
-    r"(radius-server\s+.*\s+key\s+)\S+",
+    r"(radius-server\s+.*\s+key\s+)(?:\d+\s+)?\S+",
     re.IGNORECASE,
 )
 _SNMP_COMMUNITY_RE = re.compile(
-    r"(snmp-server\s+community\s+)\S+",
+    r"(snmp-server\s+community\s+)(?:\d+\s+)?\S+",
     re.IGNORECASE,
 )
 _SECRET_RE = re.compile(
-    r"(\bsecret\s+)\S+",
+    r"(\bsecret\s+)(?:\d+\s+)?\S+",
     re.IGNORECASE,
 )
 _ENABLE_PASSWORD_RE = re.compile(
-    r"(enable\s+password\s+)\S+",
+    r"(enable\s+password\s+)(?:\d+\s+)?\S+",
     re.IGNORECASE,
 )
 _BGP_PASSWORD_RE = re.compile(
-    r"(neighbor\s+\S+\s+password\s+)\S+",
+    r"(neighbor\s+\S+\s+password\s+)(?:\d+\s+)?\S+",
     re.IGNORECASE,
 )
 
@@ -357,25 +357,23 @@ class SONiCDriver(_napalm_base.NetworkDriver):
         """Return IP addresses per interface."""
         interfaces_ip: dict = {}
 
-        # --- IPv4: try plural form first (Dell SONiC), fall back to singular ---
-        ipv4_out = self.device.send_command("show ip interfaces")
-        if not ipv4_out:
-            ipv4_out = self.device.send_command("show ip interface")
-        if ipv4_out:
-            for line in ipv4_out.splitlines():
-                m = re.match(r"^\s*" + _INTF_RE + r"\s+(\d+\.\d+\.\d+\.\d+)/(\d+)", line)
+        # Issue both the plural and singular forms; SONiC versions differ on which
+        # command is valid, and an unsupported command returns error text (non-empty)
+        # rather than an empty string, so checking for emptiness alone is unreliable.
+        # Parsing both and merging ensures coverage regardless of device variant.
+        ipv4_re = re.compile(r"^\s*" + _INTF_RE + r"\s+(\d+\.\d+\.\d+\.\d+)/(\d+)")
+        for cmd in ("show ip interfaces", "show ip interface"):
+            for line in self.device.send_command(cmd).splitlines():
+                m = ipv4_re.match(line)
                 if m:
                     interfaces_ip.setdefault(m.group(1), {}).setdefault("ipv4", {})[m.group(2)] = {
                         "prefix_length": int(m.group(3))
                     }
 
-        # --- IPv6: try plural form first (Dell SONiC), fall back to singular ---
-        ipv6_out = self.device.send_command("show ipv6 interfaces")
-        if not ipv6_out:
-            ipv6_out = self.device.send_command("show ipv6 interface")
-        if ipv6_out:
-            for line in ipv6_out.splitlines():
-                m = re.match(r"^\s*" + _INTF_RE + r"\s+([0-9a-fA-F:]+)/(\d+)", line)
+        ipv6_re = re.compile(r"^\s*" + _INTF_RE + r"\s+([0-9a-fA-F:]+)/(\d+)")
+        for cmd in ("show ipv6 interfaces", "show ipv6 interface"):
+            for line in self.device.send_command(cmd).splitlines():
+                m = ipv6_re.match(line)
                 if m:
                     interfaces_ip.setdefault(m.group(1), {}).setdefault("ipv6", {})[m.group(2)] = {
                         "prefix_length": int(m.group(3))
@@ -415,6 +413,7 @@ class SONiCDriver(_napalm_base.NetworkDriver):
             m = re.match(
                 r"\s*\|?\s*(\d+)\s*\|?\s*(\S+)\s*\|?\s*(.*?)\s*\|?\s*(active|suspend)\s*\|?\s*$",
                 line,
+                re.IGNORECASE,
             )
             if m:
                 name = m.group(2).strip()
