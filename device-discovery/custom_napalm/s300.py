@@ -80,9 +80,13 @@ def _expand_interface_range(range_str: str) -> list[str]:
     return result
 
 
-# Matches a single interface token (with optional range) in `show vlan` output.
-# Used by _parse_vlan_ports_raw to extract ports from wrapped continuation lines.
+# Matches a VLAN data row (leading optional space, digits, then a space).
 _VLAN_ROW_RE = re.compile(r"^\s*(\d+)\s")
+# Detects the column-separator line and captures the start of the Ports dash group,
+# e.g. "---- ----------------- --------------------------- ----------------"
+#       ^id   ^name              ^ports (group 1)           ^created-by
+_VLAN_SEP_RE = re.compile(r"^-{4}\s+-+\s+(-+)")
+# Interface token (with optional range) used inside the Ports column only.
 _INTF_TOKEN_RE = re.compile(r"\b((?:fa|gi|te|po)\d+(?:-\d+)?)\b", re.IGNORECASE)
 
 
@@ -152,17 +156,34 @@ def _parse_vlan_ports_raw(raw: str) -> dict[str, list[str]]:
     tokens found on continuation lines to the last-seen VLAN, giving a complete
     membership list regardless of how many ports a VLAN has.
 
+    Only the Ports column (and onwards) is scanned for tokens — the VLAN name
+    column is excluded so that interface-like names (e.g. ``gi1-uplink``) are
+    never mistaken for member ports. The column offset is derived from the
+    separator line (``---- -...-- -...-``).
+
     """
     vlan_ports: dict[str, list[str]] = {}
     current_id: str | None = None
+    ports_col: int | None = None
 
     for line in raw.splitlines():
+        # Detect the Ports column offset from the separator line, e.g.:
+        # "---- ----------------- --------------------------- ----------------"
+        sep_m = _VLAN_SEP_RE.match(line)
+        if sep_m:
+            ports_col = sep_m.start(1)
+            continue
+
         m = _VLAN_ROW_RE.match(line)
         if m:
             current_id = m.group(1)
         if current_id is None:
             continue
-        for token in _INTF_TOKEN_RE.findall(line):
+
+        # Restrict token search to the Ports column so that interface-like
+        # tokens in the VLAN name are not treated as member ports.
+        search_text = line[ports_col:] if ports_col is not None else line
+        for token in _INTF_TOKEN_RE.findall(search_text):
             expanded = _expand_interface_range(token)
             entry = vlan_ports.setdefault(current_id, [])
             for intf in expanded:
