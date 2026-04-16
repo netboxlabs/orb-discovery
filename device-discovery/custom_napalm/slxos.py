@@ -16,7 +16,8 @@ import re
 import napalm.base as _napalm_base
 from napalm.base import models
 from napalm.base.netmiko_helpers import netmiko_args
-from ntc_templates.parse import parse_output
+from ntc_templates.parse import ParsingException, parse_output
+from textfsm import TextFSMError
 
 # socket.error is an alias for OSError in Python 3; no socket import needed.
 
@@ -103,17 +104,19 @@ def _parse_uptime(uptime_str: str) -> float:
     """
     Convert an SLX-OS uptime string to seconds.
 
-    Handles the format: "X days, X hours, X minutes, X seconds"
-    as well as partial forms (e.g. "5 hours, 2 minutes, 10 seconds").
+    Handles both the long form  ("X days, X hours, X minutes, X seconds")
+    and the compact abbreviation form ("0days 4hrs 52mins 22secs") emitted
+    by some SLX-OS firmware versions.  The digit and unit may be separated
+    by optional whitespace in either form.
     """
     seconds = 0.0
     for pattern, factor in (
-        (r"(\d+)\s+year", _YEAR_SECONDS),
-        (r"(\d+)\s+week", _WEEK_SECONDS),
-        (r"(\d+)\s+day", _DAY_SECONDS),
-        (r"(\d+)\s+hour", _HOUR_SECONDS),
-        (r"(\d+)\s+minute", 60),
-        (r"(\d+)\s+second", 1),
+        (r"(\d+)\s*(?:years?|yr)", _YEAR_SECONDS),
+        (r"(\d+)\s*(?:weeks?|wk)", _WEEK_SECONDS),
+        (r"(\d+)\s*days?", _DAY_SECONDS),
+        (r"(\d+)\s*(?:hours?|hrs?)", _HOUR_SECONDS),
+        (r"(\d+)\s*(?:minutes?|mins?)", 60),
+        (r"(\d+)\s*(?:seconds?|secs?)", 1),
     ):
         m = re.search(pattern, uptime_str, re.IGNORECASE)
         if m:
@@ -376,7 +379,7 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
                 command="show ip interface brief",
                 data=filtered,
             )
-        except Exception:
+        except (TextFSMError, ParsingException):
             logger.warning(
                 "slxos: ntc-template failed for 'show ip interface brief'; "
                 "falling back to regex for all interface types",
@@ -414,6 +417,7 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
     ) -> models.ConfigDict:
         """Return device configuration."""
         config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
+        retrieve = retrieve.lower()
 
         if retrieve in ("all", "running"):
             config["running"] = self.device.send_command("show running-config")
