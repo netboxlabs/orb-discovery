@@ -22,7 +22,6 @@ import re
 
 import napalm.base as _napalm_base
 from napalm.base import models
-from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
 
 logger = logging.getLogger(__name__)
@@ -295,12 +294,6 @@ class SRLDriver(_napalm_base.NetworkDriver):
         parsed = _parse_interface_output(intf_out)
         interfaces = {}
         for entry in parsed:
-            mac_raw = entry.get("mac_address", "")
-            try:
-                mac_address = normalize_mac(mac_raw) if mac_raw else ""
-            except Exception:
-                mac_address = mac_raw
-
             interfaces[entry["name"]] = {
                 "is_up": entry["is_up"],
                 "is_enabled": entry["is_enabled"],
@@ -308,7 +301,7 @@ class SRLDriver(_napalm_base.NetworkDriver):
                 "last_flapped": -1.0,
                 "mtu": entry["mtu"],
                 "speed": entry["speed"],
-                "mac_address": mac_address,
+                "mac_address": "",
             }
 
         return interfaces
