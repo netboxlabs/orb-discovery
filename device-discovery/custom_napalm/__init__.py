@@ -1,6 +1,6 @@
 """Custom NAPALM drivers shipped with device-discovery."""
 
-from custom_napalm.aos import AOSDriver
+from custom_napalm.alcatel_aos import AlcatelAOSDriver
 from custom_napalm.aoscx import AOSCXDriver
 from custom_napalm.aoscx_ssh import AOSCXSSHDriver
 from custom_napalm.apic import APICDriver
@@ -27,6 +27,7 @@ from custom_napalm.panos_ssh import PANOSSHDriver
 from custom_napalm.powerconnect import PowerConnectDriver
 from custom_napalm.procurve import ProcurveDriver
 from custom_napalm.ros import ROSDriver
+from custom_napalm.s300 import S300Driver
 from custom_napalm.saos import SAOSDriver
 from custom_napalm.slxos import SLXOSDriver
 from custom_napalm.sros import SROSDriver
@@ -37,7 +38,7 @@ from custom_napalm.vsp import VSPDriver
 from custom_napalm.wlc import WLCDriver
 
 __all__ = [
-    "AOSDriver",
+    "AlcatelAOSDriver",
     "APICDriver",
     "ArubaOSDriver",
     "ArubaOSSDriver",
@@ -63,6 +64,7 @@ __all__ = [
     "PowerConnectDriver",
     "ProcurveDriver",
     "ROSDriver",
+    "S300Driver",
     "SAOSDriver",
     "SLXOSDriver",
     "SROSDriver",
