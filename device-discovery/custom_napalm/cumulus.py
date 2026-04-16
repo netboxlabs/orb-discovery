@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Config sanitization — Cumulus Linux / NCLU sensitive fields
 # ---------------------------------------------------------------------------
 
-# NCLU / Quagga / FRRouting style: `neighbor <peer> password <secret>`
+# FRR / Quagga BGP: `neighbor <peer> password <secret>`
 _BGP_PASSWORD_RE = re.compile(
     r"(neighbor\s+\S+\s+password)\s+\S+",
     re.IGNORECASE,
@@ -43,18 +43,63 @@ _OSPF_MD5_KEY_RE = re.compile(
     r"(ip\s+ospf\s+message-digest-key\s+\d+\s+md5)\s+\S+",
     re.IGNORECASE,
 )
-# SNMP community strings: `readonly-community <name>` /
-# `trap-destination-community <name>` / `readwrite-community <name>`
+# FRR key chains (OSPF/ISIS/BFD): `key-string <secret>`.
+_KEY_STRING_RE = re.compile(r"(\bkey-string)\s+\S+", re.IGNORECASE)
+# FRR vty `enable password <pw>` and `password <level|type> <pw>` lines.
+_ENABLE_PASSWORD_RE = re.compile(r"(\benable\s+password)\s+\S+", re.IGNORECASE)
+_FRR_PASSWORD_RE = re.compile(
+    r"(^\s*password(?:\s+\d+)?)\s+\S+",
+    re.IGNORECASE | re.MULTILINE,
+)
+# NCLU/NVUE SNMP community fields and the native snmpd.conf syntax.
 _SNMP_COMMUNITY_RE = re.compile(
     r"((?:readonly|readwrite|trap-destination)-community)\s+\S+",
     re.IGNORECASE,
 )
-# NCLU NCLU-style community: `snmp-server community <name>`
 _SNMP_SERVER_COMMUNITY_RE = re.compile(
     r"(snmp-server\s+community)\s+\S+",
     re.IGNORECASE,
 )
-# NTP auth key lines: `key <n> <type> <secret>`  (inside /etc/ntp.keys)
+_SNMPD_ROCOMM_RE = re.compile(
+    r"(^\s*(?:rocommunity|rwcommunity|rocommunity6|rwcommunity6))\s+\S+",
+    re.IGNORECASE | re.MULTILINE,
+)
+# `com2sec[6] <secname> <source> <community>` — community is the last token.
+_SNMPD_COM2SEC_RE = re.compile(
+    r"(^\s*com2sec6?\s+\S+\s+\S+)\s+\S+",
+    re.IGNORECASE | re.MULTILINE,
+)
+# TACACS+ and RADIUS shared secrets, including the NCLU / FRR `aaa` forms.
+_TACACS_KEY_RE = re.compile(
+    r"(tacacs(?:[-+]server)?\s+(?:host\s+\S+\s+)?key)\s+\S+",
+    re.IGNORECASE,
+)
+_RADIUS_KEY_RE = re.compile(
+    r"(radius(?:-server)?\s+(?:host\s+\S+\s+)?key)\s+\S+",
+    re.IGNORECASE,
+)
+# Wireguard keys: `PrivateKey = ...` / `PresharedKey = ...` (wg-quick)
+# and `wg set ... private-key <path-or-value>` / `... preshared-key <path-or-value>`.
+_WG_KEY_INI_RE = re.compile(
+    r"((?:PrivateKey|PresharedKey))\s*=\s*\S+",
+    re.IGNORECASE,
+)
+_WG_KEY_CLI_RE = re.compile(
+    r"(\b(?:private-key|preshared-key))\s+\S+",
+    re.IGNORECASE,
+)
+# MACsec CAK/CKN material — NCLU/NVUE: `pre-shared-key cak <hex>` / `pre-shared-key ckn <hex>`
+# Redact the hex value, keep the `cak`/`ckn` keyword for readability.
+_MACSEC_KEY_RE = re.compile(
+    r"(pre-shared-key\s+(?:cak|ckn))\s+\S+",
+    re.IGNORECASE,
+)
+# Debian ifupdown wireless / PPP credentials in /etc/network/interfaces.
+_WPA_RE = re.compile(
+    r"(^\s*(?:wpa-psk|wpa-passphrase|wireless-key[^\s]*))\s+\S+",
+    re.IGNORECASE | re.MULTILINE,
+)
+# NTP auth key lines: `key <n> <type> <secret>` inside /etc/ntp.keys.
 _NTP_KEY_RE = re.compile(
     r"(^\s*key\s+\d+\s+\S+)\s+\S+",
     re.IGNORECASE | re.MULTILINE,
@@ -62,12 +107,26 @@ _NTP_KEY_RE = re.compile(
 
 
 def _sanitize_config(text: str) -> str:
+    """Redact BGP/OSPF/FRR keys, TACACS/RADIUS keys, WG/MACsec/wireless PSKs, SNMP communities, and NTP keys from a Cumulus config dump."""
+    # Order matters: more specific patterns first so they don't get
+    # masked by the broader FRR `password` matcher.
     text = _BGP_PASSWORD_RE.sub(r"\1 <redacted>", text)
+    text = _ENABLE_PASSWORD_RE.sub(r"\1 <redacted>", text)
     text = _OSPF_AUTH_KEY_RE.sub(r"\1 <redacted>", text)
     text = _OSPF_MD5_KEY_RE.sub(r"\1 <redacted>", text)
+    text = _KEY_STRING_RE.sub(r"\1 <redacted>", text)
+    text = _TACACS_KEY_RE.sub(r"\1 <redacted>", text)
+    text = _RADIUS_KEY_RE.sub(r"\1 <redacted>", text)
     text = _SNMP_COMMUNITY_RE.sub(r"\1 <redacted>", text)
     text = _SNMP_SERVER_COMMUNITY_RE.sub(r"\1 <redacted>", text)
+    text = _SNMPD_ROCOMM_RE.sub(r"\1 <redacted>", text)
+    text = _SNMPD_COM2SEC_RE.sub(r"\1 <redacted>", text)
+    text = _MACSEC_KEY_RE.sub(r"\1 <redacted>", text)
+    text = _WG_KEY_INI_RE.sub(r"\1 = <redacted>", text)
+    text = _WG_KEY_CLI_RE.sub(r"\1 <redacted>", text)
+    text = _WPA_RE.sub(r"\1 <redacted>", text)
     text = _NTP_KEY_RE.sub(r"\1 <redacted>", text)
+    text = _FRR_PASSWORD_RE.sub(r"\1 <redacted>", text)
     return text
 
 
@@ -217,9 +276,9 @@ class CumulusDriver(_napalm_base.NetworkDriver):
             # Loopback and some tunnel interfaces report state=UNKNOWN but are
             # forwarding; treat "LOWER_UP" in flags as the authoritative
             # indicator of link presence.
-            has_lower_up = "LOWER_UP" in flags
-            is_enabled = "UP" in flags.split(",")
-            is_up = has_lower_up or state == "UP"
+            flag_set = {f.strip() for f in flags.split(",") if f.strip()}
+            is_enabled = "UP" in flag_set
+            is_up = "LOWER_UP" in flag_set or state == "UP"
 
             interfaces[intf] = {
                 "is_up": bool(is_up),
