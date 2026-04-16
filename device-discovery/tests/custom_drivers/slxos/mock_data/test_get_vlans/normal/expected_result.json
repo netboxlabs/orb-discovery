@@ -2,20 +2,20 @@
   "1": {
     "name": "Default",
     "interfaces": [
-      "Eth 0/1",
-      "Eth 0/2"
+      "Ethernet 0/1",
+      "Ethernet 0/2"
     ]
   },
   "10": {
     "name": "Management",
     "interfaces": [
-      "Eth 0/3"
+      "Ethernet 0/3"
     ]
   },
   "20": {
     "name": "Servers",
     "interfaces": [
-      "Eth 0/4"
+      "Ethernet 0/4"
     ]
   }
 }

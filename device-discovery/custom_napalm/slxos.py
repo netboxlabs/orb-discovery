@@ -156,6 +156,34 @@ _VLAN_ROW_RE = re.compile(
 # Port tokens like "Eth 0/1" or "Po 1" appearing in VLAN output
 _VLAN_PORT_RE = re.compile(r"((?:Eth|Po)\s*\S+)")
 
+# --- show ip interface brief pre-filter ----------------------------------- #
+# The extreme_slxos ntc-template does not include a Management interface state
+# and raises TextFSMError on Management rows.  Filter them before parsing so
+# that devices with a configured management IP still yield the remaining
+# Ethernet/Ve/Loopback addresses.
+_MGMT_LINE_RE = re.compile(r"^\s*Management\s+\S+", re.IGNORECASE)
+
+
+def _expand_vlan_port(token: str) -> str:
+    """
+    Expand abbreviated VLAN port tokens to canonical interface names.
+
+    Maps "show vlan brief" abbreviations to the same names produced by
+    get_interfaces() so that VLAN membership can be correlated with interface data.
+
+    Examples: "Eth 0/1" → "Ethernet 0/1", "Po 1" → "Port-channel 1".
+    """
+    token = token.strip()
+    parts = token.split(None, 1)
+    if not parts:
+        return token
+    prefix, rest = parts[0].upper(), parts[1] if len(parts) > 1 else ""
+    if prefix == "ETH":
+        return f"Ethernet {rest}"
+    if prefix == "PO":
+        return f"Port-channel {rest}"
+    return token
+
 
 class SLXOSDriver(_napalm_base.NetworkDriver):
     """Extreme SLX-OS NAPALM driver (read-only subset for device-discovery)."""
@@ -289,11 +317,18 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
         if not output:
             return {}
 
+        # Strip Management interface rows: the extreme_slxos ntc-template does not
+        # recognise them and raises TextFSMError, which would otherwise drop all
+        # other interface IP data collected in the same output.
+        filtered = "\n".join(
+            line for line in output.splitlines() if not _MGMT_LINE_RE.match(line)
+        )
+
         try:
             parsed = parse_output(
                 platform="extreme_slxos",
                 command="show ip interface brief",
-                data=output,
+                data=filtered,
             )
         except Exception:
             logger.warning("slxos: ntc-template failed for 'show ip interface brief'; returning {}")
@@ -352,6 +387,6 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
             vlan_id = m.group(1)
             name = m.group(2).strip()
             port_str = m.group(3) or ""
-            ports = [tok.strip() for tok in _VLAN_PORT_RE.findall(port_str)]
+            ports = [_expand_vlan_port(tok) for tok in _VLAN_PORT_RE.findall(port_str)]
             vlans[vlan_id] = {"name": name, "interfaces": ports}
         return vlans
