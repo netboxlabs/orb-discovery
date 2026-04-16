@@ -74,14 +74,14 @@ _YEAR_SECONDS = 365 * _DAY_SECONDS
 # Regex for interface names in SONiC CLI output.
 # Covers canonical names (Ethernet0, PortChannel1, Vlan100, Loopback0, Management0),
 # lowercase variants (eth0), standard Dell SONiC slot/port notation (Eth1/30),
-# and subinterfaces (Eth1/1.100, Ethernet0.10).
+# breakout ports (Eth1/1/1), and subinterfaces (Eth1/1.100, Ethernet0.10).
 _INTF_RE = (
     r"(Ethernet\d+(?:\.\d+)?"
     r"|PortChannel\d+(?:\.\d+)?"
     r"|Vlan\d+"
     r"|Loopback\d+"
     r"|Management\d+"
-    r"|Eth\d+/\d+(?:\.\d+)?"
+    r"|Eth\d+/\d+(?:/\d+)?(?:\.\d+)?"
     r"|eth\d+(?:\.\d+)?)"
 )
 
@@ -166,78 +166,88 @@ _SPEED_RE = re.compile(r"^\d+(?:\.\d+)?[GTMgtm]?$")
 
 def _parse_intf_status_header(output: str) -> dict[str, int]:
     """
-    Return a mapping of uppercase column name → token index (after interface name).
+    Return a mapping of uppercase column name → character start position.
 
-    Accepts headers that contain ``Oper`` with or without ``Admin``, handling
-    formats like ``Name Oper Reason`` (no Admin column) and both
-    ``Admin Oper`` and ``Oper Admin`` orderings.  Returns an empty dict when
-    no recognisable header line is found.
+    Uses character positions (not token indices) so that pre-status columns
+    containing embedded spaces (e.g. a ``Description`` field) do not shift
+    the indexing for subsequent columns.  Accepts headers containing ``Oper``
+    with or without ``Admin``.  Returns an empty dict when not found.
     """
     for line in output.splitlines():
-        stripped = line.strip()
-        if re.search(r"\bOper\b", stripped, re.IGNORECASE):
-            tokens = stripped.split()
-            # Skip the first token (Name/Interface label itself)
-            return {t.upper(): i for i, t in enumerate(tokens[1:])}
+        if re.search(r"\bOper\b", line, re.IGNORECASE):
+            return {m.group().upper(): m.start() for m in re.finditer(r"\S+", line)}
     return {}
 
 
-def _parse_interface_line(fields: list[str], col_map: dict[str, int]) -> dict | None:
-    """
-    Parse the column tokens after the interface name into a dict.
+def _col_value(line: str, start: int, sorted_starts: list[int]) -> str:
+    """Slice a column value from *line* using its character start position."""
+    if start < 0 or start >= len(line):
+        return ""
+    next_starts = [p for p in sorted_starts if p > start]
+    end = next_starts[0] if next_starts else len(line)
+    return line[start:end].strip()
 
-    Uses *col_map* (derived from the header row) to locate the Admin, Oper,
-    and Speed columns by name, so any column ordering is handled correctly.
-    When ``Admin`` is absent from the header (e.g. ``Name Oper Reason`` format),
-    ``is_enabled`` mirrors ``is_up``.  Falls back to scanning for status tokens
-    when no header is available.  Returns ``None`` when status cannot be determined.
-    """
-    oper_col = col_map.get("OPER", -1)
-    admin_col = col_map.get("ADMIN", -1)
-    speed_col = col_map.get("SPEED", -1)
 
-    # --- Oper / Admin status ---
-    if oper_col >= 0 and oper_col < len(fields):
-        oper_status = _parse_status(fields[oper_col])
-        # Admin column is optional; default to same value as oper when absent
-        admin_status = _parse_status(fields[admin_col]) if admin_col >= 0 and admin_col < len(fields) else oper_status
-        after_status = max(c for c in (oper_col, admin_col) if c >= 0) + 1
+def _parse_interface_line(line: str, col_map: dict[str, int]) -> dict | None:
+    """
+    Parse a ``show interfaces status`` data row into an interface dict.
+
+    Extracts Admin, Oper, Speed, Description, and MTU values using the
+    character positions supplied in *col_map* (from the header row), so any
+    column containing embedded spaces is handled correctly.  Falls back to
+    token-value scanning when *col_map* is empty.
+    Returns ``None`` when Oper status cannot be determined.
+    """
+    if col_map:
+        sorted_starts = sorted(col_map.values())
+        oper_col = col_map.get("OPER", -1)
+        admin_col = col_map.get("ADMIN", -1)
+        speed_col = col_map.get("SPEED", -1)
+        mtu_col = col_map.get("MTU", -1)
+        desc_col = col_map.get("DESCRIPTION", col_map.get("DESC", -1))
+
+        oper_val = _col_value(line, oper_col, sorted_starts)
+        if not oper_val:
+            return None
+        oper_status = _parse_status(oper_val)
+        admin_val = _col_value(line, admin_col, sorted_starts) if admin_col >= 0 else ""
+        admin_status = _parse_status(admin_val) if admin_val else oper_status
+
+        speed = _parse_speed(_col_value(line, speed_col, sorted_starts)) if speed_col >= 0 else -1.0
+
+        mtu_str = _col_value(line, mtu_col, sorted_starts) if mtu_col >= 0 else ""
+        if mtu_str and re.fullmatch(r"\d+", mtu_str) and int(mtu_str) > 64:
+            mtu = int(mtu_str)
+        else:
+            mtu = next(
+                (int(t) for t in reversed(line.split()) if re.fullmatch(r"\d+", t) and int(t) > 64),
+                -1,
+            )
+
+        description = _col_value(line, desc_col, sorted_starts) if desc_col >= 0 else ""
     else:
-        # Fallback: first two up/down/N/A tokens (first=admin, second=oper)
+        # Fallback: scan tokens when no header was parsed
+        fields = line.split()
         status_indices = [i for i, t in enumerate(fields) if _STATUS_RE.match(t)]
-        if len(status_indices) < 1:
+        if not status_indices:
             return None
         if len(status_indices) == 1:
             oper_status = admin_status = _parse_status(fields[status_indices[0]])
-            after_status = status_indices[0] + 1
+            after = status_indices[0] + 1
         else:
             admin_status = _parse_status(fields[status_indices[0]])
             oper_status = _parse_status(fields[status_indices[1]])
-            after_status = status_indices[1] + 1
-
-    # --- Speed ---
-    if speed_col >= 0 and speed_col < len(fields):
-        speed = _parse_speed(fields[speed_col])
-        desc_start = max(after_status, speed_col + 1)
-    else:
-        speed = -1.0
-        desc_start = after_status
-        for i, token in enumerate(fields[after_status:], start=after_status):
+            after = status_indices[1] + 1
+        speed, desc_start = -1.0, after
+        for i, token in enumerate(fields[after:], start=after):
             if _SPEED_RE.match(token):
-                speed = _parse_speed(token)
-                desc_start = i + 1
+                speed, desc_start = _parse_speed(token), i + 1
                 break
-
-    # --- MTU: last numeric-only token > 64 ---
-    mtu = -1
-    for token in reversed(fields):
-        if re.fullmatch(r"\d+", token) and int(token) > 64:
-            mtu = int(token)
-            break
-
-    # --- Description: tokens between speed and MTU ---
-    desc_tokens = [t for t in fields[desc_start:] if t != str(mtu)]
-    description = " ".join(desc_tokens)
+        mtu = next(
+            (int(t) for t in reversed(fields) if re.fullmatch(r"\d+", t) and int(t) > 64),
+            -1,
+        )
+        description = " ".join(t for t in fields[desc_start:] if t != str(mtu))
 
     return {
         "is_up": oper_status,
@@ -348,10 +358,13 @@ class SONiCDriver(_napalm_base.NetworkDriver):
         interfaces = {}
         for line in output.splitlines():
             # Allow optional leading whitespace before the interface name.
-            m = re.match(r"^\s*" + _INTF_RE + r"\s+(.+)", line)
+            m = re.match(r"^\s*" + _INTF_RE + r"\s", line)
             if not m:
                 continue
-            parsed = _parse_interface_line(m.group(2).split(), col_map)
+            # Pass the full line so _parse_interface_line can use character
+            # positions from col_map; splitting on whitespace here would
+            # break column alignment when any field contains spaces.
+            parsed = _parse_interface_line(line, col_map)
             if parsed is not None:
                 interfaces[m.group(1)] = parsed
 
@@ -392,11 +405,24 @@ class SONiCDriver(_napalm_base.NetworkDriver):
         sanitized: bool = False,
         format: str = "text",
     ) -> models.ConfigDict:
-        """Return device configuration."""
+        """
+        Return device configuration.
+
+        SONiC has a single active configuration store; there is no separate
+        startup config command.  When ``startup`` is requested the running
+        config is returned as a functional equivalent.
+        """
         config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
 
-        if retrieve.lower() in ("running", "all"):
+        retrieve_lower = retrieve.lower()
+        if retrieve_lower in ("running", "all"):
             config["running"] = self.device.send_command("show running-configuration")
+
+        # SONiC has no separate startup config — map it to running.
+        if retrieve_lower in ("startup", "all"):
+            config["startup"] = config["running"] or self.device.send_command(
+                "show running-configuration"
+            )
 
         if sanitized:
             for key in ("running", "candidate", "startup"):
