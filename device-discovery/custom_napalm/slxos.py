@@ -156,14 +156,15 @@ _INTF_BRIEF_RE = re.compile(
 
 # --- vlan brief parsing ---------------------------------------------------- #
 # Matches leading VLAN row; name may contain spaces so we capture greedily up to
-# the state keyword (active|inactive), then gather port tokens from the remainder.
-# Example: "10    Voice User      active   Eth 0/1 Eth 0/2"
+# the state keyword (ACTIVE|INACTIVE — case-insensitive), then gathers port
+# tokens from the remainder of the line.
+# Example: "10    Voice User      ACTIVE   Eth 0/1(u) Eth 0/2(u)"
 _VLAN_ROW_RE = re.compile(
     r"^(\d+)\s+(.*?)\s+(?:active|inactive)\s*(.*)?$",
-    re.M,
+    re.M | re.IGNORECASE,
 )
-# Port tokens like "Eth 0/1" or "Po 1" appearing in VLAN output
-_VLAN_PORT_RE = re.compile(r"((?:Eth|Po)\s*\S+)")
+# Port tokens like "Eth 0/1" or "Po 1" (with optional trailing "(u)"/"(t)" suffix)
+_VLAN_PORT_RE = re.compile(r"((?:Eth|Po)\s+\S+)")
 
 # --- show ip interface brief Management handling -------------------------- #
 # The extreme_slxos ntc-template does not include a Management interface state
@@ -185,14 +186,15 @@ def _expand_vlan_port(token: str) -> str:
 
     Maps "show vlan brief" abbreviations to the same names produced by
     get_interfaces() so that VLAN membership can be correlated with interface data.
+    Trailing state suffixes like "(u)" (untagged) and "(t)" (tagged) are stripped.
 
-    Examples: "Eth 0/1" → "Ethernet 0/1", "Po 1" → "Port-channel 1".
+    Examples: "Eth 0/1(u)" → "Ethernet 0/1", "Po 1(t)" → "Port-channel 1".
     """
-    token = token.strip()
+    token = re.sub(r"\([^)]*\)$", "", token.strip())
     parts = token.split(None, 1)
     if not parts:
         return token
-    prefix, rest = parts[0].upper(), parts[1] if len(parts) > 1 else ""
+    prefix, rest = parts[0].upper(), parts[1].strip() if len(parts) > 1 else ""
     if prefix == "ETH":
         return f"Ethernet {rest}"
     if prefix == "PO":
@@ -395,6 +397,9 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
         if retrieve in ("all", "running"):
             config["running"] = self.device.send_command("show running-config")
 
+        if retrieve in ("all", "startup"):
+            config["startup"] = self.device.send_command("show startup-config")
+
         if sanitized:
             for key in ("running", "candidate", "startup"):
                 if config[key]:
@@ -409,10 +414,18 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
             return {}
 
         vlans: dict = {}
-        for m in _VLAN_ROW_RE.finditer(output):
-            vlan_id = m.group(1)
-            name = m.group(2).strip()
-            port_str = m.group(3) or ""
-            ports = [_expand_vlan_port(tok) for tok in _VLAN_PORT_RE.findall(port_str)]
-            vlans[vlan_id] = {"name": name, "interfaces": ports}
+        current_id: str | None = None
+        for line in output.splitlines():
+            m = _VLAN_ROW_RE.match(line)
+            if m:
+                current_id = m.group(1)
+                name = m.group(2).strip()
+                port_str = m.group(3) or ""
+                ports = [_expand_vlan_port(tok) for tok in _VLAN_PORT_RE.findall(port_str)]
+                vlans[current_id] = {"name": name, "interfaces": ports}
+            elif current_id and _VLAN_PORT_RE.search(line):
+                # Continuation line: port list wrapped onto the next line(s).
+                vlans[current_id]["interfaces"].extend(
+                    _expand_vlan_port(tok) for tok in _VLAN_PORT_RE.findall(line)
+                )
         return vlans

@@ -15,7 +15,10 @@
   "20": {
     "name": "Servers",
     "interfaces": [
-      "Ethernet 0/4"
+      "Port-channel 1",
+      "Ethernet 0/4",
+      "Ethernet 0/5",
+      "Ethernet 0/6"
     ]
   }
 }
