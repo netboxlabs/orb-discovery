@@ -219,8 +219,9 @@ class SmartDriver(_napalm_base.NetworkDriver):
         if not output:
             return {}
 
-        # Each interface block starts with "<IntfName> current state : <state>"
-        separator = r"(^\S+.*current\s+state\s*:.*$)"
+        # Each interface block starts with "<IntfName> current state : <state>".
+        # Guard against "Line protocol current state" lines (same pattern as get_interfaces_ip).
+        separator = r"(^(?!Line protocol)\S+.*current\s+state\s*:.*$)"
         interfaces: dict = {}
 
         for section in _separate_section(separator, output):
