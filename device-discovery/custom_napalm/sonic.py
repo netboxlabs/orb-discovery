@@ -71,8 +71,10 @@ _DAY_SECONDS = 24 * _HOUR_SECONDS
 _WEEK_SECONDS = 7 * _DAY_SECONDS
 _YEAR_SECONDS = 365 * _DAY_SECONDS
 
-# Regex for interface names in SONiC CLI output
-_INTF_RE = r"(Ethernet\d+|PortChannel\d+|Vlan\d+|Loopback\d+|Management\d+)"
+# Regex for interface names in SONiC CLI output.
+# Covers canonical names (Ethernet0, PortChannel1, Vlan100, Loopback0, Management0)
+# and lowercase variants (eth0) used in some SONiC builds.
+_INTF_RE = r"(Ethernet\d+|PortChannel\d+|Vlan\d+|Loopback\d+|Management\d+|eth\d+)"
 
 # Map of ``show version`` field names to extraction regexes.
 # Each tuple: (field_key, compiled regex).  The first capture group is the value.
@@ -113,6 +115,11 @@ def _parse_uptime(uptime_str: str) -> float:
     return seconds
 
 
+def _parse_status(value: str) -> bool:
+    """Interpret an admin/oper status field as a boolean (up = True)."""
+    return value.strip().lower() == "up"
+
+
 def _parse_speed(speed_str: str) -> float:
     """Convert a speed string like ``100G`` or ``1G`` to Mbps."""
     if not speed_str:
@@ -130,6 +137,51 @@ def _parse_speed(speed_str: str) -> float:
     if unit == "M":
         return val
     return val
+
+
+def _parse_interface_line(fields: list[str]) -> dict | None:
+    """
+    Parse the column tokens after the interface name into a dict.
+
+    Returns ``None`` when *fields* doesn't contain the minimum required
+    admin + oper status columns.
+    """
+    if len(fields) < 2:
+        return None
+
+    admin_status = _parse_status(fields[0])
+    oper_status = _parse_status(fields[1])
+
+    # MTU is the last numeric-only token > 64
+    mtu = -1
+    for token in reversed(fields):
+        if re.fullmatch(r"\d+", token) and int(token) > 64:
+            mtu = int(token)
+            break
+
+    # Speed is the first token after admin/oper that looks like 100G/10G/25G/1G
+    speed = -1.0
+    speed_idx = -1
+    for i, token in enumerate(fields[2:], start=2):
+        if re.fullmatch(r"\d+(?:\.\d+)?[GTMgtm]?", token) and token != str(mtu):
+            speed = _parse_speed(token)
+            speed_idx = i
+            break
+
+    # Description is everything between speed and MTU columns
+    start = (speed_idx + 1) if speed_idx >= 0 else 2
+    desc_tokens = [t for t in fields[start:] if t != str(mtu)]
+    description = " ".join(desc_tokens)
+
+    return {
+        "is_up": oper_status,
+        "is_enabled": admin_status,
+        "description": description,
+        "last_flapped": -1.0,
+        "mtu": mtu,
+        "speed": speed,
+        "mac_address": "",
+    }
 
 
 def _parse_version_fields(output: str) -> dict:
@@ -223,24 +275,15 @@ class SONiCDriver(_napalm_base.NetworkDriver):
 
         interfaces = {}
         for line in output.splitlines():
-            m = re.match(
-                _INTF_RE
-                + r"\s+(up|down)\s+(up|down)"
-                r"(?:\s+(\S+))?"   # speed
-                r"\s+(.*?)"        # description (may be empty)
-                r"\s+(\d+)\s*$",   # mtu (anchored to end of line)
-                line,
-            )
-            if m:
-                interfaces[m.group(1)] = {
-                    "is_up": m.group(3) == "up",
-                    "is_enabled": m.group(2) == "up",
-                    "description": (m.group(5) or "").strip(),
-                    "last_flapped": -1.0,
-                    "mtu": int(m.group(6)),
-                    "speed": _parse_speed(m.group(4) or ""),
-                    "mac_address": "",
-                }
+            # Tolerant parser: match interface name, then extract known
+            # fields from the remaining columns.  Accepts admin/oper states
+            # of up/down/N/A and allows extra columns (lanes, alias, etc.).
+            m = re.match(_INTF_RE + r"\s+(.+)", line)
+            if not m:
+                continue
+            parsed = _parse_interface_line(m.group(2).split())
+            if parsed is not None:
+                interfaces[m.group(1)] = parsed
 
         return interfaces
 
@@ -298,11 +341,16 @@ class SONiCDriver(_napalm_base.NetworkDriver):
 
         vlans: dict = {}
         for line in output.splitlines():
-            m = re.match(r"\s*(\d+)\s+(\S+)\s+(.*?)\s+(active|suspend)", line)
+            # Tolerate both space-delimited and pipe-delimited table formats
+            m = re.match(
+                r"\s*\|?\s*(\d+)\s*\|?\s*(\S+)\s*\|?\s*(.*?)\s*\|?\s*(active|suspend)\s*\|?\s*$",
+                line,
+            )
             if m:
+                name = m.group(2).strip()
                 members_str = m.group(3).strip()
                 vlans[m.group(1)] = {
-                    "name": m.group(2),
+                    "name": name,
                     "interfaces": [i.strip() for i in members_str.split(",") if i.strip()] if members_str else [],
                 }
 
