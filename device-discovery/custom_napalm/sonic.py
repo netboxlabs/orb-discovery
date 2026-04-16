@@ -133,8 +133,8 @@ def _parse_uptime(uptime_str: str) -> float:
         (r"(\d+)\s+week", _WEEK_SECONDS),
         (r"(\d+)\s+day", _DAY_SECONDS),
         (r"(\d+)\s+hour", _HOUR_SECONDS),
-        (r"(\d+)\s+minute", 60),
-        (r"(\d+)\s+second", 1),
+        (r"(\d+)\s+min(?:ute)?s?", 60),
+        (r"(\d+)\s+sec(?:ond)?s?", 1),
     ):
         m = re.search(pattern, parse_str, re.IGNORECASE)
         if m:
@@ -474,6 +474,7 @@ class SONiCDriver(_napalm_base.NetworkDriver):
             return {}
 
         vlans: dict = {}
+        last_vlan_id: str | None = None
         for line in output.splitlines():
             # Tolerate both space-delimited (2+ spaces as separator) and
             # pipe-delimited formats; use non-greedy name capture so VLAN
@@ -486,10 +487,19 @@ class SONiCDriver(_napalm_base.NetworkDriver):
             if m:
                 name = m.group(2).strip()
                 members_str = m.group(3).strip()
-                vlans[m.group(1)] = {
+                last_vlan_id = m.group(1)
+                vlans[last_vlan_id] = {
                     "name": name,
                     "interfaces": [i.strip() for i in members_str.split(",") if i.strip()] if members_str else [],
                 }
+            elif last_vlan_id:
+                # Continuation line: extra member ports wrapped from the previous row
+                stripped = line.strip().strip("|").strip()
+                if re.search(r"\b(?:Ethernet|PortChannel|Vlan|Loopback|Management|Eth)\d", stripped):
+                    extras = [i.strip() for i in stripped.split(",") if i.strip()]
+                    vlans[last_vlan_id]["interfaces"].extend(extras)
+                else:
+                    last_vlan_id = None  # non-member continuation resets context
 
         return vlans
 
