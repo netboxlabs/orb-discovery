@@ -1,3 +1,0 @@
-pan
-pan/afapi
-pan/licapi
