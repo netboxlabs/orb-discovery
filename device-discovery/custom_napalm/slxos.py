@@ -307,7 +307,7 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
             )
             if not m:
                 # Fallback: "SW-Version: SLX-OS_v20.2.3_SLX_9640" → extract version token
-                m = re.search(r"SW-Version\s*:\s*\S+?v?(\d+\.\d+\S*)", ver_output, re.IGNORECASE)
+                m = re.search(r"SW-Version\s*:\s*\S+?v?(\d+\.\d+[^_\s]*)", ver_output, re.IGNORECASE)
             if m:
                 os_version = m.group(1)
 
