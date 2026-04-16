@@ -300,8 +300,11 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
                 model = m.group(1).strip().replace("_", " ")
 
             # OS version: "SLX-OS Software Version: SLX-OS 20.2.3"
+            # or: "SLX-OS Operating System Version: 20.2.3"
+            # (?:\w+\s+)+ matches one or more label words ("Software", "Operating System", …)
+            # (?:\S+\s+)? skips an optional non-version prefix token (e.g. "SLX-OS")
             m = re.search(
-                r"SLX-OS\s+Software\s+Version\s*:\s*\S+\s+(\S+)",
+                r"SLX-OS\s+(?:\w+\s+)+Version\s*:\s*(?:\S+\s+)?(\d+\.\d+[^_\s]*)",
                 ver_output,
                 re.IGNORECASE,
             )
