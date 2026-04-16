@@ -17,14 +17,11 @@ SR Linux commands used:
   admin display-config      — running configuration (YANG flat format)
 """
 
-import logging
 import re
 
 import napalm.base as _napalm_base
 from napalm.base import models
 from napalm.base.netmiko_helpers import netmiko_args
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Config sanitization — Nokia SR Linux sensitive fields
