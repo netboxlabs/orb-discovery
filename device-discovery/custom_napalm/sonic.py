@@ -171,11 +171,20 @@ def _parse_intf_status_header(output: str) -> dict[str, int]:
     Uses character positions (not token indices) so that pre-status columns
     containing embedded spaces (e.g. a ``Description`` field) do not shift
     the indexing for subsequent columns.  Accepts headers containing ``Oper``
-    with or without ``Admin``.  Returns an empty dict when not found.
+    with or without ``Admin``, including combined ``Admin/Oper`` tokens where
+    both names are mapped to the same character position.  Returns an empty
+    dict when not found.
     """
     for line in output.splitlines():
         if re.search(r"\bOper\b", line, re.IGNORECASE):
-            return {m.group().upper(): m.start() for m in re.finditer(r"\S+", line)}
+            col_map: dict[str, int] = {}
+            for m in re.finditer(r"\S+", line):
+                token = m.group()
+                pos = m.start()
+                # Handle combined tokens like "Admin/Oper" or "Oper/Admin"
+                for part in token.split("/"):
+                    col_map[part.upper()] = pos
+            return col_map
     return {}
 
 
@@ -209,9 +218,15 @@ def _parse_interface_line(line: str, col_map: dict[str, int]) -> dict | None:
         oper_val = _col_value(line, oper_col, sorted_starts)
         if not oper_val:
             return None
-        oper_status = _parse_status(oper_val)
-        admin_val = _col_value(line, admin_col, sorted_starts) if admin_col >= 0 else ""
-        admin_status = _parse_status(admin_val) if admin_val else oper_status
+        # Handle combined "Admin/Oper" column (e.g. value "up/up" or "up/down")
+        if "/" in oper_val and admin_col == oper_col:
+            parts = oper_val.split("/", 1)
+            admin_status = _parse_status(parts[0])
+            oper_status = _parse_status(parts[1])
+        else:
+            oper_status = _parse_status(oper_val)
+            admin_val = _col_value(line, admin_col, sorted_starts) if admin_col >= 0 else ""
+            admin_status = _parse_status(admin_val) if admin_val else oper_status
 
         speed = _parse_speed(_col_value(line, speed_col, sorted_starts)) if speed_col >= 0 else -1.0
 
