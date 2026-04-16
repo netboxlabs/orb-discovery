@@ -68,6 +68,14 @@ _TACACS_GLOBAL_KEY_RE = re.compile(
     r"(\btacacs-server\s+key)\s+\S+",
     re.IGNORECASE,
 )
+# Standalone indented "key <secret>" lines emitted when SLX-OS writes AAA host
+# blocks in hierarchical form (e.g. "radius-server host … use-vrf …\n key <v>").
+# Matches only indented lines so that top-level "key" keywords (already covered
+# by the per-host regexes above) are not double-substituted.
+_AAA_KEY_STANDALONE_RE = re.compile(
+    r"^(\s+key)\s+\S+",
+    re.IGNORECASE | re.M,
+)
 
 
 def _sanitize_config(text: str) -> str:
@@ -80,6 +88,7 @@ def _sanitize_config(text: str) -> str:
     text = _RADIUS_GLOBAL_KEY_RE.sub(r"\1 <redacted>", text)
     text = _TACACS_HOST_KEY_RE.sub(r"\1 <redacted>", text)
     text = _TACACS_GLOBAL_KEY_RE.sub(r"\1 <redacted>", text)
+    text = _AAA_KEY_STANDALONE_RE.sub(r"\1 <redacted>", text)
     return text
 
 
@@ -337,8 +346,12 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
                 data=filtered,
             )
         except Exception:
-            logger.warning("slxos: ntc-template failed for 'show ip interface brief'; returning {}")
-            return {}
+            logger.warning(
+                "slxos: ntc-template failed for 'show ip interface brief'; "
+                "continuing with Management-line fallback only",
+                exc_info=True,
+            )
+            parsed = []
 
         interfaces_ip: dict = {}
 

@@ -30,8 +30,12 @@ snmp-server community private rw
 !
 radius-server key GlobalRadiusKey
 radius-server host 10.0.0.1 auth-port 1812 acct-port 1813 key MyRadiusKey
+radius-server host 10.0.0.2 use-vrf mgmt-vrf
+ key HierarchicalRadiusKey
 tacacs-server key GlobalTacacsKey
-tacacs-server host 10.0.0.2 port 49 key MyTacacsKey
+tacacs-server host 10.0.0.3 port 49 key MyTacacsKey
+tacacs-server host 10.0.0.4 use-vrf mgmt-vrf
+ key HierarchicalTacacsKey
 !
 ip route 0.0.0.0/0 192.168.100.254
 !
