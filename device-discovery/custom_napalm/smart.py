@@ -17,7 +17,31 @@ import napalm.base as _napalm_base
 from napalm.base import models
 from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
+from netmiko.huawei.huawei_smartax import HuaweiSmartAXSSH
+from netmiko.ssh_dispatcher import CLASS_MAPPER, platforms
 from ntc_templates.parse import parse_output
+
+# ---------------------------------------------------------------------------
+# Netmiko device type — extends the upstream class so that '#' is accepted as
+# an initial prompt.  Huawei SmartAX enable-mode already uses '#', but the
+# upstream prompt_pattern only matches '>' and '$', causing session_preparation
+# to time out when the SSH server (e.g. mockit) presents a '#' prompt
+# immediately at login.  Registering a private device-type key means we don't
+# mutate the global 'huawei_smartax' mapping.
+# ---------------------------------------------------------------------------
+
+_NETMIKO_DEVICE_TYPE = "_huawei_smartax_smart"
+
+
+class _SmartAXSSH(HuaweiSmartAXSSH):
+    """HuaweiSmartAXSSH with '#' added to the initial prompt pattern."""
+
+    prompt_pattern = r"[>#$]"
+
+
+CLASS_MAPPER[_NETMIKO_DEVICE_TYPE] = _SmartAXSSH
+if _NETMIKO_DEVICE_TYPE not in platforms:
+    platforms.append(_NETMIKO_DEVICE_TYPE)
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +137,7 @@ class SmartDriver(_napalm_base.NetworkDriver):
     def open(self):
         """Open an SSH connection to the device via Netmiko."""
         self.device = self._netmiko_open(
-            "huawei_smartax", netmiko_optional_args=self.netmiko_optional_args
+            _NETMIKO_DEVICE_TYPE, netmiko_optional_args=self.netmiko_optional_args
         )
 
     def close(self):
