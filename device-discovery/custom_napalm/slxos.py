@@ -156,12 +156,18 @@ _VLAN_ROW_RE = re.compile(
 # Port tokens like "Eth 0/1" or "Po 1" appearing in VLAN output
 _VLAN_PORT_RE = re.compile(r"((?:Eth|Po)\s*\S+)")
 
-# --- show ip interface brief pre-filter ----------------------------------- #
+# --- show ip interface brief Management handling -------------------------- #
 # The extreme_slxos ntc-template does not include a Management interface state
-# and raises TextFSMError on Management rows.  Filter them before parsing so
-# that devices with a configured management IP still yield the remaining
-# Ethernet/Ve/Loopback addresses.
+# and raises TextFSMError on Management rows.  We pre-filter them before passing
+# to parse_output, then collect their IPs with a dedicated regex so that
+# management addresses are not silently dropped.
+#
+# Example row: "Management 0    10.255.255.1/24    mgmt-vrf    up    up"
 _MGMT_LINE_RE = re.compile(r"^\s*Management\s+\S+", re.IGNORECASE)
+_MGMT_IP_RE = re.compile(
+    r"^\s*(Management\s+\S+)\s+(\d[\d.]+(?:/\d+)?)\s",
+    re.IGNORECASE,
+)
 
 
 def _expand_vlan_port(token: str) -> str:
@@ -317,12 +323,12 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
         if not output:
             return {}
 
-        # Strip Management interface rows: the extreme_slxos ntc-template does not
-        # recognise them and raises TextFSMError, which would otherwise drop all
-        # other interface IP data collected in the same output.
-        filtered = "\n".join(
-            line for line in output.splitlines() if not _MGMT_LINE_RE.match(line)
-        )
+        lines = output.splitlines()
+
+        # The extreme_slxos ntc-template raises TextFSMError on Management rows,
+        # which would drop all other interface IP data.  Strip them before parsing,
+        # then collect their IPs with _MGMT_IP_RE so addresses are not silently lost.
+        filtered = "\n".join(line for line in lines if not _MGMT_LINE_RE.match(line))
 
         try:
             parsed = parse_output(
@@ -335,25 +341,32 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
             return {}
 
         interfaces_ip: dict = {}
-        for row in parsed:
-            intf = row.get("interface", "").strip()
-            ip_addr = row.get("ip_address", "").strip()
+
+        def _add_ip(intf: str, ip_addr: str) -> None:
             if not intf or not ip_addr or ip_addr == "unassigned":
-                continue
-            # ip_addr may include prefix length e.g. "192.168.1.1/24"
+                return
             if "/" in ip_addr:
                 ip, prefix_str = ip_addr.split("/", 1)
                 try:
                     prefix_len = int(prefix_str)
                 except ValueError:
                     logger.warning("slxos: unparseable prefix %r on %s; skipping", ip_addr, intf)
-                    continue
+                    return
             else:
-                ip = ip_addr
-                prefix_len = 32
+                ip, prefix_len = ip_addr, 32
             interfaces_ip.setdefault(intf, {}).setdefault("ipv4", {})[ip] = {
                 "prefix_length": prefix_len
             }
+
+        for row in parsed:
+            _add_ip(row.get("interface", "").strip(), row.get("ip_address", "").strip())
+
+        # Collect Management interface IPs parsed separately.
+        for line in lines:
+            m = _MGMT_IP_RE.match(line)
+            if m:
+                _add_ip(m.group(1).strip(), m.group(2).strip())
+
         return interfaces_ip
 
     def get_config(

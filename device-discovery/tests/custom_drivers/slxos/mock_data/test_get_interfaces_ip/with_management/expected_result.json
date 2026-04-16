@@ -19,5 +19,12 @@
         "prefix_length": 24
       }
     }
+  },
+  "Management 0": {
+    "ipv4": {
+      "10.255.255.1": {
+        "prefix_length": 24
+      }
+    }
   }
 }
