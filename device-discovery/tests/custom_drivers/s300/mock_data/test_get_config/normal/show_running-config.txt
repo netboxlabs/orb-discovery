@@ -1,4 +1,5 @@
 username cisco privilege 15 password 8 $2y$10$abc123hashvalue
+username guest password 8 $2y$10$guesthashabcdef
 enable password level 15 $2y$10$abc123hashvalue
 !
 interface vlan 1

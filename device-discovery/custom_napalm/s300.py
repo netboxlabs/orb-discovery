@@ -19,11 +19,11 @@ from ntc_templates.parse import parse_output
 logger = logging.getLogger(__name__)
 
 # Config sanitization — S300 sensitive CLI fields:
-#   username <name> privilege <n> password [<enc-type>] <hash>
+#   username <name> [privilege <n>] password [<enc-type>] <hash>
 #   enable password [level <n>] [<enc-type>] <hash>
 #   snmp-server community <community-string> [ro|rw] ...
 _USERNAME_PASSWORD_RE = re.compile(
-    r"(username\s+\S+\s+privilege\s+\d+\s+password)\s+.*",
+    r"(username\s+\S+(?:\s+privilege\s+\d+)?\s+password)\s+.*",
     re.IGNORECASE,
 )
 _ENABLE_PASSWORD_RE = re.compile(
