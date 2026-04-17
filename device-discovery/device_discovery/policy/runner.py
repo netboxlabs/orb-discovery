@@ -381,17 +381,6 @@ class PolicyRunner:
                 error=Exception("Not able to discover device driver"),
                 entity_count=0,
             )
-            try:
-                self.scheduler.remove_job(id)
-            except JobLookupError as e:
-                logger.debug(
-                    f"Policy {self.name}, Hostname {sanitized_hostname}: Error removing job: {e}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Policy {self.name}, Hostname {sanitized_hostname}: Unexpected error removing job: {e}",
-                    exc_info=True,
-                )
             return
 
         logger.info(

@@ -242,6 +242,21 @@ def test_run_discovered_driver_error(
         assert policy_runner.status == Status.FAILED
 
 
+def test_run_driver_failure_does_not_remove_job(policy_runner, sample_scopes, sample_config, run_store):
+    """Driver discovery failure must NOT remove the job — the cron should keep firing."""
+    sample_scopes[0].driver = None
+    policy_runner.run_store = run_store
+    policy_runner.name = "test_policy"
+
+    with (
+        patch("device_discovery.policy.runner.discover_device_driver", return_value=None),
+        patch.object(policy_runner.scheduler, "remove_job") as mock_remove,
+    ):
+        policy_runner.run("test_id", sample_scopes[0], sample_config)
+
+    mock_remove.assert_not_called()
+
+
 def test_run_device_with_error_in_job(
     policy_runner, sample_scopes, sample_config, run_store
 ):
