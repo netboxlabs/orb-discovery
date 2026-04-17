@@ -318,15 +318,16 @@ class PolicyRunner:
                     error=Exception("No reachable hosts found in range"),
                     entity_count=0,
                 )
-            else:
-                self.run_store.update_run(
-                    policy_name=self.name,
-                    target=original_hostname,
-                    run_id=scan_run.id,
-                    status=RunStatus.COMPLETED,
-                    error=None,
-                    entity_count=reachable_count,
-                )
+                return
+
+            self.run_store.update_run(
+                policy_name=self.name,
+                target=original_hostname,
+                run_id=scan_run.id,
+                status=RunStatus.COMPLETED,
+                error=None,
+                entity_count=reachable_count,
+            )
 
             for hostname in hostnames:
                 sanitized_hostname = hostname.replace("\r\n", "").replace("\n", "")
