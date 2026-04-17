@@ -727,7 +727,7 @@ def test_run_scan_reschedules_host_when_job_no_longer_active(monkeypatch):
     assert runner.active_host_jobs["192.168.1.1"] == "new-job-id"
 
 
-def test_run_scan_stores_failed_run_for_unreachable_host(monkeypatch):
+def test_run_scan_stores_failed_run_for_unreachable_host():
     """run_scan must create a FAILED run record for each host with no reachable port."""
     from device_discovery.policy.run import RunStatus
 
