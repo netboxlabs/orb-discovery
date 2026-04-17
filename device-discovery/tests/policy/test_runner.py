@@ -178,6 +178,8 @@ def test_setup_policy_runner_expands_hostname_ranges_one_shot(
     first_call = mock_add_job.call_args_list[0]
     assert first_call[0][0] == policy_runner.run_scan
     assert isinstance(first_call[1]["trigger"], DateTrigger)
+    _, date_trigger_arg, _, _ = first_call[1]["args"]
+    assert isinstance(date_trigger_arg, DateTrigger)
 
 
 def test_setup_with_unsupported_driver_raises_error(
