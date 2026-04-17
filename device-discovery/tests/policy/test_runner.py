@@ -725,3 +725,27 @@ def test_run_scan_reschedules_host_when_job_no_longer_active(monkeypatch):
 
     runner.scheduler.add_job.assert_called_once()
     assert runner.active_host_jobs["192.168.1.1"] == "new-job-id"
+
+
+def test_run_scan_stores_failed_run_for_unreachable_host(monkeypatch):
+    """run_scan must create a FAILED run record for each host with no reachable port."""
+    from device_discovery.policy.run import RunStatus
+
+    runner = PolicyRunner()
+    runner.name = "policy1"
+    runner.run_store = RunStore()
+    runner.scheduler = MagicMock()
+    scope = Napalm(driver="ios", hostname="192.168.1.0/24", username="admin", password="password")
+    config = Config(options=Options(port_scan_ports=[22], port_scan_timeout=0.1))
+    trigger = MagicMock(spec=BaseTrigger)
+
+    with patch(
+        "device_discovery.policy.runner.find_reachable_hosts",
+        return_value={"192.168.1.1": False},
+    ):
+        runner.run_scan(["192.168.1.1"], trigger, scope, config)
+
+    runs = runner.run_store.get_runs_for_target("policy1", "192.168.1.1")
+    assert len(runs) == 1
+    assert runs[0].status.value == "failed"
+    assert "No reachable port found" in runs[0].reason

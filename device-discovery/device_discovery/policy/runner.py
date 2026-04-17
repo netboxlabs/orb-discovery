@@ -339,8 +339,21 @@ class PolicyRunner:
                     )
                     self.active_host_jobs[sanitized_hostname] = id
                 else:
-                    logger.info(
-                        f"Policy {self.name}, Hostname {sanitized_hostname}: No reachable port found, skipping discovery job"
+                    logger.warning(
+                        f"Policy {self.name}, Hostname {sanitized_hostname}: No reachable port found"
+                    )
+                    unreachable_run = self.run_store.create_run(
+                        policy_name=self.name,
+                        target=sanitized_hostname,
+                        parent_target=original_hostname,
+                    )
+                    self.run_store.update_run(
+                        policy_name=self.name,
+                        target=sanitized_hostname,
+                        run_id=unreachable_run.id,
+                        status=RunStatus.FAILED,
+                        error=Exception("No reachable port found"),
+                        entity_count=0,
                     )
         except Exception as e:
             logger.error(
