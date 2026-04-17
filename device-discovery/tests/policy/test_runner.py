@@ -673,3 +673,28 @@ def test_run_with_parent_driver_failure_does_not_remove_job(policy_runner, run_s
         policy_runner.run_with_parent("test_id", scope, sample_config, "192.0.2.0/24")
 
     mock_remove.assert_not_called()
+
+
+def test_run_scan_skips_already_active_host(monkeypatch):
+    """run_scan must not schedule a second job for a host that already has one."""
+    runner = PolicyRunner()
+    runner.name = "policy1"
+    runner.run_store = RunStore()
+    runner.scheduler = MagicMock()
+    scope = Napalm(driver="ios", hostname="192.168.1.0/24", username="admin", password="password")
+    config = Config(options=Options(port_scan_ports=[22], port_scan_timeout=0.1))
+    trigger = MagicMock(spec=BaseTrigger)
+
+    existing_job = MagicMock()
+    runner.scheduler.get_job.return_value = existing_job
+
+    # Pre-populate active_host_jobs as if host was already scheduled
+    runner.active_host_jobs["192.168.1.1"] = "existing-job-id"
+
+    with patch(
+        "device_discovery.policy.runner.find_reachable_hosts",
+        return_value={"192.168.1.1": True},
+    ):
+        runner.run_scan(["192.168.1.1"], trigger, scope, config)
+
+    runner.scheduler.add_job.assert_not_called()

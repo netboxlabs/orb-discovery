@@ -39,6 +39,7 @@ class PolicyRunner:
         self.status = Status.NEW
         self.scheduler = BackgroundScheduler()
         self.run_store = None
+        self.active_host_jobs: dict[str, str] = {}
 
     def _validate_discovery_drivers(self):
         """
@@ -317,6 +318,12 @@ class PolicyRunner:
 
             for hostname in hostnames:
                 if results.get(hostname):
+                    existing_job_id = self.active_host_jobs.get(hostname)
+                    if existing_job_id and self.scheduler.get_job(existing_job_id):
+                        logger.info(
+                            f"Policy {self.name}, Hostname {hostname}: Discovery job already active, skipping"
+                        )
+                        continue
                     logger.info(
                         f"Policy {self.name}, Hostname {hostname}: Reachable port found, scheduling discovery job"
                     )
@@ -329,6 +336,7 @@ class PolicyRunner:
                         args=[id, self.scopes[id], config, original_hostname],
                         misfire_grace_time=None,
                     )
+                    self.active_host_jobs[hostname] = id
                 else:
                     logger.info(
                         f"Policy {self.name}, Hostname {hostname}: No reachable port found, skipping discovery job"
