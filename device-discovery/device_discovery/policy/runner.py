@@ -317,18 +317,19 @@ class PolicyRunner:
             )
 
             for hostname in hostnames:
+                sanitized_hostname = hostname.replace("\r\n", "").replace("\n", "")
                 if results.get(hostname):
-                    existing_job_id = self.active_host_jobs.get(hostname)
+                    existing_job_id = self.active_host_jobs.get(sanitized_hostname)
                     if existing_job_id and self.scheduler.get_job(existing_job_id):
                         logger.info(
-                            f"Policy {self.name}, Hostname {hostname}: Discovery job already active, skipping"
+                            f"Policy {self.name}, Hostname {sanitized_hostname}: Discovery job already active, skipping"
                         )
                         continue
                     logger.info(
-                        f"Policy {self.name}, Hostname {hostname}: Reachable port found, scheduling discovery job"
+                        f"Policy {self.name}, Hostname {sanitized_hostname}: Reachable port found, scheduling discovery job"
                     )
                     id = str(uuid.uuid4())
-                    self.scopes[id] = scope.model_copy(update={"hostname": hostname, "netbox_id": None})
+                    self.scopes[id] = scope.model_copy(update={"hostname": sanitized_hostname, "netbox_id": None})
                     self.scheduler.add_job(
                         self.run_with_parent,
                         id=id,
@@ -336,10 +337,10 @@ class PolicyRunner:
                         args=[id, self.scopes[id], config, original_hostname],
                         misfire_grace_time=None,
                     )
-                    self.active_host_jobs[hostname] = id
+                    self.active_host_jobs[sanitized_hostname] = id
                 else:
                     logger.info(
-                        f"Policy {self.name}, Hostname {hostname}: No reachable port found, skipping discovery job"
+                        f"Policy {self.name}, Hostname {sanitized_hostname}: No reachable port found, skipping discovery job"
                     )
         except Exception as e:
             logger.error(

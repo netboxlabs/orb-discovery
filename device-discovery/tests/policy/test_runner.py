@@ -698,3 +698,30 @@ def test_run_scan_skips_already_active_host(monkeypatch):
         runner.run_scan(["192.168.1.1"], trigger, scope, config)
 
     runner.scheduler.add_job.assert_not_called()
+    runner.scheduler.get_job.assert_called_once_with("existing-job-id")
+
+
+def test_run_scan_reschedules_host_when_job_no_longer_active(monkeypatch):
+    """When a previous job has finished, run_scan must schedule a new one."""
+    runner = PolicyRunner()
+    runner.name = "policy1"
+    runner.run_store = RunStore()
+    runner.scheduler = MagicMock()
+    runner.scheduler.get_job.return_value = None   # job is gone
+
+    runner.active_host_jobs["192.168.1.1"] = "stale-job-id"
+    scope = Napalm(driver="ios", hostname="192.168.1.0/24", username="admin", password="password")
+    config = Config(options=Options(port_scan_ports=[22], port_scan_timeout=0.1))
+    trigger = MagicMock(spec=BaseTrigger)
+
+    with (
+        patch(
+            "device_discovery.policy.runner.find_reachable_hosts",
+            return_value={"192.168.1.1": True},
+        ),
+        patch("uuid.uuid4", side_effect=["scan-run-id", "new-job-id"]),
+    ):
+        runner.run_scan(["192.168.1.1"], trigger, scope, config)
+
+    runner.scheduler.add_job.assert_called_once()
+    assert runner.active_host_jobs["192.168.1.1"] == "new-job-id"
