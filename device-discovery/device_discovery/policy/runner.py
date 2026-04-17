@@ -293,7 +293,7 @@ class PolicyRunner:
             return
 
         # Get original hostname from scope for parent tracking
-        original_hostname = scope.hostname
+        original_hostname = scope.hostname.replace("\r\n", "").replace("\n", "")
 
         # CREATE RUN FOR SCAN OPERATION
         scan_run = self.run_store.create_run(
