@@ -330,13 +330,13 @@ class PolicyRunner:
 
             for hostname in hostnames:
                 sanitized_hostname = hostname.replace("\r\n", "").replace("\n", "")
+                existing_job_id = self.active_host_jobs.get(sanitized_hostname)
+                if existing_job_id and self.scheduler.get_job(existing_job_id):
+                    logger.info(
+                        f"Policy {self.name}, Hostname {sanitized_hostname}: Discovery job already active, skipping"
+                    )
+                    continue
                 if results.get(hostname):
-                    existing_job_id = self.active_host_jobs.get(sanitized_hostname)
-                    if existing_job_id and self.scheduler.get_job(existing_job_id):
-                        logger.info(
-                            f"Policy {self.name}, Hostname {sanitized_hostname}: Discovery job already active, skipping"
-                        )
-                        continue
                     logger.info(
                         f"Policy {self.name}, Hostname {sanitized_hostname}: Reachable port found, scheduling discovery job"
                     )
