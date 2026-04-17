@@ -752,8 +752,8 @@ def test_run_scan_reschedules_host_when_job_no_longer_active(monkeypatch):
     assert runner.active_host_jobs["192.168.1.1"] == "new-job-id"
 
 
-def test_run_scan_stores_failed_run_for_unreachable_host():
-    """run_scan must create a FAILED run record for each host with no reachable port."""
+def test_run_scan_stores_failed_run_on_range_when_no_hosts_reachable():
+    """When no host in a range is reachable, the range-level scan run must be FAILED."""
     from device_discovery.policy.run import RunStatus
 
     runner = PolicyRunner()
@@ -766,11 +766,43 @@ def test_run_scan_stores_failed_run_for_unreachable_host():
 
     with patch(
         "device_discovery.policy.runner.find_reachable_hosts",
-        return_value={"192.168.1.1": False},
+        return_value={"192.168.1.1": False, "192.168.1.2": False},
     ):
-        runner.run_scan(["192.168.1.1"], trigger, scope, config)
+        runner.run_scan(["192.168.1.1", "192.168.1.2"], trigger, scope, config)
 
-    runs = runner.run_store.get_runs_for_target("policy1", "192.168.1.1")
-    assert len(runs) == 1
-    assert runs[0].status.value == "failed"
-    assert "No reachable port found" in runs[0].reason
+    # Failure reported at range level, not per-host
+    range_runs = runner.run_store.get_runs_for_target("policy1", "192.168.1.0/24")
+    assert len(range_runs) == 1
+    assert range_runs[0].status.value == "failed"
+    assert "No reachable hosts found in range" in range_runs[0].reason
+
+    # No per-host run records created for unreachable hosts
+    assert runner.run_store.get_runs_for_target("policy1", "192.168.1.1") == []
+    assert runner.run_store.get_runs_for_target("policy1", "192.168.1.2") == []
+    runner.scheduler.add_job.assert_not_called()
+
+
+def test_run_scan_stores_completed_run_when_some_hosts_reachable():
+    """When at least one host is reachable, the range-level scan run is COMPLETED."""
+    runner = PolicyRunner()
+    runner.name = "policy1"
+    runner.run_store = RunStore()
+    runner.scheduler = MagicMock()
+    scope = Napalm(driver="ios", hostname="192.168.1.0/24", username="admin", password="password")
+    config = Config(options=Options(port_scan_ports=[22], port_scan_timeout=0.1))
+    trigger = MagicMock(spec=BaseTrigger)
+
+    with (
+        patch(
+            "device_discovery.policy.runner.find_reachable_hosts",
+            return_value={"192.168.1.1": True, "192.168.1.2": False},
+        ),
+        patch("uuid.uuid4", side_effect=["scan-run-id", "job-1"]),
+    ):
+        runner.run_scan(["192.168.1.1", "192.168.1.2"], trigger, scope, config)
+
+    range_runs = runner.run_store.get_runs_for_target("policy1", "192.168.1.0/24")
+    assert len(range_runs) == 1
+    assert range_runs[0].status.value == "completed"
+    assert range_runs[0].entity_count == 1
+    runner.scheduler.add_job.assert_called_once()

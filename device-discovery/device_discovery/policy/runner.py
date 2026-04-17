@@ -306,15 +306,27 @@ class PolicyRunner:
             results = find_reachable_hosts(hostnames, ports, timeout)
             reachable_count = sum(1 for v in results.values() if v)
 
-            # UPDATE SCAN RUN
-            self.run_store.update_run(
-                policy_name=self.name,
-                target=original_hostname,
-                run_id=scan_run.id,
-                status=RunStatus.COMPLETED,
-                error=None,
-                entity_count=reachable_count,
-            )
+            if reachable_count == 0:
+                logger.warning(
+                    f"Policy {self.name}, Hostname {original_hostname}: No reachable hosts found in range"
+                )
+                self.run_store.update_run(
+                    policy_name=self.name,
+                    target=original_hostname,
+                    run_id=scan_run.id,
+                    status=RunStatus.FAILED,
+                    error=Exception("No reachable hosts found in range"),
+                    entity_count=0,
+                )
+            else:
+                self.run_store.update_run(
+                    policy_name=self.name,
+                    target=original_hostname,
+                    run_id=scan_run.id,
+                    status=RunStatus.COMPLETED,
+                    error=None,
+                    entity_count=reachable_count,
+                )
 
             for hostname in hostnames:
                 sanitized_hostname = hostname.replace("\r\n", "").replace("\n", "")
@@ -339,21 +351,8 @@ class PolicyRunner:
                     )
                     self.active_host_jobs[sanitized_hostname] = id
                 else:
-                    logger.warning(
-                        f"Policy {self.name}, Hostname {sanitized_hostname}: No reachable port found"
-                    )
-                    unreachable_run = self.run_store.create_run(
-                        policy_name=self.name,
-                        target=sanitized_hostname,
-                        parent_target=original_hostname,
-                    )
-                    self.run_store.update_run(
-                        policy_name=self.name,
-                        target=sanitized_hostname,
-                        run_id=unreachable_run.id,
-                        status=RunStatus.FAILED,
-                        error=Exception("No reachable port found"),
-                        entity_count=0,
+                    logger.info(
+                        f"Policy {self.name}, Hostname {sanitized_hostname}: No reachable port found, skipping"
                     )
         except Exception as e:
             logger.error(
