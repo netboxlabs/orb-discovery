@@ -446,5 +446,7 @@ func TestNewRunner_RangeScheduledWithCron(t *testing.T) {
 
 	nextRuns, err := jobs[0].NextRuns(2)
 	require.NoError(t, err)
-	assert.Len(t, nextRuns, 2, "cron job must have at least 2 future runs")
+	require.Len(t, nextRuns, 2)
+	assert.False(t, nextRuns[1].IsZero(), "second next run must be a real future time, not zero — proves this is a cron job not a one-time job")
+	assert.True(t, nextRuns[1].After(nextRuns[0]), "cron next runs must be strictly increasing")
 }

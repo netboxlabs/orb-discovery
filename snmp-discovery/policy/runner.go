@@ -207,8 +207,9 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 	}
 
 	// Snapshot live job IDs before the loop to avoid holding two locks simultaneously
-	liveIDs := make(map[uuid.UUID]struct{}, len(r.scheduler.Jobs()))
-	for _, j := range r.scheduler.Jobs() {
+	jobs := r.scheduler.Jobs()
+	liveIDs := make(map[uuid.UUID]struct{}, len(jobs))
+	for _, j := range jobs {
 		liveIDs[j.ID()] = struct{}{}
 	}
 
