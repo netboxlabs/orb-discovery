@@ -240,6 +240,7 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 			continue
 		}
 		r.activeHostJobs[jobKey] = newJob.ID()
+		liveIDs[newJob.ID()] = struct{}{} // keep snapshot current for remaining iterations
 		r.activeHostJobsMu.Unlock()
 	}
 

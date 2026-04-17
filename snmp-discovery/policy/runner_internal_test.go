@@ -418,6 +418,33 @@ func TestRunScanWithOriginal_FailsWhenNoResponsiveHosts(t *testing.T) {
 	assert.Len(t, scheduler.Jobs(), 0, "no crawl jobs should be scheduled")
 }
 
+func TestRunScanWithOriginal_NoDuplicateForRepeatedResponsiveHost(t *testing.T) {
+	scheduler, err := gocron.NewScheduler()
+	require.NoError(t, err)
+
+	runStore := NewRunStore()
+	runner := &Runner{
+		scheduler:      scheduler,
+		ctx:            context.WithValue(context.Background(), policyKey, "test-policy"),
+		timeout:        5 * time.Second,
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		runStore:       runStore,
+		activeHostJobs: make(map[string]uuid.UUID),
+	}
+	runner.ClientFactory = func(_ string, _ uint16, _ int, _ time.Duration, _ *config.Authentication, _ *slog.Logger) (snmp.Walker, error) {
+		return &testWalker{}, nil
+	}
+
+	// Same host appears twice in the targets list (simulates misconfigured overlapping range)
+	runner.runScanWithOriginal([]config.Target{
+		{Host: "192.168.1.1", Port: 161},
+		{Host: "192.168.1.1", Port: 161},
+	}, "192.168.1.0/24")
+
+	// Only one crawl job should be scheduled despite duplicate in responsive list
+	assert.Len(t, scheduler.Jobs(), 1)
+}
+
 func TestNewRunner_RangeScheduledWithCron(t *testing.T) {
 	cron := "0 * * * *"
 	pol := config.Policy{
