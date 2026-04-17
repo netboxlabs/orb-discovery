@@ -333,7 +333,7 @@ class PolicyRunner:
                 sanitized_hostname = hostname.replace("\r\n", "").replace("\n", "")
                 existing_job_id = self.active_host_jobs.get((original_hostname, sanitized_hostname))
                 if existing_job_id and self.scheduler.get_job(existing_job_id):
-                    logger.info(
+                    logger.debug(
                         f"Policy {self.name}, Hostname {sanitized_hostname}: Discovery job already active, skipping"
                     )
                     continue
