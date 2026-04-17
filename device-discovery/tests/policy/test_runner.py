@@ -658,3 +658,18 @@ def test_run_with_parent_uses_entity_count_from_collect(policy_runner, run_store
     mock_update.assert_called_once()
     call_kwargs = mock_update.call_args[1]
     assert call_kwargs["entity_count"] == 12
+
+
+def test_run_with_parent_driver_failure_does_not_remove_job(policy_runner, run_store, sample_config):
+    """Driver discovery failure in run_with_parent must NOT remove the job."""
+    scope = Napalm(driver=None, hostname="192.0.2.1", username="admin", password="password")
+    policy_runner.run_store = run_store
+    policy_runner.name = "test_policy"
+
+    with (
+        patch("device_discovery.policy.runner.discover_device_driver", return_value=None),
+        patch.object(policy_runner.scheduler, "remove_job") as mock_remove,
+    ):
+        policy_runner.run_with_parent("test_id", scope, sample_config, "192.0.2.0/24")
+
+    mock_remove.assert_not_called()
