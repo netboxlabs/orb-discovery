@@ -210,6 +210,15 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 		liveIDs[j.ID()] = struct{}{}
 	}
 
+	// Prune stale host->job mappings so completed/removed jobs do not accumulate indefinitely.
+	r.activeHostJobsMu.Lock()
+	for jobKey, jobID := range r.activeHostJobs {
+		if _, alive := liveIDs[jobID]; !alive {
+			delete(r.activeHostJobs, jobKey)
+		}
+	}
+	r.activeHostJobsMu.Unlock()
+
 	var err error
 	for _, target := range responsive {
 		jobKey := fmt.Sprintf("%s::%s:%d", originalTarget, target.Host, target.Port)
