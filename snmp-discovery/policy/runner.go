@@ -119,9 +119,14 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 		}
 		// Create scan task for multiple targets with original target
 		task := gocron.NewTask(runner.runScanWithOriginal, group.targets, group.originalTarget)
-		_, err = runner.scheduler.NewJob(gocron.OneTimeJob(
-			gocron.OneTimeJobStartDateTime(time.Now().Add(1*time.Second))), task,
-			gocron.WithSingletonMode(gocron.LimitModeReschedule))
+		if policy.Config.Schedule != nil {
+			_, err = runner.scheduler.NewJob(gocron.CronJob(*policy.Config.Schedule, false), task,
+				gocron.WithSingletonMode(gocron.LimitModeReschedule))
+		} else {
+			_, err = runner.scheduler.NewJob(gocron.OneTimeJob(
+				gocron.OneTimeJobStartDateTime(time.Now().Add(1*time.Second))), task,
+				gocron.WithSingletonMode(gocron.LimitModeReschedule))
+		}
 		if err != nil {
 			return nil, err
 		}

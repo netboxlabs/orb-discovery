@@ -343,3 +343,33 @@ func TestRunner_HasActiveHostJobsField(t *testing.T) {
 	r.activeHostJobs = make(map[string]uuid.UUID)
 	assert.NotNil(t, r.activeHostJobs)
 }
+
+func TestNewRunner_RangeScheduledWithCron(t *testing.T) {
+	cron := "0 * * * *"
+	pol := config.Policy{
+		Config: config.PolicyConfig{
+			Schedule: &cron,
+			Timeout:  120,
+		},
+		Scope: config.Scope{
+			Targets: []config.Target{
+				{Host: "192.168.1.1-2", Port: 161},
+			},
+		},
+	}
+	runStore := NewRunStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	runner, err := NewRunner(context.Background(), logger, "test-policy", pol, nil,
+		snmp.NewFakeSNMPWalker, &config.Mapping{}, nil, nil, runStore)
+	require.NoError(t, err)
+	runner.scheduler.Start()
+	defer func() { _ = runner.Stop() }()
+
+	jobs := runner.scheduler.Jobs()
+	require.Len(t, jobs, 1, "one job for the range scan")
+
+	nextRuns, err := jobs[0].NextRuns(2)
+	require.NoError(t, err)
+	assert.Len(t, nextRuns, 2, "cron job must have at least 2 future runs")
+}
