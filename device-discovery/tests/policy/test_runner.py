@@ -714,7 +714,7 @@ def test_run_scan_skips_already_active_host(monkeypatch):
     runner.scheduler.get_job.return_value = existing_job
 
     # Pre-populate active_host_jobs as if host was already scheduled
-    runner.active_host_jobs["192.168.1.1"] = "existing-job-id"
+    runner.active_host_jobs[("192.168.1.0/24", "192.168.1.1")] = "existing-job-id"
 
     with patch(
         "device_discovery.policy.runner.find_reachable_hosts",
@@ -734,7 +734,7 @@ def test_run_scan_reschedules_host_when_job_no_longer_active(monkeypatch):
     runner.scheduler = MagicMock()
     runner.scheduler.get_job.return_value = None   # job is gone
 
-    runner.active_host_jobs["192.168.1.1"] = "stale-job-id"
+    runner.active_host_jobs[("192.168.1.0/24", "192.168.1.1")] = "stale-job-id"
     scope = Napalm(driver="ios", hostname="192.168.1.0/24", username="admin", password="password")
     config = Config(options=Options(port_scan_ports=[22], port_scan_timeout=0.1))
     trigger = MagicMock(spec=BaseTrigger)
@@ -749,7 +749,37 @@ def test_run_scan_reschedules_host_when_job_no_longer_active(monkeypatch):
         runner.run_scan(["192.168.1.1"], trigger, scope, config)
 
     runner.scheduler.add_job.assert_called_once()
-    assert runner.active_host_jobs["192.168.1.1"] == "new-job-id"
+    assert runner.active_host_jobs[("192.168.1.0/24", "192.168.1.1")] == "new-job-id"
+
+
+def test_run_scan_overlapping_scopes_each_schedule_independently():
+    """Two scopes whose ranges overlap must each schedule their own job for the shared host."""
+    runner = PolicyRunner()
+    runner.name = "policy1"
+    runner.run_store = RunStore()
+    runner.scheduler = MagicMock()
+    runner.scheduler.get_job.return_value = None  # no prior jobs
+    trigger = MagicMock(spec=BaseTrigger)
+    config = Config(options=Options(port_scan_ports=[22], port_scan_timeout=0.1))
+
+    scope_a = Napalm(driver="ios", hostname="192.168.1.0/24", username="admin", password="admin")
+    scope_b = Napalm(driver="ios", hostname="192.168.1.1-192.168.1.5", username="ops", password="ops")
+
+    with (
+        patch("device_discovery.policy.runner.find_reachable_hosts", return_value={"192.168.1.1": True}),
+        patch("uuid.uuid4", side_effect=["scan-a", "job-a"]),
+    ):
+        runner.run_scan(["192.168.1.1"], trigger, scope_a, config)
+
+    with (
+        patch("device_discovery.policy.runner.find_reachable_hosts", return_value={"192.168.1.1": True}),
+        patch("uuid.uuid4", side_effect=["scan-b", "job-b"]),
+    ):
+        runner.run_scan(["192.168.1.1"], trigger, scope_b, config)
+
+    assert runner.scheduler.add_job.call_count == 2
+    assert runner.active_host_jobs[("192.168.1.0/24", "192.168.1.1")] == "job-a"
+    assert runner.active_host_jobs[("192.168.1.1-192.168.1.5", "192.168.1.1")] == "job-b"
 
 
 def test_run_scan_stores_failed_run_on_range_when_no_hosts_reachable():
