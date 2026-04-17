@@ -331,6 +331,23 @@ func findLatestRun(runs []*Run) *Run {
 	return runs[0]
 }
 
+// deriveStatus returns "running" if any run is still running, otherwise the latest run's status.
+func deriveStatus(runs []*Run) string {
+	if len(runs) == 0 {
+		return "unknown"
+	}
+	for _, r := range runs {
+		if r.Status == RunStatusRunning {
+			return string(RunStatusRunning)
+		}
+	}
+	latestRun := findLatestRun(runs)
+	if latestRun != nil {
+		return string(latestRun.Status)
+	}
+	return "unknown"
+}
+
 // GetPolicyStatuses returns all policies with their status and runs
 func (m *Manager) GetPolicyStatuses() []Status {
 	allRuns := m.runStore.GetAllPoliciesWithRuns()
@@ -340,16 +357,9 @@ func (m *Manager) GetPolicyStatuses() []Status {
 	// Get statuses for all policies that have runners
 	for name := range m.policies {
 		runs := m.runStore.GetRunsForPolicy(name)
-		status := "unknown"
-		if len(runs) > 0 {
-			latestRun := findLatestRun(runs)
-			if latestRun != nil {
-				status = string(latestRun.Status)
-			}
-		}
 		statuses = append(statuses, Status{
 			Name:   name,
-			Status: status,
+			Status: deriveStatus(runs),
 			Runs:   runs,
 		})
 	}
@@ -357,16 +367,9 @@ func (m *Manager) GetPolicyStatuses() []Status {
 	// Also include policies that have runs but no active runner
 	for name, runs := range allRuns {
 		if !m.HasPolicy(name) {
-			status := "unknown"
-			if len(runs) > 0 {
-				latestRun := findLatestRun(runs)
-				if latestRun != nil {
-					status = string(latestRun.Status)
-				}
-			}
 			statuses = append(statuses, Status{
 				Name:   name,
-				Status: status,
+				Status: deriveStatus(runs),
 				Runs:   runs,
 			})
 		}
