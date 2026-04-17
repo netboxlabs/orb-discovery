@@ -130,7 +130,7 @@ class PolicyRunner:
                 self.scheduler.add_job(
                     self.run_scan,
                     id=id,
-                    trigger=DateTrigger(run_date=datetime.now() + timedelta(seconds=1)),
+                    trigger=trigger,
                     args=[hostnames, trigger, scope, config],
                     misfire_grace_time=None,
                 )

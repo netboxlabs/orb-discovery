@@ -152,9 +152,32 @@ def test_setup_policy_runner_expands_hostname_ranges(
     hostnames, cron_trigger, passed_scope, copied_config = first_call[1]["args"]
     assert hostnames == ["192.0.2.1", "192.0.2.2"]
     assert isinstance(cron_trigger, CronTrigger)
-    assert isinstance(first_call[1]["trigger"], DateTrigger)
+    assert isinstance(first_call[1]["trigger"], CronTrigger)
     assert passed_scope.hostname == ranged_scope.hostname
     assert copied_config.defaults.role == "Router"
+
+
+def test_setup_policy_runner_expands_hostname_ranges_one_shot(
+    policy_runner, run_store
+):
+    """Range scan with no schedule must still use DateTrigger for run_scan."""
+    ranged_scope = Napalm(
+        driver="ios",
+        hostname="192.0.2.1-192.0.2.2",
+        username="admin",
+        password="password",
+    )
+    one_shot_config = Config()  # no schedule
+
+    with (
+        patch.object(policy_runner.scheduler, "start"),
+        patch.object(policy_runner.scheduler, "add_job") as mock_add_job,
+    ):
+        policy_runner.setup("policy1", one_shot_config, [ranged_scope], run_store)
+
+    first_call = mock_add_job.call_args_list[0]
+    assert first_call[0][0] == policy_runner.run_scan
+    assert isinstance(first_call[1]["trigger"], DateTrigger)
 
 
 def test_setup_with_unsupported_driver_raises_error(
