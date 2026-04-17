@@ -200,20 +200,45 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 
 	var err error
 	for _, target := range responsive {
+		jobKey := fmt.Sprintf("%s::%s:%d", originalTarget, target.Host, target.Port)
+		r.activeHostJobsMu.Lock()
+		if existingID, ok := r.activeHostJobs[jobKey]; ok {
+			alive := false
+			for _, j := range r.scheduler.Jobs() {
+				if j.ID() == existingID {
+					alive = true
+					break
+				}
+			}
+			if alive {
+				r.activeHostJobsMu.Unlock()
+				r.logger.Debug("crawl job already active, skipping",
+					"host", target.Host, "policy", policyName)
+				continue
+			}
+		}
+
 		task := gocron.NewTask(r.runWithMetadata, target, originalTarget)
+		var newJob gocron.Job
 		if r.config.Schedule != nil {
-			_, err = r.scheduler.NewJob(gocron.CronJob(*r.config.Schedule, false), task,
+			newJob, err = r.scheduler.NewJob(gocron.CronJob(*r.config.Schedule, false), task,
 				gocron.WithSingletonMode(gocron.LimitModeReschedule))
 		} else {
-			_, err = r.scheduler.NewJob(gocron.OneTimeJob(
+			newJob, err = r.scheduler.NewJob(gocron.OneTimeJob(
 				gocron.OneTimeJobStartDateTime(time.Now().Add(1*time.Second))), task,
 				gocron.WithSingletonMode(gocron.LimitModeReschedule))
 		}
 		if err != nil {
+			r.activeHostJobsMu.Unlock()
 			r.logger.Error("failed to schedule crawl task for responsive target",
 				"host", target.Host, "policy", policyName, "error", err)
 			continue
 		}
+		if r.activeHostJobs == nil {
+			r.activeHostJobs = make(map[string]uuid.UUID)
+		}
+		r.activeHostJobs[jobKey] = newJob.ID()
+		r.activeHostJobsMu.Unlock()
 		r.tasks = append(r.tasks, task)
 	}
 

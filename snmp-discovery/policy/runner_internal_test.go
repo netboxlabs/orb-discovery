@@ -344,6 +344,42 @@ func TestRunner_HasActiveHostJobsField(t *testing.T) {
 	assert.NotNil(t, r.activeHostJobs)
 }
 
+func TestRunScanWithOriginal_SkipsDuplicateCrawlJob(t *testing.T) {
+	scheduler, err := gocron.NewScheduler()
+	require.NoError(t, err)
+
+	// Schedule a pre-existing crawl job with a known ID
+	existingJobID := uuid.New()
+	_, err = scheduler.NewJob(
+		gocron.CronJob("0 * * * *", false),
+		gocron.NewTask(func() {}),
+		gocron.WithIdentifier(existingJobID),
+	)
+	require.NoError(t, err)
+
+	runStore := NewRunStore()
+	runner := &Runner{
+		scheduler: scheduler,
+		ctx:       context.WithValue(context.Background(), policyKey, "test-policy"),
+		timeout:   5 * time.Second,
+		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		runStore:  runStore,
+		activeHostJobs: map[string]uuid.UUID{
+			"192.168.1.0/24::192.168.1.1:161": existingJobID,
+		},
+	}
+	runner.ClientFactory = func(host string, _ uint16, _ int, _ time.Duration, _ *config.Authentication, _ *slog.Logger) (snmp.Walker, error) {
+		return &testWalker{}, nil // all hosts probe successfully
+	}
+
+	runner.runScanWithOriginal([]config.Target{
+		{Host: "192.168.1.1", Port: 161},
+	}, "192.168.1.0/24")
+
+	// Still only 1 job — the pre-existing one; no duplicate was added
+	assert.Len(t, scheduler.Jobs(), 1)
+}
+
 func TestNewRunner_RangeScheduledWithCron(t *testing.T) {
 	cron := "0 * * * *"
 	pol := config.Policy{
