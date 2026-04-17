@@ -250,7 +250,6 @@ func TestRunScanSchedulesResponsiveTargets(t *testing.T) {
 		{Host: "good-2", Port: 161},
 	}, "192.168.1.0/24")
 
-	assert.Len(t, runner.tasks, 2)
 	assert.Len(t, runner.scheduler.Jobs(), 2)
 
 	// Verify scan run was created

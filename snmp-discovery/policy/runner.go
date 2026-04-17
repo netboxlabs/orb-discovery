@@ -42,7 +42,6 @@ type expandedTargetGroup struct {
 type Runner struct {
 	scheduler        gocron.Scheduler
 	ctx              context.Context
-	tasks            []gocron.Task
 	client           diode.Client
 	logger           *slog.Logger
 	timeout          time.Duration
@@ -114,7 +113,6 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 			if err != nil {
 				return nil, err
 			}
-			runner.tasks = append(runner.tasks, task)
 			continue
 		}
 		// Create scan task for multiple targets with original target
@@ -130,7 +128,6 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 		if err != nil {
 			return nil, err
 		}
-		runner.tasks = append(runner.tasks, task)
 	}
 	return runner, nil
 }
@@ -243,7 +240,6 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 			continue
 		}
 		r.activeHostJobs[jobKey] = newJob.ID()
-		r.tasks = append(r.tasks, task) // protected by activeHostJobsMu
 		r.activeHostJobsMu.Unlock()
 	}
 
