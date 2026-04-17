@@ -198,6 +198,14 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 		return
 	}
 
+	if len(responsive) == 0 {
+		r.logger.Warn("no hosts responded to SNMP probe",
+			"policy", policyName, "target", originalTarget)
+		r.runStore.UpdateRun(policyName, originalTarget, port, scanRun.ID,
+			RunStatusFailed, fmt.Errorf("no hosts responded to SNMP probe"), 0)
+		return
+	}
+
 	// Snapshot live job IDs before the loop to avoid holding two locks simultaneously
 	liveIDs := make(map[uuid.UUID]struct{}, len(r.scheduler.Jobs()))
 	for _, j := range r.scheduler.Jobs() {
