@@ -198,19 +198,18 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 		return
 	}
 
+	// Snapshot live job IDs before the loop to avoid holding two locks simultaneously
+	liveIDs := make(map[uuid.UUID]struct{}, len(r.scheduler.Jobs()))
+	for _, j := range r.scheduler.Jobs() {
+		liveIDs[j.ID()] = struct{}{}
+	}
+
 	var err error
 	for _, target := range responsive {
 		jobKey := fmt.Sprintf("%s::%s:%d", originalTarget, target.Host, target.Port)
 		r.activeHostJobsMu.Lock()
 		if existingID, ok := r.activeHostJobs[jobKey]; ok {
-			alive := false
-			for _, j := range r.scheduler.Jobs() {
-				if j.ID() == existingID {
-					alive = true
-					break
-				}
-			}
-			if alive {
+			if _, alive := liveIDs[existingID]; alive {
 				r.activeHostJobsMu.Unlock()
 				r.logger.Debug("crawl job already active, skipping",
 					"host", target.Host, "policy", policyName)
@@ -234,12 +233,9 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 				"host", target.Host, "policy", policyName, "error", err)
 			continue
 		}
-		if r.activeHostJobs == nil {
-			r.activeHostJobs = make(map[string]uuid.UUID)
-		}
 		r.activeHostJobs[jobKey] = newJob.ID()
+		r.tasks = append(r.tasks, task) // protected by activeHostJobsMu
 		r.activeHostJobsMu.Unlock()
-		r.tasks = append(r.tasks, task)
 	}
 
 	// Update scan run status

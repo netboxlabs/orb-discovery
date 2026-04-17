@@ -229,11 +229,12 @@ func TestRunScanSchedulesResponsiveTargets(t *testing.T) {
 	runStore := NewRunStore()
 
 	runner := &Runner{
-		scheduler: scheduler,
-		ctx:       context.WithValue(context.Background(), policyKey, "test-policy"),
-		timeout:   5 * time.Second,
-		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		runStore:  runStore,
+		scheduler:      scheduler,
+		ctx:            context.WithValue(context.Background(), policyKey, "test-policy"),
+		timeout:        5 * time.Second,
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		runStore:       runStore,
+		activeHostJobs: make(map[string]uuid.UUID),
 	}
 
 	runner.ClientFactory = func(host string, _ uint16, _ int, _ time.Duration, _ *config.Authentication, _ *slog.Logger) (snmp.Walker, error) {
@@ -339,9 +340,17 @@ func TestQueryTargetSuccess(t *testing.T) {
 }
 
 func TestRunner_HasActiveHostJobsField(t *testing.T) {
-	r := &Runner{}
-	r.activeHostJobs = make(map[string]uuid.UUID)
-	assert.NotNil(t, r.activeHostJobs)
+	cron := "0 * * * *"
+	pol := config.Policy{
+		Config: config.PolicyConfig{Schedule: &cron, Timeout: 120},
+		Scope:  config.Scope{Targets: []config.Target{{Host: "192.168.1.1", Port: 161}}},
+	}
+	runner, err := NewRunner(context.Background(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		"test-policy", pol, nil, snmp.NewFakeSNMPWalker, &config.Mapping{}, nil, nil, NewRunStore())
+	require.NoError(t, err)
+	defer func() { _ = runner.Stop() }()
+	assert.NotNil(t, runner.activeHostJobs, "NewRunner must initialize activeHostJobs")
 }
 
 func TestRunScanWithOriginal_SkipsDuplicateCrawlJob(t *testing.T) {
