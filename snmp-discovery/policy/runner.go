@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-co-op/gocron/v2"
+	"github.com/google/uuid"
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/data"
@@ -54,6 +55,8 @@ type Runner struct {
 	mappingConfig    *config.Mapping
 	deviceLookup     data.DeviceRetriever
 	runStore         *RunStore
+	activeHostJobs   map[string]uuid.UUID
+	activeHostJobsMu sync.Mutex
 }
 
 // NewRunner returns a new policy runner
@@ -64,14 +67,15 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 	}
 
 	runner := &Runner{
-		scheduler:     s,
-		client:        client,
-		logger:        logger,
-		ClientFactory: ClientFactory,
-		manufacturers: manufacturers,
-		mappingConfig: mappingConfig,
-		deviceLookup:  deviceLookup,
-		runStore:      runStore,
+		scheduler:      s,
+		client:         client,
+		logger:         logger,
+		ClientFactory:  ClientFactory,
+		manufacturers:  manufacturers,
+		mappingConfig:  mappingConfig,
+		deviceLookup:   deviceLookup,
+		runStore:       runStore,
+		activeHostJobs: make(map[string]uuid.UUID),
 	}
 
 	runner.timeout = time.Duration(policy.Config.Timeout) * time.Second

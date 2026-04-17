@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-co-op/gocron/v2"
+	"github.com/google/uuid"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/snmp"
 	"github.com/stretchr/testify/assert"
@@ -335,4 +336,10 @@ func TestQueryTargetSuccess(t *testing.T) {
 	entities, err := runner.queryTarget(context.Background(), config.Target{Host: "127.0.0.1", Port: 161})
 	require.NoError(t, err)
 	assert.NotEmpty(t, entities)
+}
+
+func TestRunner_HasActiveHostJobsField(t *testing.T) {
+	r := &Runner{}
+	r.activeHostJobs = make(map[string]uuid.UUID)
+	assert.NotNil(t, r.activeHostJobs)
 }
