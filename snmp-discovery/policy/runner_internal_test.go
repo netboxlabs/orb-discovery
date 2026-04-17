@@ -376,8 +376,8 @@ func TestRunScanWithOriginal_SkipsDuplicateCrawlJob(t *testing.T) {
 			"192.168.1.0/24::192.168.1.1:161": existingJobID,
 		},
 	}
-	runner.ClientFactory = func(host string, _ uint16, _ int, _ time.Duration, _ *config.Authentication, _ *slog.Logger) (snmp.Walker, error) {
-		return &testWalker{}, nil // all hosts probe successfully
+	runner.ClientFactory = func(_ string, _ uint16, _ int, _ time.Duration, _ *config.Authentication, _ *slog.Logger) (snmp.Walker, error) {
+		return &testWalker{}, nil
 	}
 
 	runner.runScanWithOriginal([]config.Target{
