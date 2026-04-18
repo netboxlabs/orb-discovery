@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -197,11 +198,16 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 		liveIDs[j.ID()] = struct{}{}
 	}
 
-	// Prune stale host->job mappings so completed/removed jobs do not accumulate indefinitely.
+	// Prune stale host->job mappings for this originalTarget only.
+	// Scoped to the current range to avoid deleting entries freshly added by a concurrent
+	// runScanWithOriginal invocation for a different range target in the same policy.
+	keyPrefix := originalTarget + "::"
 	r.activeHostJobsMu.Lock()
 	for jobKey, jobID := range r.activeHostJobs {
-		if _, alive := liveIDs[jobID]; !alive {
-			delete(r.activeHostJobs, jobKey)
+		if strings.HasPrefix(jobKey, keyPrefix) {
+			if _, alive := liveIDs[jobID]; !alive {
+				delete(r.activeHostJobs, jobKey)
+			}
 		}
 	}
 	r.activeHostJobsMu.Unlock()
@@ -224,6 +230,9 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 	var err error
 	for _, target := range responsive {
 		jobKey := fmt.Sprintf("%s::%s:%d", originalTarget, target.Host, target.Port)
+
+		// Check under lock, then unlock before calling scheduler to avoid holding mutex
+		// across scheduler's internal locks.
 		r.activeHostJobsMu.Lock()
 		if existingID, ok := r.activeHostJobs[jobKey]; ok {
 			if _, alive := liveIDs[existingID]; alive {
@@ -233,6 +242,7 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 				continue
 			}
 		}
+		r.activeHostJobsMu.Unlock()
 
 		task := gocron.NewTask(r.runWithMetadata, target, originalTarget)
 		var newJob gocron.Job
@@ -245,11 +255,12 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 				gocron.WithSingletonMode(gocron.LimitModeReschedule))
 		}
 		if err != nil {
-			r.activeHostJobsMu.Unlock()
 			r.logger.Error("failed to schedule crawl task for responsive target",
 				"host", target.Host, "policy", policyName, "error", err)
 			continue
 		}
+
+		r.activeHostJobsMu.Lock()
 		r.activeHostJobs[jobKey] = newJob.ID()
 		liveIDs[newJob.ID()] = struct{}{} // keep snapshot current for remaining iterations
 		r.activeHostJobsMu.Unlock()
