@@ -47,7 +47,7 @@ func NewRunStore() *RunStore {
 	}
 }
 
-// copyRun creates a deep copy of a Run to prevent callers from racing with UpdateRun.
+// copyRun creates a deep copy of a Run so callers never hold a pointer into the store's internal state.
 func copyRun(r *Run) *Run {
 	if r == nil {
 		return nil
@@ -107,7 +107,7 @@ func (rs *RunStore) CreateRun(policyName string, targets []string) *Run {
 	}
 
 	rs.runs[policyName] = runs
-	return run
+	return copyRun(run)
 }
 
 // UpdateRun updates the status of a run
