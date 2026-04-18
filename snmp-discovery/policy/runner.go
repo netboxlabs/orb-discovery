@@ -188,22 +188,9 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 		r.logger.Debug("SNMP probe succeeded", "host", target.Host, "port", target.Port, "policy", policyName)
 	}
 
-	// Check if context was canceled or timed out
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		r.logger.Warn("SNMP probe scan interrupted", "policy", policyName, "error", ctxErr, "responsive_target_count", len(responsive))
-		r.runStore.UpdateRun(policyName, originalTarget, port, scanRun.ID, RunStatusFailed, ctxErr, len(responsive))
-		return
-	}
-
-	if len(responsive) == 0 {
-		r.logger.Warn("no hosts responded to SNMP probe",
-			"policy", policyName, "target", originalTarget)
-		r.runStore.UpdateRun(policyName, originalTarget, port, scanRun.ID,
-			RunStatusFailed, fmt.Errorf("no hosts responded to SNMP probe"), 0)
-		return
-	}
-
-	// Snapshot live job IDs before the loop to avoid holding two locks simultaneously
+	// Snapshot live job IDs before the loop to avoid holding two locks simultaneously.
+	// Done here (before early returns) so stale entries are pruned on every probe invocation,
+	// including the zero-responsive and context-timeout paths.
 	jobs := r.scheduler.Jobs()
 	liveIDs := make(map[uuid.UUID]struct{}, len(jobs))
 	for _, j := range jobs {
@@ -218,6 +205,21 @@ func (r *Runner) runScanWithOriginal(targets []config.Target, originalTarget str
 		}
 	}
 	r.activeHostJobsMu.Unlock()
+
+	// Check if context was canceled or timed out
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		r.logger.Warn("SNMP probe scan interrupted", "policy", policyName, "error", ctxErr, "responsive_target_count", len(responsive))
+		r.runStore.UpdateRun(policyName, originalTarget, port, scanRun.ID, RunStatusFailed, ctxErr, len(responsive))
+		return
+	}
+
+	if len(responsive) == 0 {
+		r.logger.Warn("no hosts responded to SNMP probe",
+			"policy", policyName, "target", originalTarget)
+		r.runStore.UpdateRun(policyName, originalTarget, port, scanRun.ID,
+			RunStatusFailed, fmt.Errorf("no hosts responded to SNMP probe"), 0)
+		return
+	}
 
 	var err error
 	for _, target := range responsive {
