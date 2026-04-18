@@ -317,7 +317,7 @@ func (m *Manager) resolveAuthenticationEnvVars(policy *config.Policy) error {
 // Status represents the status of a policy with its runs
 type Status struct {
 	Name   string `json:"name"`
-	Status string `json:"status"` // "running" if any run is in-flight, otherwise the latest run's status
+	Status string `json:"status"` // "unknown" if there are no runs, "running" if any run is in-flight, otherwise the latest run's status
 	Runs   []*Run `json:"runs"`
 }
 
@@ -331,7 +331,8 @@ func findLatestRun(runs []*Run) *Run {
 	return runs[0]
 }
 
-// deriveStatus returns "running" if any run is still running, otherwise the latest run's status.
+// deriveStatus returns "unknown" when runs is empty, "running" if any run is still running,
+// and otherwise the latest run's status. Expects runs sorted newest-first, as returned by RunStore.GetRunsForPolicy.
 func deriveStatus(runs []*Run) string {
 	if len(runs) == 0 {
 		return "unknown"
