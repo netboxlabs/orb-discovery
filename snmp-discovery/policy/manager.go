@@ -317,7 +317,7 @@ func (m *Manager) resolveAuthenticationEnvVars(policy *config.Policy) error {
 // Status represents the status of a policy with its runs
 type Status struct {
 	Name   string `json:"name"`
-	Status string `json:"status"` // derived from latest run
+	Status string `json:"status"` // "running" if any run is in-flight, otherwise the latest run's status
 	Runs   []*Run `json:"runs"`
 }
 

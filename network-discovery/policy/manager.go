@@ -98,11 +98,12 @@ func (m *Manager) GetCapabilities() []string {
 // Status represents the status of a policy with its runs
 type Status struct {
 	Name   string `json:"name"`
-	Status string `json:"status"` // derived from latest run
+	Status string `json:"status"` // "running" if any run is in-flight, otherwise the latest run's status
 	Runs   []*Run `json:"runs"`
 }
 
 // deriveStatus returns "running" if any run is still running, otherwise the latest run's status.
+// Expects runs in chronological order (oldest first), as stored by RunStore.CreateRun.
 func deriveStatus(runs []*Run) string {
 	if len(runs) == 0 {
 		return "unknown"
@@ -112,6 +113,7 @@ func deriveStatus(runs []*Run) string {
 			return string(RunStatusRunning)
 		}
 	}
+	// Last element is the most recent run (append order = chronological)
 	return string(runs[len(runs)-1].Status)
 }
 
