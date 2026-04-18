@@ -12,7 +12,7 @@ func TestDeriveStatus(t *testing.T) {
 		assert.Equal(t, "unknown", deriveStatus([]*Run{}))
 	})
 
-	t.Run("all completed returns latest status", func(t *testing.T) {
+	t.Run("no running runs returns latest run status", func(t *testing.T) {
 		// runs are oldest-first; last element is the most recent
 		runs := []*Run{
 			{Status: RunStatusFailed},
