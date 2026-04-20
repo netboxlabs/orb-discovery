@@ -321,16 +321,6 @@ type Status struct {
 	Runs   []*Run `json:"runs"`
 }
 
-// findLatestRun returns the most recent run from a sorted list
-// Note: GetRunsForPolicy returns runs sorted by CreatedAt descending (newest first)
-func findLatestRun(runs []*Run) *Run {
-	if len(runs) == 0 {
-		return nil
-	}
-	// Runs are already sorted newest first by GetRunsForPolicy
-	return runs[0]
-}
-
 // deriveStatus returns "unknown" when runs is empty, "running" if any run is still running,
 // and otherwise the latest run's status. Expects runs sorted newest-first, as returned by RunStore.GetRunsForPolicy.
 func deriveStatus(runs []*Run) string {
