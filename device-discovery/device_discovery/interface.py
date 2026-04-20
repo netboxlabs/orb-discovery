@@ -229,8 +229,7 @@ def translate_interface(
         )
     else:
         # Tier 2 & 3: Try pattern matching (user + built-in merged)
-        # Use getattr for backward compatibility with SimpleNamespace in tests
-        user_patterns = getattr(defaults, 'interface_patterns', None)
+        user_patterns = defaults.interface_patterns
         merged_patterns = merge_interface_patterns(user_patterns, include_defaults=True)
 
         # Count user patterns to maintain priority during matching
@@ -382,10 +381,8 @@ def build_interface_entities(
 ) -> list[Entity]:
     """Create interface entities from interface definitions and IP data."""
     exclude_patterns = []
-    # Use getattr for backward compatibility with SimpleNamespace in tests
-    exclude_patterns_config = getattr(defaults, "interface_exclude_patterns", None)
-    if exclude_patterns_config:
-        for p in exclude_patterns_config:
+    if defaults.interface_exclude_patterns:
+        for p in defaults.interface_exclude_patterns:
             try:
                 exclude_patterns.append(re.compile(p))
             except re.error as e:
