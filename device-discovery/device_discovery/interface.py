@@ -376,6 +376,10 @@ def extract_parent_interface_name(interface_name: str) -> str | None:
 def _compile_exclude_patterns(patterns: list[str]) -> list[re.Pattern]:
     compiled = []
     for p in patterns:
+        p = p.strip()
+        if not p:
+            logger.warning("Empty interface exclude pattern, skipping.")
+            continue
         try:
             compiled.append(re.compile(p))
         except re.error as e:

@@ -299,6 +299,11 @@ func compileExcludePatterns(defaults *config.Defaults, logger *slog.Logger) []*r
 	}
 	patterns := make([]*regexp.Regexp, 0, len(defaults.InterfaceExcludePatterns))
 	for _, p := range defaults.InterfaceExcludePatterns {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			logger.Warn("empty interface exclude pattern, skipping")
+			continue
+		}
 		re, err := regexp.Compile(p)
 		if err != nil {
 			logger.Warn("invalid interface exclude pattern, skipping", "pattern", p, "error", err)
