@@ -382,8 +382,10 @@ def build_interface_entities(
 ) -> list[Entity]:
     """Create interface entities from interface definitions and IP data."""
     exclude_patterns = []
-    if defaults.interface_exclude_patterns:
-        for p in defaults.interface_exclude_patterns:
+    # Use getattr for backward compatibility with SimpleNamespace in tests
+    exclude_patterns_config = getattr(defaults, "interface_exclude_patterns", None)
+    if exclude_patterns_config:
+        for p in exclude_patterns_config:
             try:
                 exclude_patterns.append(re.compile(p))
             except re.error as e:
