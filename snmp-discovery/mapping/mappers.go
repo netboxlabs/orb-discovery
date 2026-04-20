@@ -545,14 +545,6 @@ func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defa
 	}
 	entityDefaults := defaults.Device
 
-	// Apply entity-specific defaults
-	if entityDefaults.Description != "" {
-		entity.Description = &entityDefaults.Description
-	}
-	if entityDefaults.Comments != "" {
-		entity.Comments = &entityDefaults.Comments
-	}
-
 	// Collect tags from both entity-specific and global defaults
 	var tags []*diode.Tag
 	if len(entityDefaults.Tags) > 0 {

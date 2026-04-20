@@ -2357,6 +2357,53 @@ func TestDeviceMapper_Map(t *testing.T) {
 			expectError:    false,
 		},
 		{
+			// SNMP description must not be overwritten by the default description.
+			name: "SNMP description is preserved when defaults also specify a description",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.1.5.0": {
+					OID:    "1.3.6.1.2.1.1.5.0",
+					Index:  "0",
+					Parent: "1.3.6.1.2.1.1.5",
+					Value:  "router1",
+					Type:   mapping.OctetString,
+				},
+				"1.3.6.1.2.1.1.1.0": {
+					OID:    "1.3.6.1.2.1.1.1.0",
+					Index:  "0",
+					Parent: "1.3.6.1.2.1.1.1",
+					Value:  "description from SNMP",
+					Type:   mapping.OctetString,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.1",
+				Entity: "device",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.1.5",
+						Entity: "device",
+						Field:  "name",
+					},
+					{
+						OID:    "1.3.6.1.2.1.1.1",
+						Entity: "device",
+						Field:  "description",
+					},
+				},
+			},
+			defaults: &config.Defaults{
+				Device: config.DeviceDefaults{
+					Description: "default device description",
+				},
+			},
+			expectedEntity: &diode.Device{
+				Name:        mapping.StringPtr("router1"),
+				Description: mapping.StringPtr("description from SNMP"),
+			},
+			expectError: false,
+		},
+		{
 			name: "trailing null bytes are stripped from device name and description",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.1.5.0": {
