@@ -317,17 +317,17 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 					MappingEntries: []config.MappingEntry{
 						{OID: ".1.3.6.1.2.1.4.20.1.1", Entity: "ipAddress", Field: "address"},
 						{
-							OID:    ".1.3.6.1.2.1.4.20.1.2",
-							Entity: "ipAddress",
-							Field:  "assignedObject",
+							OID:          ".1.3.6.1.2.1.4.20.1.2",
+							Entity:       "ipAddress",
+							Field:        "assignedObject",
 							Relationship: config.Relationship{Type: "interface", Field: "_id"},
 						},
 					},
 				},
 			},
 			objectIDs: mapping.ObjectIDValueMap{
-				".1.3.6.1.2.1.2.2.1.2.1":          mapping.Value{Value: "eth0", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1},
-				".1.3.6.1.2.1.2.2.1.2.2":          mapping.Value{Value: "tap0", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1},
+				".1.3.6.1.2.1.2.2.1.2.1":         mapping.Value{Value: "eth0", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1},
+				".1.3.6.1.2.1.2.2.1.2.2":         mapping.Value{Value: "tap0", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1},
 				".1.3.6.1.2.1.4.20.1.1.10.0.0.1": mapping.Value{Value: "10.0.0.1", Type: mapping.Asn1BER(mapping.IPAddress), IdentifierSize: 4},
 				".1.3.6.1.2.1.4.20.1.2.10.0.0.1": mapping.Value{Value: "2", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 4},
 			},
