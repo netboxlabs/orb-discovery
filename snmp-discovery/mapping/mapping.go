@@ -68,9 +68,15 @@ func (r *EntityRegistry) ExcludeInterface(name string) {
 	r.excludedInterfaces[name] = struct{}{}
 }
 
+// IsInterfaceExcluded checks whether an interface name is excluded
+func (r *EntityRegistry) IsInterfaceExcluded(name string) bool {
+	_, excluded := r.excludedInterfaces[name]
+	return excluded
+}
+
 // GetInterfaceByName searches for an interface entity by its name field
 func (r *EntityRegistry) GetInterfaceByName(interfaceName string) *diode.Interface {
-	if _, excluded := r.excludedInterfaces[interfaceName]; excluded {
+	if r.IsInterfaceExcluded(interfaceName) {
 		return nil
 	}
 	if r.entities[InterfaceEntityType] == nil {
@@ -447,6 +453,8 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 }
 
 func (m *ObjectIDMapper) filterExcludedEntities(entities map[diode.Entity]bool) {
+	// Deletion from a map during range is safe in Go: deleted entries are not
+	// visited in subsequent iterations.
 	if len(m.excludePatterns) == 0 {
 		return
 	}
@@ -473,7 +481,7 @@ func (m *ObjectIDMapper) filterExcludedEntities(entities map[diode.Entity]bool) 
 		if !ok || iface.Name == nil {
 			continue
 		}
-		if _, excluded := m.registry.excludedInterfaces[*iface.Name]; excluded {
+		if m.registry.IsInterfaceExcluded(*iface.Name) {
 			delete(entities, entity)
 			m.logger.Debug("excluding IP for excluded interface", "interface", *iface.Name)
 		}
