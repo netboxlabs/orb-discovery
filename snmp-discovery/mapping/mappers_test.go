@@ -1326,6 +1326,65 @@ func TestInterfaceMapper_Map(t *testing.T) {
 			},
 			expectError: false,
 		},
+		{
+			// SNMP description must not be overwritten by the default description.
+			name: "SNMP description is preserved when defaults also specify a description",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.2.2.1.1.1": {
+					OID:    "1.3.6.1.2.1.2.2.1.1.1",
+					Index:  "1",
+					Parent: "1.3.6.1.2.1.2.2.1.1",
+					Value:  "1",
+					Type:   mapping.Integer,
+				},
+				"1.3.6.1.2.1.2.2.1.2.1": {
+					OID:    "1.3.6.1.2.1.2.2.1.2.1",
+					Index:  "1",
+					Parent: "1.3.6.1.2.1.2.2.1.2",
+					Value:  "eth0",
+					Type:   mapping.OctetString,
+				},
+				"1.3.6.1.2.1.31.1.1.1.18.1": {
+					OID:    "1.3.6.1.2.1.31.1.1.1.18.1",
+					Index:  "1",
+					Parent: "1.3.6.1.2.1.31.1.1.1.18",
+					Value:  "uplink to core",
+					Type:   mapping.OctetString,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.2.2.1.1",
+				Entity: "interface",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.2.2.1.1",
+						Entity: "interface",
+						Field:  "_id",
+					},
+					{
+						OID:    "1.3.6.1.2.1.2.2.1.2",
+						Entity: "interface",
+						Field:  "name",
+					},
+					{
+						OID:    "1.3.6.1.2.1.31.1.1.1.18",
+						Entity: "interface",
+						Field:  "description",
+					},
+				},
+			},
+			defaults: &config.Defaults{
+				Interface: config.InterfaceDefaults{
+					Description: "default interface description",
+				},
+			},
+			expectedEntity: &diode.Interface{
+				Name:        mapping.StringPtr("eth0"),
+				Description: mapping.StringPtr("uplink to core"),
+			},
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {

@@ -306,11 +306,6 @@ func (m *InterfaceMapper) applyDefaults(entity *diode.Interface, defaults *confi
 	}
 	entityDefaults := defaults.Interface
 
-	// Apply entity-specific defaults
-	if entityDefaults.Description != "" {
-		entity.Description = &entityDefaults.Description
-	}
-
 	// Collect tags from both entity-specific and global defaults
 	var tags []*diode.Tag
 	if len(entityDefaults.Tags) > 0 {
