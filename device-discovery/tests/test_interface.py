@@ -654,3 +654,18 @@ def test_build_interface_entities_excludes_ip_only_interface(sample_diode_device
     entities = build_interface_entities(sample_diode_device, interfaces, interfaces_ip, defaults)
     assert not any(e.HasField("interface") for e in entities)
     assert not any(e.HasField("ip_address") for e in entities)
+
+
+def test_build_interface_entities_invalid_exclude_pattern_skipped(sample_diode_device):
+    """Invalid regex patterns are skipped with a warning; valid ones still apply."""
+    interfaces = {
+        "tap0": {"is_enabled": True, "mtu": 1500, "speed": 10, "mac_address": "", "description": ""},
+        "eth0": {"is_enabled": True, "mtu": 1500, "speed": 1000, "mac_address": "", "description": ""},
+    }
+    defaults = Defaults(interface_exclude_patterns=["[invalid", "^tap"])
+    entities = build_interface_entities(sample_diode_device, interfaces, {}, defaults)
+
+    interface_names = [e.interface.name for e in entities if e.HasField("interface")]
+    # invalid pattern "[invalid" is skipped; valid "^tap" still excludes tap0
+    assert "tap0" not in interface_names
+    assert "eth0" in interface_names

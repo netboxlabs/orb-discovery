@@ -380,6 +380,35 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Invalid exclude pattern is skipped, valid pattern still applies",
+			mapping: []config.MappingEntry{
+				{
+					OID:            ".1.3.6.1.2.1.2.2.1",
+					Entity:         "interface",
+					Field:          "_id",
+					IdentifierSize: 1,
+					MappingEntries: []config.MappingEntry{
+						{OID: ".1.3.6.1.2.1.2.2.1.2", Entity: "interface", Field: "name"},
+					},
+				},
+			},
+			objectIDs: mapping.ObjectIDValueMap{
+				".1.3.6.1.2.1.2.2.1.2.1": mapping.Value{Value: "tap0", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1},
+				".1.3.6.1.2.1.2.2.1.2.2": mapping.Value{Value: "eth0", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1},
+			},
+			defaults: &config.Defaults{
+				Interface:                config.InterfaceDefaults{Type: "other"},
+				InterfaceExcludePatterns: []string{"[invalid", "^tap.*"},
+			},
+			expected: []diode.Entity{
+				&diode.Interface{
+					Name:   diode.String("eth0"),
+					Type:   diode.String("other"),
+					Device: &diode.Device{},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
