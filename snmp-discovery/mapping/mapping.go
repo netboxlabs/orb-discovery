@@ -425,7 +425,9 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 
 	currentDevice := m.registry.GetOrCreateEntity(DeviceEntityType, CurrentDeviceIndex).(*diode.Device)
 
-	// Resolve parent interface relationships for subinterfaces now that all interfaces are discovered
+	// ResolveSubinterfaceParents must run after filterExcludedEntities: excluded interface
+	// names are marked in the registry so GetInterfaceByName returns nil for them,
+	// preventing subinterfaces from receiving a parent pointer to an excluded interface.
 	m.registry.ResolveSubinterfaceParents()
 
 	assignedInterfaceIndices := m.getAssignedInterfaces(uniqueEntities)
