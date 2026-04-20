@@ -358,15 +358,19 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 				switch propertyMappingEntry.Field {
 				case "name":
 					name := strings.TrimRight(value.Value, "\x00 \t\n\r")
-					interfaceEntity.Name = &name
-					fieldFound = true
+					if name != "" {
+						interfaceEntity.Name = &name
+						fieldFound = true
+					}
 				case "description":
 					description := strings.TrimRight(value.Value, "\x00 \t\n\r")
-					if len(description) > 200 {
-						description = description[:197] + "..."
+					if description != "" {
+						if len(description) > 200 {
+							description = description[:197] + "..."
+						}
+						interfaceEntity.Description = &description
+						fieldFound = true
 					}
-					interfaceEntity.Description = &description
-					fieldFound = true
 				case "type":
 					// Store SNMP ifType but defer type resolution until after all fields are processed
 					// This ensures name and speed are available for pattern matching
@@ -620,15 +624,19 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 				switch propertyMappingEntry.Field {
 				case "name":
 					name := strings.TrimRight(value.Value, "\x00 \t\n\r")
-					deviceEntity.Name = &name
-					fieldFound = true
+					if name != "" {
+						deviceEntity.Name = &name
+						fieldFound = true
+					}
 				case "description":
 					description := strings.TrimRight(value.Value, "\x00 \t\n\r")
-					if len(description) > 200 {
-						description = description[:197] + "..."
+					if description != "" {
+						if len(description) > 200 {
+							description = description[:197] + "..."
+						}
+						deviceEntity.Description = &description
+						fieldFound = true
 					}
-					deviceEntity.Description = &description
-					fieldFound = true
 				case "platform":
 					manufacturerID, err := m.getManufacturerID(value.Value)
 					if err != nil {
