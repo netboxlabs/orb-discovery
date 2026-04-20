@@ -5,6 +5,11 @@ is a flat Python file (`<driver_name>.py`) that exposes a `NetworkDriver` subcla
 `get_network_driver()` checks `custom_napalm.<name>` before `napalm.<name>`, so no PyPI publishing is
 needed and the driver is available immediately once the package is installed.
 
+Driver files **must** follow the `<vendor>_<os>[_ssh].py` naming convention, matching the
+[netmiko platform string](https://ktbyers.github.io/netmiko/PLATFORMS.html) wherever one exists
+(e.g. `paloalto_panos.py`, `huawei_vrp.py`, `aruba_aoscx_ssh.py`). The only exception is
+`alcatel_aos.py` which predates this convention but already matches the netmiko name.
+
 ---
 
 ## How driver lookup works
@@ -144,16 +149,16 @@ grep -c "MyRawSecret" tests/custom_drivers/my_driver/mock_data/test_get_config_s
 ```
 device-discovery/
 ├── custom_napalm/
-│   ├── __init__.py          # re-export convenience only, not required by NAPALM
-│   ├── CLAUDE.md            # this file
-│   ├── huawei_vrp.py        # Netmiko + ntc-templates example
-│   ├── panos.py             # XML API (pan-python) example
-│   └── panos_ssh.py         # Netmiko + ntc-templates example
+│   ├── __init__.py              # re-export convenience only, not required by NAPALM
+│   ├── CLAUDE.md                # this file
+│   ├── huawei_vrp.py            # Netmiko + ntc-templates example
+│   ├── paloalto_panos.py        # XML API (pan-python) example
+│   └── paloalto_panos_ssh.py    # Netmiko + ntc-templates example
 └── tests/
     └── custom_drivers/
         ├── base_test.py           # BaseDriverTest + parametrize_scenarios
         ├── mock_device.py         # FakeCLIDevice, FakeXmlDevice
-        └── <driver_name>/
+        └── <vendor_os>/           # matches driver filename, e.g. paloalto_panos/
             ├── __init__.py
             ├── conftest.py
             ├── test_driver.py
@@ -185,7 +190,7 @@ pip install -e .           # from device-discovery/
 ## Approach A — Netmiko + ntc-templates (SSH CLI)
 
 Use this when the device has an SSH CLI and ntc-templates has templates for the needed commands.
-`panos_ssh.py` and `huawei_vrp.py` follow this pattern.
+`panos_ssh.py` and `vrp.py` follow this pattern.
 
 ### Check available ntc-templates
 
@@ -461,6 +466,125 @@ All existing drivers run in the same invocation. A new driver's tests are auto-d
 pre-recorded CLI output for a given `DEVICE_TYPE`. It supports the same Netmiko device-type
 strings.
 
+### Supported ssh DEVICE_TYPE
+a10
+accedian
+adtran_os
+alcatel_aos
+alcatel_sros
+allied_telesis_awplus
+apresia_aeos
+arista_eos
+aruba_aoscx
+aruba_os
+aruba_osswitch
+aruba_procurve
+audiocode_66
+audiocode_72
+avaya_ers
+avaya_vsp
+broadcom_icos
+brocade_fastiron
+brocade_fos
+brocade_netiron
+brocade_nos
+brocade_vdx
+brocade_vyos
+calix_b6
+cdot_cros
+centec_os
+checkpoint_gaia
+ciena_saos
+cisco_asa
+cisco_ftd
+cisco_ios
+cisco_nxos
+cisco_s300
+cisco_viptela
+cisco_wlc
+cisco_xe
+cisco_xr
+cloudgenix_ion
+coriant
+dell_dnos9
+dell_force10
+dell_isilon
+dell_os10
+dell_os6
+dell_os9
+dell_powerconnect
+dell_sonic
+dlink_ds
+eltex
+eltex_esr
+endace
+enterasys
+ericsson_ipos
+extreme
+extreme_ers
+extreme_exos
+extreme_netiron
+extreme_nos
+extreme_slx
+extreme_tierra
+extreme_vdx
+extreme_vsp
+extreme_wing
+f5_linux
+f5_ltm
+f5_tmsh
+flexvnf
+fortinet
+generic
+generic_termserver
+hp_comware
+hp_procurve
+huawei
+huawei_olt
+huawei_smartax
+huawei_vrpv8
+ipinfusion_ocnos
+juniper_junos
+juniper_screenos
+keymile
+keymile_nos
+linux
+mellanox
+mellanox_mlnxos
+mikrotik_routeros/v6
+mikrotik_routeros/v7
+mikrotik_switchos
+mrv_lx
+mrv_optiswitch
+netapp_cdot
+netgear_prosafe
+netscaler
+nokia_srl
+nokia_sros
+oneaccess_oneos
+ovs_linux
+paloalto_panos
+pluribus
+quanta_mesh
+rad_etx
+raisecom_roap
+ruckus_fastiron
+ruijie_os
+sixwind_os
+sophos_sfos
+supermicro_smis
+tplink_jetstream
+ubiquiti_edgerouter
+ubiquiti_edgeswitch
+ubiquiti_unifiswitch
+vyatta_vyos
+vyos
+watchguard_fireware
+yamaha
+zte_zxros
+zyxel_os
+
+
 ### 1. Start a mockit container locally
 
 No external test lab needed. Run mockit as a standalone container, mapping its SSH port to any
@@ -611,7 +735,7 @@ Common errors:
 
 Before opening a PR with a new driver, confirm all of the following:
 
-- [ ] Driver file is `custom_napalm/<driver_name>.py` (flat file, not a package).
+- [ ] Driver file is `custom_napalm/<vendor>_<os>[_ssh].py` (flat file, not a package; matches the netmiko platform string where one exists).
 - [ ] Class inherits from `_napalm_base.NetworkDriver` (uses `import napalm.base as _napalm_base`).
 - [ ] All five getters are implemented: `get_facts`, `get_interfaces`, `get_interfaces_ip`, `get_config`, `get_vlans`.
 - [ ] `get_facts` returns all required keys including a float `uptime`.

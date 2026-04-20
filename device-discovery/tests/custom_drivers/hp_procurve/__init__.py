@@ -1,1 +1,1 @@
-"""Unit test package for HP ProCurve NAPALM driver."""
+"""Tests for the custom ProCurve NAPALM driver."""

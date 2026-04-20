@@ -1,9 +1,14 @@
 """
 Fake device objects for custom NAPALM driver unit tests.
 
-Two flavours:
-  FakeCLIDevice   -- intercepts send_command() for Netmiko-based drivers.
-  FakeXmlDevice   -- intercepts op() / show() / xml_root() for pan.xapi-based drivers.
+Flavours:
+  FakeCLIDevice      -- intercepts send_command() for Netmiko-based drivers.
+  FakeXmlDevice      -- intercepts op() / show() / xml_root() for pan.xapi-based drivers.
+  FakeHTTPSession    -- intercepts get() / post() / cli() for REST API drivers
+                        (ArubaOS-Switch and similar).
+  FakePyaoscxSession -- intercepts request() for pyaoscx-based AOS-CX drivers.
+  FakeNetconfConn    -- intercepts get() / get_config() for NETCONF drivers.
+  FakeRestDevice     -- intercepts get_resp() for Cisco ASA REST drivers.
 
 File-name mapping
 -----------------
@@ -16,6 +21,14 @@ XML:  op(cmd="<show><system><info></info></system></show>")
       →  _show__system__info___info___system___show_.xml
       (Same convention as napalm-panos community driver.)
       show() → running_config.xml
+
+HTTP (REST): get("system/status")            → system_status.json
+             get("port-statistics")          → port-statistics.json
+             get("system/status/switch")     → system_status_switch.json
+             cli("show running-config")      → cli_show_running-config.json
+             Rule for GET: replace '/' with '_'.
+             Rule for CLI: same as CLI above, prefixed with 'cli_'.
+             Missing files return an empty dict with status 404 (ok=False).
 """
 
 import json
@@ -100,6 +113,84 @@ class FakeXmlDevice:
         return "<response status='success'><result/></response>"
 
 
+class FakeHTTPSession:
+    """
+    Drop-in replacement for ``_ArubaOSSDevice`` in ArubaOS-Switch REST driver tests.
+
+    Intercepts ``get(endpoint)``, ``post(endpoint, payload=...)``, and ``cli(cmd)``
+    calls and serves responses from JSON files in the mock directory.
+
+    File naming:
+        get("system/status")            → system_status.json
+        get("port-statistics")          → port-statistics.json
+        get("system/status/switch")     → system_status_switch.json
+        cli("show running-config")      → cli_show_running-config.json
+        cli("show config")              → cli_show_config.json
+
+    Missing files for GET/POST: returns a ``_MockResponse`` with ``status_code=404``
+    and ``ok=False``; ``json()`` returns an empty dict ``{}``.
+
+    Missing files for CLI: returns ``""`` (empty string). ``cli()`` uses
+    ``missing_status=200`` so the response is still ``ok=True``; the base64 field
+    will be absent and the method returns ``""`` gracefully without error.
+    """
+
+    class _MockResponse:
+        """Minimal requests.Response look-alike."""
+
+        def __init__(self, data: dict, status_code: int = 200) -> None:
+            self._data = data
+            self.status_code = status_code
+            self.ok = status_code < 400
+
+        def json(self) -> dict:
+            """Return the parsed JSON payload."""
+            return self._data
+
+    def __init__(self, mock_dir: Path) -> None:
+        """Store the directory containing mock JSON response files."""
+        self._mock_dir = mock_dir
+
+    def _load(self, filename: str, *, missing_status: int = 404) -> "_MockResponse":
+        path = self._mock_dir / filename
+        if path.exists():
+            return self._MockResponse(json.loads(path.read_text(encoding="utf-8")), 200)
+        return self._MockResponse({}, missing_status)
+
+    def get(self, endpoint: str, **kwargs) -> "_MockResponse":
+        """Return mock response for a GET request to the given endpoint path."""
+        filename = endpoint.replace("/", "_").strip("_") + ".json"
+        return self._load(filename)
+
+    def post(self, endpoint: str, payload: dict | None = None, **kwargs) -> "_MockResponse":
+        """Return mock response for a POST request (non-CLI calls only)."""
+        filename = endpoint.replace("/", "_").strip("_") + ".json"
+        return self._load(filename)
+
+    def delete(self, endpoint: str, **kwargs) -> "_MockResponse":
+        """Stub DELETE — always succeeds (used for logout)."""
+        return self._MockResponse({}, 204)
+
+    def close(self) -> None:
+        """No-op stub — no real session to close."""
+
+    def cli(self, cmd: str) -> str:
+        """Run a mock CLI command and return decoded text output."""
+        import base64
+
+        safe = re.sub(r"[^\w\-]", "_", cmd)
+        safe = re.sub(r"_+", "_", safe).strip("_")
+        filename = f"cli_{safe}.json"
+        resp = self._load(filename, missing_status=200)
+        encoded = resp.json().get("result_base64_encoded", "")
+        if not encoded:
+            return ""
+        try:
+            return base64.b64decode(encoded).decode("utf-8")
+        except Exception:
+            return ""
+
+
 class FakePyaoscxSession:
     """
     Drop-in replacement for a pyaoscx v2 Session object.
@@ -153,6 +244,54 @@ class FakePyaoscxSession:
         else:
             text = "{}"
         return self._MockResponse(text)
+
+
+class FakeNetconfConn:
+    """
+    Mock ncclient manager for NETCONF-based driver unit tests.
+
+    Each test method has its own mock_dir. ``get()`` reads ``response.xml`` from
+    that directory; ``get_config(source)`` reads ``{source}_config.xml``
+    (e.g. ``running_config.xml``, ``candidate_config.xml``).
+
+    Examples:
+        test_get_facts/normal/response.xml
+        test_get_interfaces/normal/response.xml
+        test_get_interfaces_ip/normal/response.xml
+        test_get_config/normal/running_config.xml
+        test_get_config_sanitized/normal/running_config.xml
+
+    """
+
+    class _Response:
+        """Minimal ncclient reply look-alike (exposes .data_xml as a string)."""
+
+        def __init__(self, xml: str) -> None:
+            self.data_xml = xml
+
+    def __init__(self, mock_dir: Path) -> None:
+        """Store the directory containing mock XML response files."""
+        self._mock_dir = mock_dir
+
+    @property
+    def server_capabilities(self) -> list[str]:
+        """Return empty capabilities — driver treats this as a modern (non-R19) device."""
+        return []
+
+    def get(self, filter=None, with_defaults=None, **kwargs) -> "_Response":
+        """Return ``response.xml`` from the mock directory."""
+        path = self._mock_dir / "response.xml"
+        xml = path.read_text(encoding="utf-8") if path.exists() else "<data/>"
+        return self._Response(xml)
+
+    def get_config(self, source: str = "running", **kwargs) -> "_Response":
+        """Return ``{source}_config.xml`` from the mock directory."""
+        path = self._mock_dir / f"{source}_config.xml"
+        xml = path.read_text(encoding="utf-8") if path.exists() else "<data/>"
+        return self._Response(xml)
+
+    def close_session(self) -> None:
+        """No-op stub."""
 
 
 class FakeRestDevice:
