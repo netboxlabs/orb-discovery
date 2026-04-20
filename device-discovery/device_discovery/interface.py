@@ -382,7 +382,7 @@ def build_interface_entities(
 ) -> list[Entity]:
     """Create interface entities from interface definitions and IP data."""
     exclude_patterns = []
-    if getattr(defaults, "interface_exclude_patterns", None):
+    if defaults.interface_exclude_patterns:
         for p in defaults.interface_exclude_patterns:
             try:
                 exclude_patterns.append(re.compile(p))
@@ -392,6 +392,8 @@ def build_interface_entities(
                 )
 
     def is_excluded(name: str) -> bool:
+        # Uses search (not match) so patterns match anywhere in the name.
+        # Use ^ to anchor to start, e.g. "^tap.*"
         return any(pat.search(name) for pat in exclude_patterns)
 
     interface_entities: dict[str, Interface] = {}

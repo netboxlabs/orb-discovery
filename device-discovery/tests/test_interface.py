@@ -642,3 +642,15 @@ def test_build_interface_entities_no_exclude_patterns(sample_diode_device):
 
     interface_names = [e.interface.name for e in entities if e.HasField("interface")]
     assert "tap103i0" in interface_names
+
+
+def test_build_interface_entities_excludes_ip_only_interface(sample_diode_device):
+    """Excluded interface absent from interfaces dict is also suppressed via ip-only fallback loop."""
+    interfaces = {}
+    interfaces_ip = {
+        "tap103i0": {"ipv4": {"10.0.0.1": {"prefix_length": 24}}, "ipv6": {}},
+    }
+    defaults = Defaults(interface_exclude_patterns=["^tap"])
+    entities = build_interface_entities(sample_diode_device, interfaces, interfaces_ip, defaults)
+    assert not any(e.HasField("interface") for e in entities)
+    assert not any(e.HasField("ip_address") for e in entities)
