@@ -357,10 +357,11 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 				m.logger.Debug("mapping value to interface entity with mapper", "object_id", objectID, "value", value)
 				switch propertyMappingEntry.Field {
 				case "name":
-					interfaceEntity.Name = &value.Value
+					name := strings.TrimRight(value.Value, "\x00 \t\n\r")
+					interfaceEntity.Name = &name
 					fieldFound = true
 				case "description":
-					description := strings.TrimRight(value.Value, " \t\n\r")
+					description := strings.TrimRight(value.Value, "\x00 \t\n\r")
 					if len(description) > 200 {
 						description = description[:197] + "..."
 					}
@@ -626,10 +627,11 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 				m.logger.Debug("mapping value to device entity with mapper", "object_id", objectID, "value", value, "mapping_entry", propertyMappingEntry)
 				switch propertyMappingEntry.Field {
 				case "name":
-					deviceEntity.Name = &value.Value
+					name := strings.TrimRight(value.Value, "\x00 \t\n\r")
+					deviceEntity.Name = &name
 					fieldFound = true
 				case "description":
-					description := strings.TrimRight(value.Value, " \t\n\r")
+					description := strings.TrimRight(value.Value, "\x00 \t\n\r")
 					if len(description) > 200 {
 						description = description[:197] + "..."
 					}

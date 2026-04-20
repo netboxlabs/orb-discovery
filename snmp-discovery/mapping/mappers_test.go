@@ -1327,6 +1327,60 @@ func TestInterfaceMapper_Map(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name: "trailing null bytes are stripped from interface name and description",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.2.2.1.1.1": {
+					OID:    "1.3.6.1.2.1.2.2.1.1.1",
+					Index:  "1",
+					Parent: "1.3.6.1.2.1.2.2.1.1",
+					Value:  "1",
+					Type:   mapping.Integer,
+				},
+				"1.3.6.1.2.1.2.2.1.2.1": {
+					OID:    "1.3.6.1.2.1.2.2.1.2.1",
+					Index:  "1",
+					Parent: "1.3.6.1.2.1.2.2.1.2",
+					Value:  "eth0\x00",
+					Type:   mapping.OctetString,
+				},
+				"1.3.6.1.2.1.31.1.1.1.18.1": {
+					OID:    "1.3.6.1.2.1.31.1.1.1.18.1",
+					Index:  "1",
+					Parent: "1.3.6.1.2.1.31.1.1.1.18",
+					Value:  "uplink\x00",
+					Type:   mapping.OctetString,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.2.2.1.1",
+				Entity: "interface",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.2.2.1.1",
+						Entity: "interface",
+						Field:  "_id",
+					},
+					{
+						OID:    "1.3.6.1.2.1.2.2.1.2",
+						Entity: "interface",
+						Field:  "name",
+					},
+					{
+						OID:    "1.3.6.1.2.1.31.1.1.1.18",
+						Entity: "interface",
+						Field:  "description",
+					},
+				},
+			},
+			defaults: nil,
+			expectedEntity: &diode.Interface{
+				Name:        mapping.StringPtr("eth0"),
+				Description: mapping.StringPtr("uplink"),
+			},
+			expectError: false,
+		},
+		{
 			// SNMP description must not be overwritten by the default description.
 			name: "SNMP description is preserved when defaults also specify a description",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
@@ -2300,6 +2354,45 @@ func TestDeviceMapper_Map(t *testing.T) {
 				Field:  "_id",
 			},
 			expectedEntity: &diode.Device{},
+			expectError:    false,
+		},
+		{
+			name: "trailing null bytes are stripped from device name and description",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.1.5.0": {
+					OID:    "1.3.6.1.2.1.1.5.0",
+					Index:  "0",
+					Parent: "1.3.6.1.2.1.1.5",
+					Value:  "router01\x00",
+					Type:   mapping.OctetString,
+				},
+				"1.3.6.1.2.1.1.1.0": {
+					OID:    "1.3.6.1.2.1.1.1.0",
+					Index:  "0",
+					Parent: "1.3.6.1.2.1.1.1",
+					Value:  "core router\x00",
+					Type:   mapping.OctetString,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.1",
+				Entity: "device",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.1.5",
+						Entity: "device",
+						Field:  "name",
+					},
+					{
+						OID:    "1.3.6.1.2.1.1.1",
+						Entity: "device",
+						Field:  "description",
+					},
+				},
+			},
+			defaults:       nil,
+			expectedEntity: &diode.Device{Name: mapping.StringPtr("router01"), Description: mapping.StringPtr("core router")},
 			expectError:    false,
 		},
 	}
