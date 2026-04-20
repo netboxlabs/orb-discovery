@@ -3,6 +3,7 @@ package mapping
 import (
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -48,20 +49,30 @@ const (
 
 // EntityRegistry is a struct that contains a map of entities
 type EntityRegistry struct {
-	entities map[EntityType]map[ObjectIDIndex]diode.Entity
-	logger   *slog.Logger
+	entities           map[EntityType]map[ObjectIDIndex]diode.Entity
+	logger             *slog.Logger
+	excludedInterfaces map[string]struct{}
 }
 
 // NewEntityRegistry creates a new EntityRegistry
 func NewEntityRegistry(logger *slog.Logger) *EntityRegistry {
 	return &EntityRegistry{
-		entities: make(map[EntityType]map[ObjectIDIndex]diode.Entity),
-		logger:   logger,
+		entities:           make(map[EntityType]map[ObjectIDIndex]diode.Entity),
+		logger:             logger,
+		excludedInterfaces: make(map[string]struct{}),
 	}
+}
+
+// ExcludeInterface marks an interface name as excluded so it is skipped during lookups
+func (r *EntityRegistry) ExcludeInterface(name string) {
+	r.excludedInterfaces[name] = struct{}{}
 }
 
 // GetInterfaceByName searches for an interface entity by its name field
 func (r *EntityRegistry) GetInterfaceByName(interfaceName string) *diode.Interface {
+	if _, excluded := r.excludedInterfaces[interfaceName]; excluded {
+		return nil
+	}
 	if r.entities[InterfaceEntityType] == nil {
 		return nil
 	}
@@ -185,10 +196,11 @@ const (
 
 // ObjectIDMapper is a struct that maps ObjectIDs to entities
 type ObjectIDMapper struct {
-	mappingConfig *Config
-	logger        *slog.Logger
-	registry      *EntityRegistry
-	defaults      *config.Defaults
+	mappingConfig   *Config
+	logger          *slog.Logger
+	registry        *EntityRegistry
+	defaults        *config.Defaults
+	excludePatterns []*regexp.Regexp
 }
 
 // Entry is a struct that contains a mapping entry
@@ -267,11 +279,28 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 // NewObjectIDMapper creates a new ObjectIDMapper
 func NewObjectIDMapper(mappingConfig *Config, logger *slog.Logger, defaults *config.Defaults) *ObjectIDMapper {
 	return &ObjectIDMapper{
-		mappingConfig: mappingConfig,
-		logger:        logger,
-		registry:      NewEntityRegistry(logger),
-		defaults:      defaults,
+		mappingConfig:   mappingConfig,
+		logger:          logger,
+		registry:        NewEntityRegistry(logger),
+		defaults:        defaults,
+		excludePatterns: compileExcludePatterns(defaults, logger),
 	}
+}
+
+func compileExcludePatterns(defaults *config.Defaults, logger *slog.Logger) []*regexp.Regexp {
+	if defaults == nil || len(defaults.InterfaceExcludePatterns) == 0 {
+		return nil
+	}
+	patterns := make([]*regexp.Regexp, 0, len(defaults.InterfaceExcludePatterns))
+	for _, p := range defaults.InterfaceExcludePatterns {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			logger.Warn("invalid interface exclude pattern, skipping", "pattern", p, "error", err)
+			continue
+		}
+		patterns = append(patterns, re)
+	}
+	return patterns
 }
 
 type orbToEntityMapper interface {
@@ -386,6 +415,8 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 		uniqueEntities[newEntity] = true
 	}
 
+	m.filterExcludedEntities(uniqueEntities)
+
 	currentDevice := m.registry.GetOrCreateEntity(DeviceEntityType, CurrentDeviceIndex).(*diode.Device)
 
 	// Resolve parent interface relationships for subinterfaces now that all interfaces are discovered
@@ -413,6 +444,40 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 		}
 	}
 	return entities
+}
+
+func (m *ObjectIDMapper) filterExcludedEntities(entities map[diode.Entity]bool) {
+	if len(m.excludePatterns) == 0 {
+		return
+	}
+	for entity := range entities {
+		iface, ok := entity.(*diode.Interface)
+		if !ok || iface.Name == nil {
+			continue
+		}
+		for _, pat := range m.excludePatterns {
+			if pat.MatchString(*iface.Name) {
+				m.registry.ExcludeInterface(*iface.Name)
+				delete(entities, entity)
+				m.logger.Debug("excluding interface by pattern", "name", *iface.Name)
+				break
+			}
+		}
+	}
+	for entity := range entities {
+		ip, ok := entity.(*diode.IPAddress)
+		if !ok || ip.AssignedObject == nil {
+			continue
+		}
+		iface, ok := ip.AssignedObject.(*diode.Interface)
+		if !ok || iface.Name == nil {
+			continue
+		}
+		if _, excluded := m.registry.excludedInterfaces[*iface.Name]; excluded {
+			delete(entities, entity)
+			m.logger.Debug("excluding IP for excluded interface", "interface", *iface.Name)
+		}
+	}
 }
 
 func (*ObjectIDMapper) getAssignedInterfaces(uniqueEntities map[diode.Entity]bool) map[diode.Entity]bool {
