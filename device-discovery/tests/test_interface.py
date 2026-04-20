@@ -596,6 +596,7 @@ def sample_diode_device(sample_device_info, sample_defaults):
 
 
 def test_build_interface_entities_excludes_matching_interfaces(sample_diode_device):
+    """Interfaces matching exclude patterns and their IPs are not ingested."""
     interfaces = {
         "GigabitEthernet0/0": {
             "is_enabled": True, "mtu": 1500, "speed": 1000,
@@ -631,6 +632,7 @@ def test_build_interface_entities_excludes_matching_interfaces(sample_diode_devi
 
 
 def test_build_interface_entities_no_exclude_patterns(sample_diode_device):
+    """All interfaces are ingested when no exclude patterns are configured."""
     interfaces = {
         "tap103i0": {"is_enabled": True, "mtu": 1500, "speed": 10, "mac_address": "", "description": ""},
     }

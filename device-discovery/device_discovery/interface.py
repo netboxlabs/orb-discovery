@@ -373,6 +373,16 @@ def extract_parent_interface_name(interface_name: str) -> str | None:
     return None
 
 
+def _compile_exclude_patterns(patterns: list[str]) -> list[re.Pattern]:
+    compiled = []
+    for p in patterns:
+        try:
+            compiled.append(re.compile(p))
+        except re.error as e:
+            logger.warning(f"Invalid interface exclude pattern '{p}': {e}. Skipping.")
+    return compiled
+
+
 def build_interface_entities(
     device: Device,
     interfaces: dict,
@@ -380,15 +390,7 @@ def build_interface_entities(
     defaults: Defaults,
 ) -> list[Entity]:
     """Create interface entities from interface definitions and IP data."""
-    exclude_patterns = []
-    if defaults.interface_exclude_patterns:
-        for p in defaults.interface_exclude_patterns:
-            try:
-                exclude_patterns.append(re.compile(p))
-            except re.error as e:
-                logger.warning(
-                    f"Invalid interface exclude pattern '{p}': {e}. Skipping."
-                )
+    exclude_patterns = _compile_exclude_patterns(defaults.interface_exclude_patterns or [])
 
     def is_excluded(name: str) -> bool:
         # Uses search (not match) so patterns match anywhere in the name.
