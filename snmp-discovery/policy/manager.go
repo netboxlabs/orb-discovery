@@ -342,11 +342,7 @@ func deriveStatus(runs []*Run) string {
 			return string(RunStatusRunning)
 		}
 	}
-	latestRun := findLatestRun(runs)
-	if latestRun != nil {
-		return string(latestRun.Status)
-	}
-	return "unknown"
+	return string(runs[0].Status)
 }
 
 // GetPolicyStatuses returns all policies with their status and runs
