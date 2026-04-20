@@ -418,7 +418,9 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 			continue
 		}
 		newEntity := entry.MapToEntity(value.Values, m.registry, m.defaults, m.logger)
-		uniqueEntities[newEntity] = true
+		if newEntity != nil {
+			uniqueEntities[newEntity] = true
+		}
 	}
 
 	m.filterExcludedEntities(uniqueEntities)
