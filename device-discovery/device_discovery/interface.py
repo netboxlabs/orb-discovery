@@ -381,6 +381,19 @@ def build_interface_entities(
     defaults: Defaults,
 ) -> list[Entity]:
     """Create interface entities from interface definitions and IP data."""
+    exclude_patterns = []
+    if getattr(defaults, "interface_exclude_patterns", None):
+        for p in defaults.interface_exclude_patterns:
+            try:
+                exclude_patterns.append(re.compile(p))
+            except re.error as e:
+                logger.warning(
+                    f"Invalid interface exclude pattern '{p}': {e}. Skipping."
+                )
+
+    def is_excluded(name: str) -> bool:
+        return any(pat.search(name) for pat in exclude_patterns)
+
     interface_entities: dict[str, Interface] = {}
     entities: list[Entity] = []
     defined_interface_names = set(interfaces.keys())
@@ -398,6 +411,8 @@ def build_interface_entities(
     for if_name, interface_info in sorted(
         interfaces.items(), key=lambda item: interface_sort_key(item[0])
     ):
+        if is_excluded(if_name):
+            continue
         parent = resolve_parent(if_name)
         interface = translate_interface(
             device, if_name, interface_info, defaults, parent=parent
@@ -408,6 +423,8 @@ def build_interface_entities(
 
     for if_name in sorted(interfaces_ip.keys(), key=interface_sort_key):
         if if_name in interface_entities:
+            continue
+        if is_excluded(if_name):
             continue
         parent = resolve_parent(if_name)
         interface = translate_interface(device, if_name, {}, defaults, parent=parent)
