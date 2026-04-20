@@ -116,6 +116,10 @@ class Defaults(BaseModel):
         default=None,
         description="Interface type patterns for name-based matching, optional",
     )
+    interface_exclude_patterns: list[str] | None = Field(
+        default=None,
+        description="Interface name patterns (regex) to exclude from ingestion, optional",
+    )
     location: str | None = Field(default=None, description="Location name, optional")
     tenant: str | TenantParameters | None = Field(
         default=None, description="Tenant, optional"
