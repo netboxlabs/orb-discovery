@@ -856,18 +856,18 @@ def test_setup_policy_runner_override_defaults_deep_merges_nested_models(
     """
     base_config = Config(
         defaults=Defaults(
-            site="Mycity",
+            site="HQ",
             tags=["switch-device-discovery", "orb-agent"],
-            device=DeviceParameters(manufacturer="HPE", model="Aruba 2530-48G"),
+            device=DeviceParameters(manufacturer="Cisco", model="Catalyst 2960"),
         )
     )
     override_scope = Napalm(
         driver="ios",
-        hostname="172.29.91.43",
+        hostname="192.0.2.1",
         username="admin",
         password="password",
         override_defaults=Defaults(
-            device=DeviceParameters(model="Aruba 2540-24G-PoE+-4SFP"),
+            device=DeviceParameters(model="Catalyst 9300"),
         ),
     )
 
@@ -880,9 +880,9 @@ def test_setup_policy_runner_override_defaults_deep_merges_nested_models(
     passed_config = mock_add_job.call_args_list[0][1]["args"][2]
 
     assert isinstance(passed_config.defaults.device, DeviceParameters)
-    assert passed_config.defaults.device.model == "Aruba 2540-24G-PoE+-4SFP"
-    assert passed_config.defaults.device.manufacturer == "HPE"
+    assert passed_config.defaults.device.model == "Catalyst 9300"
+    assert passed_config.defaults.device.manufacturer == "Cisco"
     assert passed_config.defaults.tags == ["switch-device-discovery", "orb-agent"]
-    assert passed_config.defaults.site == "Mycity"
+    assert passed_config.defaults.site == "HQ"
 
-    assert policy_runner.config.defaults.device.model == "Aruba 2530-48G"
+    assert policy_runner.config.defaults.device.model == "Catalyst 2960"
