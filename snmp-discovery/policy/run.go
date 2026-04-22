@@ -3,8 +3,10 @@ package policy
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/netip"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -103,7 +105,7 @@ func (rs *RunStore) CreateRun(policyName string, target string, port uint16, par
 	normalizedTarget := normalizeTarget(target, port)
 
 	// Create metadata with targets as JSON array of host:port strings
-	hostPort := fmt.Sprintf("%s:%d", target, port)
+	hostPort := net.JoinHostPort(target, strconv.FormatUint(uint64(port), 10))
 	targetsJSON, _ := json.Marshal([]string{hostPort})
 	metadata := map[string]string{
 		"targets": string(targetsJSON),
