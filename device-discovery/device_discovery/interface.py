@@ -229,8 +229,7 @@ def translate_interface(
         )
     else:
         # Tier 2 & 3: Try pattern matching (user + built-in merged)
-        # Use getattr for backward compatibility with SimpleNamespace in tests
-        user_patterns = getattr(defaults, 'interface_patterns', None)
+        user_patterns = defaults.interface_patterns
         merged_patterns = merge_interface_patterns(user_patterns, include_defaults=True)
 
         # Count user patterns to maintain priority during matching
@@ -288,7 +287,7 @@ def translate_interface_ips(
         Iterable[Entity]: Iterable of translated IP address and Prefixes entities.
 
     """
-    from device_discovery.translate import translate_tenant
+    from device_discovery.translate import translate_tenant, translate_vrf
 
     tags = defaults.tags if defaults.tags else []
     ip_tags = list(tags)
@@ -311,7 +310,7 @@ def translate_interface_ips(
         ip_description = defaults.ipaddress.description
         ip_role = defaults.ipaddress.role
         ip_tenant = translate_tenant(defaults.ipaddress.tenant)
-        ip_vrf = defaults.ipaddress.vrf
+        ip_vrf = translate_vrf(defaults.ipaddress.vrf)
 
     if defaults.prefix:
         prefix_tags.extend(defaults.prefix.tags or [])
@@ -319,7 +318,7 @@ def translate_interface_ips(
         prefix_description = defaults.prefix.description
         prefix_role = defaults.prefix.role
         prefix_tenant = translate_tenant(defaults.prefix.tenant)
-        prefix_vrf = defaults.prefix.vrf
+        prefix_vrf = translate_vrf(defaults.prefix.vrf)
 
     ip_entities = []
 
@@ -374,6 +373,20 @@ def extract_parent_interface_name(interface_name: str) -> str | None:
     return None
 
 
+def _compile_exclude_patterns(patterns: list[str]) -> list[re.Pattern]:
+    compiled = []
+    for p in patterns:
+        p = p.strip()
+        if not p:
+            logger.warning("Empty interface exclude pattern, skipping.")
+            continue
+        try:
+            compiled.append(re.compile(p))
+        except re.error as e:
+            logger.warning(f"Invalid interface exclude pattern '{p}': {e}. Skipping.")
+    return compiled
+
+
 def build_interface_entities(
     device: Device,
     interfaces: dict,
@@ -381,6 +394,13 @@ def build_interface_entities(
     defaults: Defaults,
 ) -> list[Entity]:
     """Create interface entities from interface definitions and IP data."""
+    exclude_patterns = _compile_exclude_patterns(defaults.interface_exclude_patterns or [])
+
+    def is_excluded(name: str) -> bool:
+        # Uses search (not match) so patterns match anywhere in the name.
+        # Use ^ to anchor to start, e.g. "^tap.*"
+        return any(pat.search(name) for pat in exclude_patterns)
+
     interface_entities: dict[str, Interface] = {}
     entities: list[Entity] = []
     defined_interface_names = set(interfaces.keys())
@@ -398,6 +418,8 @@ def build_interface_entities(
     for if_name, interface_info in sorted(
         interfaces.items(), key=lambda item: interface_sort_key(item[0])
     ):
+        if is_excluded(if_name):
+            continue
         parent = resolve_parent(if_name)
         interface = translate_interface(
             device, if_name, interface_info, defaults, parent=parent
@@ -408,6 +430,8 @@ def build_interface_entities(
 
     for if_name in sorted(interfaces_ip.keys(), key=interface_sort_key):
         if if_name in interface_entities:
+            continue
+        if is_excluded(if_name):
             continue
         parent = resolve_parent(if_name)
         interface = translate_interface(device, if_name, {}, defaults, parent=parent)
