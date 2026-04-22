@@ -23,6 +23,7 @@ from device_discovery.translate import (
     translate_data,
     translate_device,
     translate_device_config,
+    translate_vrf,
     translate_vlan,
 )
 
@@ -142,6 +143,20 @@ def sample_override_defaults(sample_defaults):
     return sample_defaults
 
 
+def test_translate_vrf_none_returns_none():
+    """Ensure translate_vrf returns None for None input."""
+    assert translate_vrf(None) is None
+
+
+def test_translate_vrf_string_returns_vrf():
+    """Ensure translate_vrf wraps a string into a VRF with just the name."""
+    from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
+    vrf = translate_vrf("my-vrf")
+    assert isinstance(vrf, pb.VRF)
+    assert vrf.name == "my-vrf"
+    assert vrf.rd == ""
+
+
 def test_translate_device_with_asset_tag(sample_device_info, sample_defaults):
     """Ensure device asset_tag is translated correctly."""
     sample_defaults.device = DeviceParameters(asset_tag="ASSET-001")
@@ -152,7 +167,7 @@ def test_translate_device_with_asset_tag(sample_device_info, sample_defaults):
 def test_translate_device_asset_tag_none_by_default(sample_device_info, sample_defaults):
     """Ensure device asset_tag is None when not set."""
     device = translate_device(sample_device_info, sample_defaults)
-    assert device.asset_tag is None or device.asset_tag == ""
+    assert device.asset_tag == ""
 
 
 def test_translate_device_with_rack(sample_device_info, sample_defaults):
