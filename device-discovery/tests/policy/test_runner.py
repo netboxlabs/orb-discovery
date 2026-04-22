@@ -9,7 +9,14 @@ from apscheduler.triggers.base import BaseTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
-from device_discovery.policy.models import Config, Defaults, Napalm, Options, Status
+from device_discovery.policy.models import (
+    Config,
+    Defaults,
+    DeviceParameters,
+    Napalm,
+    Options,
+    Status,
+)
 from device_discovery.policy.run import RunStore
 from device_discovery.policy.runner import PolicyRunner
 
@@ -836,3 +843,46 @@ def test_run_scan_stores_completed_run_when_some_hosts_reachable():
     assert range_runs[0].status.value == "completed"
     assert range_runs[0].entity_count == 1
     runner.scheduler.add_job.assert_called_once()
+
+
+def test_setup_policy_runner_override_defaults_deep_merges_nested_models(
+    policy_runner, run_store
+):
+    """override_defaults on a nested sub-model must deep-merge and stay a model instance.
+
+    Regression for AttributeError: 'dict' object has no attribute 'tags' — caused
+    by model_copy(update=dict) replacing nested Pydantic sub-models with raw dicts
+    and shallow-overwriting sibling fields.
+    """
+    base_config = Config(
+        defaults=Defaults(
+            site="Mycity",
+            tags=["switch-device-discovery", "orb-agent"],
+            device=DeviceParameters(manufacturer="HPE", model="Aruba 2530-48G"),
+        )
+    )
+    override_scope = Napalm(
+        driver="ios",
+        hostname="172.29.91.43",
+        username="admin",
+        password="password",
+        override_defaults=Defaults(
+            device=DeviceParameters(model="Aruba 2540-24G-PoE+-4SFP"),
+        ),
+    )
+
+    with (
+        patch.object(policy_runner.scheduler, "start"),
+        patch.object(policy_runner.scheduler, "add_job") as mock_add_job,
+    ):
+        policy_runner.setup("policy1", base_config, [override_scope], run_store)
+
+    passed_config = mock_add_job.call_args_list[0][1]["args"][2]
+
+    assert isinstance(passed_config.defaults.device, DeviceParameters)
+    assert passed_config.defaults.device.model == "Aruba 2540-24G-PoE+-4SFP"
+    assert passed_config.defaults.device.manufacturer == "HPE"
+    assert passed_config.defaults.tags == ["switch-device-discovery", "orb-agent"]
+    assert passed_config.defaults.site == "Mycity"
+
+    assert policy_runner.config.defaults.device.model == "Aruba 2530-48G"
