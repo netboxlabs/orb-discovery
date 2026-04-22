@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
 from netboxlabs.diode.sdk.ingester import (
     VLAN,
+    VRF,
     Device,
     DeviceConfig,
     DeviceType,
@@ -17,7 +18,6 @@ from netboxlabs.diode.sdk.ingester import (
     Rack,
     Tenant,
     TenantGroup,
-    VRF,
 )
 
 from device_discovery.interface import build_interface_entities

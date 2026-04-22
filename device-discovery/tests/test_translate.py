@@ -23,8 +23,8 @@ from device_discovery.translate import (
     translate_data,
     translate_device,
     translate_device_config,
-    translate_vrf,
     translate_vlan,
+    translate_vrf,
 )
 
 
