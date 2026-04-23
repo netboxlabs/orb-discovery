@@ -5,7 +5,6 @@
 import copy
 import ipaddress
 import logging
-import socket
 from collections.abc import Iterable
 
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
@@ -27,9 +26,6 @@ from device_discovery.interface import build_interface_entities
 from device_discovery.policy.models import Defaults, Options, TenantParameters, VrfParameters
 
 logger = logging.getLogger(__name__)
-
-# DNS timeout for primary-IP hostname resolution (seconds).
-PRIMARY_IP_DNS_TIMEOUT_SECONDS = 2.0
 
 
 def translate_tenant(
@@ -260,68 +256,39 @@ def translate_device_config(config_info: dict, options: Options) -> DeviceConfig
     )
 
 
-def _resolve_target_ipv4s(
-    hostname: str | None,
-    resolver=None,
-) -> list[str]:
+def _target_ipv4_candidate(hostname: str | None) -> str | None:
     """
-    Resolve the target host to its IPv4 candidate addresses.
+    Return the IPv4 literal candidate for the SNMP/NAPALM target host.
 
-    If ``hostname`` parses as an IPv4 literal, the single address is returned.
-    Otherwise DNS is consulted (best-effort, 2s timeout) and only IPv4 results
-    are kept. Returns an empty list on any failure or for IPv6-only hosts.
+    Only IPv4 literals are matched for primary-IP assignment. Hostnames are
+    deliberately NOT re-resolved here: re-resolving can pick a different
+    address than the one NAPALM actually connected to (DNS load-balancing,
+    address-family preference), and in practice NAPALM inventories are
+    overwhelmingly keyed by IP. Users who need primary-IP populated for
+    name-keyed devices should set it through another source.
 
     Args:
     ----
-        hostname: Target host string (may be literal IP or DNS name). Trimmed
-            leading/trailing whitespace.
-        resolver: Optional callable ``(host) -> list[str]`` used in tests to
-            bypass the real resolver. When ``None`` ``socket.getaddrinfo`` is
-            used with a 2s timeout.
+        hostname: The sanitized target host as configured on the policy.
+
+    Returns:
+    -------
+        The canonicalized IPv4 address, or ``None`` if the host is empty,
+        an IPv6 literal, or a DNS name.
 
     """
     if not hostname:
-        return []
+        return None
     hostname = hostname.strip()
     if not hostname:
-        return []
+        return None
     try:
         parsed = ipaddress.ip_address(hostname)
-        return [str(parsed)] if isinstance(parsed, ipaddress.IPv4Address) else []
     except ValueError:
-        pass
-
-    if resolver is not None:
-        try:
-            resolved = resolver(hostname)
-        except Exception as exc:
-            logger.debug(
-                "Primary-IP: target host DNS lookup failed", extra={"target": hostname, "error": str(exc)}
-            )
-            return []
-    else:
-        prev_timeout = socket.getdefaulttimeout()
-        try:
-            socket.setdefaulttimeout(PRIMARY_IP_DNS_TIMEOUT_SECONDS)
-            infos = socket.getaddrinfo(hostname, None, family=socket.AF_INET)
-        except (socket.gaierror, OSError) as exc:
-            logger.debug(
-                "Primary-IP: target host DNS lookup failed", extra={"target": hostname, "error": str(exc)}
-            )
-            return []
-        finally:
-            socket.setdefaulttimeout(prev_timeout)
-        resolved = [info[4][0] for info in infos]
-
-    out: list[str] = []
-    for addr in resolved:
-        try:
-            parsed = ipaddress.ip_address(addr)
-        except ValueError:
-            continue
-        if isinstance(parsed, ipaddress.IPv4Address):
-            out.append(str(parsed))
-    return out
+        return None
+    if isinstance(parsed, ipaddress.IPv4Address):
+        return str(parsed)
+    return None
 
 
 def _strip_prefix(address: str) -> str:
@@ -333,30 +300,29 @@ def assign_primary_ip(
     device: Device,
     entities: list[Entity],
     hostname: str | None,
-    resolver=None,
 ) -> None:
     """
     Set ``device.primary_ip4`` when the target host matches a discovered IP.
 
-    Scans the emitted ``ip_address`` entities (which carry interface
-    assignments) and picks the IPAddress whose address matches the target
-    host or any of its DNS-resolved IPv4 addresses. No-op when there is no
-    match, when the target cannot be resolved to any IPv4, or when no
-    candidate IPAddress carries an interface assignment.
+    The target host must be an IPv4 literal — DNS names are not re-resolved
+    here because re-resolution can pick a different address than the one
+    NAPALM actually connected to, and NAPALM inventories are predominantly
+    IP-keyed. Scans the emitted ``ip_address`` entities and picks the
+    IPAddress whose address matches the target IPv4, restricted to entities
+    whose ``assigned_object_interface`` is set.
 
     Args:
     ----
         device: The Device entity to mutate in place.
         entities: The list of translated entities; only IPAddress entities
             whose ``assigned_object_interface`` is set are eligible.
-        hostname: Target host string (literal IPv4 or DNS name).
-        resolver: Optional DNS resolver callable for tests.
+        hostname: Target host string. Only IPv4 literals produce a match.
 
     """
     if device is None:
         return
-    candidates = _resolve_target_ipv4s(hostname, resolver=resolver)
-    if not candidates:
+    target_ipv4 = _target_ipv4_candidate(hostname)
+    if target_ipv4 is None:
         return
 
     hits = []
@@ -368,7 +334,7 @@ def assign_primary_ip(
             continue
         if not ip.HasField("assigned_object_interface"):
             continue
-        if _strip_prefix(ip.address) not in candidates:
+        if _strip_prefix(ip.address) != target_ipv4:
             continue
         iface_name = ip.assigned_object_interface.name or ""
         # Primary sort key is ``<address>|<interface-name>``; content key is
@@ -394,16 +360,13 @@ def assign_primary_ip(
     device.primary_ip4.CopyFrom(hits[0][2])
 
 
-def translate_data(data: dict, resolver=None) -> Iterable[Entity]:
+def translate_data(data: dict) -> Iterable[Entity]:
     """
     Translate data from NAPALM format to Diode SDK entities.
 
     Args:
     ----
         data (dict): Dictionary containing device, interface and VLAN data from NAPALM.
-        resolver: Optional DNS resolver callable used by the primary-IP
-            assignment. Tests inject a stub; production uses the default
-            resolver via :func:`_resolve_target_ipv4s`.
 
     Returns:
     -------
@@ -438,7 +401,7 @@ def translate_data(data: dict, resolver=None) -> Iterable[Entity]:
         # assign_primary_ip must run before the Device is wrapped into Entity
         # because Entity(device=...) copies the message; subsequent mutations
         # on `device` would not propagate to the wrapped copy.
-        assign_primary_ip(device, interface_related_entities, hostname, resolver=resolver)
+        assign_primary_ip(device, interface_related_entities, hostname)
         entities.append(Entity(device=device))
         entities.extend(interface_related_entities)
 

@@ -20,8 +20,8 @@ from device_discovery.policy.models import (
     VrfParameters,
 )
 from device_discovery.translate import (
-    _resolve_target_ipv4s,
     _strip_prefix,
+    _target_ipv4_candidate,
     assign_primary_ip,
     translate_data,
     translate_device,
@@ -946,38 +946,26 @@ def test_strip_prefix_returns_address_without_cidr():
     assert _strip_prefix("10.0.0.1") == "10.0.0.1"
 
 
-def test_resolve_target_ipv4s_with_literal_ipv4():
-    """An IPv4 literal short-circuits DNS resolution."""
-    assert _resolve_target_ipv4s("10.0.0.1") == ["10.0.0.1"]
+def test_target_ipv4_candidate_ipv4_literal():
+    """IPv4 literal is returned canonicalized."""
+    assert _target_ipv4_candidate("10.0.0.1") == "10.0.0.1"
 
 
-def test_resolve_target_ipv4s_with_literal_ipv6_ignored():
-    """An IPv6 literal yields no IPv4 candidates."""
-    assert _resolve_target_ipv4s("2001:db8::1") == []
+def test_target_ipv4_candidate_ipv6_literal_ignored():
+    """IPv6 literals are not eligible for primary-IPv4 matching."""
+    assert _target_ipv4_candidate("2001:db8::1") is None
 
 
-def test_resolve_target_ipv4s_with_hostname_uses_resolver():
-    """A hostname delegates to the injected resolver and filters IPv4."""
-    resolver = lambda host: ["10.0.0.5", "2001:db8::1", "10.0.0.6"]  # noqa: E731
-    assert _resolve_target_ipv4s("router.example", resolver=resolver) == [
-        "10.0.0.5",
-        "10.0.0.6",
-    ]
+def test_target_ipv4_candidate_hostname_ignored():
+    """Hostnames are deliberately not re-resolved for primary-IP matching."""
+    assert _target_ipv4_candidate("router.example.com") is None
 
 
-def test_resolve_target_ipv4s_resolver_failure_is_noop():
-    """DNS failures degrade gracefully to an empty candidate list."""
-    def boom(_host):
-        raise OSError("nxdomain")
-
-    assert _resolve_target_ipv4s("nope.invalid", resolver=boom) == []
-
-
-def test_resolve_target_ipv4s_blank_host():
-    """Empty / whitespace-only hosts return no candidates."""
-    assert _resolve_target_ipv4s(None) == []
-    assert _resolve_target_ipv4s("") == []
-    assert _resolve_target_ipv4s("   ") == []
+def test_target_ipv4_candidate_blank_host():
+    """Empty / whitespace-only hosts yield no candidate."""
+    assert _target_ipv4_candidate(None) is None
+    assert _target_ipv4_candidate("") is None
+    assert _target_ipv4_candidate("   ") is None
 
 
 def test_translate_data_sets_primary_ip_when_target_matches(
@@ -1034,11 +1022,17 @@ def test_translate_data_no_primary_ip_without_hostname(
     assert not device_entity.device.HasField("primary_ip4")
 
 
-def test_translate_data_primary_ip_via_hostname_resolution(
+def test_translate_data_hostname_target_is_noop(
     sample_device_info, sample_interface_info, sample_interfaces_ip
 ):
-    """Hostname targets resolved through the injected resolver still match."""
-    resolver = lambda host: ["192.0.2.1"]  # noqa: E731
+    """
+    Hostname targets do not trigger DNS re-resolution.
+
+    Device-discovery deliberately matches only IPv4 literals because
+    re-resolving a hostname can pick a different address than the one
+    NAPALM actually connected to, which would silently mis-associate the
+    primary IP.
+    """
     data = {
         "device": sample_device_info,
         "interface": sample_interface_info,
@@ -1046,24 +1040,23 @@ def test_translate_data_primary_ip_via_hostname_resolution(
         "driver": "ios",
         "hostname": "router.example",
     }
-    entities = list(translate_data(data, resolver=resolver))
+    entities = list(translate_data(data))
     device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
-    assert device_entity.device.primary_ip4.address == "192.0.2.1/24"
+    assert not device_entity.device.HasField("primary_ip4")
 
 
-def test_translate_data_primary_ip_ipv6_only_hostname_is_noop(
+def test_translate_data_ipv6_literal_target_is_noop(
     sample_device_info, sample_interface_info, sample_interfaces_ip
 ):
-    """An IPv6-only resolution yields no IPv4 candidates — primary_ip4 stays empty."""
-    resolver = lambda host: ["2001:db8::1"]  # noqa: E731
+    """IPv6 targets do not set primary_ip4 (IPv4-only)."""
     data = {
         "device": sample_device_info,
         "interface": sample_interface_info,
         "interface_ip": sample_interfaces_ip,
         "driver": "ios",
-        "hostname": "router.example",
+        "hostname": "2001:db8::1",
     }
-    entities = list(translate_data(data, resolver=resolver))
+    entities = list(translate_data(data))
     device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
     assert not device_entity.device.HasField("primary_ip4")
 
