@@ -568,23 +568,32 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 	// that pointer graph into device.PrimaryIp4 would make the diode SDK's
 	// proto serializer recurse forever (device -> primary_ip4 -> ip ->
 	// interface -> device -> ...). We detach with a shallow snapshot: copy
-	// the IPAddress, then (if present) copy the assigned Interface and
-	// clear its Device so the snapshot is a tree, not a cycle. The
-	// standalone emitted entities keep their full graph untouched.
-	device.PrimaryIp4 = detachForPrimaryIP(hits[0].ip)
+	// the IPAddress and (if present) the assigned Interface, then replace
+	// the interface's Device with a Device copy that has PrimaryIp4 nil.
+	// The snapshot is then a tree (no back-edge), and the nested Device
+	// still satisfies Diode's validation requirement that an Interface
+	// reference a Device. The standalone emitted entities keep their full
+	// graph untouched.
+	device.PrimaryIp4 = detachForPrimaryIP(hits[0].ip, device)
 }
 
-// detachForPrimaryIP returns a shallow copy of the matched IPAddress with
-// its AssignedObject interface's Device cleared, so the resulting pointer
-// tree contains no cycle back to the owning Device.
-func detachForPrimaryIP(ip *diode.IPAddress) *diode.IPAddress {
+// detachForPrimaryIP returns a shallow copy of the matched IPAddress
+// suitable to attach as Device.PrimaryIp4 without introducing a reference
+// cycle. The assigned Interface (if any) is copied, and its Device pointer
+// is replaced with a copy of the owning Device that has PrimaryIp4 cleared
+// so the resulting tree has no back-edge.
+func detachForPrimaryIP(ip *diode.IPAddress, owner *diode.Device) *diode.IPAddress {
 	if ip == nil {
 		return nil
 	}
 	snapshot := *ip
 	if iface, ok := snapshot.AssignedObject.(*diode.Interface); ok && iface != nil {
 		ifaceCopy := *iface
-		ifaceCopy.Device = nil
+		if owner != nil {
+			deviceCopy := *owner
+			deviceCopy.PrimaryIp4 = nil
+			ifaceCopy.Device = &deviceCopy
+		}
 		snapshot.AssignedObject = &ifaceCopy
 	}
 	return &snapshot

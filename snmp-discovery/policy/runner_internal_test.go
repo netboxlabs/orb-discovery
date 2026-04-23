@@ -444,8 +444,10 @@ func TestQueryTargetAssignsPrimaryIPFromTarget(t *testing.T) {
 	require.True(t, ok, "PrimaryIp4 snapshot must preserve the interface assignment")
 	require.NotNil(t, snapshotIface.Name)
 	assert.Equal(t, "Gi0", *snapshotIface.Name)
-	assert.Nil(t, snapshotIface.Device,
-		"PrimaryIp4 snapshot's interface must not back-reference the parent Device")
+	require.NotNil(t, snapshotIface.Device,
+		"PrimaryIp4 snapshot's interface must carry a Device (Diode validation)")
+	assert.Nil(t, snapshotIface.Device.PrimaryIp4,
+		"nested Device must have PrimaryIp4 cleared to break the cycle")
 }
 
 func TestRunner_HasActiveHostJobsField(t *testing.T) {

@@ -908,10 +908,14 @@ func TestAssignPrimaryIP_DeviceIsProtoSerializable(t *testing.T) {
 	proto := device.ConvertToProtoEntity()
 	assert.NotNil(t, proto)
 
-	// Belt-and-braces: the snapshot attached to PrimaryIp4 must not carry
-	// a back-pointer to the parent Device through its assigned interface.
+	// The snapshot must keep the nested Device reference (Diode requires
+	// Interface.device to be set) but that nested Device must have
+	// PrimaryIp4 cleared so the graph is a tree, not a cycle.
 	if iface, ok := device.PrimaryIp4.AssignedObject.(*diode.Interface); ok && iface != nil {
-		assert.Nil(t, iface.Device, "PrimaryIp4 snapshot must not reference the parent Device")
+		assert.NotNil(t, iface.Device, "PrimaryIp4 snapshot must keep a Device on the assigned interface")
+		if iface.Device != nil {
+			assert.Nil(t, iface.Device.PrimaryIp4, "nested Device must have PrimaryIp4 cleared to break the cycle")
+		}
 	}
 }
 
@@ -1041,10 +1045,15 @@ func TestAssignPrimaryIP_MultipleMatches(t *testing.T) {
 
 	m.AssignPrimaryIPForTest(device, entities)
 
-	assert.NotNil(t, device.PrimaryIp4)
-	// Lexicographically smaller key wins:
-	//   "10.0.0.1/32|GigabitEthernet0/1" < "10.0.0.1/32|Loopback0"
-	assert.Equal(t, ip2, device.PrimaryIp4, "deterministic selection must prefer the smaller sort key")
+	if assert.NotNil(t, device.PrimaryIp4) && assert.NotNil(t, device.PrimaryIp4.Address) {
+		// Lexicographically smaller key wins:
+		//   "10.0.0.1/32|GigabitEthernet0/1" < "10.0.0.1/32|Loopback0"
+		assert.Equal(t, "10.0.0.1/32", *device.PrimaryIp4.Address)
+		if snapshotIface, ok := device.PrimaryIp4.AssignedObject.(*diode.Interface); assert.True(t, ok) && assert.NotNil(t, snapshotIface.Name) {
+			assert.Equal(t, ip2Name, *snapshotIface.Name,
+				"deterministic selection must prefer the smaller sort key")
+		}
+	}
 
 	rec := handler.find(slog.LevelWarn, "multiple IP candidates for primary IP assignment; picking deterministic first")
 	assert.NotNil(t, rec, "expected Warn log for multi-match")
@@ -1085,9 +1094,10 @@ func TestAssignPrimaryIP_MultipleMatches_EqualCompositeKey(t *testing.T) {
 
 	m.AssignPrimaryIPForTest(device, entities)
 
-	assert.NotNil(t, device.PrimaryIp4)
-	// JSON of ipA contains "alpha" which is < "bravo"; deterministic pick: ipA.
-	assert.Equal(t, ipA, device.PrimaryIp4)
+	if assert.NotNil(t, device.PrimaryIp4) && assert.NotNil(t, device.PrimaryIp4.Description) {
+		// JSON of ipA contains "alpha" which is < "bravo"; deterministic pick: ipA.
+		assert.Equal(t, "alpha", *device.PrimaryIp4.Description)
+	}
 
 	rec := handler.find(slog.LevelWarn, "multiple IP candidates for primary IP assignment; picking deterministic first")
 	assert.NotNil(t, rec, "expected Warn log for multi-match")
