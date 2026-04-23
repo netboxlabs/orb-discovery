@@ -299,7 +299,7 @@ def _strip_prefix(address: str) -> str:
 def assign_primary_ip(
     device: Device,
     entities: list[Entity],
-    hostname: str | None,
+    target_hostname: str | None,
 ) -> None:
     """
     Set ``device.primary_ip4`` when the target host matches a discovered IP.
@@ -316,12 +316,14 @@ def assign_primary_ip(
         device: The Device entity to mutate in place.
         entities: The list of translated entities; only IPAddress entities
             whose ``assigned_object_interface`` is set are eligible.
-        hostname: Target host string. Only IPv4 literals produce a match.
+        target_hostname: The scan target host (policy's ``scope.hostname``),
+            distinct from the device's own name reported in NAPALM facts.
+            Only IPv4 literals produce a match.
 
     """
     if device is None:
         return
-    target_ipv4 = _target_ipv4_candidate(hostname)
+    target_ipv4 = _target_ipv4_candidate(target_hostname)
     if target_ipv4 is None:
         return
 
@@ -352,7 +354,7 @@ def assign_primary_ip(
         logger.warning(
             "Primary-IP: multiple candidates match target; picking deterministic first",
             extra={
-                "target": hostname,
+                "target": target_hostname,
                 "candidates": [h[0] for h in hits],
             },
         )
@@ -382,7 +384,10 @@ def translate_data(data: dict) -> Iterable[Entity]:
     interfaces = data.get("interface") or {}
     interfaces_ip = data.get("interface_ip") or {}
     netbox_id = data.get("netbox_id")
-    hostname = data.get("hostname")
+    # ``target_hostname`` is the policy's scan target; device_info["hostname"]
+    # is the device's own name reported by NAPALM — the two concepts must
+    # not be conflated.
+    target_hostname = data.get("target_hostname")
     if device_info:
         if options.platform_omit_version:
             device_info["platform"] = data.get("driver")
@@ -401,7 +406,7 @@ def translate_data(data: dict) -> Iterable[Entity]:
         # assign_primary_ip must run before the Device is wrapped into Entity
         # because Entity(device=...) copies the message; subsequent mutations
         # on `device` would not propagate to the wrapped copy.
-        assign_primary_ip(device, interface_related_entities, hostname)
+        assign_primary_ip(device, interface_related_entities, target_hostname)
         entities.append(Entity(device=device))
         entities.extend(interface_related_entities)
 

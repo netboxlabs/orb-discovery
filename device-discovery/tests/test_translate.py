@@ -974,7 +974,7 @@ def test_translate_data_sets_primary_ip_when_target_matches(
         "interface": sample_interface_info,
         "interface_ip": sample_interfaces_ip,
         "driver": "ios",
-        "hostname": "192.0.2.1",
+        "target_hostname": "192.0.2.1",
     }
     entities = list(translate_data(data))
     device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
@@ -997,7 +997,7 @@ def test_translate_data_no_primary_ip_when_target_does_not_match(
         "interface": sample_interface_info,
         "interface_ip": sample_interfaces_ip,
         "driver": "ios",
-        "hostname": "198.51.100.99",
+        "target_hostname": "198.51.100.99",
     }
     entities = list(translate_data(data))
     device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
@@ -1035,7 +1035,7 @@ def test_translate_data_hostname_target_is_noop(
         "interface": sample_interface_info,
         "interface_ip": sample_interfaces_ip,
         "driver": "ios",
-        "hostname": "router.example",
+        "target_hostname": "router.example",
     }
     entities = list(translate_data(data))
     device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
@@ -1051,7 +1051,7 @@ def test_translate_data_ipv6_literal_target_is_noop(
         "interface": sample_interface_info,
         "interface_ip": sample_interfaces_ip,
         "driver": "ios",
-        "hostname": "2001:db8::1",
+        "target_hostname": "2001:db8::1",
     }
     entities = list(translate_data(data))
     device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
