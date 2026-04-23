@@ -431,7 +431,7 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 
 	auth := r.resolveTargetAuthentication(target)
 
-	host := snmp.NewHost(target.Host, target.Port, r.config.Retries, r.snmpTimeout, auth, r.logger, r.ClientFactory)
+	host := snmp.NewHost(targetHost, target.Port, r.config.Retries, r.snmpTimeout, auth, r.logger, r.ClientFactory)
 
 	type walkResult struct {
 		oids mapping.ObjectIDValueMap

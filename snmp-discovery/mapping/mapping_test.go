@@ -1013,6 +1013,49 @@ func TestAssignPrimaryIP_MultipleMatches(t *testing.T) {
 	assert.NotNil(t, rec, "expected Warn log for multi-match")
 }
 
+// TestAssignPrimaryIP_MultipleMatches_EqualCompositeKey exercises the
+// content-based tiebreaker when two entries have the same primaryIPSortKey
+// (same address, same assigned interface name). Deterministic selection
+// must still hold via primaryIPContentKey.
+func TestAssignPrimaryIP_MultipleMatches_EqualCompositeKey(t *testing.T) {
+	handler := &bufferHandler{}
+	logger := slog.New(handler)
+
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
+
+	// Identical address and interface name: composite sort key collides.
+	// The entities differ by Description so the content-based tiebreaker
+	// picks the lexicographically-smaller JSON serialization.
+	ifName := "Loopback0"
+	addr := "10.0.0.1/32"
+	descA := "alpha"
+	descB := "bravo"
+	ipA := &diode.IPAddress{
+		Address:        &addr,
+		AssignedObject: &diode.Interface{Name: &ifName},
+		Description:    &descA,
+	}
+	ipB := &diode.IPAddress{
+		Address:        &addr,
+		AssignedObject: &diode.Interface{Name: &ifName},
+		Description:    &descB,
+	}
+	entities := map[diode.Entity]bool{ipA: true, ipB: true}
+	device := m.CurrentDevice()
+
+	m.AssignPrimaryIPForTest(device, entities)
+
+	assert.NotNil(t, device.PrimaryIp4)
+	// JSON of ipA contains "alpha" which is < "bravo"; deterministic pick: ipA.
+	assert.Equal(t, ipA, device.PrimaryIp4)
+
+	rec := handler.find(slog.LevelWarn, "multiple IP candidates for primary IP assignment; picking deterministic first")
+	assert.NotNil(t, rec, "expected Warn log for multi-match")
+}
+
 func TestAssignPrimaryIP_ExcludedInterfaceIP(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 

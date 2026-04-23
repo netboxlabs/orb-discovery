@@ -2,6 +2,7 @@ package mapping
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -9,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
@@ -510,9 +510,9 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 	}
 
 	type hit struct {
-		key  string
-		ip   *diode.IPAddress
-		addr uintptr // stable tiebreaker when key collides
+		key     string
+		ip      *diode.IPAddress
+		content string // stable, data-derived tiebreaker when key collides
 	}
 	var hits []hit
 	for entity := range entities {
@@ -524,9 +524,9 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 		for _, cand := range candidates {
 			if stripped == cand {
 				hits = append(hits, hit{
-					key:  primaryIPSortKey(ip),
-					ip:   ip,
-					addr: uintptr(unsafe.Pointer(ip)),
+					key:     primaryIPSortKey(ip),
+					ip:      ip,
+					content: primaryIPContentKey(ip),
 				})
 				break
 			}
@@ -538,13 +538,14 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 		return
 	}
 
-	// Primary sort by composite key; pointer address is a deterministic
-	// tiebreaker within this process when two entries share a key.
+	// Primary sort by composite key; content hash is a data-derived,
+	// run-to-run-stable tiebreaker for the rare case of two entries
+	// sharing a key.
 	sort.Slice(hits, func(i, j int) bool {
 		if hits[i].key != hits[j].key {
 			return hits[i].key < hits[j].key
 		}
-		return hits[i].addr < hits[j].addr
+		return hits[i].content < hits[j].content
 	})
 
 	if len(hits) > 1 {
@@ -572,6 +573,21 @@ func primaryIPSortKey(ip *diode.IPAddress) string {
 		ifName = *iface.Name
 	}
 	return addr + "|" + ifName
+}
+
+// primaryIPContentKey returns a run-to-run-stable secondary ordering key
+// derived from the IPAddress entity's content. Used as a tiebreaker when
+// two entries produce the same primaryIPSortKey. JSON marshalling is
+// deterministic for a given struct value, so the returned string is the
+// same across process invocations for the same input.
+func primaryIPContentKey(ip *diode.IPAddress) string {
+	if ip == nil {
+		return ""
+	}
+	if b, err := json.Marshal(ip); err == nil {
+		return string(b)
+	}
+	return fmt.Sprintf("%+v", *ip)
 }
 
 // resolveTargetIPv4s returns the IPv4 candidate addresses for the current
