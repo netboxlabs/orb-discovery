@@ -934,16 +934,29 @@ func TestAssignPrimaryIP_DeviceIsProtoSerializable_WithSubinterfaceParent(t *tes
 	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
 	device := m.CurrentDevice()
 
-	// Build: subinterface "Gi0.10" whose Parent is "Gi0", and whose Parent's
-	// Device pointer points back at `device`. The IPAddress is assigned to
-	// the subinterface. Without the relationship-pointer prune in
+	// Build: subinterface "Gi0.10" with back-references on every cycle-prone
+	// field -- Parent, Bridge, Lag, and Module all point at entities whose
+	// Device is the owning `device` (which carries PrimaryIp4 once
+	// assignPrimaryIP runs). Without the relationship-pointer prune in
 	// detachForPrimaryIP, ConvertToProtoEntity would recurse forever via
-	// PrimaryIp4 -> subinterface copy -> Parent (original) -> Device
-	// (same) -> PrimaryIp4 -> ...
+	// PrimaryIp4 -> subinterface copy -> (any of those pointers) ->
+	// Device (same) -> PrimaryIp4 -> ...
 	parentName := "Gi0"
 	parent := &diode.Interface{Name: &parentName, Device: device}
+	bridgeName := "br0"
+	bridge := &diode.Interface{Name: &bridgeName, Device: device}
+	lagName := "Port-Channel1"
+	lag := &diode.Interface{Name: &lagName, Device: device}
+	module := &diode.Module{Device: device}
 	subName := "Gi0.10"
-	sub := &diode.Interface{Name: &subName, Device: device, Parent: parent}
+	sub := &diode.Interface{
+		Name:   &subName,
+		Device: device,
+		Parent: parent,
+		Bridge: bridge,
+		Lag:    lag,
+		Module: module,
+	}
 	addr := "10.0.0.1/32"
 	ip := &diode.IPAddress{Address: &addr, AssignedObject: sub}
 
