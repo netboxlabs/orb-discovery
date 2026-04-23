@@ -909,7 +909,7 @@ func (h *bufferHandler) Handle(_ context.Context, r slog.Record) error {
 	return nil
 }
 func (h *bufferHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
-func (h *bufferHandler) WithGroup(_ string) slog.Handler     { return h }
+func (h *bufferHandler) WithGroup(_ string) slog.Handler      { return h }
 
 func (h *bufferHandler) find(level slog.Level, msg string) *slog.Record {
 	h.mu.Lock()
