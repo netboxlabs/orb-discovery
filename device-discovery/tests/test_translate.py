@@ -937,9 +937,6 @@ def test_translate_data_with_config_disabled(sample_device_info):
     assert len(device_entities) == 1
 
 
-# --- OBS-1896: primary IP assignment tests ---
-
-
 def test_strip_prefix_returns_address_without_cidr():
     """StripPrefix drops the /prefix suffix (helper sanity)."""
     assert _strip_prefix("192.0.2.10/24") == "192.0.2.10"
