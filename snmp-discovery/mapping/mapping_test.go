@@ -876,3 +876,34 @@ func TestAssignPrimaryIP_DirectIPv4Match(t *testing.T) {
 		assert.Equal(t, "10.0.0.1/32", *device.PrimaryIp4.Address)
 	}
 }
+
+func TestAssignPrimaryIP_NoMatch(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	// Target 10.0.0.1, discovered only 10.0.0.2.
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
+	entities := m.MapObjectIDsToEntity(primaryIPOneInterfaceOIDs("10.0.0.2", "Gi0"))
+
+	device := findDevice(entities)
+	assert.NotNil(t, device)
+	assert.Nil(t, device.PrimaryIp4, "primary IP must not be set when no match")
+}
+
+func TestAssignPrimaryIP_PrefixStripping(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Reuses the default /32 emission: verifies stripPrefix drops "/32"
+	// before comparing to the bare target literal.
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
+	entities := m.MapObjectIDsToEntity(primaryIPOneInterfaceOIDs("10.0.0.1", "Gi0"))
+
+	device := findDevice(entities)
+	assert.NotNil(t, device.PrimaryIp4)
+	assert.Equal(t, "10.0.0.1/32", *device.PrimaryIp4.Address)
+}
