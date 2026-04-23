@@ -459,7 +459,7 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 		return nil, ctx.Err()
 	case res := <-resultCh:
 		if res.err != nil {
-			r.logger.Warn("error crawling host", "host", target.Host, "error", res.err)
+			r.logger.Warn("error crawling host", "host", targetHost, "error", res.err)
 			if rMetric := metrics.GetDiscoveryFailure(); rMetric != nil {
 				rMetric.Add(r.ctx, 1,
 					metric.WithAttributes(

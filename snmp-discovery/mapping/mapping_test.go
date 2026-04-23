@@ -905,7 +905,9 @@ func (h *bufferHandler) Enabled(_ context.Context, _ slog.Level) bool { return t
 func (h *bufferHandler) Handle(_ context.Context, r slog.Record) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.records = append(h.records, r)
+	// r.Clone() is required per slog docs: the Record's contents may be
+	// reused by the caller after Handle returns.
+	h.records = append(h.records, r.Clone())
 	return nil
 }
 func (h *bufferHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
@@ -1054,6 +1056,28 @@ func TestAssignPrimaryIP_MultipleMatches_EqualCompositeKey(t *testing.T) {
 
 	rec := handler.find(slog.LevelWarn, "multiple IP candidates for primary IP assignment; picking deterministic first")
 	assert.NotNil(t, rec, "expected Warn log for multi-match")
+}
+
+// TestAssignPrimaryIP_UnassignedIPIgnored verifies the "verified interface
+// IP" guarantee: a discovered IPAddress whose AssignedObject is not an
+// Interface is not a valid primary-IP candidate even if its address matches
+// the target.
+func TestAssignPrimaryIP_UnassignedIPIgnored(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
+
+	addr := "10.0.0.1/32"
+	unassigned := &diode.IPAddress{Address: &addr} // AssignedObject is nil
+	entities := map[diode.Entity]bool{unassigned: true}
+	device := m.CurrentDevice()
+
+	m.AssignPrimaryIPForTest(device, entities)
+
+	assert.Nil(t, device.PrimaryIp4, "primary IP must not be set from an IPAddress without an Interface assignment")
 }
 
 func TestAssignPrimaryIP_ExcludedInterfaceIP(t *testing.T) {

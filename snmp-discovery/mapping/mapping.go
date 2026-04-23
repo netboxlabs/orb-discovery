@@ -520,6 +520,11 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 		if !ok || ip.Address == nil {
 			continue
 		}
+		// Enforce the "verified interface IP" guarantee: only accept
+		// addresses that were discovered on an interface during the walk.
+		if _, assigned := ip.AssignedObject.(*diode.Interface); !assigned {
+			continue
+		}
 		stripped := stripPrefix(*ip.Address)
 		for _, cand := range candidates {
 			if stripped == cand {
