@@ -578,8 +578,17 @@ func primaryIPSortKey(ip *diode.IPAddress) string {
 // primaryIPContentKey returns a run-to-run-stable secondary ordering key
 // derived from the IPAddress entity's content. Used as a tiebreaker when
 // two entries produce the same primaryIPSortKey. JSON marshalling is
-// deterministic for a given struct value, so the returned string is the
-// same across process invocations for the same input.
+// deterministic for a given struct value (encoding/json sorts map keys,
+// and diode.IPAddress has no time.Time or custom MarshalJSON with
+// randomness), so the returned string is the same across process
+// invocations for the same input. The fallback dereferences scalar
+// pointer fields explicitly and never embeds pointer addresses.
+//
+// If two *distinct* IPAddress entities produce byte-for-byte identical
+// content (identical address, description, tags, interface, ...), the
+// selection between them is semantically equivalent — the NetBox
+// payload for either is the same — so the residual non-determinism in
+// that case has no observable effect on downstream data.
 func primaryIPContentKey(ip *diode.IPAddress) string {
 	if ip == nil {
 		return ""
@@ -587,7 +596,30 @@ func primaryIPContentKey(ip *diode.IPAddress) string {
 	if b, err := json.Marshal(ip); err == nil {
 		return string(b)
 	}
-	return fmt.Sprintf("%+v", *ip)
+	// Fallback for the unlikely case json.Marshal fails (e.g. a custom
+	// field that contains a channel or function). Explicit dereferences
+	// avoid the process-local pointer addresses that %+v would print.
+	addr := ""
+	if ip.Address != nil {
+		addr = *ip.Address
+	}
+	desc := ""
+	if ip.Description != nil {
+		desc = *ip.Description
+	}
+	comments := ""
+	if ip.Comments != nil {
+		comments = *ip.Comments
+	}
+	dnsName := ""
+	if ip.DnsName != nil {
+		dnsName = *ip.DnsName
+	}
+	ifName := ""
+	if iface, ok := ip.AssignedObject.(*diode.Interface); ok && iface != nil && iface.Name != nil {
+		ifName = *iface.Name
+	}
+	return strings.Join([]string{addr, desc, comments, dnsName, ifName}, "\x00")
 }
 
 // resolveTargetIPv4s returns the IPv4 candidate addresses for the current
