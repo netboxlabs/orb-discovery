@@ -3,6 +3,9 @@
 """Translate from NAPALM output format to Diode SDK entities."""
 
 import copy
+import ipaddress
+import logging
+import socket
 from collections.abc import Iterable
 
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
@@ -22,6 +25,11 @@ from netboxlabs.diode.sdk.ingester import (
 
 from device_discovery.interface import build_interface_entities
 from device_discovery.policy.models import Defaults, Options, TenantParameters, VrfParameters
+
+logger = logging.getLogger(__name__)
+
+# DNS timeout for primary-IP hostname resolution (seconds).
+PRIMARY_IP_DNS_TIMEOUT_SECONDS = 2.0
 
 
 def translate_tenant(
@@ -252,13 +260,150 @@ def translate_device_config(config_info: dict, options: Options) -> DeviceConfig
     )
 
 
-def translate_data(data: dict) -> Iterable[Entity]:
+def _resolve_target_ipv4s(
+    hostname: str | None,
+    resolver=None,
+) -> list[str]:
+    """
+    Resolve the target host to its IPv4 candidate addresses.
+
+    If ``hostname`` parses as an IPv4 literal, the single address is returned.
+    Otherwise DNS is consulted (best-effort, 2s timeout) and only IPv4 results
+    are kept. Returns an empty list on any failure or for IPv6-only hosts.
+
+    Args:
+    ----
+        hostname: Target host string (may be literal IP or DNS name). Trimmed
+            leading/trailing whitespace.
+        resolver: Optional callable ``(host) -> list[str]`` used in tests to
+            bypass the real resolver. When ``None`` ``socket.getaddrinfo`` is
+            used with a 2s timeout.
+
+    """
+    if not hostname:
+        return []
+    hostname = hostname.strip()
+    if not hostname:
+        return []
+    try:
+        parsed = ipaddress.ip_address(hostname)
+        return [str(parsed)] if isinstance(parsed, ipaddress.IPv4Address) else []
+    except ValueError:
+        pass
+
+    if resolver is not None:
+        try:
+            resolved = resolver(hostname)
+        except Exception as exc:
+            logger.debug(
+                "Primary-IP: target host DNS lookup failed", extra={"target": hostname, "error": str(exc)}
+            )
+            return []
+    else:
+        prev_timeout = socket.getdefaulttimeout()
+        try:
+            socket.setdefaulttimeout(PRIMARY_IP_DNS_TIMEOUT_SECONDS)
+            infos = socket.getaddrinfo(hostname, None, family=socket.AF_INET)
+        except (socket.gaierror, OSError) as exc:
+            logger.debug(
+                "Primary-IP: target host DNS lookup failed", extra={"target": hostname, "error": str(exc)}
+            )
+            return []
+        finally:
+            socket.setdefaulttimeout(prev_timeout)
+        resolved = [info[4][0] for info in infos]
+
+    out: list[str] = []
+    for addr in resolved:
+        try:
+            parsed = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        if isinstance(parsed, ipaddress.IPv4Address):
+            out.append(str(parsed))
+    return out
+
+
+def _strip_prefix(address: str) -> str:
+    """Return the IP portion of a CIDR or plain IP string."""
+    return address.split("/", 1)[0]
+
+
+def assign_primary_ip(
+    device: Device,
+    entities: list[Entity],
+    hostname: str | None,
+    resolver=None,
+) -> None:
+    """
+    Set ``device.primary_ip4`` when the target host matches a discovered IP.
+
+    Scans the emitted ``ip_address`` entities (which carry interface
+    assignments) and picks the IPAddress whose address matches the target
+    host or any of its DNS-resolved IPv4 addresses. No-op when there is no
+    match, when the target cannot be resolved to any IPv4, or when no
+    candidate IPAddress carries an interface assignment.
+
+    Args:
+    ----
+        device: The Device entity to mutate in place.
+        entities: The list of translated entities; only IPAddress entities
+            whose ``assigned_object_interface`` is set are eligible.
+        hostname: Target host string (literal IPv4 or DNS name).
+        resolver: Optional DNS resolver callable for tests.
+
+    """
+    if device is None:
+        return
+    candidates = _resolve_target_ipv4s(hostname, resolver=resolver)
+    if not candidates:
+        return
+
+    hits = []
+    for entity in entities:
+        if not entity.HasField("ip_address"):
+            continue
+        ip = entity.ip_address
+        if not ip.address:
+            continue
+        if not ip.HasField("assigned_object_interface"):
+            continue
+        if _strip_prefix(ip.address) not in candidates:
+            continue
+        iface_name = ip.assigned_object_interface.name or ""
+        # Primary sort key is ``<address>|<interface-name>``; content key is
+        # the full IPAddress serialization as a stable, data-derived
+        # tiebreaker when two entries share a primary key.
+        primary_key = f"{ip.address}|{iface_name}"
+        content_key = ip.SerializeToString(deterministic=True)
+        hits.append((primary_key, content_key, ip))
+
+    if not hits:
+        return
+
+    hits.sort(key=lambda h: (h[0], h[1]))
+    if len(hits) > 1:
+        logger.warning(
+            "Primary-IP: multiple candidates match target; picking deterministic first",
+            extra={
+                "target": hostname,
+                "candidates": [h[0] for h in hits],
+            },
+        )
+
+    device.primary_ip4.CopyFrom(hits[0][2])
+
+
+def translate_data(data: dict, resolver=None) -> Iterable[Entity]:
     """
     Translate data from NAPALM format to Diode SDK entities.
 
     Args:
     ----
         data (dict): Dictionary containing device, interface and VLAN data from NAPALM.
+        resolver: Optional DNS resolver callable used by the primary-IP
+            assignment. Tests inject a stub; production uses the default
+            resolver via :func:`_resolve_target_ipv4s`.
 
     Returns:
     -------
@@ -274,6 +419,7 @@ def translate_data(data: dict) -> Iterable[Entity]:
     interfaces = data.get("interface") or {}
     interfaces_ip = data.get("interface_ip") or {}
     netbox_id = data.get("netbox_id")
+    hostname = data.get("hostname")
     if device_info:
         if options.platform_omit_version:
             device_info["platform"] = data.get("driver")
@@ -284,12 +430,16 @@ def translate_data(data: dict) -> Iterable[Entity]:
             if len(device_info["platform"]) > 100:
                 device_info["platform"] = device_info.get("os_version")[:100]
         device = translate_device(device_info, defaults, config_info, options, netbox_id=netbox_id)
-        entities.append(Entity(device=device))
         device_for_interfaces = copy.deepcopy(device)
         device_for_interfaces.ClearField("config")
         interface_related_entities = build_interface_entities(
             device_for_interfaces, interfaces, interfaces_ip, defaults
         )
+        # assign_primary_ip must run before the Device is wrapped into Entity
+        # because Entity(device=...) copies the message; subsequent mutations
+        # on `device` would not propagate to the wrapped copy.
+        assign_primary_ip(device, interface_related_entities, hostname, resolver=resolver)
+        entities.append(Entity(device=device))
         entities.extend(interface_related_entities)
 
     if data.get("vlan"):

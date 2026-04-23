@@ -20,6 +20,9 @@ from device_discovery.policy.models import (
     VrfParameters,
 )
 from device_discovery.translate import (
+    _resolve_target_ipv4s,
+    _strip_prefix,
+    assign_primary_ip,
     translate_data,
     translate_device,
     translate_device_config,
@@ -932,3 +935,176 @@ def test_translate_data_with_config_disabled(sample_device_info):
     # Device should be created but without config
     device_entities = [e for e in entities if e.WhichOneof("entity") == "device"]
     assert len(device_entities) == 1
+
+
+# --- OBS-1896: primary IP assignment tests ---
+
+
+def test_strip_prefix_returns_address_without_cidr():
+    """StripPrefix drops the /prefix suffix (helper sanity)."""
+    assert _strip_prefix("192.0.2.10/24") == "192.0.2.10"
+    assert _strip_prefix("10.0.0.1") == "10.0.0.1"
+
+
+def test_resolve_target_ipv4s_with_literal_ipv4():
+    """An IPv4 literal short-circuits DNS resolution."""
+    assert _resolve_target_ipv4s("10.0.0.1") == ["10.0.0.1"]
+
+
+def test_resolve_target_ipv4s_with_literal_ipv6_ignored():
+    """An IPv6 literal yields no IPv4 candidates."""
+    assert _resolve_target_ipv4s("2001:db8::1") == []
+
+
+def test_resolve_target_ipv4s_with_hostname_uses_resolver():
+    """A hostname delegates to the injected resolver and filters IPv4."""
+    resolver = lambda host: ["10.0.0.5", "2001:db8::1", "10.0.0.6"]  # noqa: E731
+    assert _resolve_target_ipv4s("router.example", resolver=resolver) == [
+        "10.0.0.5",
+        "10.0.0.6",
+    ]
+
+
+def test_resolve_target_ipv4s_resolver_failure_is_noop():
+    """DNS failures degrade gracefully to an empty candidate list."""
+    def boom(_host):
+        raise OSError("nxdomain")
+
+    assert _resolve_target_ipv4s("nope.invalid", resolver=boom) == []
+
+
+def test_resolve_target_ipv4s_blank_host():
+    """Empty / whitespace-only hosts return no candidates."""
+    assert _resolve_target_ipv4s(None) == []
+    assert _resolve_target_ipv4s("") == []
+    assert _resolve_target_ipv4s("   ") == []
+
+
+def test_translate_data_sets_primary_ip_when_target_matches(
+    sample_device_info, sample_interface_info, sample_interfaces_ip
+):
+    """End-to-end: hostname equal to a discovered interface IP populates primary_ip4."""
+    data = {
+        "device": sample_device_info,
+        "interface": sample_interface_info,
+        "interface_ip": sample_interfaces_ip,
+        "driver": "ios",
+        "hostname": "192.0.2.1",
+    }
+    entities = list(translate_data(data))
+    device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
+    assert device_entity.device.HasField("primary_ip4")
+    assert device_entity.device.primary_ip4.address == "192.0.2.1/24"
+    # The primary IP must be attached to the interface that holds it.
+    assert device_entity.device.primary_ip4.HasField("assigned_object_interface")
+    assert (
+        device_entity.device.primary_ip4.assigned_object_interface.name
+        == "GigabitEthernet0/0/1"
+    )
+
+
+def test_translate_data_no_primary_ip_when_target_does_not_match(
+    sample_device_info, sample_interface_info, sample_interfaces_ip
+):
+    """No match leaves primary_ip4 unset."""
+    data = {
+        "device": sample_device_info,
+        "interface": sample_interface_info,
+        "interface_ip": sample_interfaces_ip,
+        "driver": "ios",
+        "hostname": "198.51.100.99",
+    }
+    entities = list(translate_data(data))
+    device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
+    assert not device_entity.device.HasField("primary_ip4")
+
+
+def test_translate_data_no_primary_ip_without_hostname(
+    sample_device_info, sample_interface_info, sample_interfaces_ip
+):
+    """Missing hostname is a no-op (backwards compatible)."""
+    data = {
+        "device": sample_device_info,
+        "interface": sample_interface_info,
+        "interface_ip": sample_interfaces_ip,
+        "driver": "ios",
+    }
+    entities = list(translate_data(data))
+    device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
+    assert not device_entity.device.HasField("primary_ip4")
+
+
+def test_translate_data_primary_ip_via_hostname_resolution(
+    sample_device_info, sample_interface_info, sample_interfaces_ip
+):
+    """Hostname targets resolved through the injected resolver still match."""
+    resolver = lambda host: ["192.0.2.1"]  # noqa: E731
+    data = {
+        "device": sample_device_info,
+        "interface": sample_interface_info,
+        "interface_ip": sample_interfaces_ip,
+        "driver": "ios",
+        "hostname": "router.example",
+    }
+    entities = list(translate_data(data, resolver=resolver))
+    device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
+    assert device_entity.device.primary_ip4.address == "192.0.2.1/24"
+
+
+def test_translate_data_primary_ip_ipv6_only_hostname_is_noop(
+    sample_device_info, sample_interface_info, sample_interfaces_ip
+):
+    """An IPv6-only resolution yields no IPv4 candidates — primary_ip4 stays empty."""
+    resolver = lambda host: ["2001:db8::1"]  # noqa: E731
+    data = {
+        "device": sample_device_info,
+        "interface": sample_interface_info,
+        "interface_ip": sample_interfaces_ip,
+        "driver": "ios",
+        "hostname": "router.example",
+    }
+    entities = list(translate_data(data, resolver=resolver))
+    device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
+    assert not device_entity.device.HasField("primary_ip4")
+
+
+def test_assign_primary_ip_ignores_ip_without_interface_assignment():
+    """Enforce the "verified interface IP" guarantee directly on the helper."""
+    from netboxlabs.diode.sdk.ingester import Device, Entity, IPAddress
+
+    device = Device(name="router")
+    unassigned = Entity(ip_address=IPAddress(address="10.0.0.1/32"))
+    assign_primary_ip(device, [unassigned], "10.0.0.1")
+    assert not device.HasField("primary_ip4")
+
+
+def test_assign_primary_ip_multiple_matches_deterministic_warn(caplog):
+    """Two matching entries resolve to the lexicographically smaller key + Warn log."""
+    from netboxlabs.diode.sdk.ingester import (
+        Device,
+        Entity,
+        Interface,
+        IPAddress,
+    )
+
+    device = Device(name="router")
+    ip_high = Entity(
+        ip_address=IPAddress(
+            address="10.0.0.1/32",
+            assigned_object_interface=Interface(name="Loopback1"),
+        )
+    )
+    ip_low = Entity(
+        ip_address=IPAddress(
+            address="10.0.0.1/32",
+            assigned_object_interface=Interface(name="Loopback0"),
+        )
+    )
+    with caplog.at_level("WARNING"):
+        assign_primary_ip(device, [ip_high, ip_low], "10.0.0.1")
+    assert device.HasField("primary_ip4")
+    # Lexicographic tie-break picks "Loopback0" over "Loopback1".
+    assert device.primary_ip4.assigned_object_interface.name == "Loopback0"
+    assert any(
+        "multiple candidates match target" in rec.message for rec in caplog.records
+    )
