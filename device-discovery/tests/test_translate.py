@@ -1058,6 +1058,59 @@ def test_translate_data_ipv6_literal_target_is_noop(
     assert not device_entity.device.HasField("primary_ip4")
 
 
+def test_translate_data_device_config_only_on_top_level_device(
+    sample_device_info, sample_interface_info, sample_interfaces_ip, sample_defaults
+):
+    """
+    Config lives only on the top-level Device entity.
+
+    ``translate_data`` deep-copies the Device for the interface entities and
+    clears ``config`` on the copy (``device_for_interfaces.ClearField("config")``),
+    so the Device reference embedded in each Interface must carry no config
+    even when the top-level Device does. Guards against regressions in the
+    ordering of deep-copy / ClearField / assign_primary_ip / Entity wrap.
+    """
+    config_info = {
+        "running": "hostname router1\n",
+        "startup": "hostname router1\n",
+    }
+    options = Options(capture_running_config=True, capture_startup_config=True)
+    data = {
+        "device": sample_device_info,
+        "interface": sample_interface_info,
+        "interface_ip": sample_interfaces_ip,
+        "config": config_info,
+        "driver": "ios",
+        "defaults": sample_defaults,
+        "options": options,
+        "target_hostname": "192.0.2.1",
+    }
+    entities = list(translate_data(data))
+
+    device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
+    assert device_entity.device.HasField("config"), (
+        "top-level Device must carry the captured config"
+    )
+
+    interface_entities = [e for e in entities if e.WhichOneof("entity") == "interface"]
+    assert interface_entities, "expected at least one Interface in the output"
+    for e in interface_entities:
+        assert not e.interface.device.HasField("config"), (
+            f"Interface {e.interface.name!r} must not carry device.config; "
+            "ClearField('config') on device_for_interfaces was skipped"
+        )
+
+    # primary_ip4 also references a Device (via assigned_object_interface ->
+    # device). That Device is the interface-scoped copy, so it must also be
+    # config-free.
+    assert device_entity.device.HasField("primary_ip4")
+    primary_ip4 = device_entity.device.primary_ip4
+    assert primary_ip4.HasField("assigned_object_interface")
+    assert not primary_ip4.assigned_object_interface.device.HasField("config"), (
+        "primary_ip4's assigned interface must not carry device.config"
+    )
+
+
 def test_assign_primary_ip_ignores_ip_without_interface_assignment():
     """Enforce the "verified interface IP" guarantee directly on the helper."""
     from netboxlabs.diode.sdk.ingester import Device, Entity, IPAddress
