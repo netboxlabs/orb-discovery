@@ -1,8 +1,10 @@
 package mapping
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"regexp"
 	"strings"
 
@@ -208,6 +210,14 @@ type ObjectIDMapper struct {
 	defaults        *config.Defaults
 	excludePatterns []*regexp.Regexp
 	targetHost      string
+	resolver        hostResolver
+}
+
+// hostResolver is the minimal DNS lookup surface used by ObjectIDMapper.
+// It is satisfied by *net.Resolver (including net.DefaultResolver) and
+// overridable in tests.
+type hostResolver interface {
+	LookupHost(ctx context.Context, host string) ([]string, error)
 }
 
 // Entry is a struct that contains a mapping entry
@@ -285,6 +295,12 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 
 // NewObjectIDMapper creates a new ObjectIDMapper for a given SNMP target host.
 func NewObjectIDMapper(mappingConfig *Config, logger *slog.Logger, defaults *config.Defaults, targetHost string) *ObjectIDMapper {
+	return newObjectIDMapperWithResolver(mappingConfig, logger, defaults, targetHost, net.DefaultResolver)
+}
+
+// newObjectIDMapperWithResolver is the test seam that allows injecting a
+// custom DNS resolver. Production code uses NewObjectIDMapper.
+func newObjectIDMapperWithResolver(mappingConfig *Config, logger *slog.Logger, defaults *config.Defaults, targetHost string, resolver hostResolver) *ObjectIDMapper {
 	return &ObjectIDMapper{
 		mappingConfig:   mappingConfig,
 		logger:          logger,
@@ -292,6 +308,7 @@ func NewObjectIDMapper(mappingConfig *Config, logger *slog.Logger, defaults *con
 		defaults:        defaults,
 		excludePatterns: compileExcludePatterns(defaults, logger),
 		targetHost:      targetHost,
+		resolver:        resolver,
 	}
 }
 
