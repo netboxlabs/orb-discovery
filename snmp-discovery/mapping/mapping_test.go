@@ -1050,3 +1050,64 @@ func TestAssignPrimaryIP_PrefixStripping(t *testing.T) {
 	assert.NotNil(t, device.PrimaryIp4)
 	assert.Equal(t, "10.0.0.1/32", *device.PrimaryIp4.Address)
 }
+
+// TestAssignPrimaryIP_NonDefaultPrefix exercises the stripPrefix path with a
+// real subnet-mask-derived prefix (/24) rather than the default /32.
+func TestAssignPrimaryIP_NonDefaultPrefix(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Extend the default fixture with addressPrefixSize so the emitted
+	// IPAddress carries /24.
+	entries := []config.MappingEntry{
+		{
+			OID:            ".1.3.6.1.2.1.2.2.1",
+			Entity:         "interface",
+			Field:          "_id",
+			IdentifierSize: 1,
+			MappingEntries: []config.MappingEntry{
+				{OID: ".1.3.6.1.2.1.2.2.1.2", Entity: "interface", Field: "name"},
+			},
+		},
+		{
+			OID:            ".1.3.6.1.2.1.4.20.1",
+			Entity:         "ipAddress",
+			Field:          "_id",
+			IdentifierSize: 4,
+			MappingEntries: []config.MappingEntry{
+				{OID: ".1.3.6.1.2.1.4.20.1.1", Entity: "ipAddress", Field: "address"},
+				{OID: ".1.3.6.1.2.1.4.20.1.3", Entity: "ipAddress", Field: "addressPrefixSize"},
+				{
+					OID:          ".1.3.6.1.2.1.4.20.1.2",
+					Entity:       "ipAddress",
+					Field:        "assignedObject",
+					Relationship: config.Relationship{Type: "interface"},
+				},
+			},
+		},
+	}
+	mappingConfig, err := mapping.NewConfig(entries, logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	oids := mapping.ObjectIDValueMap{
+		".1.3.6.1.2.1.2.2.1.2.1": mapping.Value{
+			Value: "Gi0", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1,
+		},
+		".1.3.6.1.2.1.4.20.1.1.10.0.0.1": mapping.Value{
+			Value: "10.0.0.1", Type: mapping.Asn1BER(mapping.IPAddress), IdentifierSize: 4,
+		},
+		".1.3.6.1.2.1.4.20.1.3.10.0.0.1": mapping.Value{
+			Value: "255.255.255.0", Type: mapping.Asn1BER(mapping.IPAddress), IdentifierSize: 4,
+		},
+		".1.3.6.1.2.1.4.20.1.2.10.0.0.1": mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 4,
+		},
+	}
+
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
+	entities := m.MapObjectIDsToEntity(oids)
+
+	device := findDevice(entities)
+	assert.NotNil(t, device.PrimaryIp4)
+	assert.Equal(t, "10.0.0.1/24", *device.PrimaryIp4.Address,
+		"primary IP must carry the discovered /24 prefix, and stripPrefix must still match against the bare target")
+}

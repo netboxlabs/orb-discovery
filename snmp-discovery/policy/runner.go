@@ -413,9 +413,11 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 		return nil, err
 	}
 	objectIDs := mappingConfig.ObjectIDs()
-	r.logger.Info("querying target", "host", target.Host, "port", target.Port, "object_count", len(objectIDs))
+	targetHost := strings.TrimSpace(target.Host)
+	r.logger.Info("querying target", "host", targetHost, "port", target.Port, "object_count", len(objectIDs))
 
-	mapper := mapping.NewObjectIDMapper(mappingConfig, r.logger, targetDefaults, target.Host)
+	mapper := mapping.NewObjectIDMapper(mappingConfig, r.logger, targetDefaults, targetHost)
+	mapper.SetContext(ctx)
 	policyName := r.ctx.Value(policyKey).(string)
 	// Track discovery attempt
 	if rMetric := metrics.GetDiscoveryAttempts(); rMetric != nil {

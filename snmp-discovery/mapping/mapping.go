@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
@@ -213,6 +214,14 @@ type ObjectIDMapper struct {
 	excludePatterns []*regexp.Regexp
 	targetHost      string
 	resolver        hostResolver
+	ctx             context.Context
+}
+
+// SetContext stores the scan's context on the mapper. If set, the primary-IP
+// DNS lookup will derive its 2s timeout from this parent context so that a
+// cancelled scan also aborts the lookup.
+func (m *ObjectIDMapper) SetContext(ctx context.Context) {
+	m.ctx = ctx
 }
 
 // hostResolver is the minimal DNS lookup surface used by ObjectIDMapper.
@@ -501,8 +510,9 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 	}
 
 	type hit struct {
-		key string
-		ip  *diode.IPAddress
+		key  string
+		ip   *diode.IPAddress
+		addr uintptr // stable tiebreaker when key collides
 	}
 	var hits []hit
 	for entity := range entities {
@@ -513,7 +523,11 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 		stripped := stripPrefix(*ip.Address)
 		for _, cand := range candidates {
 			if stripped == cand {
-				hits = append(hits, hit{key: primaryIPSortKey(ip), ip: ip})
+				hits = append(hits, hit{
+					key:  primaryIPSortKey(ip),
+					ip:   ip,
+					addr: uintptr(unsafe.Pointer(ip)),
+				})
 				break
 			}
 		}
@@ -524,7 +538,14 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 		return
 	}
 
-	sort.Slice(hits, func(i, j int) bool { return hits[i].key < hits[j].key })
+	// Primary sort by composite key; pointer address is a deterministic
+	// tiebreaker within this process when two entries share a key.
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].key != hits[j].key {
+			return hits[i].key < hits[j].key
+		}
+		return hits[i].addr < hits[j].addr
+	})
 
 	if len(hits) > 1 {
 		all := make([]string, 0, len(hits))
@@ -567,7 +588,11 @@ func (m *ObjectIDMapper) resolveTargetIPv4s() []string {
 	if m.resolver == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	parent := m.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 	addrs, err := m.resolver.LookupHost(ctx, m.targetHost)
 	if err != nil {
