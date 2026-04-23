@@ -2,6 +2,7 @@ package mapping_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"sync"
@@ -919,6 +920,60 @@ func (h *bufferHandler) find(level slog.Level, msg string) *slog.Record {
 		}
 	}
 	return nil
+}
+
+type fakeResolver struct {
+	addrs []string
+	err   error
+}
+
+func (f *fakeResolver) LookupHost(_ context.Context, _ string) ([]string, error) {
+	return f.addrs, f.err
+}
+
+func TestAssignPrimaryIP_HostnameResolvesToIPv4(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	resolver := &fakeResolver{addrs: []string{"10.0.0.1"}}
+	m := mapping.NewObjectIDMapperForTest(mappingConfig, logger, &config.Defaults{}, "router.example", resolver)
+
+	entities := m.MapObjectIDsToEntity(primaryIPOneInterfaceOIDs("10.0.0.1", "Gi0"))
+	device := findDevice(entities)
+	assert.NotNil(t, device.PrimaryIp4)
+	assert.Equal(t, "10.0.0.1/32", *device.PrimaryIp4.Address)
+}
+
+func TestAssignPrimaryIP_HostnameResolvesToIPv6Only(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	resolver := &fakeResolver{addrs: []string{"2001:db8::1"}}
+	m := mapping.NewObjectIDMapperForTest(mappingConfig, logger, &config.Defaults{}, "router.example", resolver)
+
+	entities := m.MapObjectIDsToEntity(primaryIPOneInterfaceOIDs("10.0.0.1", "Gi0"))
+	device := findDevice(entities)
+	assert.NotNil(t, device)
+	assert.Nil(t, device.PrimaryIp4, "IPv6-only DNS result must not yield a PrimaryIp4")
+}
+
+func TestAssignPrimaryIP_InvalidHost(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	resolver := &fakeResolver{err: errors.New("nxdomain")}
+	m := mapping.NewObjectIDMapperForTest(mappingConfig, logger, &config.Defaults{}, "nope.invalid", resolver)
+
+	entities := m.MapObjectIDsToEntity(primaryIPOneInterfaceOIDs("10.0.0.1", "Gi0"))
+	device := findDevice(entities)
+	assert.NotNil(t, device)
+	assert.Nil(t, device.PrimaryIp4)
 }
 
 func TestAssignPrimaryIP_MultipleMatches(t *testing.T) {
