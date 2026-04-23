@@ -562,7 +562,32 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 			"target", m.targetHost, "candidates", all)
 	}
 
-	device.PrimaryIp4 = hits[0].ip
+	// Break the reference cycle before attaching. The matched IPAddress is
+	// also emitted as a standalone entity whose AssignedObject points at an
+	// Interface whose Device points back at the same currentDevice. Sharing
+	// that pointer graph into device.PrimaryIp4 would make the diode SDK's
+	// proto serializer recurse forever (device -> primary_ip4 -> ip ->
+	// interface -> device -> ...). We detach with a shallow snapshot: copy
+	// the IPAddress, then (if present) copy the assigned Interface and
+	// clear its Device so the snapshot is a tree, not a cycle. The
+	// standalone emitted entities keep their full graph untouched.
+	device.PrimaryIp4 = detachForPrimaryIP(hits[0].ip)
+}
+
+// detachForPrimaryIP returns a shallow copy of the matched IPAddress with
+// its AssignedObject interface's Device cleared, so the resulting pointer
+// tree contains no cycle back to the owning Device.
+func detachForPrimaryIP(ip *diode.IPAddress) *diode.IPAddress {
+	if ip == nil {
+		return nil
+	}
+	snapshot := *ip
+	if iface, ok := snapshot.AssignedObject.(*diode.Interface); ok && iface != nil {
+		ifaceCopy := *iface
+		ifaceCopy.Device = nil
+		snapshot.AssignedObject = &ifaceCopy
+	}
+	return &snapshot
 }
 
 // primaryIPSortKey returns a stable composite ordering key for an IPAddress

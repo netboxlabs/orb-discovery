@@ -880,6 +880,41 @@ func TestAssignPrimaryIP_DirectIPv4Match(t *testing.T) {
 	}
 }
 
+// TestAssignPrimaryIP_DeviceIsProtoSerializable is the regression test for
+// the reference-cycle bug that caused a stack overflow during ingestion
+// against a real diode target. Before the fix, device.PrimaryIp4 shared a
+// pointer with an IPAddress whose assigned Interface pointed back at the
+// same Device -- the diode SDK's proto serializer recursed forever.
+func TestAssignPrimaryIP_DeviceIsProtoSerializable(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
+	entities := m.MapObjectIDsToEntity(primaryIPOneInterfaceOIDs("10.0.0.1", "Gi0"))
+
+	device := m.CurrentDevice()
+	assert.NotNil(t, device.PrimaryIp4)
+
+	// Converting every emitted entity to its proto form must complete
+	// without recursing into the primary_ip4 -> interface -> device cycle.
+	for _, e := range entities {
+		proto := e.ConvertToProtoEntity()
+		assert.NotNil(t, proto)
+	}
+	// The device itself is constructed on the fly by the caller; exercise
+	// the path that crashed in the lab (marshal a live Device entity).
+	proto := device.ConvertToProtoEntity()
+	assert.NotNil(t, proto)
+
+	// Belt-and-braces: the snapshot attached to PrimaryIp4 must not carry
+	// a back-pointer to the parent Device through its assigned interface.
+	if iface, ok := device.PrimaryIp4.AssignedObject.(*diode.Interface); ok && iface != nil {
+		assert.Nil(t, iface.Device, "PrimaryIp4 snapshot must not reference the parent Device")
+	}
+}
+
 func TestAssignPrimaryIP_NoMatch(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
