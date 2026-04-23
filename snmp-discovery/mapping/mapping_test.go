@@ -892,6 +892,28 @@ func TestAssignPrimaryIP_NoMatch(t *testing.T) {
 	assert.Nil(t, device.PrimaryIp4, "primary IP must not be set when no match")
 }
 
+func TestAssignPrimaryIP_ExcludedInterfaceIP(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// The IP is assigned to an interface whose name matches the exclusion
+	// pattern; filterExcludedEntities drops the IPAddress, so primary-IP
+	// must remain nil.
+	defaults := &config.Defaults{
+		InterfaceExcludePatterns: []string{"^Null.*"},
+	}
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, defaults)
+	assert.NoError(t, err)
+
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, defaults, "10.0.0.1")
+	_ = m.MapObjectIDsToEntity(primaryIPOneInterfaceOIDs("10.0.0.1", "Null0"))
+
+	// Interface+IP are both excluded from the output, so reach the device
+	// directly via the test helper.
+	device := m.CurrentDevice()
+	assert.NotNil(t, device)
+	assert.Nil(t, device.PrimaryIp4, "primary IP must not point to an IPAddress on an excluded interface")
+}
+
 func TestAssignPrimaryIP_PrefixStripping(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
