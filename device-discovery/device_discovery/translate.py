@@ -258,7 +258,7 @@ def translate_device_config(config_info: dict, options: Options) -> DeviceConfig
 
 def _target_ipv4_candidate(hostname: str | None) -> str | None:
     """
-    Return the IPv4 literal candidate for the SNMP/NAPALM target host.
+    Return the IPv4 literal candidate for the NAPALM target host.
 
     Only IPv4 literals are matched for primary-IP assignment. Hostnames are
     deliberately NOT re-resolved here: re-resolving can pick a different
