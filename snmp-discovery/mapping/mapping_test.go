@@ -423,7 +423,7 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 					},
 				}
 			}
-			mapper := mapping.NewObjectIDMapper(mappingConfig, slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false})), defaults)
+			mapper := mapping.NewObjectIDMapper(mappingConfig, slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false})), defaults, "")
 			entities := mapper.MapObjectIDsToEntity(tt.objectIDs)
 
 			assert.ElementsMatch(t, tt.expected, entities)
@@ -679,7 +679,7 @@ func TestIPAddressIdentifierSizeInheritance(t *testing.T) {
 			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 			mappingConfig, err := mapping.NewConfig(tt.mapping, logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
 			assert.NoError(t, err)
-			objectIDMapper := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{})
+			objectIDMapper := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "")
 
 			entities := objectIDMapper.MapObjectIDsToEntity(tt.objectIDs)
 

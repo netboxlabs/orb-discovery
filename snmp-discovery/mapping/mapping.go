@@ -207,6 +207,7 @@ type ObjectIDMapper struct {
 	registry        *EntityRegistry
 	defaults        *config.Defaults
 	excludePatterns []*regexp.Regexp
+	targetHost      string
 }
 
 // Entry is a struct that contains a mapping entry
@@ -282,14 +283,15 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 	}, nil
 }
 
-// NewObjectIDMapper creates a new ObjectIDMapper
-func NewObjectIDMapper(mappingConfig *Config, logger *slog.Logger, defaults *config.Defaults) *ObjectIDMapper {
+// NewObjectIDMapper creates a new ObjectIDMapper for a given SNMP target host.
+func NewObjectIDMapper(mappingConfig *Config, logger *slog.Logger, defaults *config.Defaults, targetHost string) *ObjectIDMapper {
 	return &ObjectIDMapper{
 		mappingConfig:   mappingConfig,
 		logger:          logger,
 		registry:        NewEntityRegistry(logger),
 		defaults:        defaults,
 		excludePatterns: compileExcludePatterns(defaults, logger),
+		targetHost:      targetHost,
 	}
 }
 
