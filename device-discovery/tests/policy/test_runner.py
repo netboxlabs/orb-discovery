@@ -849,7 +849,8 @@ def test_run_scan_stores_completed_run_when_some_hosts_reachable():
 def test_setup_policy_runner_override_defaults_deep_merges_nested_models(
     policy_runner, run_store
 ):
-    """override_defaults on a nested sub-model must deep-merge and stay a model instance.
+    """
+    override_defaults on a nested sub-model must deep-merge and stay a model instance.
 
     Regression for AttributeError: 'dict' object has no attribute 'tags' — caused
     by model_copy(update=dict) replacing nested Pydantic sub-models with raw dicts
@@ -892,7 +893,8 @@ def test_setup_policy_runner_override_defaults_deep_merges_nested_models(
 def test_setup_policy_runner_override_defaults_empty_list_preserves_parent(
     policy_runner, run_store
 ):
-    """Empty list on override must not clear inherited interface_patterns.
+    """
+    Empty list on override must not clear inherited interface_patterns.
 
     `Defaults.coerce_empty_list_to_none` coerces an empty list to None; combined
     with `exclude_none=True` during merge, the parent value must survive.
