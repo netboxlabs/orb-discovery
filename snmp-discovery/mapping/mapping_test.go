@@ -786,3 +786,93 @@ func TestObjectIDsMethodWithIdentifierSizeInheritance(t *testing.T) {
 		})
 	}
 }
+
+// --- OBS-1896: primary IP assignment tests ---
+
+// primaryIPFixture is the minimal mapping config the primary-IP tests reuse:
+// one interface entry + one ipAddress entry that assigns itself to the
+// interface. The ipAddress index carries the full IPv4 address (IdentifierSize
+// = 4) so different discovered IPs live under different ObjectIDIndex keys.
+func primaryIPFixture() []config.MappingEntry {
+	return []config.MappingEntry{
+		{
+			OID:            ".1.3.6.1.2.1.2.2.1",
+			Entity:         "interface",
+			Field:          "_id",
+			IdentifierSize: 1,
+			MappingEntries: []config.MappingEntry{
+				{OID: ".1.3.6.1.2.1.2.2.1.2", Entity: "interface", Field: "name"},
+			},
+		},
+		{
+			OID:            ".1.3.6.1.2.1.4.20.1",
+			Entity:         "ipAddress",
+			Field:          "_id",
+			IdentifierSize: 4,
+			MappingEntries: []config.MappingEntry{
+				{OID: ".1.3.6.1.2.1.4.20.1.1", Entity: "ipAddress", Field: "address"},
+				{
+					OID:          ".1.3.6.1.2.1.4.20.1.2",
+					Entity:       "ipAddress",
+					Field:        "assignedObject",
+					Relationship: config.Relationship{Type: "interface"},
+				},
+			},
+		},
+	}
+}
+
+// primaryIPOneInterfaceOIDs seeds one interface named "Gi0" (ifIndex 1) and
+// one IP address at the given literal address, assigned to that interface.
+func primaryIPOneInterfaceOIDs(address, ifName string) mapping.ObjectIDValueMap {
+	return mapping.ObjectIDValueMap{
+		".1.3.6.1.2.1.2.2.1.2.1": mapping.Value{
+			Value: ifName, Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1,
+		},
+		".1.3.6.1.2.1.4.20.1.1." + address: mapping.Value{
+			Value: address, Type: mapping.Asn1BER(mapping.IPAddress), IdentifierSize: 4,
+		},
+		".1.3.6.1.2.1.4.20.1.2." + address: mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 4,
+		},
+	}
+}
+
+// findDevice returns the first non-nil device pointer reachable through the
+// emitted entities. It prefers a standalone diode.Device entity but falls
+// back to an Interface's Device reference (the same currentDevice pointer).
+func findDevice(entities []diode.Entity) *diode.Device {
+	for _, e := range entities {
+		if d, ok := e.(*diode.Device); ok {
+			return d
+		}
+	}
+	for _, e := range entities {
+		if iface, ok := e.(*diode.Interface); ok && iface.Device != nil {
+			return iface.Device
+		}
+		if ip, ok := e.(*diode.IPAddress); ok {
+			if iface, ok := ip.AssignedObject.(*diode.Interface); ok && iface.Device != nil {
+				return iface.Device
+			}
+		}
+	}
+	return nil
+}
+
+func TestAssignPrimaryIP_DirectIPv4Match(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
+	entities := m.MapObjectIDsToEntity(primaryIPOneInterfaceOIDs("10.0.0.1", "Gi0"))
+
+	device := findDevice(entities)
+	assert.NotNil(t, device, "device reference must be reachable")
+	assert.NotNil(t, device.PrimaryIp4, "primary IP must be assigned")
+	if device.PrimaryIp4 != nil {
+		assert.Equal(t, "10.0.0.1/32", *device.PrimaryIp4.Address)
+	}
+}

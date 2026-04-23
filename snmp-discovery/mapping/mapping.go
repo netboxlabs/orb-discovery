@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"net"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
@@ -477,7 +479,118 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 			entities = append(entities, entity)
 		}
 	}
+
+	m.assignPrimaryIP(currentDevice, uniqueEntities)
+
 	return entities
+}
+
+// assignPrimaryIP points currentDevice.PrimaryIp4 at the surviving IPAddress
+// entity whose address matches the SNMP target host (literal IPv4 or DNS-
+// resolved). No-op when the target is not IPv4-addressable, when DNS lookup
+// fails, or when no surviving IPAddress entity matches.
+func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diode.Entity]bool) {
+	if m.targetHost == "" {
+		return
+	}
+
+	candidates := m.resolveTargetIPv4s()
+	if len(candidates) == 0 {
+		m.logger.Debug("no IPv4 candidates for primary IP assignment", "target", m.targetHost)
+		return
+	}
+
+	type hit struct {
+		key string
+		ip  *diode.IPAddress
+	}
+	var hits []hit
+	for entity := range entities {
+		ip, ok := entity.(*diode.IPAddress)
+		if !ok || ip.Address == nil {
+			continue
+		}
+		stripped := stripPrefix(*ip.Address)
+		for _, cand := range candidates {
+			if stripped == cand {
+				hits = append(hits, hit{key: primaryIPSortKey(ip), ip: ip})
+				break
+			}
+		}
+	}
+
+	if len(hits) == 0 {
+		m.logger.Debug("no matching IP for primary IP assignment", "target", m.targetHost)
+		return
+	}
+
+	sort.Slice(hits, func(i, j int) bool { return hits[i].key < hits[j].key })
+
+	if len(hits) > 1 {
+		all := make([]string, 0, len(hits))
+		for _, h := range hits {
+			all = append(all, h.key)
+		}
+		m.logger.Warn("multiple IP candidates for primary IP assignment; picking deterministic first",
+			"target", m.targetHost, "candidates", all)
+	}
+
+	device.PrimaryIp4 = hits[0].ip
+}
+
+// primaryIPSortKey returns a stable composite ordering key for an IPAddress
+// entity: "<address>|<interface-name>". Deterministic even when two
+// IPAddresses share the same stripped address.
+func primaryIPSortKey(ip *diode.IPAddress) string {
+	addr := ""
+	if ip.Address != nil {
+		addr = *ip.Address
+	}
+	ifName := ""
+	if iface, ok := ip.AssignedObject.(*diode.Interface); ok && iface != nil && iface.Name != nil {
+		ifName = *iface.Name
+	}
+	return addr + "|" + ifName
+}
+
+// resolveTargetIPv4s returns the IPv4 candidate addresses for the current
+// SNMP target. If targetHost is an IPv4 literal, the single address is
+// returned. Otherwise DNS is consulted with a 2s timeout and IPv4 results
+// are returned. Returns an empty slice on any failure.
+func (m *ObjectIDMapper) resolveTargetIPv4s() []string {
+	if ip := net.ParseIP(m.targetHost); ip != nil {
+		if v4 := ip.To4(); v4 != nil {
+			return []string{v4.String()}
+		}
+		return nil
+	}
+	if m.resolver == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	addrs, err := m.resolver.LookupHost(ctx, m.targetHost)
+	if err != nil {
+		m.logger.Debug("target host DNS lookup failed", "target", m.targetHost, "error", err)
+		return nil
+	}
+	out := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		if ip := net.ParseIP(a); ip != nil {
+			if v4 := ip.To4(); v4 != nil {
+				out = append(out, v4.String())
+			}
+		}
+	}
+	return out
+}
+
+// stripPrefix removes a "/prefix" suffix from an IP/CIDR string.
+func stripPrefix(addr string) string {
+	if i := strings.IndexByte(addr, '/'); i >= 0 {
+		return addr[:i]
+	}
+	return addr
 }
 
 func (m *ObjectIDMapper) filterExcludedEntities(entities map[diode.Entity]bool) {
