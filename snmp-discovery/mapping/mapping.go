@@ -599,27 +599,38 @@ func primaryIPContentKey(ip *diode.IPAddress) string {
 	// Fallback for the unlikely case json.Marshal fails (e.g. a custom
 	// field that contains a channel or function). Explicit dereferences
 	// avoid the process-local pointer addresses that %+v would print.
-	addr := ""
-	if ip.Address != nil {
-		addr = *ip.Address
+	// We pull every scalar field that could legitimately distinguish
+	// two otherwise-matching IPAddress entities.
+	parts := []string{
+		derefString(ip.Address),
+		derefString(ip.Description),
+		derefString(ip.Comments),
+		derefString(ip.DnsName),
+		derefString(ip.Status),
+		derefString(ip.Role),
 	}
-	desc := ""
-	if ip.Description != nil {
-		desc = *ip.Description
+	if ip.Tenant != nil {
+		parts = append(parts, derefString(ip.Tenant.Name))
 	}
-	comments := ""
-	if ip.Comments != nil {
-		comments = *ip.Comments
+	if ip.Vrf != nil {
+		parts = append(parts, derefString(ip.Vrf.Name))
 	}
-	dnsName := ""
-	if ip.DnsName != nil {
-		dnsName = *ip.DnsName
+	if iface, ok := ip.AssignedObject.(*diode.Interface); ok && iface != nil {
+		parts = append(parts, derefString(iface.Name))
 	}
-	ifName := ""
-	if iface, ok := ip.AssignedObject.(*diode.Interface); ok && iface != nil && iface.Name != nil {
-		ifName = *iface.Name
+	for _, tag := range ip.Tags {
+		if tag != nil {
+			parts = append(parts, derefString(tag.Name))
+		}
 	}
-	return strings.Join([]string{addr, desc, comments, dnsName, ifName}, "\x00")
+	return strings.Join(parts, "\x00")
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // resolveTargetIPv4s returns the IPv4 candidate addresses for the current
