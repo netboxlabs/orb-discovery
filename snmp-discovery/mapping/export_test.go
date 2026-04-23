@@ -27,3 +27,10 @@ func (m *ObjectIDMapper) CurrentDevice() *diode.Device {
 	}
 	return nil
 }
+
+// AssignPrimaryIPForTest invokes the unexported primary-IP assignment with
+// a synthetic entities set, so tests can construct multi-match scenarios
+// that are hard to trigger through the real OID pipeline.
+func (m *ObjectIDMapper) AssignPrimaryIPForTest(device *diode.Device, entities map[diode.Entity]bool) {
+	m.assignPrimaryIP(device, entities)
+}

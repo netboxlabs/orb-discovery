@@ -1,8 +1,10 @@
 package mapping_test
 
 import (
+	"context"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -890,6 +892,70 @@ func TestAssignPrimaryIP_NoMatch(t *testing.T) {
 	device := findDevice(entities)
 	assert.NotNil(t, device)
 	assert.Nil(t, device.PrimaryIp4, "primary IP must not be set when no match")
+}
+
+// bufferHandler captures slog records for assertion.
+type bufferHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *bufferHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (h *bufferHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r)
+	return nil
+}
+func (h *bufferHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h *bufferHandler) WithGroup(_ string) slog.Handler     { return h }
+
+func (h *bufferHandler) find(level slog.Level, msg string) *slog.Record {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := range h.records {
+		if h.records[i].Level == level && h.records[i].Message == msg {
+			return &h.records[i]
+		}
+	}
+	return nil
+}
+
+func TestAssignPrimaryIP_MultipleMatches(t *testing.T) {
+	handler := &bufferHandler{}
+	logger := slog.New(handler)
+
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
+
+	// Build two IPAddress entities sharing the same stripped address but
+	// assigned to two distinct interfaces, so primaryIPSortKey differs.
+	ip1Name := "Loopback0"
+	ip2Name := "GigabitEthernet0/1"
+	addr := "10.0.0.1/32"
+	ip1 := &diode.IPAddress{
+		Address:        &addr,
+		AssignedObject: &diode.Interface{Name: &ip1Name},
+	}
+	ip2 := &diode.IPAddress{
+		Address:        &addr,
+		AssignedObject: &diode.Interface{Name: &ip2Name},
+	}
+
+	entities := map[diode.Entity]bool{ip1: true, ip2: true}
+	device := m.CurrentDevice()
+
+	m.AssignPrimaryIPForTest(device, entities)
+
+	assert.NotNil(t, device.PrimaryIp4)
+	// Lexicographically smaller key wins:
+	//   "10.0.0.1/32|GigabitEthernet0/1" < "10.0.0.1/32|Loopback0"
+	assert.Equal(t, ip2, device.PrimaryIp4, "deterministic selection must prefer the smaller sort key")
+
+	rec := handler.find(slog.LevelWarn, "multiple IP candidates for primary IP assignment; picking deterministic first")
+	assert.NotNil(t, rec, "expected Warn log for multi-match")
 }
 
 func TestAssignPrimaryIP_ExcludedInterfaceIP(t *testing.T) {
