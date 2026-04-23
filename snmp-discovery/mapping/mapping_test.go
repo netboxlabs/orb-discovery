@@ -919,6 +919,52 @@ func TestAssignPrimaryIP_DeviceIsProtoSerializable(t *testing.T) {
 	}
 }
 
+// TestAssignPrimaryIP_DeviceIsProtoSerializable_WithSubinterfaceParent
+// covers the specific regression flagged by the PR #368 review: if the
+// matched IPAddress is assigned to a subinterface (which has a Parent
+// pointer back into the interface graph), a shallow-only copy still
+// serializes into a cycle unless the relationship pointers are cleared.
+// We seed the scenario directly via the test helper.
+func TestAssignPrimaryIP_DeviceIsProtoSerializable_WithSubinterfaceParent(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
+	device := m.CurrentDevice()
+
+	// Build: subinterface "Gi0.10" whose Parent is "Gi0", and whose Parent's
+	// Device pointer points back at `device`. The IPAddress is assigned to
+	// the subinterface. Without the relationship-pointer prune in
+	// detachForPrimaryIP, ConvertToProtoEntity would recurse forever via
+	// PrimaryIp4 -> subinterface copy -> Parent (original) -> Device
+	// (same) -> PrimaryIp4 -> ...
+	parentName := "Gi0"
+	parent := &diode.Interface{Name: &parentName, Device: device}
+	subName := "Gi0.10"
+	sub := &diode.Interface{Name: &subName, Device: device, Parent: parent}
+	addr := "10.0.0.1/32"
+	ip := &diode.IPAddress{Address: &addr, AssignedObject: sub}
+
+	entities := map[diode.Entity]bool{ip: true}
+	m.AssignPrimaryIPForTest(device, entities)
+
+	assert.NotNil(t, device.PrimaryIp4)
+	// Serialization must terminate.
+	proto := device.ConvertToProtoEntity()
+	assert.NotNil(t, proto)
+
+	// Snapshot must not retain the Parent / Bridge / Lag / Module
+	// back-references.
+	snap, ok := device.PrimaryIp4.AssignedObject.(*diode.Interface)
+	assert.True(t, ok)
+	assert.Nil(t, snap.Parent, "snapshot interface must not retain Parent back-edge")
+	assert.Nil(t, snap.Bridge, "snapshot interface must not retain Bridge back-edge")
+	assert.Nil(t, snap.Lag, "snapshot interface must not retain Lag back-edge")
+	assert.Nil(t, snap.Module, "snapshot interface must not retain Module back-edge")
+}
+
 func TestAssignPrimaryIP_NoMatch(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 

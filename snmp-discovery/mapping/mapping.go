@@ -579,9 +579,14 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 
 // detachForPrimaryIP returns a shallow copy of the matched IPAddress
 // suitable to attach as Device.PrimaryIp4 without introducing a reference
-// cycle. The assigned Interface (if any) is copied, and its Device pointer
-// is replaced with a copy of the owning Device that has PrimaryIp4 cleared
-// so the resulting tree has no back-edge.
+// cycle. The assigned Interface (if any) is copied; its Device pointer is
+// replaced with a copy of the owning Device that has PrimaryIp4 cleared,
+// and all *Interface / *Module relationship fields (Parent, Bridge, Lag,
+// Module) are cleared -- otherwise a subinterface's Parent (or similar
+// back-reference) would point at another *diode.Interface whose Device
+// still carries PrimaryIp4, reintroducing the cycle. The standalone
+// emitted Interface entities keep their full graph; only the snapshot is
+// pruned.
 func detachForPrimaryIP(ip *diode.IPAddress, owner *diode.Device) *diode.IPAddress {
 	if ip == nil {
 		return nil
@@ -594,6 +599,12 @@ func detachForPrimaryIP(ip *diode.IPAddress, owner *diode.Device) *diode.IPAddre
 			deviceCopy.PrimaryIp4 = nil
 			ifaceCopy.Device = &deviceCopy
 		}
+		// Prune relationship pointers that can transitively reach a
+		// Device with PrimaryIp4 set. See the function doc for why.
+		ifaceCopy.Parent = nil
+		ifaceCopy.Bridge = nil
+		ifaceCopy.Lag = nil
+		ifaceCopy.Module = nil
 		snapshot.AssignedObject = &ifaceCopy
 	}
 	return &snapshot
