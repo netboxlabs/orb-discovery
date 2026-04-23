@@ -135,7 +135,9 @@ class PolicyRunner:
             if scope.override_defaults is not None:
                 merged = _deep_merge(
                     config.defaults.model_dump(),
-                    scope.override_defaults.model_dump(exclude_unset=True),
+                    scope.override_defaults.model_dump(
+                        exclude_unset=True, exclude_none=True
+                    ),
                 )
                 config.defaults = Defaults.model_validate(merged)
             hostnames, parsed_as_range = expand_hostnames(sanitized_hostname)
