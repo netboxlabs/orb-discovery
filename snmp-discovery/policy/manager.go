@@ -224,12 +224,25 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 			m.logger.Info("loaded device lookup extensions", "directory", policy.Config.LookupExtensionsDir)
 		}
 
+		// Build the per-policy manufacturer resolver: the built-in IANA
+		// catalog held by the Manager + any manufacturers: blocks in
+		// built-in extension files + optional user overrides from
+		// policy.Config.LookupExtensionsDir. If the resolver fails to
+		// construct (e.g. malformed YAML in a user file), degrade to the
+		// built-in catalog alone so the policy still runs.
+		var manufacturerRetriever data.ManufacturerRetriever = m.manufacturers
+		if resolver, err := data.NewManufacturerResolver(m.manufacturers, policy.Config.LookupExtensionsDir); err != nil {
+			m.logger.Warn("failed to load manufacturer overrides", "error", err, "directory", policy.Config.LookupExtensionsDir)
+		} else {
+			manufacturerRetriever = resolver
+		}
+
 		// Create logger-aware ClientFactory wrapper
 		clientFactory := func(host string, port uint16, retries int, timeout time.Duration, authentication *config.Authentication, logger *slog.Logger) (snmp.Walker, error) {
 			return snmp.NewClient(host, port, retries, timeout, authentication, logger)
 		}
 
-		r, err := NewRunner(m.ctx, m.logger, name, policy, m.client, clientFactory, &m.mappingConfig, m.manufacturers, deviceLookup, m.runStore)
+		r, err := NewRunner(m.ctx, m.logger, name, policy, m.client, clientFactory, &m.mappingConfig, manufacturerRetriever, deviceLookup, m.runStore)
 		if err != nil {
 			return err
 		}
