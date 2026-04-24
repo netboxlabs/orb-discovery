@@ -1602,7 +1602,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 				},
 			},
 			expectedEntity: &diode.Interface{
-				Name: mapping.StringPtr("unknown"),
+				Name: mapping.StringPtr(mapping.DefaultInterfaceName),
 			},
 			expectError: false,
 		},
