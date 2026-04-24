@@ -81,6 +81,114 @@ func (m *ManufacturerLookup) GetManufacturer(id string) (string, error) {
 	return "", fmt.Errorf("manufacturer not found")
 }
 
+// ManufacturerResolver wraps a built-in ManufacturerLookup with user-supplied
+// overrides loaded from lookup_extensions YAML files. Overrides are keyed by
+// IANA PEN (integer encoded as a string) and consulted first; if no override
+// matches, the lookup falls back to the built-in catalog.
+type ManufacturerResolver struct {
+	builtin   ManufacturerRetriever
+	overrides map[string]string
+}
+
+// NewManufacturerResolver builds a resolver from the given built-in lookup,
+// merging the optional manufacturers: blocks from (a) the embedded
+// snmp-discovery lookup_extensions/*.yaml and (b) every *.yaml/*.yml file
+// under userDir (if non-empty). User overrides take precedence over
+// built-in extension overrides, which take precedence over the IANA catalog.
+func NewManufacturerResolver(builtin ManufacturerRetriever, userDir string) (*ManufacturerResolver, error) {
+	overrides := make(map[string]string)
+
+	if err := loadBuiltInManufacturerOverrides(overrides); err != nil {
+		return nil, err
+	}
+
+	if userDir != "" {
+		if err := loadUserManufacturerOverrides(userDir, overrides); err != nil {
+			return nil, err
+		}
+	}
+
+	return &ManufacturerResolver{
+		builtin:   builtin,
+		overrides: overrides,
+	}, nil
+}
+
+// GetManufacturer returns the manufacturer name for an IANA PEN, honoring
+// user/extension overrides before falling back to the built-in catalog.
+func (r *ManufacturerResolver) GetManufacturer(id string) (string, error) {
+	if name, ok := r.overrides[id]; ok {
+		return name, nil
+	}
+	return r.builtin.GetManufacturer(id)
+}
+
+func loadBuiltInManufacturerOverrides(overrides map[string]string) error {
+	files, err := lookupExtensionsData.ReadDir("lookup_extensions")
+	if err != nil {
+		return fmt.Errorf("failed to read directory lookup_extensions: %w", err)
+	}
+	for _, file := range files {
+		if !isLookupExtensionFile(file) {
+			continue
+		}
+		filePath := filepath.Join("lookup_extensions", file.Name())
+		extensionFile, err := lookupExtensionsData.Open(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to open file %s: %w", file.Name(), err)
+		}
+		fileData, err := io.ReadAll(extensionFile)
+		_ = extensionFile.Close()
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %w", file.Name(), err)
+		}
+		if err := loadManufacturerYAML(fileData, overrides); err != nil {
+			return fmt.Errorf("failed to load manufacturers from %s: %w", file.Name(), err)
+		}
+	}
+	return nil
+}
+
+func loadUserManufacturerOverrides(dir string, overrides map[string]string) error {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("failed to read directory %s: %w", dir, err)
+	}
+	for _, file := range files {
+		if !isLookupExtensionFile(file) {
+			continue
+		}
+		filePath := filepath.Join(dir, file.Name())
+		fileData, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %w", filePath, err)
+		}
+		if err := loadManufacturerYAML(fileData, overrides); err != nil {
+			safePath := strings.ReplaceAll(filePath, "\n", "")
+			safePath = strings.ReplaceAll(safePath, "\r", "")
+			log.Printf("Warning: failed to load manufacturer overrides from %s: %v", safePath, err)
+			continue
+		}
+	}
+	return nil
+}
+
+// loadManufacturerYAML parses the optional manufacturers: block from a
+// lookup-extension YAML file and merges it into overrides. Files without
+// the block are silently ignored (they only carry devices:).
+func loadManufacturerYAML(fileData []byte, overrides map[string]string) error {
+	var parsed struct {
+		Manufacturers map[string]string `yaml:"manufacturers"`
+	}
+	if err := yaml.Unmarshal(fileData, &parsed); err != nil {
+		return fmt.Errorf("failed to parse YAML: %w", err)
+	}
+	for id, name := range parsed.Manufacturers {
+		overrides[id] = name
+	}
+	return nil
+}
+
 // DeviceRetriever is an interface that provides a method to retrieve device information by device OID
 type DeviceRetriever interface {
 	GetDevice(deviceOID string) (string, error)

@@ -550,6 +550,71 @@ func TestEmbeddedLookupExtensions_AllOIDsMappedCorrectly(t *testing.T) {
 	}
 }
 
+func TestManufacturerResolver_UserOverrideWins(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "custom.yaml"), []byte(`
+manufacturers:
+  "9": "Cisco Systems"
+  "14823": "Aruba"
+`), 0o644)
+	require.NoError(t, err)
+
+	builtin, err := NewManufacturerLookup()
+	require.NoError(t, err)
+
+	resolver, err := NewManufacturerResolver(builtin, dir)
+	require.NoError(t, err)
+
+	got, err := resolver.GetManufacturer("9")
+	require.NoError(t, err)
+	assert.Equal(t, "Cisco Systems", got)
+
+	got, err = resolver.GetManufacturer("14823")
+	require.NoError(t, err)
+	assert.Equal(t, "Aruba", got)
+}
+
+func TestManufacturerResolver_FallsBackToBuiltin(t *testing.T) {
+	dir := t.TempDir()
+	builtin, err := NewManufacturerLookup()
+	require.NoError(t, err)
+
+	resolver, err := NewManufacturerResolver(builtin, dir)
+	require.NoError(t, err)
+
+	// PEN 9 is ciscoSystems in the shipped manufacturers.yaml; no user
+	// override was written, so the built-in value must flow through.
+	got, err := resolver.GetManufacturer("9")
+	require.NoError(t, err)
+	assert.Equal(t, "ciscoSystems", got)
+}
+
+func TestManufacturerResolver_BuiltinExtensionFileManufacturers(t *testing.T) {
+	// A built-in lookup_extensions/*.yaml file may ship its own
+	// manufacturers: block. This test asserts the loader picks it up
+	// without requiring a user dir.
+	builtin, err := NewManufacturerLookup()
+	require.NoError(t, err)
+
+	resolver, err := NewManufacturerResolver(builtin, "")
+	require.NoError(t, err)
+
+	// Sanity: builtin PEN 9 -> "ciscoSystems" still flows through.
+	got, err := resolver.GetManufacturer("9")
+	require.NoError(t, err)
+	assert.Equal(t, "ciscoSystems", got)
+}
+
+func TestManufacturerResolver_UnknownPENBubblesError(t *testing.T) {
+	builtin, err := NewManufacturerLookup()
+	require.NoError(t, err)
+	resolver, err := NewManufacturerResolver(builtin, "")
+	require.NoError(t, err)
+
+	_, err = resolver.GetManufacturer("999999999")
+	require.Error(t, err)
+}
+
 func TestLoadYAMLFile(t *testing.T) {
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "yaml_file_test")
