@@ -686,12 +686,16 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 					// Apply per-target overrides (config.DeviceDefaults)
 					// after auto-discovery so a policy author can hard-pin
 					// any subset of {Model, Manufacturer, Platform}.
+					// Order matters: apply Manufacturer first so a
+					// Manufacturer-only override also flows into Platform.Name
+					// (which defaults to the manufacturer string). An
+					// explicit Platform override then wins over that.
+					if defaults != nil && defaults.Device.Manufacturer != "" {
+						manufacturer = defaults.Device.Manufacturer
+					}
 					platformName := manufacturer
 					if defaults != nil && defaults.Device.Platform != "" {
 						platformName = defaults.Device.Platform
-					}
-					if defaults != nil && defaults.Device.Manufacturer != "" {
-						manufacturer = defaults.Device.Manufacturer
 					}
 					if defaults != nil && defaults.Device.Model != "" {
 						deviceModel = defaults.Device.Model

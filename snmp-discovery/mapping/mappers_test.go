@@ -3653,6 +3653,42 @@ func TestDeviceMapper_Map_OverrideModelOnlyPreservesAutoManufacturer(t *testing.
 	assert.Equal(t, "Cisco", *device.DeviceType.Manufacturer.Name)
 }
 
+func TestDeviceMapper_Map_OverrideManufacturerOnlyFlowsIntoPlatformName(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewDeviceMapper(&FakeManufacturers{}, &FakeDeviceLookup{}, logger)
+
+	values := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"1.3.6.1.2.1.1.2.0": {
+			OID:    "1.3.6.1.2.1.1.2.0",
+			Parent: "1.3.6.1.2.1.1.2",
+			Value:  ".1.3.6.1.4.1.9.1.2495",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	entry := &mapping.Entry{
+		OID:    "1.3.6.1.2.1.1.2",
+		Entity: "device",
+		Field:  "_id",
+		MappingEntries: []mapping.Entry{
+			{OID: "1.3.6.1.2.1.1.2", Entity: "device", Field: "platform"},
+		},
+	}
+	defaults := &config.Defaults{
+		Device: config.DeviceDefaults{
+			Manufacturer: "Cisco Systems",
+			// Platform intentionally unset: spec says Manufacturer
+			// override should also flow into Platform.Name.
+		},
+	}
+	entity := mapper.Map(values, entry, registry, defaults)
+	device := entity.(*diode.Device)
+	assert.Equal(t, "Cisco Systems", *device.DeviceType.Manufacturer.Name)
+	assert.Equal(t, "Cisco Systems", *device.Platform.Manufacturer.Name)
+	assert.Equal(t, "Cisco Systems", *device.Platform.Name,
+		"Platform.Name must track the Manufacturer override when Platform override is unset")
+}
+
 func TestDeviceMapper_Map_DynamicModelRefResolvedFromWalked(t *testing.T) {
 	logger := slog.Default()
 	registry := mapping.NewEntityRegistry(logger)
