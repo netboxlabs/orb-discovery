@@ -715,6 +715,29 @@ devices:
 	assert.Equal(t, "RouterOS 7.18", got)
 }
 
+func TestDeviceLookup_GetDeviceModel_DynamicRefLeadingDotNormalization(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "custom.yaml"), []byte(`
+devices:
+  ".1.3.6.1.4.1.99995.1": .1.3.6.1.2.1.1.1.0
+  ".1.3.6.1.4.1.99995.2": .1.3.6.1.2.1.1.1.0
+`), 0o644)
+	require.NoError(t, err)
+
+	deviceLookup, err := LoadDeviceLookupExtensions(dir)
+	require.NoError(t, err)
+
+	walkedNoDot := map[string]string{"1.3.6.1.2.1.1.1.0": "RouterOS A"}
+	got, err := deviceLookup.GetDeviceModel(".1.3.6.1.4.1.99995.1", walkedNoDot)
+	require.NoError(t, err, "resolver must find walked entry whose key lacks the leading dot present in YAML")
+	assert.Equal(t, "RouterOS A", got)
+
+	walkedWithDot := map[string]string{".1.3.6.1.2.1.1.1.0": "RouterOS B"}
+	got, err = deviceLookup.GetDeviceModel(".1.3.6.1.4.1.99995.2", walkedWithDot)
+	require.NoError(t, err)
+	assert.Equal(t, "RouterOS B", got)
+}
+
 func TestDeviceLookup_GetDevice_BackwardCompatibleLiteral(t *testing.T) {
 	deviceLookup, err := LoadDeviceLookupExtensions("")
 	require.NoError(t, err)
