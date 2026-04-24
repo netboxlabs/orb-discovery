@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -96,7 +97,11 @@ type ManufacturerResolver struct {
 // snmp-discovery lookup_extensions/*.yaml and (b) every *.yaml/*.yml file
 // under userDir (if non-empty). User overrides take precedence over
 // built-in extension overrides, which take precedence over the IANA catalog.
-func NewManufacturerResolver(builtin ManufacturerRetriever, userDir string) (*ManufacturerResolver, error) {
+//
+// logger receives non-fatal warnings emitted while loading user override
+// files (missing directory, unreadable file, malformed YAML). A nil logger
+// is permitted; warnings are silently dropped in that case.
+func NewManufacturerResolver(builtin ManufacturerRetriever, userDir string, logger *slog.Logger) (*ManufacturerResolver, error) {
 	overrides := make(map[string]string)
 
 	if err := loadBuiltInManufacturerOverrides(overrides); err != nil {
@@ -104,7 +109,7 @@ func NewManufacturerResolver(builtin ManufacturerRetriever, userDir string) (*Ma
 	}
 
 	if userDir != "" {
-		if err := loadUserManufacturerOverrides(userDir, overrides); err != nil {
+		if err := loadUserManufacturerOverrides(userDir, overrides, logger); err != nil {
 			return nil, err
 		}
 	}
@@ -150,12 +155,10 @@ func loadBuiltInManufacturerOverrides(overrides map[string]string) error {
 	return nil
 }
 
-func loadUserManufacturerOverrides(dir string, overrides map[string]string) error {
+func loadUserManufacturerOverrides(dir string, overrides map[string]string, logger *slog.Logger) error {
 	files, err := os.ReadDir(dir)
 	if err != nil {
-		safeDir := strings.ReplaceAll(dir, "\n", "")
-		safeDir = strings.ReplaceAll(safeDir, "\r", "")
-		log.Printf("Warning: failed to read manufacturer overrides directory %s: %v", safeDir, err)
+		warn(logger, "failed to read manufacturer overrides directory", "directory", dir, "error", err)
 		return nil
 	}
 	for _, file := range files {
@@ -165,16 +168,27 @@ func loadUserManufacturerOverrides(dir string, overrides map[string]string) erro
 		filePath := filepath.Join(dir, file.Name())
 		fileData, err := os.ReadFile(filePath)
 		if err != nil {
-			return fmt.Errorf("failed to read file %s: %w", filePath, err)
+			// Soft-fail per file: a single unreadable file must not
+			// drop every other override (including built-in extension
+			// blocks already merged into overrides above).
+			warn(logger, "failed to read manufacturer overrides file", "file", filePath, "error", err)
+			continue
 		}
 		if err := loadManufacturerYAML(fileData, overrides); err != nil {
-			safePath := strings.ReplaceAll(filePath, "\n", "")
-			safePath = strings.ReplaceAll(safePath, "\r", "")
-			log.Printf("Warning: failed to load manufacturer overrides from %s: %v", safePath, err)
+			warn(logger, "failed to load manufacturer overrides", "file", filePath, "error", err)
 			continue
 		}
 	}
 	return nil
+}
+
+// warn forwards a structured warning to logger, or silently drops it when
+// logger is nil. Centralizes the nil-check so call sites stay terse.
+func warn(logger *slog.Logger, msg string, args ...any) {
+	if logger == nil {
+		return
+	}
+	logger.Warn(msg, args...)
 }
 
 // loadManufacturerYAML parses the optional manufacturers: block from a

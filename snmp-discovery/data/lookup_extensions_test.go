@@ -570,7 +570,7 @@ manufacturers:
 	builtin, err := NewManufacturerLookup()
 	require.NoError(t, err)
 
-	resolver, err := NewManufacturerResolver(builtin, dir)
+	resolver, err := NewManufacturerResolver(builtin, dir, nil)
 	require.NoError(t, err)
 
 	got, err := resolver.GetManufacturer("9")
@@ -587,7 +587,7 @@ func TestManufacturerResolver_FallsBackToBuiltin(t *testing.T) {
 	builtin, err := NewManufacturerLookup()
 	require.NoError(t, err)
 
-	resolver, err := NewManufacturerResolver(builtin, dir)
+	resolver, err := NewManufacturerResolver(builtin, dir, nil)
 	require.NoError(t, err)
 
 	// PEN 9 is ciscoSystems in the shipped manufacturers.yaml; no user
@@ -605,7 +605,7 @@ func TestManufacturerResolver_NoUserDirFallsBackToBuiltinCatalog(t *testing.T) {
 	builtin, err := NewManufacturerLookup()
 	require.NoError(t, err)
 
-	resolver, err := NewManufacturerResolver(builtin, "")
+	resolver, err := NewManufacturerResolver(builtin, "", nil)
 	require.NoError(t, err)
 
 	got, err := resolver.GetManufacturer("9")
@@ -616,7 +616,7 @@ func TestManufacturerResolver_NoUserDirFallsBackToBuiltinCatalog(t *testing.T) {
 func TestManufacturerResolver_UnknownPENBubblesError(t *testing.T) {
 	builtin, err := NewManufacturerLookup()
 	require.NoError(t, err)
-	resolver, err := NewManufacturerResolver(builtin, "")
+	resolver, err := NewManufacturerResolver(builtin, "", nil)
 	require.NoError(t, err)
 
 	_, err = resolver.GetManufacturer("999999999")
@@ -629,7 +629,7 @@ func TestManufacturerResolver_MissingUserDirIsSoftError(t *testing.T) {
 
 	// A directory that does not exist must not fail construction —
 	// the resolver should degrade to built-in-only.
-	resolver, err := NewManufacturerResolver(builtin, "/this/path/does/not/exist/snmp-discovery-test")
+	resolver, err := NewManufacturerResolver(builtin, "/this/path/does/not/exist/snmp-discovery-test", nil)
 	require.NoError(t, err)
 	require.NotNil(t, resolver)
 

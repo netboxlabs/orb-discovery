@@ -233,7 +233,7 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 		// the built-in catalog itself being unreadable) falls back to
 		// the built-in-only catalog so the policy can still run.
 		manufacturerRetriever := m.manufacturers
-		if resolver, err := data.NewManufacturerResolver(m.manufacturers, policy.Config.LookupExtensionsDir); err != nil {
+		if resolver, err := data.NewManufacturerResolver(m.manufacturers, policy.Config.LookupExtensionsDir, m.logger); err != nil {
 			m.logger.Warn("failed to load manufacturer overrides", "error", err, "directory", policy.Config.LookupExtensionsDir)
 		} else {
 			manufacturerRetriever = resolver

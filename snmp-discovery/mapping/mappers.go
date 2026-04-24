@@ -632,6 +632,14 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 	m.logger.Debug("mapping values to device entity", "values", values, "mapping_entry", mappingEntry)
 	deviceEntity := entityRegistry.GetOrCreateEntity(EntityType(mappingEntry.Entity), CurrentDeviceIndex).(*diode.Device)
 
+	// Build the walked OID->value map once per Map() call so the
+	// "platform" branch (and any future dynamic-ref consumer) reuses
+	// the same snapshot instead of rebuilding it on every iteration.
+	walked := make(map[string]string, len(values))
+	for _, w := range values {
+		walked[w.OID] = w.Value
+	}
+
 	fieldFound := false
 	for objectID, value := range values {
 		for _, propertyMappingEntry := range mappingEntry.MappingEntries {
@@ -665,18 +673,14 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 						manufacturer = value.Value
 					}
 
-					// Build the walked map once per group so a dynamic
-					// devices[] ref (e.g. MikroTik's shared sysObjectID
-					// that points at sysDescr) can resolve against
-					// already-walked OID values without any extra SNMP
-					// traffic. The MIB-II system-group scalars sysObjectID
-					// (.1.3.6.1.2.1.1.2.0) and sysDescr (.1.3.6.1.2.1.1.1.0)
+					// Resolve the device model against the walked OID
+					// snapshot built at the top of Map(). Dynamic
+					// devices[] refs (e.g. MikroTik's shared sysObjectID
+					// pointing at sysDescr) read from this snapshot
+					// without any extra SNMP traffic — the MIB-II
+					// system-group scalars sysObjectID and sysDescr
 					// share ifIndex "0" under the device mapping's
-					// identifier_size=1, so sysDescr IS present in values.
-					walked := make(map[string]string, len(values))
-					for _, w := range values {
-						walked[w.OID] = w.Value
-					}
+					// identifier_size=1, so sysDescr IS present.
 					deviceModel, err := m.deviceLookup.GetDeviceModel(value.Value, walked)
 					if err != nil {
 						m.logger.Warn("error getting device model falling back to OID", "error", err, "device_oid", value.Value)
