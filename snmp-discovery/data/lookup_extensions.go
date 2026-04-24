@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -192,22 +193,98 @@ func loadManufacturerYAML(fileData []byte, overrides map[string]string) error {
 	return nil
 }
 
-// DeviceRetriever is an interface that provides a method to retrieve device information by device OID
+// devRefKind discriminates a devices[] map value between a literal model
+// string and an already-walked OID reference whose value becomes the model.
+type devRefKind uint8
+
+const (
+	devRefStatic devRefKind = iota
+	devRefDynamic
+)
+
+// deviceRef is the stored form of a lookup_extensions devices[] entry after
+// the loader classifies the raw YAML value.
+type deviceRef struct {
+	kind      devRefKind
+	literal   string // populated when kind == devRefStatic
+	sourceOID string // populated when kind == devRefDynamic; format: ".1.3.6..." or "1.3.6..."
+}
+
+// oidPattern matches an SNMP numeric OID (optionally leading dot).
+// Any map value that matches is treated as a dynamic reference.
+var oidPattern = regexp.MustCompile(`^\.?\d+(\.\d+)+$`)
+
+func classifyDeviceValue(value string) deviceRef {
+	if oidPattern.MatchString(value) {
+		return deviceRef{kind: devRefDynamic, sourceOID: value}
+	}
+	return deviceRef{kind: devRefStatic, literal: value}
+}
+
+// DeviceRetriever is an interface that provides methods to retrieve device
+// information by device OID. GetDevice returns the model name for static
+// entries only and is preserved for backward compatibility. GetDeviceModel
+// additionally resolves dynamic references (where the YAML value is an
+// OID whose walked value is the model name).
 type DeviceRetriever interface {
 	GetDevice(deviceOID string) (string, error)
+	GetDeviceModel(deviceOID string, walked map[string]string) (string, error)
 }
 
-// DeviceLookup represents a device lookup service
+// DeviceLookup represents a device lookup service.
 type DeviceLookup struct {
-	devicesByVendor *map[string]string
+	devicesByVendor map[string]deviceRef
 }
 
-// GetDevice returns the device name for given device OID
+// GetDevice returns the device name for a given device OID using only the
+// static catalog. Dynamic references cannot be resolved without a walked
+// OID map; callers that need them must use GetDeviceModel.
 func (d *DeviceLookup) GetDevice(deviceOID string) (string, error) {
-	if device, ok := (*d.devicesByVendor)[deviceOID]; ok {
-		return device, nil
+	ref, ok := d.devicesByVendor[deviceOID]
+	if !ok {
+		return "", fmt.Errorf("device ID %s not found", deviceOID)
 	}
-	return "", fmt.Errorf("device ID %s not found", deviceOID)
+	if ref.kind == devRefStatic {
+		return ref.literal, nil
+	}
+	return "", fmt.Errorf("device ID %s resolves dynamically; call GetDeviceModel", deviceOID)
+}
+
+// GetDeviceModel resolves a device model name. For static entries it returns
+// the literal; for dynamic entries it reads walked[sourceOID], trims null
+// bytes and whitespace, and returns the result (or an error if the source
+// OID is missing or empty).
+//
+// Callers pass the walked OID->string map for the current scan so that
+// dynamic references (e.g. a shared sysObjectID that indexes into
+// sysDescr) can resolve without performing extra SNMP traffic.
+func (d *DeviceLookup) GetDeviceModel(deviceOID string, walked map[string]string) (string, error) {
+	ref, ok := d.devicesByVendor[deviceOID]
+	if !ok {
+		return "", fmt.Errorf("device ID %s not found", deviceOID)
+	}
+	if ref.kind == devRefStatic {
+		return ref.literal, nil
+	}
+	value, ok := walked[ref.sourceOID]
+	if !ok {
+		// Accept leading-dot and no-leading-dot spellings since callers
+		// may normalize differently than the YAML author did.
+		alt := strings.TrimPrefix(ref.sourceOID, ".")
+		value, ok = walked[alt]
+		if !ok {
+			value, ok = walked["."+alt]
+		}
+	}
+	if !ok {
+		return "", fmt.Errorf("device ID %s references walked OID %s which was not found in the walk set", deviceOID, ref.sourceOID)
+	}
+	trimmed := strings.TrimRight(value, "\x00 \t\n\r")
+	trimmed = strings.TrimLeft(trimmed, " \t\n\r")
+	if trimmed == "" {
+		return "", fmt.Errorf("device ID %s references walked OID %s whose value is empty", deviceOID, ref.sourceOID)
+	}
+	return trimmed, nil
 }
 
 //go:embed lookup_extensions/*.yaml
@@ -215,19 +292,19 @@ var lookupExtensionsData embed.FS
 
 // LoadDeviceLookupExtensions loads device data from YAML files in the specified directory
 func LoadDeviceLookupExtensions(dir string) (*DeviceLookup, error) {
-	devicesByVendor := make(map[string]string)
+	devicesByVendor := make(map[string]deviceRef)
 	deviceLookup := DeviceLookup{
-		devicesByVendor: &devicesByVendor,
+		devicesByVendor: devicesByVendor,
 	}
 
-	err := loadBuiltInExtensions(&devicesByVendor)
+	err := loadBuiltInExtensions(devicesByVendor)
 	if err != nil {
 		return &deviceLookup, err
 	}
 
 	if dir != "" {
 		// Extend built in extensions with user provided extensions
-		err = loadUserProvidedExtensions(dir, &devicesByVendor)
+		err = loadUserProvidedExtensions(dir, devicesByVendor)
 		if err != nil {
 			return &deviceLookup, err
 		}
@@ -236,7 +313,7 @@ func LoadDeviceLookupExtensions(dir string) (*DeviceLookup, error) {
 	return &deviceLookup, nil
 }
 
-func loadBuiltInExtensions(devicesByVendor *map[string]string) error {
+func loadBuiltInExtensions(devicesByVendor map[string]deviceRef) error {
 	files, err := lookupExtensionsData.ReadDir("lookup_extensions")
 	if err != nil {
 		return fmt.Errorf("failed to read directory %s: %w", "lookup_extensions", err)
@@ -270,7 +347,7 @@ func loadBuiltInExtensions(devicesByVendor *map[string]string) error {
 	return nil
 }
 
-func loadUserProvidedExtensions(dir string, devicesByVendor *map[string]string) error {
+func loadUserProvidedExtensions(dir string, devicesByVendor map[string]deviceRef) error {
 	// Read all files in the directory
 	files, err := os.ReadDir(dir)
 	if err != nil {
@@ -307,8 +384,10 @@ func isLookupExtensionFile(file os.DirEntry) bool {
 			strings.HasSuffix(strings.ToLower(file.Name()), ".yml"))
 }
 
-// loadYAMLFile loads a single YAML file and merges its data into devicesByVendor
-func loadYAMLFile(data []byte, devicesByVendor *map[string]string) error {
+// loadYAMLFile loads a single YAML file and merges its data into
+// devicesByVendor, classifying each value as a static literal or a
+// dynamic OID reference.
+func loadYAMLFile(data []byte, devicesByVendor map[string]deviceRef) error {
 	var fileData struct {
 		Devices map[string]string `yaml:"devices"`
 	}
@@ -317,9 +396,8 @@ func loadYAMLFile(data []byte, devicesByVendor *map[string]string) error {
 		return fmt.Errorf("failed to parse YAML: %w", err)
 	}
 
-	// Merge the data into devicesByVendor
-	for deviceOID, deviceName := range fileData.Devices {
-		(*devicesByVendor)[deviceOID] = deviceName
+	for deviceOID, deviceValue := range fileData.Devices {
+		devicesByVendor[deviceOID] = classifyDeviceValue(deviceValue)
 	}
 
 	return nil

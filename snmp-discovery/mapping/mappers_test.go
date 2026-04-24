@@ -2707,6 +2707,11 @@ func (m *MockDeviceLookup) GetDevice(deviceOID string) (string, error) {
 	return args.Get(0).(string), args.Error(1)
 }
 
+func (m *MockDeviceLookup) GetDeviceModel(deviceOID string, walked map[string]string) (string, error) {
+	args := m.Called(deviceOID, walked)
+	return args.Get(0).(string), args.Error(1)
+}
+
 // Helper functions to create pointers
 func int64Ptr(i int64) *int64 {
 	return &i
