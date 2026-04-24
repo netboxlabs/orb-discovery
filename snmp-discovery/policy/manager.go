@@ -227,9 +227,11 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 		// Build the per-policy manufacturer resolver: the built-in IANA
 		// catalog held by the Manager + any manufacturers: blocks in
 		// built-in extension files + optional user overrides from
-		// policy.Config.LookupExtensionsDir. If the resolver fails to
-		// construct (e.g. malformed YAML in a user file), degrade to the
-		// built-in catalog alone so the policy still runs.
+		// policy.Config.LookupExtensionsDir. Per-file YAML parse errors
+		// inside the user directory are logged and skipped, so partial
+		// overrides still apply. Only a hard construction failure (e.g.
+		// the built-in catalog itself being unreadable) falls back to
+		// the built-in-only catalog so the policy can still run.
 		manufacturerRetriever := m.manufacturers
 		if resolver, err := data.NewManufacturerResolver(m.manufacturers, policy.Config.LookupExtensionsDir); err != nil {
 			m.logger.Warn("failed to load manufacturer overrides", "error", err, "directory", policy.Config.LookupExtensionsDir)

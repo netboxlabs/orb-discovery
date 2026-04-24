@@ -597,17 +597,17 @@ func TestManufacturerResolver_FallsBackToBuiltin(t *testing.T) {
 	assert.Equal(t, "ciscoSystems", got)
 }
 
-func TestManufacturerResolver_BuiltinExtensionFileManufacturers(t *testing.T) {
-	// A built-in lookup_extensions/*.yaml file may ship its own
-	// manufacturers: block. This test asserts the loader picks it up
-	// without requiring a user dir.
+func TestManufacturerResolver_NoUserDirFallsBackToBuiltinCatalog(t *testing.T) {
+	// With no user override directory and no shipped manufacturers:
+	// block, the resolver must still answer lookups from the base
+	// IANA catalog. This guards against the resolver wrapping the
+	// base catalog in a way that hides its entries.
 	builtin, err := NewManufacturerLookup()
 	require.NoError(t, err)
 
 	resolver, err := NewManufacturerResolver(builtin, "")
 	require.NoError(t, err)
 
-	// Sanity: builtin PEN 9 -> "ciscoSystems" still flows through.
 	got, err := resolver.GetManufacturer("9")
 	require.NoError(t, err)
 	assert.Equal(t, "ciscoSystems", got)

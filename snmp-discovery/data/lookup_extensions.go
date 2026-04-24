@@ -330,12 +330,10 @@ func loadBuiltInExtensions(devicesByVendor map[string]deviceRef) error {
 			return fmt.Errorf("failed to open file %s: %w", file.Name(), err)
 		}
 
-		defer func() {
-			if err := extensionFile.Close(); err != nil {
-				log.Println("Error closing file:", err)
-			}
-		}()
 		extensionFileData, err := io.ReadAll(extensionFile)
+		if cerr := extensionFile.Close(); cerr != nil {
+			log.Println("Error closing file:", cerr)
+		}
 		if err != nil {
 			return fmt.Errorf("failed to read file %s: %w", file.Name(), err)
 		}
