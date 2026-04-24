@@ -1,10 +1,15 @@
 package mapping
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
@@ -164,6 +169,12 @@ func (r *EntityRegistry) GetOrCreateEntity(entityType EntityType, index ObjectID
 	return r.entities[entityType][index]
 }
 
+// DefaultInterfaceName is the placeholder assigned to a freshly created
+// Interface entity before any PDU has populated its name. Mapper
+// fallback handlers (e.g. ifName → name_alternate) treat this sentinel
+// as "not yet populated" so they can overwrite it safely.
+const DefaultInterfaceName = "unknown"
+
 func createEntity(entityType EntityType) (diode.Entity, error) {
 	switch entityType {
 	case "ipAddress":
@@ -172,7 +183,7 @@ func createEntity(entityType EntityType) (diode.Entity, error) {
 		}, nil
 	case "interface":
 		return &diode.Interface{
-			Name: StringPtr("unknown"),
+			Name: StringPtr(DefaultInterfaceName),
 		}, nil
 	case "device":
 		return &diode.Device{}, nil
@@ -207,6 +218,23 @@ type ObjectIDMapper struct {
 	registry        *EntityRegistry
 	defaults        *config.Defaults
 	excludePatterns []*regexp.Regexp
+	targetHost      string
+	resolver        hostResolver
+	ctx             context.Context
+}
+
+// SetContext stores the scan's context on the mapper. If set, the primary-IP
+// DNS lookup will derive its 2s timeout from this parent context so that a
+// cancelled scan also aborts the lookup.
+func (m *ObjectIDMapper) SetContext(ctx context.Context) {
+	m.ctx = ctx
+}
+
+// hostResolver is the minimal DNS lookup surface used by ObjectIDMapper.
+// It is satisfied by *net.Resolver (including net.DefaultResolver) and
+// overridable in tests.
+type hostResolver interface {
+	LookupHost(ctx context.Context, host string) ([]string, error)
 }
 
 // Entry is a struct that contains a mapping entry
@@ -282,14 +310,22 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 	}, nil
 }
 
-// NewObjectIDMapper creates a new ObjectIDMapper
-func NewObjectIDMapper(mappingConfig *Config, logger *slog.Logger, defaults *config.Defaults) *ObjectIDMapper {
+// NewObjectIDMapper creates a new ObjectIDMapper for a given SNMP target host.
+func NewObjectIDMapper(mappingConfig *Config, logger *slog.Logger, defaults *config.Defaults, targetHost string) *ObjectIDMapper {
+	return newObjectIDMapperWithResolver(mappingConfig, logger, defaults, targetHost, net.DefaultResolver)
+}
+
+// newObjectIDMapperWithResolver is the test seam that allows injecting a
+// custom DNS resolver. Production code uses NewObjectIDMapper.
+func newObjectIDMapperWithResolver(mappingConfig *Config, logger *slog.Logger, defaults *config.Defaults, targetHost string, resolver hostResolver) *ObjectIDMapper {
 	return &ObjectIDMapper{
 		mappingConfig:   mappingConfig,
 		logger:          logger,
 		registry:        NewEntityRegistry(logger),
 		defaults:        defaults,
 		excludePatterns: compileExcludePatterns(defaults, logger),
+		targetHost:      targetHost,
+		resolver:        resolver,
 	}
 }
 
@@ -417,7 +453,7 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 	uniqueEntities := make(map[diode.Entity]bool)
 	for index, value := range objectIDIndexMap {
 		m.logger.Debug("mapping object ID index", "object_id_index", index, "values", value.Values)
-		entry, err := m.mappingConfig.getMappingEntry(value.Index)
+		entry, err := m.resolveMappingEntry(value)
 		if err != nil {
 			m.logger.Warn("error finding mapping entry", "error", err, "object_id", value.Index)
 			continue
@@ -458,7 +494,243 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 			entities = append(entities, entity)
 		}
 	}
+
+	m.assignPrimaryIP(currentDevice, uniqueEntities)
+
 	return entities
+}
+
+// assignPrimaryIP points currentDevice.PrimaryIp4 at the surviving IPAddress
+// entity whose address matches the SNMP target host (literal IPv4 or DNS-
+// resolved). No-op when the target is not IPv4-addressable, when DNS lookup
+// fails, or when no surviving IPAddress entity matches.
+func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diode.Entity]bool) {
+	if m.targetHost == "" {
+		return
+	}
+
+	candidates := m.resolveTargetIPv4s()
+	if len(candidates) == 0 {
+		m.logger.Debug("no IPv4 candidates for primary IP assignment", "target", m.targetHost)
+		return
+	}
+
+	type hit struct {
+		key     string
+		ip      *diode.IPAddress
+		content string // stable, data-derived tiebreaker when key collides
+	}
+	var hits []hit
+	for entity := range entities {
+		ip, ok := entity.(*diode.IPAddress)
+		if !ok || ip.Address == nil {
+			continue
+		}
+		// Enforce the "verified interface IP" guarantee: only accept
+		// addresses that were discovered on an interface during the walk.
+		if _, assigned := ip.AssignedObject.(*diode.Interface); !assigned {
+			continue
+		}
+		stripped := stripPrefix(*ip.Address)
+		for _, cand := range candidates {
+			if stripped == cand {
+				hits = append(hits, hit{
+					key:     primaryIPSortKey(ip),
+					ip:      ip,
+					content: primaryIPContentKey(ip),
+				})
+				break
+			}
+		}
+	}
+
+	if len(hits) == 0 {
+		m.logger.Debug("no matching IP for primary IP assignment", "target", m.targetHost)
+		return
+	}
+
+	// Primary sort by composite key; content hash is a data-derived,
+	// run-to-run-stable tiebreaker for the rare case of two entries
+	// sharing a key.
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].key != hits[j].key {
+			return hits[i].key < hits[j].key
+		}
+		return hits[i].content < hits[j].content
+	})
+
+	if len(hits) > 1 {
+		all := make([]string, 0, len(hits))
+		for _, h := range hits {
+			all = append(all, h.key)
+		}
+		m.logger.Warn("multiple IP candidates for primary IP assignment; picking deterministic first",
+			"target", m.targetHost, "candidates", all)
+	}
+
+	// Break the reference cycle before attaching. The matched IPAddress is
+	// also emitted as a standalone entity whose AssignedObject points at an
+	// Interface whose Device points back at the same currentDevice. Sharing
+	// that pointer graph into device.PrimaryIp4 would make the diode SDK's
+	// proto serializer recurse forever (device -> primary_ip4 -> ip ->
+	// interface -> device -> ...). We detach with a shallow snapshot: copy
+	// the IPAddress and (if present) the assigned Interface, then replace
+	// the interface's Device with a Device copy that has PrimaryIp4 nil.
+	// The snapshot is then a tree (no back-edge), and the nested Device
+	// still satisfies Diode's validation requirement that an Interface
+	// reference a Device. The standalone emitted entities keep their full
+	// graph untouched.
+	device.PrimaryIp4 = detachForPrimaryIP(hits[0].ip, device)
+}
+
+// detachForPrimaryIP returns a shallow copy of the matched IPAddress
+// suitable to attach as Device.PrimaryIp4 without introducing a reference
+// cycle. The assigned Interface (if any) is copied; its Device pointer is
+// replaced with a copy of the owning Device that has PrimaryIp4 cleared,
+// and all *Interface / *Module relationship fields (Parent, Bridge, Lag,
+// Module) are cleared -- otherwise a subinterface's Parent (or similar
+// back-reference) would point at another *diode.Interface whose Device
+// still carries PrimaryIp4, reintroducing the cycle. The standalone
+// emitted Interface entities keep their full graph; only the snapshot is
+// pruned.
+func detachForPrimaryIP(ip *diode.IPAddress, owner *diode.Device) *diode.IPAddress {
+	if ip == nil {
+		return nil
+	}
+	snapshot := *ip
+	if iface, ok := snapshot.AssignedObject.(*diode.Interface); ok && iface != nil {
+		ifaceCopy := *iface
+		if owner != nil {
+			deviceCopy := *owner
+			deviceCopy.PrimaryIp4 = nil
+			ifaceCopy.Device = &deviceCopy
+		}
+		// Prune relationship pointers that can transitively reach a
+		// Device with PrimaryIp4 set. See the function doc for why.
+		ifaceCopy.Parent = nil
+		ifaceCopy.Bridge = nil
+		ifaceCopy.Lag = nil
+		ifaceCopy.Module = nil
+		snapshot.AssignedObject = &ifaceCopy
+	}
+	return &snapshot
+}
+
+// primaryIPSortKey returns a stable composite ordering key for an IPAddress
+// entity: "<address>|<interface-name>". Deterministic even when two
+// IPAddresses share the same stripped address.
+func primaryIPSortKey(ip *diode.IPAddress) string {
+	addr := ""
+	if ip.Address != nil {
+		addr = *ip.Address
+	}
+	ifName := ""
+	if iface, ok := ip.AssignedObject.(*diode.Interface); ok && iface != nil && iface.Name != nil {
+		ifName = *iface.Name
+	}
+	return addr + "|" + ifName
+}
+
+// primaryIPContentKey returns a run-to-run-stable secondary ordering key
+// derived from the IPAddress entity's content. Used as a tiebreaker when
+// two entries produce the same primaryIPSortKey. JSON marshalling is
+// deterministic for a given struct value (encoding/json sorts map keys,
+// and diode.IPAddress has no time.Time or custom MarshalJSON with
+// randomness), so the returned string is the same across process
+// invocations for the same input. The fallback dereferences scalar
+// pointer fields explicitly and never embeds pointer addresses.
+//
+// If two *distinct* IPAddress entities produce byte-for-byte identical
+// content (identical address, description, tags, interface, ...), the
+// selection between them is semantically equivalent — the NetBox
+// payload for either is the same — so the residual non-determinism in
+// that case has no observable effect on downstream data.
+func primaryIPContentKey(ip *diode.IPAddress) string {
+	if ip == nil {
+		return ""
+	}
+	if b, err := json.Marshal(ip); err == nil {
+		return string(b)
+	}
+	// Fallback for the unlikely case json.Marshal fails (e.g. a custom
+	// field that contains a channel or function). Explicit dereferences
+	// avoid the process-local pointer addresses that %+v would print.
+	// We pull every scalar field that could legitimately distinguish
+	// two otherwise-matching IPAddress entities.
+	parts := []string{
+		derefString(ip.Address),
+		derefString(ip.Description),
+		derefString(ip.Comments),
+		derefString(ip.DnsName),
+		derefString(ip.Status),
+		derefString(ip.Role),
+	}
+	if ip.Tenant != nil {
+		parts = append(parts, derefString(ip.Tenant.Name))
+	}
+	if ip.Vrf != nil {
+		parts = append(parts, derefString(ip.Vrf.Name))
+	}
+	if iface, ok := ip.AssignedObject.(*diode.Interface); ok && iface != nil {
+		parts = append(parts, derefString(iface.Name))
+	}
+	for _, tag := range ip.Tags {
+		if tag != nil {
+			parts = append(parts, derefString(tag.Name))
+		}
+	}
+	return strings.Join(parts, "\x00")
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// resolveTargetIPv4s returns the IPv4 candidate addresses for the current
+// SNMP target. If targetHost is an IPv4 literal, the single address is
+// returned. Otherwise DNS is consulted with a 2s timeout and IPv4 results
+// are returned. Returns an empty slice on any failure.
+func (m *ObjectIDMapper) resolveTargetIPv4s() []string {
+	if ip := net.ParseIP(m.targetHost); ip != nil {
+		if v4 := ip.To4(); v4 != nil {
+			return []string{v4.String()}
+		}
+		return nil
+	}
+	if m.resolver == nil {
+		return nil
+	}
+	parent := m.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
+	defer cancel()
+	addrs, err := m.resolver.LookupHost(ctx, m.targetHost)
+	if err != nil {
+		m.logger.Debug("target host DNS lookup failed", "target", m.targetHost, "error", err)
+		return nil
+	}
+	out := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		if ip := net.ParseIP(a); ip != nil {
+			if v4 := ip.To4(); v4 != nil {
+				out = append(out, v4.String())
+			}
+		}
+	}
+	return out
+}
+
+// stripPrefix removes a "/prefix" suffix from an IP/CIDR string.
+func stripPrefix(addr string) string {
+	if i := strings.IndexByte(addr, '/'); i >= 0 {
+		return addr[:i]
+	}
+	return addr
 }
 
 func (m *ObjectIDMapper) filterExcludedEntities(entities map[diode.Entity]bool) {
@@ -509,6 +781,32 @@ func (*ObjectIDMapper) getAssignedInterfaces(uniqueEntities map[diode.Entity]boo
 		}
 	}
 	return assignedInterfaceIndices
+}
+
+// resolveMappingEntry returns the top-level mapping Entry for a group of
+// PDUs sharing an ObjectIDIndex. groupByObjectIDIndex captures only the
+// Parent OID of the FIRST PDU iterated per index; when that parent's
+// subtree has no registered top-level entry (e.g. ifXTable-only OIDs
+// like .1.3.6.1.2.1.31.1.1.1.* are registered as CHILDREN of the
+// interface entry .1.3.6.1.2.1.2.2.1, not as top-level parents
+// themselves), getMappingEntry on it fails. Go map iteration is
+// randomised, so relying on whichever Parent landed first is
+// nondeterministic. Fall back to trying each PDU's Parent until one
+// resolves.
+func (m *ObjectIDMapper) resolveMappingEntry(details *ObjectIDIndexDetails) (*Entry, error) {
+	entry, err := m.mappingConfig.getMappingEntry(details.Index)
+	if err == nil {
+		return entry, nil
+	}
+	for _, pdu := range details.Values {
+		if pdu.Parent == details.Index {
+			continue
+		}
+		if e, e2 := m.mappingConfig.getMappingEntry(pdu.Parent); e2 == nil {
+			return e, nil
+		}
+	}
+	return nil, err
 }
 
 func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[ObjectIDIndex]*ObjectIDIndexDetails {
