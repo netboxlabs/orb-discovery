@@ -362,6 +362,20 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 						interfaceEntity.Name = &name
 						fieldFound = true
 					}
+				case "name_alternate":
+					// Fallback for vendors where ifDescr is empty/absent
+					// (e.g. FortiGate, Nokia TiMOS 7750). Only used when
+					// the primary ifDescr-backed "name" field produced no
+					// value; the guard makes the outcome independent of
+					// PDU iteration order within the group.
+					alt := strings.TrimRight(value.Value, "\x00 \t\n\r")
+					if alt == "" {
+						continue
+					}
+					if interfaceEntity.Name == nil || *interfaceEntity.Name == "" || *interfaceEntity.Name == "unknown" {
+						interfaceEntity.Name = &alt
+						fieldFound = true
+					}
 				case "description":
 					description := strings.TrimRight(value.Value, "\x00 \t\n\r")
 					if description != "" {
