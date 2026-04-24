@@ -1178,3 +1178,62 @@ func TestAssignPrimaryIP_NonDefaultPrefix(t *testing.T) {
 	assert.Equal(t, "10.0.0.1/24", *device.PrimaryIp4.Address,
 		"primary IP must carry the discovered /24 prefix, and stripPrefix must still match against the bare target")
 }
+
+// TestMapObjectIDsToEntity_MixedSubtreeOrderingRobust covers the codex P1
+// regression from PR #369: groupByObjectIDIndex captures the Parent of the
+// first PDU iterated per ifIndex. Go map iteration is randomised, so if
+// the first PDU happens to be from ifXTable (e.g. ifName, whose Parent
+// .1.3.6.1.2.1.31.1.1.1.1 has no top-level mapping entry), the whole
+// index was previously dropped. Input here has BOTH an ifDescr PDU and an
+// ifName PDU so the fallback loop in resolveMappingEntry has a resolvable
+// parent available even when the bad parent was captured first. We run N
+// iterations to defend against regressions where the fix appears to
+// "work" only on certain iteration orders.
+func TestMapObjectIDsToEntity_MixedSubtreeOrderingRobust(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	entries := []config.MappingEntry{
+		{
+			OID:            ".1.3.6.1.2.1.2.2.1",
+			Entity:         "interface",
+			Field:          "_id",
+			IdentifierSize: 1,
+			MappingEntries: []config.MappingEntry{
+				{OID: ".1.3.6.1.2.1.2.2.1.2", Entity: "interface", Field: "name"},
+				{OID: ".1.3.6.1.2.1.31.1.1.1.1", Entity: "interface", Field: "name_alternate"},
+			},
+		},
+	}
+	mappingConfig, err := mapping.NewConfig(entries, logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	// Input contains an empty ifDescr PDU (under a parent that DOES
+	// resolve) plus a populated ifName PDU (under a parent that does
+	// NOT resolve as a top-level entry). Grouping randomly picks
+	// whichever PDU is iterated first; the fallback loop must find the
+	// ifDescr parent regardless.
+	oids := mapping.ObjectIDValueMap{
+		".1.3.6.1.2.1.2.2.1.2.1":    mapping.Value{Value: "", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1},
+		".1.3.6.1.2.1.31.1.1.1.1.1": mapping.Value{Value: "mgmt", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1},
+	}
+
+	for i := 0; i < 25; i++ {
+		m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "")
+		entities := m.MapObjectIDsToEntity(oids)
+		var iface *diode.Interface
+		for _, e := range entities {
+			if intf, ok := e.(*diode.Interface); ok {
+				iface = intf
+				break
+			}
+		}
+		assert.NotNilf(t, iface, "iteration %d: interface must be emitted regardless of PDU iteration order", i)
+		if iface == nil {
+			continue
+		}
+		assert.NotNilf(t, iface.Name, "iteration %d: Interface.Name must be set via name_alternate fallback", i)
+		if iface.Name != nil {
+			assert.Equalf(t, "mgmt", *iface.Name, "iteration %d: Name must come from ifName PDU", i)
+		}
+	}
+}
