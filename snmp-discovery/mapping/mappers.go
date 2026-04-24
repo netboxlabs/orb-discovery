@@ -665,20 +665,45 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 						manufacturer = value.Value
 					}
 
-					manufacturerEntity := diode.Manufacturer{
-						Name: &manufacturer,
+					// Build the walked map once per group so a dynamic
+					// devices[] ref (e.g. MikroTik's shared sysObjectID
+					// that points at sysDescr) can resolve against
+					// already-walked OID values without any extra SNMP
+					// traffic. The MIB-II system-group scalars sysObjectID
+					// (.1.3.6.1.2.1.1.2.0) and sysDescr (.1.3.6.1.2.1.1.1.0)
+					// share ifIndex "0" under the device mapping's
+					// identifier_size=1, so sysDescr IS present in values.
+					walked := make(map[string]string, len(values))
+					for _, w := range values {
+						walked[w.OID] = w.Value
 					}
-
-					deviceEntity.Platform = &diode.Platform{
-						Name:         &manufacturer,
-						Slug:         toSlug(&manufacturer),
-						Manufacturer: &manufacturerEntity,
-					}
-
-					deviceModel, err := m.deviceLookup.GetDevice(value.Value)
+					deviceModel, err := m.deviceLookup.GetDeviceModel(value.Value, walked)
 					if err != nil {
 						m.logger.Warn("error getting device model falling back to OID", "error", err, "device_oid", value.Value)
 						deviceModel = value.Value
+					}
+
+					// Apply per-target overrides (config.DeviceDefaults)
+					// after auto-discovery so a policy author can hard-pin
+					// any subset of {Model, Manufacturer, Platform}.
+					platformName := manufacturer
+					if defaults != nil && defaults.Device.Platform != "" {
+						platformName = defaults.Device.Platform
+					}
+					if defaults != nil && defaults.Device.Manufacturer != "" {
+						manufacturer = defaults.Device.Manufacturer
+					}
+					if defaults != nil && defaults.Device.Model != "" {
+						deviceModel = defaults.Device.Model
+					}
+
+					manufacturerEntity := diode.Manufacturer{
+						Name: &manufacturer,
+					}
+					deviceEntity.Platform = &diode.Platform{
+						Name:         &platformName,
+						Slug:         toSlug(&platformName),
+						Manufacturer: &manufacturerEntity,
 					}
 					deviceEntity.DeviceType = &diode.DeviceType{
 						Model:        &deviceModel,
