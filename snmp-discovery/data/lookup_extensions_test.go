@@ -698,6 +698,23 @@ devices:
 	require.Error(t, err, "whitespace/null-only source value must not be returned as a model")
 }
 
+func TestDeviceLookup_GetDeviceModel_StripsLeadingNullByte(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "custom.yaml"), []byte(`
+devices:
+  ".1.3.6.1.4.1.99996.1": .1.3.6.1.2.1.1.1.0
+`), 0o644)
+	require.NoError(t, err)
+
+	deviceLookup, err := LoadDeviceLookupExtensions(dir)
+	require.NoError(t, err)
+
+	walked := map[string]string{".1.3.6.1.2.1.1.1.0": "\x00\x00RouterOS 7.18"}
+	got, err := deviceLookup.GetDeviceModel(".1.3.6.1.4.1.99996.1", walked)
+	require.NoError(t, err)
+	assert.Equal(t, "RouterOS 7.18", got)
+}
+
 func TestDeviceLookup_GetDevice_BackwardCompatibleLiteral(t *testing.T) {
 	deviceLookup, err := LoadDeviceLookupExtensions("")
 	require.NoError(t, err)

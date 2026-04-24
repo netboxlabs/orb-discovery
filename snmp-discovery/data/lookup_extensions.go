@@ -280,7 +280,7 @@ func (d *DeviceLookup) GetDeviceModel(deviceOID string, walked map[string]string
 		return "", fmt.Errorf("device ID %s references walked OID %s which was not found in the walk set", deviceOID, ref.sourceOID)
 	}
 	trimmed := strings.TrimRight(value, "\x00 \t\n\r")
-	trimmed = strings.TrimLeft(trimmed, " \t\n\r")
+	trimmed = strings.TrimLeft(trimmed, "\x00 \t\n\r")
 	if trimmed == "" {
 		return "", fmt.Errorf("device ID %s references walked OID %s whose value is empty", deviceOID, ref.sourceOID)
 	}
