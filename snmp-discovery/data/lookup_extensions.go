@@ -8,6 +8,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -138,7 +139,7 @@ func loadBuiltInManufacturerOverrides(overrides map[string]string) error {
 		if !isLookupExtensionFile(file) {
 			continue
 		}
-		filePath := filepath.Join("lookup_extensions", file.Name())
+		filePath := path.Join("lookup_extensions", file.Name())
 		extensionFile, err := lookupExtensionsData.Open(filePath)
 		if err != nil {
 			return fmt.Errorf("failed to open file %s: %w", file.Name(), err)
@@ -338,7 +339,7 @@ func loadBuiltInExtensions(devicesByVendor map[string]deviceRef) error {
 			continue
 		}
 
-		filePath := filepath.Join("lookup_extensions", file.Name())
+		filePath := path.Join("lookup_extensions", file.Name())
 		extensionFile, err := lookupExtensionsData.Open(filePath)
 		if err != nil {
 			return fmt.Errorf("failed to open file %s: %w", file.Name(), err)
