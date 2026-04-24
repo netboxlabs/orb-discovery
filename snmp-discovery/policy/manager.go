@@ -230,7 +230,7 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 		// policy.Config.LookupExtensionsDir. If the resolver fails to
 		// construct (e.g. malformed YAML in a user file), degrade to the
 		// built-in catalog alone so the policy still runs.
-		var manufacturerRetriever data.ManufacturerRetriever = m.manufacturers
+		manufacturerRetriever := m.manufacturers
 		if resolver, err := data.NewManufacturerResolver(m.manufacturers, policy.Config.LookupExtensionsDir); err != nil {
 			m.logger.Warn("failed to load manufacturer overrides", "error", err, "directory", policy.Config.LookupExtensionsDir)
 		} else {
