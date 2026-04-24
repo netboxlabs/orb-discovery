@@ -152,7 +152,10 @@ func loadBuiltInManufacturerOverrides(overrides map[string]string) error {
 func loadUserManufacturerOverrides(dir string, overrides map[string]string) error {
 	files, err := os.ReadDir(dir)
 	if err != nil {
-		return fmt.Errorf("failed to read directory %s: %w", dir, err)
+		safeDir := strings.ReplaceAll(dir, "\n", "")
+		safeDir = strings.ReplaceAll(safeDir, "\r", "")
+		log.Printf("Warning: failed to read manufacturer overrides directory %s: %v", safeDir, err)
+		return nil
 	}
 	for _, file := range files {
 		if !isLookupExtensionFile(file) {

@@ -615,6 +615,22 @@ func TestManufacturerResolver_UnknownPENBubblesError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestManufacturerResolver_MissingUserDirIsSoftError(t *testing.T) {
+	builtin, err := NewManufacturerLookup()
+	require.NoError(t, err)
+
+	// A directory that does not exist must not fail construction —
+	// the resolver should degrade to built-in-only.
+	resolver, err := NewManufacturerResolver(builtin, "/this/path/does/not/exist/snmp-discovery-test")
+	require.NoError(t, err)
+	require.NotNil(t, resolver)
+
+	// Built-in catalog still works.
+	got, err := resolver.GetManufacturer("9")
+	require.NoError(t, err)
+	assert.Equal(t, "ciscoSystems", got)
+}
+
 func TestLoadYAMLFile(t *testing.T) {
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "yaml_file_test")
