@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -99,14 +100,21 @@ type ManufacturerResolver struct {
 // under userDir (if non-empty). User overrides take precedence over
 // built-in extension overrides, which take precedence over the IANA catalog.
 //
+// The built-in extension scan is parsed once per process and cached, so
+// callers (including per-policy StartPolicy invocations) only pay the
+// userDir merge cost on subsequent constructions.
+//
 // logger receives non-fatal warnings emitted while loading user override
 // files (missing directory, unreadable file, malformed YAML). A nil logger
 // is permitted; warnings are silently dropped in that case.
 func NewManufacturerResolver(builtin ManufacturerRetriever, userDir string, logger *slog.Logger) (*ManufacturerResolver, error) {
-	overrides := make(map[string]string)
-
-	if err := loadBuiltInManufacturerOverrides(overrides); err != nil {
+	cached, err := getBuiltInManufacturerOverrides()
+	if err != nil {
 		return nil, err
+	}
+	overrides := make(map[string]string, len(cached))
+	for k, v := range cached {
+		overrides[k] = v
 	}
 
 	if userDir != "" {
@@ -119,6 +127,28 @@ func NewManufacturerResolver(builtin ManufacturerRetriever, userDir string, logg
 		builtin:   builtin,
 		overrides: overrides,
 	}, nil
+}
+
+// getBuiltInManufacturerOverrides parses the embedded lookup_extensions/*.yaml
+// manufacturers blocks once per process and returns the cached map. The
+// returned map is not safe to mutate — callers must clone before merging
+// user overrides.
+var (
+	builtInManufacturerOverridesOnce sync.Once
+	builtInManufacturerOverrides     map[string]string
+	builtInManufacturerOverridesErr  error
+)
+
+func getBuiltInManufacturerOverrides() (map[string]string, error) {
+	builtInManufacturerOverridesOnce.Do(func() {
+		overrides := make(map[string]string)
+		if err := loadBuiltInManufacturerOverrides(overrides); err != nil {
+			builtInManufacturerOverridesErr = err
+			return
+		}
+		builtInManufacturerOverrides = overrides
+	})
+	return builtInManufacturerOverrides, builtInManufacturerOverridesErr
 }
 
 // GetManufacturer returns the manufacturer name for an IANA PEN, honoring
@@ -146,7 +176,7 @@ func loadBuiltInManufacturerOverrides(overrides map[string]string) error {
 		}
 		fileData, err := io.ReadAll(extensionFile)
 		if cerr := extensionFile.Close(); cerr != nil {
-			log.Println("Error closing file:", cerr)
+			log.Printf("Error closing file %s: %v", filePath, cerr)
 		}
 		if err != nil {
 			return fmt.Errorf("failed to read file %s: %w", file.Name(), err)
@@ -349,7 +379,7 @@ func loadBuiltInExtensions(devicesByVendor map[string]deviceRef) error {
 
 		extensionFileData, err := io.ReadAll(extensionFile)
 		if cerr := extensionFile.Close(); cerr != nil {
-			log.Println("Error closing file:", cerr)
+			log.Printf("Error closing file %s: %v", filePath, cerr)
 		}
 		if err != nil {
 			return fmt.Errorf("failed to read file %s: %w", file.Name(), err)
