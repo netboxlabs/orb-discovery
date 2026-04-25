@@ -145,7 +145,9 @@ func loadBuiltInManufacturerOverrides(overrides map[string]string) error {
 			return fmt.Errorf("failed to open file %s: %w", file.Name(), err)
 		}
 		fileData, err := io.ReadAll(extensionFile)
-		_ = extensionFile.Close()
+		if cerr := extensionFile.Close(); cerr != nil {
+			log.Println("Error closing file:", cerr)
+		}
 		if err != nil {
 			return fmt.Errorf("failed to read file %s: %w", file.Name(), err)
 		}

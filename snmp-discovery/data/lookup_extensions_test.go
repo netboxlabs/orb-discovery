@@ -3,6 +3,7 @@ package data
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 
@@ -501,7 +502,7 @@ func TestEmbeddedLookupExtensions_NoDuplicateOIDs(t *testing.T) {
 			continue
 		}
 
-		filePath := filepath.Join("lookup_extensions", file.Name())
+		filePath := path.Join("lookup_extensions", file.Name())
 		data, err := lookupExtensionsData.ReadFile(filePath)
 		require.NoError(t, err, "file %s should be readable", file.Name())
 
@@ -533,7 +534,7 @@ func TestEmbeddedLookupExtensions_AllOIDsMappedCorrectly(t *testing.T) {
 			continue
 		}
 
-		filePath := filepath.Join("lookup_extensions", file.Name())
+		filePath := path.Join("lookup_extensions", file.Name())
 		data, err := lookupExtensionsData.ReadFile(filePath)
 		require.NoError(t, err, "file %s should be readable", file.Name())
 
