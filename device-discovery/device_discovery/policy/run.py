@@ -73,15 +73,15 @@ class RunStore:
         """
         return run.model_copy(deep=True)
 
-    def create_run(self, policy_name: str, target: str, parent_target: str = "") -> Run:
+    def create_run(self, policy_name: str, target: str, child_target: str = "") -> Run:
         """
         Create a new run for the given policy and target.
 
         Args:
         ----
             policy_name: Name of the policy.
-            target: Target hostname or IP.
-            parent_target: Parent target if this was expanded from a range (optional).
+            target: Target hostname, IP, or CIDR range.
+            child_target: Specific host being discovered when target is a range (optional).
 
         Returns:
         -------
@@ -93,8 +93,8 @@ class RunStore:
 
             # Build metadata with targets as JSON array
             metadata = {"targets": json.dumps([target])}
-            if parent_target:
-                metadata["parent_target"] = parent_target
+            if child_target:
+                metadata["child_target"] = child_target
 
             # Create run with running status
             run = Run(
