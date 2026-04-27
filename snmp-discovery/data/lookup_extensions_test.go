@@ -747,6 +747,35 @@ func TestDeviceLookup_GetDevice_BackwardCompatibleLiteral(t *testing.T) {
 	assert.Equal(t, "f5BIGIPi10800", got)
 }
 
+// Embedded YAML keys carry leading dots (e.g. ".1.3.6.1.4.1...") but
+// callers may pass either spelling depending on how their SNMP layer
+// formats OIDs. Both Get* methods must normalize.
+func TestDeviceLookup_GetDevice_NoLeadingDotMatches(t *testing.T) {
+	deviceLookup, err := LoadDeviceLookupExtensions("")
+	require.NoError(t, err)
+	got, err := deviceLookup.GetDevice("1.3.6.1.4.1.3375.2.1.3.4.113")
+	require.NoError(t, err, "GetDevice should accept the no-leading-dot spelling for a YAML key written with a leading dot")
+	assert.Equal(t, "f5BIGIPi10800", got)
+}
+
+func TestDeviceLookup_GetDeviceModel_DeviceOIDNoLeadingDotMatches(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "custom.yaml"), []byte(`
+devices:
+  ".1.3.6.1.4.1.99994.1": .1.3.6.1.2.1.1.1.0
+`), 0o644)
+	require.NoError(t, err)
+
+	deviceLookup, err := LoadDeviceLookupExtensions(dir)
+	require.NoError(t, err)
+
+	walked := map[string]string{".1.3.6.1.2.1.1.1.0": "RouterOS X"}
+	// Caller passes deviceOID *without* the leading dot present in YAML.
+	got, err := deviceLookup.GetDeviceModel("1.3.6.1.4.1.99994.1", walked)
+	require.NoError(t, err, "GetDeviceModel must normalize deviceOID dot spelling against the loaded keys")
+	assert.Equal(t, "RouterOS X", got)
+}
+
 func TestLoadYAMLFile(t *testing.T) {
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "yaml_file_test")

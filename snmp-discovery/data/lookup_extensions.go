@@ -283,11 +283,28 @@ type DeviceLookup struct {
 	devicesByVendor map[string]deviceRef
 }
 
+// lookupOIDBothSpellings indexes m by oid, accepting either leading-dot or
+// no-leading-dot spellings since callers and YAML authors may disagree.
+func lookupOIDBothSpellings[V any](m map[string]V, oid string) (V, bool) {
+	if v, ok := m[oid]; ok {
+		return v, true
+	}
+	alt := strings.TrimPrefix(oid, ".")
+	if v, ok := m[alt]; ok {
+		return v, true
+	}
+	if v, ok := m["."+alt]; ok {
+		return v, true
+	}
+	var zero V
+	return zero, false
+}
+
 // GetDevice returns the device name for a given device OID using only the
 // static catalog. Dynamic references cannot be resolved without a walked
 // OID map; callers that need them must use GetDeviceModel.
 func (d *DeviceLookup) GetDevice(deviceOID string) (string, error) {
-	ref, ok := d.devicesByVendor[deviceOID]
+	ref, ok := lookupOIDBothSpellings(d.devicesByVendor, deviceOID)
 	if !ok {
 		return "", fmt.Errorf("device ID %s not found", deviceOID)
 	}
@@ -306,23 +323,14 @@ func (d *DeviceLookup) GetDevice(deviceOID string) (string, error) {
 // dynamic references (e.g. a shared sysObjectID that indexes into
 // sysDescr) can resolve without performing extra SNMP traffic.
 func (d *DeviceLookup) GetDeviceModel(deviceOID string, walked map[string]string) (string, error) {
-	ref, ok := d.devicesByVendor[deviceOID]
+	ref, ok := lookupOIDBothSpellings(d.devicesByVendor, deviceOID)
 	if !ok {
 		return "", fmt.Errorf("device ID %s not found", deviceOID)
 	}
 	if ref.kind == devRefStatic {
 		return ref.literal, nil
 	}
-	value, ok := walked[ref.sourceOID]
-	if !ok {
-		// Accept leading-dot and no-leading-dot spellings since callers
-		// may normalize differently than the YAML author did.
-		alt := strings.TrimPrefix(ref.sourceOID, ".")
-		value, ok = walked[alt]
-		if !ok {
-			value, ok = walked["."+alt]
-		}
-	}
+	value, ok := lookupOIDBothSpellings(walked, ref.sourceOID)
 	if !ok {
 		return "", fmt.Errorf("device ID %s references walked OID %s which was not found in the walk set", deviceOID, ref.sourceOID)
 	}
