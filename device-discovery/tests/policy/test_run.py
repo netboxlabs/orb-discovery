@@ -26,41 +26,41 @@ def test_run_creation():
     assert run.updated_at
 
 
-def test_run_with_parent():
-    """Test run creation with parent tracking."""
+def test_run_with_child_target():
+    """Test run creation with child target tracking."""
     run = Run(
         policy_id="test-policy",
         status=RunStatus.RUNNING,
         metadata={
-            "targets": '["192.168.1.5"]',
-            "parent_target": "192.168.1.0/24",
+            "targets": '["192.168.1.0/24"]',
+            "child_target": "192.168.1.5",
         },
     )
 
-    assert run.metadata["targets"] == '["192.168.1.5"]'
-    assert run.metadata["parent_target"] == "192.168.1.0/24"
+    assert run.metadata["targets"] == '["192.168.1.0/24"]'
+    assert run.metadata["child_target"] == "192.168.1.5"
 
 
 def test_create_run_basic():
     """Test basic run creation."""
     store = RunStore()
-    run = store.create_run("policy1", "192.168.1.1", "")
+    run = store.create_run("policy1", "192.168.1.1")
 
     assert run.policy_id == "policy1"
     assert run.status == RunStatus.RUNNING
     assert run.metadata["targets"] == '["192.168.1.1"]'
     assert "target" not in run.metadata
-    assert "parent_target" not in run.metadata
+    assert "child_target" not in run.metadata
 
 
-def test_create_run_with_parent():
-    """Test run creation with parent tracking."""
+def test_create_run_with_child_target():
+    """Test run creation with child target tracking."""
     store = RunStore()
-    run = store.create_run("policy1", "192.168.1.5", "192.168.1.0/24")
+    run = store.create_run("policy1", "192.168.1.0/24", child_target="192.168.1.5")
 
-    assert run.metadata["targets"] == '["192.168.1.5"]'
+    assert run.metadata["targets"] == '["192.168.1.0/24"]'
     assert "target" not in run.metadata
-    assert run.metadata["parent_target"] == "192.168.1.0/24"
+    assert run.metadata["child_target"] == "192.168.1.5"
 
 
 def test_update_run_success():
@@ -297,29 +297,29 @@ def test_parent_child_relationship():
     """Test parent-child relationship tracking."""
     store = RunStore()
 
-    # Create parent run (scan)
-    store.create_run("policy1", "192.168.1.0/24", "")
+    # Create scan run for the range
+    store.create_run("policy1", "192.168.1.0/24")
 
-    # Create child runs
-    store.create_run("policy1", "192.168.1.5", "192.168.1.0/24")
-    store.create_run("policy1", "192.168.1.10", "192.168.1.0/24")
+    # Create child runs - stored under the same range key
+    store.create_run("policy1", "192.168.1.0/24", child_target="192.168.1.5")
+    store.create_run("policy1", "192.168.1.0/24", child_target="192.168.1.10")
 
-    # Verify parent run
-    parent_runs = store.get_runs_for_target("policy1", "192.168.1.0/24")
-    assert len(parent_runs) == 1
-    assert parent_runs[0].metadata["targets"] == '["192.168.1.0/24"]'
-    assert "parent_target" not in parent_runs[0].metadata
+    # All runs are stored under the CIDR key
+    all_runs = store.get_runs_for_target("policy1", "192.168.1.0/24")
+    assert len(all_runs) == 3
 
-    # Verify child runs have parent reference
-    child1_runs = store.get_runs_for_target("policy1", "192.168.1.5")
-    assert len(child1_runs) == 1
-    assert child1_runs[0].metadata["targets"] == '["192.168.1.5"]'
-    assert child1_runs[0].metadata["parent_target"] == "192.168.1.0/24"
+    scan_runs = [r for r in all_runs if "child_target" not in r.metadata]
+    child_runs = [r for r in all_runs if "child_target" in r.metadata]
 
-    child2_runs = store.get_runs_for_target("policy1", "192.168.1.10")
-    assert len(child2_runs) == 1
-    assert child2_runs[0].metadata["targets"] == '["192.168.1.10"]'
-    assert child2_runs[0].metadata["parent_target"] == "192.168.1.0/24"
+    # Verify scan run
+    assert len(scan_runs) == 1
+    assert scan_runs[0].metadata["targets"] == '["192.168.1.0/24"]'
+
+    # Verify child runs reference specific hosts via child_target
+    assert len(child_runs) == 2
+    assert {r.metadata["child_target"] for r in child_runs} == {"192.168.1.5", "192.168.1.10"}
+    for r in child_runs:
+        assert r.metadata["targets"] == '["192.168.1.0/24"]'
 
 
 def test_metadata_preserved():
