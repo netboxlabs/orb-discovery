@@ -319,7 +319,6 @@ class PolicyRunner:
         scan_run = self.run_store.create_run(
             policy_name=self.name,
             target=original_hostname,
-            parent_target="",
         )
 
         try:
@@ -407,7 +406,6 @@ class PolicyRunner:
         run = self.run_store.create_run(
             policy_name=self.name,
             target=sanitized_hostname,
-            parent_target="",
         )
 
         # Try to discover driver if needed
@@ -510,11 +508,11 @@ class PolicyRunner:
         discovery_start_time = time.perf_counter()
         sanitized_hostname = scope.hostname.replace("\r\n", "").replace("\n", "")
 
-        # CREATE RUN WITH PARENT
+        # CREATE RUN WITH CHILD TARGET
         run = self.run_store.create_run(
             policy_name=self.name,
-            target=sanitized_hostname,
-            parent_target=parent_target,
+            target=parent_target,
+            child_target=sanitized_hostname,
         )
 
         # Try to discover driver if needed
@@ -523,7 +521,7 @@ class PolicyRunner:
             # UPDATE RUN ON DRIVER DISCOVERY FAILURE
             self.run_store.update_run(
                 policy_name=self.name,
-                target=sanitized_hostname,
+                target=parent_target,
                 run_id=run.id,
                 status=RunStatus.FAILED,
                 error=Exception("Not able to discover device driver"),
@@ -546,7 +544,7 @@ class PolicyRunner:
             # UPDATE RUN ON SUCCESS
             self.run_store.update_run(
                 policy_name=self.name,
-                target=sanitized_hostname,
+                target=parent_target,
                 run_id=run.id,
                 status=RunStatus.COMPLETED,
                 error=None,
@@ -570,7 +568,7 @@ class PolicyRunner:
             # UPDATE RUN ON FAILURE
             self.run_store.update_run(
                 policy_name=self.name,
-                target=sanitized_hostname,
+                target=parent_target,
                 run_id=run.id,
                 status=RunStatus.FAILED,
                 error=e,
