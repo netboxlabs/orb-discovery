@@ -7,7 +7,7 @@
     ]
   },
   "10": {
-    "name": "mgmt-vlan",
+    "name": "mgmt vlan",
     "interfaces": [
       "Eth1/1"
     ]
@@ -16,7 +16,8 @@
     "name": "data-vlan",
     "interfaces": [
       "Eth1/1",
-      "Eth1/2"
+      "Eth1/2",
+      "Eth1/5"
     ]
   }
 }

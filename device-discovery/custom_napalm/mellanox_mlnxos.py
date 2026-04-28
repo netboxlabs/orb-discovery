@@ -207,11 +207,22 @@ class MLNXOSDriver(_napalm_base.NetworkDriver):
         sanitized: bool = False,
         format: str = "text",
     ) -> models.ConfigDict:
-        """Return device configuration."""
+        """Return device configuration.
+
+        MLNX-OS has no separate startup-config file; ``configuration write`` saves the
+        running config into the active configuration file in place, so in steady state
+        running and saved configs are identical. We fetch ``show running-config`` once
+        and use it to populate both ``running`` and ``startup`` when requested.
+        """  # noqa: D213
         config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
 
-        if retrieve.lower() in ("running", "all"):
-            config["running"] = self.device.send_command("show running-config")
+        retrieve_norm = retrieve.lower()
+        if retrieve_norm in ("running", "startup", "all"):
+            running_config = self.device.send_command("show running-config")
+            if retrieve_norm in ("running", "all"):
+                config["running"] = running_config
+            if retrieve_norm in ("startup", "all"):
+                config["startup"] = running_config
 
         if sanitized:
             for key in ("running", "candidate", "startup"):
@@ -351,43 +362,73 @@ def _populate_ip(result: dict, text: str, family: str) -> None:
             }
 
 
-_VLAN_ROW_RE = re.compile(
-    r"^\s*(?P<id>\d+)\s+(?P<name>\S+)\s*(?P<ports>.*)$", re.M
-)
+_DASHES_LINE_RE = re.compile(r"^\s*-+(?:\s+-+)+\s*$")
+
+
+def _column_spans(separator_line: str) -> list[tuple[int, int]]:
+    """Return ``[(start, end), ...]`` byte offsets for each dash group on a separator line."""
+    return [(m.start(), m.end()) for m in re.finditer(r"-+", separator_line)]
+
+
+def _split_columns(line: str, spans: list[tuple[int, int]]) -> list[str]:
+    """Slice ``line`` by the column offsets in ``spans``; the last column extends to EOL."""
+    columns: list[str] = []
+    for idx, (start, end) in enumerate(spans):
+        if idx == len(spans) - 1:
+            columns.append(line[start:].rstrip())
+        else:
+            columns.append(line[start:end].rstrip())
+    return [c.strip() for c in columns]
 
 
 def _parse_vlan_table(text: str) -> dict:
-    """Parse the ``show vlan`` table into ``{vlan_id: {name, interfaces}}``."""
+    """Parse the ``show vlan`` table into ``{vlan_id: {name, interfaces}}``.
+
+    Uses the dashes separator beneath the column headers to determine fixed column
+    widths. This preserves whitespace within the ``Name`` column and rejects
+    footer/summary lines that don't fit the layout.
+    """  # noqa: D213
     if not text.strip():
         return {}
 
-    # Skip lines until after a separator like '----' so headings aren't matched.
     lines = text.splitlines()
-    body_start = 0
-    for idx, line in enumerate(lines):
-        if re.match(r"^\s*-+\s*$", line) or re.match(r"^\s*-+\s+-+", line):
-            body_start = idx + 1
-            break
+    sep_idx = next(
+        (idx for idx, line in enumerate(lines) if _DASHES_LINE_RE.match(line)),
+        None,
+    )
+    if sep_idx is None:
+        return {}
 
-    body = "\n".join(lines[body_start:]) if body_start else text
+    spans = _column_spans(lines[sep_idx])
+    if len(spans) < 3:
+        return {}
 
     vlans: dict = {}
     current_id: str | None = None
-    for line in body.splitlines():
+    id_start = spans[0][0]
+    name_start = spans[1][0]
+    ports_start = spans[2][0]
+
+    for line in lines[sep_idx + 1:]:
         if not line.strip():
             current_id = None
             continue
 
-        m = _VLAN_ROW_RE.match(line)
-        if m:
-            current_id = m.group("id")
-            ports = [p.strip() for p in m.group("ports").split(",") if p.strip()]
+        id_field = line[id_start:name_start].strip() if len(line) > id_start else ""
+        if id_field.isdigit():
+            current_id = id_field
+            name = line[name_start:ports_start].strip() if len(line) > name_start else ""
+            ports_field = line[ports_start:] if len(line) > ports_start else ""
             vlans[current_id] = {
-                "name": m.group("name"),
-                "interfaces": ports,
+                "name": name,
+                "interfaces": [p.strip() for p in ports_field.split(",") if p.strip()],
             }
-        elif current_id is not None:
-            extra = [p.strip() for p in line.split(",") if p.strip()]
-            vlans[current_id]["interfaces"].extend(extra)
+        elif id_field == "" and current_id is not None and len(line) > ports_start:
+            ports_field = line[ports_start:]
+            vlans[current_id]["interfaces"].extend(
+                p.strip() for p in ports_field.split(",") if p.strip()
+            )
+        else:
+            current_id = None
 
     return vlans
