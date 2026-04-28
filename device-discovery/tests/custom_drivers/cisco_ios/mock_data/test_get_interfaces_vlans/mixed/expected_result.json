@@ -1,0 +1,5 @@
+{
+  "Gi1/0/1": {"mode": "access", "tagged": [], "untagged": 10},
+  "Gi1/0/2": {"mode": "routed", "tagged": [], "untagged": null},
+  "Gi1/0/24": {"mode": "trunk", "tagged": [10, 20, 30], "untagged": 1}
+}
