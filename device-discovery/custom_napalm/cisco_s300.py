@@ -520,16 +520,27 @@ class S300Driver(_napalm_base.NetworkDriver):
 
         blocks: dict[str, dict[str, str]] = {}
         current: str | None = None
+        last_key: str | None = None
         for line in output.splitlines():
             m = _S300_BLOCK_RE.match(line)
             if m:
                 current = m.group(1)
+                last_key = None
                 blocks[current] = {}
                 continue
             if current is None:
                 continue
             if ":" in line:
                 k, _, v = line.partition(":")
-                blocks[current][k.strip()] = v.strip()
+                last_key = k.strip()
+                blocks[current][last_key] = v.strip()
+            elif last_key is not None and line.strip():
+                # Continuation of the previous field's value. S300 wraps long
+                # `Trunking VLANs Enabled` values across indented lines; the
+                # downstream `_parse_s300_vlan_list` splits on commas and
+                # tolerates extra whitespace so we just concatenate.
+                blocks[current][last_key] = (
+                    blocks[current][last_key] + line.strip()
+                )
 
         return {ifname: _s300_switchport_block_to_entry(fields) for ifname, fields in blocks.items()}

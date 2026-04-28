@@ -126,7 +126,14 @@ def _classify_ios_switchport_row(row: dict) -> dict:
     voice_vid = _to_int(row.get("voice_vlan", ""))
 
     if "access" in effective:
-        if voice_vid:
+        # Voice-VLAN promotion: an access port with a *distinct* voice VLAN
+        # is reported as mode=trunk with the voice VLAN tagged. NetBox's
+        # `access` mode disallows tagged VLANs. When voice_vid equals
+        # access_vid (operator misconfiguration or coincidence), keep the
+        # interface as plain access — promoting would produce mode=tagged
+        # with an empty tagged list after the translator's defensive
+        # native-stripped-from-tagged filter.
+        if voice_vid and voice_vid != access_vid:
             return {
                 "mode": "trunk",
                 "tagged": [voice_vid],

@@ -120,3 +120,20 @@ class TestIOSDriver(BaseDriverTest):
         }
         result = _classify_ios_switchport_row(row)
         assert result == {"mode": "trunk-all", "tagged": [], "untagged": 99}
+
+    def test_get_interfaces_vlans_voice_equal_access_stays_access(self) -> None:
+        """When voice VLAN equals access VLAN, keep mode=access (don't promote)."""
+        from custom_napalm.ios import _classify_ios_switchport_row
+        row = {
+            "interface": "Gi1/0/5",
+            "switchport": "Enabled",
+            "admin_mode": "static access",
+            "mode": "static access",
+            "access_vlan": "10",
+            "native_vlan": "1",
+            "voice_vlan": "10",  # same as access_vlan — operator quirk
+            "trunking_vlans": ["ALL"],
+        }
+        result = _classify_ios_switchport_row(row)
+        # NOT mode=trunk — promotion is suppressed when voice == access.
+        assert result == {"mode": "access", "tagged": [], "untagged": 10}
