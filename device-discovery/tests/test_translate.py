@@ -1458,3 +1458,42 @@ def test_apply_interface_vlans_trunk_all_maps_to_tagged_all():
     assert iface.mode == "tagged-all"
     assert iface.untagged_vlan.vid == 99
     assert list(iface.tagged_vlans) == []
+
+
+def test_apply_interface_vlans_is_idempotent_on_tagged_vlans():
+    """Calling apply_interface_vlans twice doesn't duplicate tagged VLANs."""
+    entities = [_make_iface_entity("Gi1/0/24")]
+    defaults = Defaults()
+    cache = _build_vlan_cache(
+        {"1": {"name": "default"}, "10": {"name": "DATA"}, "20": {"name": "VOICE"}},
+        defaults,
+    )
+    new_stubs: list = []
+    payload = {"Gi1/0/24": {"mode": "trunk", "tagged": [10, 20], "untagged": 1}}
+    apply_interface_vlans(entities, payload, cache, defaults, Options(), new_stubs)
+    apply_interface_vlans(entities, payload, cache, defaults, Options(), new_stubs)
+    iface = entities[0].interface
+    # Without the clear-before-append, this would be [10, 10, 20, 20].
+    assert sorted(v.vid for v in iface.tagged_vlans) == [10, 20]
+
+
+def test_apply_interface_vlans_clears_stale_untagged_when_new_has_none():
+    """Switching an interface from access (untagged=10) to a trunk with no native clears the stale link."""
+    entities = [_make_iface_entity("Gi1/0/1")]
+    defaults = Defaults()
+    cache = _build_vlan_cache({"10": {"name": "DATA"}}, defaults)
+    new_stubs: list = []
+    apply_interface_vlans(
+        entities,
+        {"Gi1/0/1": {"mode": "access", "tagged": [], "untagged": 10}},
+        cache, defaults, Options(), new_stubs,
+    )
+    iface = entities[0].interface
+    assert iface.HasField("untagged_vlan")
+    apply_interface_vlans(
+        entities,
+        {"Gi1/0/1": {"mode": "trunk", "tagged": [10], "untagged": None}},
+        cache, defaults, Options(), new_stubs,
+    )
+    assert not iface.HasField("untagged_vlan")
+    assert sorted(v.vid for v in iface.tagged_vlans) == [10]

@@ -291,7 +291,16 @@ def _apply_iface_vlan_mutation(
         vlan = _ensure_vlan(untagged_vid, vlan_cache, defaults, options, new_stubs)
         if vlan is not None:
             iface.untagged_vlan.CopyFrom(vlan)
+    else:
+        # Defensive idempotency: if a prior mutation set untagged_vlan and
+        # the current driver row has no untagged, clear the stale link.
+        iface.ClearField("untagged_vlan")
 
+    # Defensive idempotency: clear any pre-existing tagged VLANs before
+    # rebuilding the list. Without this, calling apply_interface_vlans()
+    # twice on the same Interface entity (or handing in an entity that
+    # already has tagged_vlans set) would accumulate duplicates.
+    del iface.tagged_vlans[:]
     for vid in tagged_vids:
         vlan = _ensure_vlan(vid, vlan_cache, defaults, options, new_stubs)
         if vlan is not None:

@@ -51,6 +51,24 @@ def _expand_ios_vlan_list(items: list[str]) -> list[int]:
     return out
 
 
+def _classify_ios_trunk(raw_trunking: list, native_vid: int | None) -> dict:
+    """Classify the trunking_vlans portion of a trunk row into the jobec shape."""
+    # Literal "ALL" sentinel → tagged-all.
+    if any((tok or "").strip().upper() == "ALL" for tok in raw_trunking):
+        return {"mode": "trunk-all", "tagged": [], "untagged": native_vid}
+    tagged = _expand_ios_vlan_list(raw_trunking)
+    # Numeric full-range expansion (e.g. "1-4094" or overlapping ranges
+    # totaling 1..4094) collapses to [] inside _expand_ios_vlan_list. That
+    # is semantically identical to "ALL" — preserve it as tagged-all.
+    has_input = any((tok or "").strip() for tok in raw_trunking)
+    has_none = any((tok or "").strip().upper() == "NONE" for tok in raw_trunking)
+    if not tagged and has_input and not has_none:
+        return {"mode": "trunk-all", "tagged": [], "untagged": native_vid}
+    if native_vid is not None:
+        tagged = [v for v in tagged if v != native_vid]
+    return {"mode": "trunk", "tagged": tagged, "untagged": native_vid}
+
+
 def _classify_ios_switchport_row(row: dict) -> dict:
     """
     Map one ntc-templates parsed row to NAPALM #919 jobec shape.
@@ -107,24 +125,7 @@ def _classify_ios_switchport_row(row: dict) -> dict:
             "untagged": access_vid,
         }
     if "trunk" in effective:
-        raw_trunking = row.get("trunking_vlans") or []
-        # Distinguish "Trunking VLANs Enabled: ALL" from a NONE/empty list:
-        # the former maps to NetBox `tagged-all`, the latter to `tagged` with
-        # an empty tagged_vlans set.
-        if any((tok or "").strip().upper() == "ALL" for tok in raw_trunking):
-            return {
-                "mode": "trunk-all",
-                "tagged": [],
-                "untagged": native_vid,
-            }
-        tagged = _expand_ios_vlan_list(raw_trunking)
-        if native_vid is not None:
-            tagged = [v for v in tagged if v != native_vid]
-        return {
-            "mode": "trunk",
-            "tagged": tagged,
-            "untagged": native_vid,
-        }
+        return _classify_ios_trunk(row.get("trunking_vlans") or [], native_vid)
     return {"mode": "routed", "tagged": [], "untagged": None}
 
 

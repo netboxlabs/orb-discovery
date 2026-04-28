@@ -52,3 +52,35 @@ class TestIOSDriver(BaseDriverTest):
         assert result["GigabitEthernet1/0/48"]["mode"] == "trunk-all"
         assert result["GigabitEthernet1/0/48"]["tagged"] == []
         assert result["GigabitEthernet1/0/48"]["untagged"] == 99
+
+    def test_get_interfaces_vlans_numeric_full_range_is_trunk_all(self) -> None:
+        """A numeric full-range trunk (e.g. 1-4094) collapses to trunk-all, same as literal ALL."""
+        from custom_napalm.ios import _classify_ios_switchport_row
+        row = {
+            "interface": "Gi1/0/48",
+            "switchport": "Enabled",
+            "admin_mode": "trunk",
+            "mode": "trunk",
+            "access_vlan": "1",
+            "native_vlan": "99",
+            "voice_vlan": "none",
+            "trunking_vlans": ["1-4094"],
+        }
+        result = _classify_ios_switchport_row(row)
+        assert result == {"mode": "trunk-all", "tagged": [], "untagged": 99}
+
+    def test_get_interfaces_vlans_explicit_none_stays_plain_trunk(self) -> None:
+        """A trunk explicitly with NONE allowed stays mode=trunk, not trunk-all."""
+        from custom_napalm.ios import _classify_ios_switchport_row
+        row = {
+            "interface": "Gi1/0/48",
+            "switchport": "Enabled",
+            "admin_mode": "trunk",
+            "mode": "trunk",
+            "access_vlan": "1",
+            "native_vlan": "1",
+            "voice_vlan": "none",
+            "trunking_vlans": ["NONE"],
+        }
+        result = _classify_ios_switchport_row(row)
+        assert result == {"mode": "trunk", "tagged": [], "untagged": 1}
