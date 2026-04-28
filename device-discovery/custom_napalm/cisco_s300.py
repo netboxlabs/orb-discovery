@@ -188,6 +188,7 @@ def _parse_s300_vlan_list(value: str) -> list[int]:
                 out.append(int(chunk))
             except ValueError:
                 continue
+    out = [v for v in out if 1 <= v <= 4094]
     # Treat full 1-4094 dot1q range as a wildcard ("all VLANs").
     if out and min(out) <= 1 and max(out) >= 4094 and len(set(out)) >= 4094:
         return []
@@ -216,7 +217,19 @@ def _s300_switchport_block_to_entry(fields: dict[str, str]) -> dict:
         return {"mode": "access", "tagged": [], "untagged": access_vid}
     if admin_mode in {"trunk", "general"}:
         trunk_vlans = fields.get("Trunking VLANs Enabled", "")
-        tagged = [v for v in _parse_s300_vlan_list(trunk_vlans) if v != native_vid]
+        raw = (trunk_vlans or "").strip().lower()
+        # Distinguish "all VLANs" from "specific list" so downstream translation
+        # can map to NetBox tagged-all rather than tagged-with-empty-list.
+        # Cases that mean "all": literal "all", or numeric expansions that the
+        # parser collapses to [] (e.g. "1-4094" or overlapping ranges totaling
+        # 1..4094). "none" / empty trunk fields stay as plain trunk.
+        if raw == "all":
+            return {"mode": "trunk-all", "tagged": [], "untagged": native_vid}
+        expanded = _parse_s300_vlan_list(trunk_vlans)
+        if not expanded and raw and raw != "none":
+            # Parser collapsed a non-empty, non-"none" input to [] → wildcard.
+            return {"mode": "trunk-all", "tagged": [], "untagged": native_vid}
+        tagged = [v for v in expanded if v != native_vid]
         return {"mode": "trunk", "tagged": tagged, "untagged": native_vid}
     return {"mode": "routed", "tagged": [], "untagged": None}
 

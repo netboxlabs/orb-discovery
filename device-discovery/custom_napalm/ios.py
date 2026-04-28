@@ -107,7 +107,17 @@ def _classify_ios_switchport_row(row: dict) -> dict:
             "untagged": access_vid,
         }
     if "trunk" in effective:
-        tagged = _expand_ios_vlan_list(row.get("trunking_vlans") or [])
+        raw_trunking = row.get("trunking_vlans") or []
+        # Distinguish "Trunking VLANs Enabled: ALL" from a NONE/empty list:
+        # the former maps to NetBox `tagged-all`, the latter to `tagged` with
+        # an empty tagged_vlans set.
+        if any((tok or "").strip().upper() == "ALL" for tok in raw_trunking):
+            return {
+                "mode": "trunk-all",
+                "tagged": [],
+                "untagged": native_vid,
+            }
+        tagged = _expand_ios_vlan_list(raw_trunking)
         if native_vid is not None:
             tagged = [v for v in tagged if v != native_vid]
         return {

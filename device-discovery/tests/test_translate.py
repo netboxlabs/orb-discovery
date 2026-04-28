@@ -1441,3 +1441,20 @@ def test_apply_interface_vlans_handles_non_list_tagged():
     assert iface.mode == "access"
     assert iface.untagged_vlan.vid == 10
     assert list(iface.tagged_vlans) == []
+
+
+def test_apply_interface_vlans_trunk_all_maps_to_tagged_all():
+    """mode=trunk-all from the driver maps to NetBox 'tagged-all'."""
+    entities = [_make_iface_entity("Gi1/0/48")]
+    defaults = Defaults()
+    cache = _build_vlan_cache({"99": {"name": "MGMT"}}, defaults)
+    new_stubs: list = []
+    apply_interface_vlans(
+        entities,
+        {"Gi1/0/48": {"mode": "trunk-all", "tagged": [], "untagged": 99}},
+        cache, defaults, Options(), new_stubs,
+    )
+    iface = entities[0].interface
+    assert iface.mode == "tagged-all"
+    assert iface.untagged_vlan.vid == 99
+    assert list(iface.tagged_vlans) == []

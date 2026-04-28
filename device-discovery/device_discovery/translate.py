@@ -239,6 +239,7 @@ def _ensure_vlan(
 _NAPALM_TO_NETBOX_MODE = {
     "access": "access",
     "trunk": "tagged",
+    "trunk-all": "tagged-all",
 }
 
 

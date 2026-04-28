@@ -42,3 +42,13 @@ class TestIOSDriver(BaseDriverTest):
         assert result == [10, 11, 12]
         # Inverted range after clamping → skipped.
         assert _expand_ios_vlan_list(["5000-9000"]) == []
+
+    def test_get_interfaces_vlans_trunk_all_emits_distinct_mode(self) -> None:
+        """A trunk advertising ALL VLANs emits mode='trunk-all', not 'trunk'."""
+        mock_dir = self.mock_data_root / "test_get_interfaces_vlans" / "trunk_all"
+        driver = self._build_driver(mock_dir)
+        result = driver.get_interfaces_vlans()
+        assert "GigabitEthernet1/0/48" in result
+        assert result["GigabitEthernet1/0/48"]["mode"] == "trunk-all"
+        assert result["GigabitEthernet1/0/48"]["tagged"] == []
+        assert result["GigabitEthernet1/0/48"]["untagged"] == 99

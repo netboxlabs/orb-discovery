@@ -195,7 +195,7 @@ class BaseDriverTest:
         result = driver.get_interfaces_vlans()
         assert isinstance(result, dict), "get_interfaces_vlans must return a dict"
         for ifname, info in result.items():
-            assert info.get("mode") in ("access", "trunk", "routed"), (
+            assert info.get("mode") in ("access", "trunk", "trunk-all", "routed"), (
                 f"{ifname}: invalid mode {info.get('mode')!r}"
             )
             tagged = info.get("tagged", [])
