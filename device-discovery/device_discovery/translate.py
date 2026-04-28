@@ -5,7 +5,8 @@
 import copy
 import ipaddress
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
 from netboxlabs.diode.sdk.ingester import (
@@ -352,7 +353,7 @@ def _apply_interface_vlan_associations(
 
 def apply_interface_vlans(
     entities: list[Entity],
-    interfaces_vlans: dict[str, dict],
+    interfaces_vlans: Mapping[str, Any] | object,
     vlan_cache: dict[int, pb.VLAN],
     defaults: Defaults,
     options: Options,

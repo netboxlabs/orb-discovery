@@ -1348,8 +1348,6 @@ def test_apply_interface_vlans_handles_empty_input():
 
 def test_translate_data_emits_interface_vlan_associations():
     """translate_data() applies interface↔VLAN associations and emits stub VLANs."""
-    from device_discovery.translate import translate_data
-
     data = {
         "driver": "ios",
         "device": {
@@ -1508,7 +1506,7 @@ def test_apply_interface_vlans_skips_non_dict_payload(caplog):
     with caplog.at_level(logging.WARNING):
         apply_interface_vlans(
             entities,
-            ["malformed", "list"],  # type: ignore[arg-type]  # intentionally wrong
+            ["malformed", "list"],
             {}, Defaults(), Options(), new_stubs,
         )
     iface = entities[0].interface
@@ -1530,7 +1528,7 @@ def test_apply_interface_vlans_skips_non_dict_per_entry(caplog):
             entities,
             {
                 "Gi1/0/1": {"mode": "access", "tagged": [], "untagged": 10},
-                "Gi1/0/2": "broken-string-value",  # type: ignore[dict-item]
+                "Gi1/0/2": "broken-string-value",
             },
             cache, defaults, Options(), new_stubs,
         )
@@ -1559,7 +1557,7 @@ def test_apply_interface_vlans_skips_none_per_entry(caplog):
     with caplog.at_level(logging.WARNING):
         apply_interface_vlans(
             entities,
-            {"Gi1/0/1": None},  # type: ignore[dict-item]
+            {"Gi1/0/1": None},
             cache, defaults, Options(), new_stubs,
         )
     iface = entities[0].interface
