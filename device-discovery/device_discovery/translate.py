@@ -294,14 +294,20 @@ def _apply_iface_vlan_mutation(
         if vid is not None and vid != untagged_vid:
             tagged_vids.append(vid)
 
+    # Defensive idempotency: clear any pre-existing untagged_vlan up front.
+    # We then re-set it only if (a) the new payload supplies a VID and
+    # (b) _ensure_vlan returns a usable VLAN (which honors
+    # `Options.create_unknown_vlans` for unknown VIDs).
+    # NOTE: at the Diode/NetBox layer this clear is currently cosmetic
+    # because the plugin uses PATCH semantics on omitted fields — the
+    # proto state is correct but won't propagate as a clear to NetBox.
+    # See the Round 9 limitation note in the routed branch and the PR
+    # description.
+    iface.ClearField("untagged_vlan")
     if untagged_vid is not None:
         vlan = _ensure_vlan(untagged_vid, vlan_cache, defaults, options, new_stubs)
         if vlan is not None:
             iface.untagged_vlan.CopyFrom(vlan)
-    else:
-        # Defensive idempotency: if a prior mutation set untagged_vlan and
-        # the current driver row has no untagged, clear the stale link.
-        iface.ClearField("untagged_vlan")
 
     # Defensive idempotency: clear any pre-existing tagged VLANs before
     # rebuilding the list. Without this, calling apply_interface_vlans()

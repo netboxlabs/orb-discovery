@@ -1612,3 +1612,37 @@ def test_apply_interface_vlans_unknown_mode_leaves_stale_state_untouched():
     assert iface.mode == "tagged"
     assert iface.untagged_vlan.vid == 1
     assert [v.vid for v in iface.tagged_vlans] == [10]
+
+
+def test_apply_interface_vlans_clears_stale_untagged_when_create_unknown_vlans_false():
+    """
+    Verify stale untagged_vlan is cleared when stub creation is refused.
+
+    When create_unknown_vlans=False AND the new untagged VID is unknown,
+    a previously-set untagged_vlan on the entity is cleared at the proto layer.
+    """
+    from netboxlabs.diode.sdk.ingester import VLAN
+    entities = [_make_iface_entity("Gi1/0/1")]
+    iface = entities[0].interface
+    # Pre-populate as if a prior translation left an untagged_vlan link.
+    iface.untagged_vlan.CopyFrom(VLAN(vid=10, name="DATA"))
+    assert iface.untagged_vlan.vid == 10
+
+    apply_interface_vlans(
+        entities,
+        # New payload references vid=99, which isn't in the cache.
+        # With create_unknown_vlans=False, _ensure_vlan returns None and the
+        # untagged_vlan should be cleared at the proto level.
+        {"Gi1/0/1": {"mode": "access", "tagged": [], "untagged": 99}},
+        {},
+        Defaults(),
+        Options(create_unknown_vlans=False),
+        [],
+    )
+
+    iface = entities[0].interface
+    assert iface.mode == "access"
+    assert not iface.HasField("untagged_vlan"), (
+        "untagged_vlan must be cleared when the new VID is unknown and "
+        "create_unknown_vlans=False — otherwise the Interface keeps a stale link."
+    )
