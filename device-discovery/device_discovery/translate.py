@@ -242,6 +242,22 @@ _NAPALM_TO_NETBOX_MODE = {
 }
 
 
+def _safe_vid(value: object) -> int | None:
+    """
+    Coerce a driver-supplied VID to an int in [1, 4094], or return None.
+
+    Drivers occasionally emit malformed values; clamping/coercing here keeps
+    discovery resilient instead of aborting on a bad row.
+    """
+    try:
+        vid = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if vid < 1 or vid > 4094:
+        return None
+    return vid
+
+
 def _apply_iface_vlan_mutation(
     iface: pb.Interface,
     info: dict,
@@ -255,17 +271,28 @@ def _apply_iface_vlan_mutation(
     iface.mode = netbox_mode
 
     untagged = info.get("untagged")
-    tagged = list(info.get("tagged") or [])
 
-    # Defensive: tagged must never include the native VID
-    if untagged is not None:
-        tagged = [v for v in tagged if v != untagged]
-        vlan = _ensure_vlan(int(untagged), vlan_cache, defaults, options, new_stubs)
+    # Defensive: ``tagged`` may not be a list when a custom driver
+    # returns malformed data — coerce to an iterable.
+    raw_tagged = info.get("tagged")
+    if not isinstance(raw_tagged, (list, tuple)):
+        raw_tagged = []
+
+    # Defensive: filter unparseable VIDs (and out-of-range) silently.
+    untagged_vid = _safe_vid(untagged) if untagged is not None else None
+    tagged_vids = []
+    for v in raw_tagged:
+        vid = _safe_vid(v)
+        if vid is not None and vid != untagged_vid:
+            tagged_vids.append(vid)
+
+    if untagged_vid is not None:
+        vlan = _ensure_vlan(untagged_vid, vlan_cache, defaults, options, new_stubs)
         if vlan is not None:
             iface.untagged_vlan.CopyFrom(vlan)
 
-    for vid in tagged:
-        vlan = _ensure_vlan(int(vid), vlan_cache, defaults, options, new_stubs)
+    for vid in tagged_vids:
+        vlan = _ensure_vlan(vid, vlan_cache, defaults, options, new_stubs)
         if vlan is not None:
             iface.tagged_vlans.append(vlan)
 

@@ -33,6 +33,12 @@ def _expand_ios_vlan_list(items: list[str]) -> list[int]:
                 lo, hi = int(lo_s), int(hi_s)
             except ValueError:
                 continue
+            lo = max(lo, 1)
+            hi = min(hi, 4094)
+            if lo > hi:
+                continue
+            if lo == 1 and hi == 4094:
+                return []
             out.extend(range(lo, hi + 1))
         else:
             try:

@@ -1391,3 +1391,53 @@ def test_translate_data_emits_interface_vlan_associations():
 
     vlan_vids = sorted(e.vlan.vid for e in entities if e.HasField("vlan"))
     assert 99 in vlan_vids, "stub VLAN(vid=99) must be emitted alongside known VLANs"
+
+
+def test_apply_interface_vlans_skips_non_int_untagged():
+    """Non-int untagged value (driver bug) is silently dropped, not raised."""
+    entities = [_make_iface_entity("Gi1/0/1")]
+    defaults = Defaults()
+    cache = _build_vlan_cache({"10": {"name": "DATA"}}, defaults)
+    new_stubs: list = []
+    apply_interface_vlans(
+        entities,
+        {"Gi1/0/1": {"mode": "access", "tagged": [], "untagged": "not-a-vid"}},
+        cache, defaults, Options(), new_stubs,
+    )
+    iface = entities[0].interface
+    assert iface.mode == "access"
+    assert not iface.HasField("untagged_vlan")
+    assert new_stubs == []
+
+
+def test_apply_interface_vlans_filters_out_of_range_tagged_vids():
+    """Tagged VIDs outside 1..4094 are dropped (defensive)."""
+    entities = [_make_iface_entity("Gi1/0/24")]
+    defaults = Defaults()
+    cache = _build_vlan_cache({"1": {"name": "default"}}, defaults)
+    new_stubs: list = []
+    apply_interface_vlans(
+        entities,
+        {"Gi1/0/24": {"mode": "trunk", "tagged": [10, 0, 5000, "bad", 99], "untagged": 1}},
+        cache, defaults, Options(create_unknown_vlans=True), new_stubs,
+    )
+    iface = entities[0].interface
+    # Only 10 and 99 survive (0 out-of-range, 5000 out-of-range, "bad" non-int)
+    assert sorted(v.vid for v in iface.tagged_vlans) == [10, 99]
+
+
+def test_apply_interface_vlans_handles_non_list_tagged():
+    """Non-list 'tagged' value (driver bug) is treated as empty, not raised."""
+    entities = [_make_iface_entity("Gi1/0/1")]
+    defaults = Defaults()
+    cache = _build_vlan_cache({"10": {"name": "DATA"}}, defaults)
+    new_stubs: list = []
+    apply_interface_vlans(
+        entities,
+        {"Gi1/0/1": {"mode": "access", "tagged": None, "untagged": 10}},
+        cache, defaults, Options(), new_stubs,
+    )
+    iface = entities[0].interface
+    assert iface.mode == "access"
+    assert iface.untagged_vlan.vid == 10
+    assert list(iface.tagged_vlans) == []

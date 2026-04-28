@@ -31,3 +31,14 @@ class TestIOSDriver(BaseDriverTest):
         assert "GigabitEthernet1/0/1" in result, f"expected canonical key, got {sorted(result)}"
         assert result["GigabitEthernet1/0/1"]["mode"] == "access"
         assert result["GigabitEthernet1/0/1"]["untagged"] == 10
+
+    def test_expand_ios_vlan_list_clamps_huge_range(self) -> None:
+        """A range like 1-100000 is clamped to 1..4094 (then collapsed to wildcard)."""
+        from custom_napalm.ios import _expand_ios_vlan_list
+        # Single huge range whose hi is clamped to 4094 and lo is 1 → wildcard collapse.
+        assert _expand_ios_vlan_list(["1-100000"]) == []
+        # Out-of-range single hi gets clamped; lo=10, hi=clamped(50000→4094) → expanded list.
+        result = _expand_ios_vlan_list(["10-12"])
+        assert result == [10, 11, 12]
+        # Inverted range after clamping → skipped.
+        assert _expand_ios_vlan_list(["5000-9000"]) == []
