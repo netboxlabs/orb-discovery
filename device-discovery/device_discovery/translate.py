@@ -203,6 +203,110 @@ def translate_vlan(vid: str, vlan_name: str, defaults: Defaults) -> VLAN | None:
     return vlan
 
 
+def _build_vlan_cache(
+    raw_vlans: dict | None,
+    defaults: Defaults,
+) -> dict[int, pb.VLAN]:
+    """Build vid -> pb.VLAN cache using the same rules as translate_vlan()."""
+    cache: dict[int, pb.VLAN] = {}
+    for vid_str, info in (raw_vlans or {}).items():
+        vlan = translate_vlan(vid_str, (info or {}).get("name", ""), defaults)
+        if vlan is not None:
+            cache[vlan.vid] = vlan
+    return cache
+
+
+def _ensure_vlan(
+    vid: int,
+    cache: dict[int, pb.VLAN],
+    defaults: Defaults,
+    options: Options,
+    new_stubs: list[pb.VLAN],
+) -> pb.VLAN | None:
+    """Return the cached VLAN for ``vid``, or synthesize a stub when allowed."""
+    if vid in cache:
+        return cache[vid]
+    if not getattr(options, "create_unknown_vlans", True):
+        return None
+    stub = translate_vlan(str(vid), "", defaults)
+    if stub is None:
+        return None
+    cache[vid] = stub
+    new_stubs.append(stub)
+    return stub
+
+
+_NAPALM_TO_NETBOX_MODE = {
+    "access": "access",
+    "trunk": "tagged",
+}
+
+
+def _apply_iface_vlan_mutation(
+    iface: pb.Interface,
+    info: dict,
+    netbox_mode: str,
+    vlan_cache: dict[int, pb.VLAN],
+    defaults: Defaults,
+    options: Options,
+    new_stubs: list[pb.VLAN],
+) -> None:
+    """Apply a single interface's VLAN association based on driver-supplied info."""
+    iface.mode = netbox_mode
+
+    untagged = info.get("untagged")
+    tagged = list(info.get("tagged") or [])
+
+    # Defensive: tagged must never include the native VID
+    if untagged is not None:
+        tagged = [v for v in tagged if v != untagged]
+        vlan = _ensure_vlan(int(untagged), vlan_cache, defaults, options, new_stubs)
+        if vlan is not None:
+            iface.untagged_vlan.CopyFrom(vlan)
+
+    for vid in tagged:
+        vlan = _ensure_vlan(int(vid), vlan_cache, defaults, options, new_stubs)
+        if vlan is not None:
+            iface.tagged_vlans.append(vlan)
+
+
+def apply_interface_vlans(
+    entities: list[Entity],
+    interfaces_vlans: dict[str, dict],
+    vlan_cache: dict[int, pb.VLAN],
+    defaults: Defaults,
+    options: Options,
+    new_stubs: list[pb.VLAN],
+) -> None:
+    """Mutate Interface entities in place with mode/untagged_vlan/tagged_vlans."""
+    if not interfaces_vlans:
+        return
+
+    by_name: dict[str, pb.Interface] = {
+        entity.interface.name: entity.interface
+        for entity in entities
+        if entity.HasField("interface")
+    }
+
+    for if_name, info in interfaces_vlans.items():
+        iface = by_name.get(if_name)
+        if iface is None:
+            logger.debug(
+                "interfaces_vlans: skipping %r — not present among emitted Interface entities",
+                if_name,
+            )
+            continue
+
+        netbox_mode = _NAPALM_TO_NETBOX_MODE.get((info or {}).get("mode"))
+        if netbox_mode is None:
+            # routed / unknown — leave the interface alone
+            continue
+
+        _apply_iface_vlan_mutation(
+            iface, info, netbox_mode, vlan_cache, defaults, options, new_stubs
+        )
+
+
 def translate_device_config(config_info: dict, options: Options) -> DeviceConfig | None:
     """
     Translate device configuration from NAPALM format to Diode SDK DeviceConfig entity.
