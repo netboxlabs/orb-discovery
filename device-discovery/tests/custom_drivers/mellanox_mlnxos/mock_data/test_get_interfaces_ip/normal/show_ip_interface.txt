@@ -8,5 +8,6 @@ Vlan 20:
   Interface status: UP
 
 Interface mgmt0 status:
-  IP Address: 192.168.1.10/24
-  Netmask: 255.255.255.0
+  IP address : 10.12.67.33
+  Netmask    : 255.255.255.128
+  Interface status: UP

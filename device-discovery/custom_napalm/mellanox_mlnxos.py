@@ -323,12 +323,21 @@ _IP_SECTION_HEADER_RE = re.compile(
     """,
     re.M | re.X,
 )
-_IPV4_ADDR_RE = re.compile(
+_IPV4_INLINE_RE = re.compile(
     r"(?:Internet|IP)\s+address\s*:\s*(\d+\.\d+\.\d+\.\d+)\s*/\s*(\d+)", re.I
 )
+_IPV4_NOPFX_RE = re.compile(
+    r"(?:Internet|IP)\s+address\s*:\s*(\d+\.\d+\.\d+\.\d+)\s*(?!/|\d)$", re.I | re.M
+)
+_IPV4_NETMASK_RE = re.compile(r"Netmask\s*:\s*(\d+\.\d+\.\d+\.\d+)", re.I)
 _IPV6_ADDR_RE = re.compile(
     r"(?P<addr>[0-9A-Fa-f:]*::?[0-9A-Fa-f:]*)\s*/\s*(?P<prefix>\d+)"
 )
+
+
+def _netmask_to_prefix(netmask: str) -> int:
+    """Convert a dotted-decimal netmask to its CIDR prefix length."""
+    return sum(bin(int(o)).count("1") for o in netmask.split("."))
 
 
 def _iter_ip_sections(text: str):
@@ -351,21 +360,48 @@ def _populate_ip(result: dict, text: str, family: str) -> None:
     if not text.strip():
         return
 
-    addr_re = _IPV4_ADDR_RE if family == "ipv4" else _IPV6_ADDR_RE
-
     for name, body in _iter_ip_sections(text):
-        for addr_match in addr_re.finditer(body):
-            if family == "ipv4":
-                ip = addr_match.group(1)
-                prefix = int(addr_match.group(2))
-            else:
-                ip = addr_match.group("addr")
-                if ":" not in ip:
-                    continue
-                prefix = int(addr_match.group("prefix"))
+        if family == "ipv4":
+            entries = _parse_ipv4_addresses(body)
+        else:
+            entries = _parse_ipv6_addresses(body)
+        for ip, prefix in entries:
             result.setdefault(name, {}).setdefault(family, {})[ip] = {
                 "prefix_length": prefix
             }
+
+
+def _parse_ipv4_addresses(body: str) -> list[tuple[str, int]]:
+    """Return ``[(ip, prefix), ...]`` for both inline ``addr/prefix`` and split netmask layouts."""
+    entries: list[tuple[str, int]] = []
+    seen: set[str] = set()
+
+    for ip, prefix in _IPV4_INLINE_RE.findall(body):
+        entries.append((ip, int(prefix)))
+        seen.add(ip)
+
+    for m in _IPV4_NOPFX_RE.finditer(body):
+        ip = m.group(1)
+        if ip in seen:
+            continue
+        netmask_match = _IPV4_NETMASK_RE.search(body, pos=m.end())
+        if not netmask_match:
+            continue
+        entries.append((ip, _netmask_to_prefix(netmask_match.group(1))))
+        seen.add(ip)
+
+    return entries
+
+
+def _parse_ipv6_addresses(body: str) -> list[tuple[str, int]]:
+    """Return ``[(ip, prefix), ...]`` from an IPv6 interface section body."""
+    entries: list[tuple[str, int]] = []
+    for m in _IPV6_ADDR_RE.finditer(body):
+        ip = m.group("addr")
+        if ":" not in ip:
+            continue
+        entries.append((ip, int(m.group("prefix"))))
+    return entries
 
 
 _DASHES_LINE_RE = re.compile(r"^\s*-+(?:\s+-+)+\s*$")
