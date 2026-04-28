@@ -175,7 +175,7 @@ class MLNXOSDriver(_napalm_base.NetworkDriver):
 
         eth_out = self.device.send_command("show interfaces ethernet")
         for name, body in _split_sections(eth_out, _ETH_SECTION_RE):
-            interfaces[name.strip()] = _parse_interface_body(body)
+            interfaces[name.strip().rstrip(":")] = _parse_interface_body(body)
 
         mgmt_out = self.device.send_command("show interfaces mgmt0")
         if mgmt_out.strip():
@@ -202,13 +202,7 @@ class MLNXOSDriver(_napalm_base.NetworkDriver):
         sanitized: bool = False,
         format: str = "text",
     ) -> models.ConfigDict:
-        """Return device configuration.
-
-        MLNX-OS has no separate startup-config file; ``configuration write`` saves the
-        running config into the active configuration file in place, so in steady state
-        running and saved configs are identical. We fetch ``show running-config`` once
-        and use it to populate both ``running`` and ``startup`` when requested.
-        """  # noqa: D213
+        """Return device configuration; MLNX-OS has no separate startup file (saved == running)."""
         config: models.ConfigDict = {"running": "", "candidate": "", "startup": ""}
 
         retrieve_norm = retrieve.lower()
@@ -235,7 +229,7 @@ class MLNXOSDriver(_napalm_base.NetworkDriver):
 # ---------------------------------------------------------------------------
 # Module-level parsers
 # ---------------------------------------------------------------------------
-_ETH_SECTION_RE = re.compile(r"^Eth\d+/\d+(?:/\d+)?(?=\s*$)", re.M)
+_ETH_SECTION_RE = re.compile(r"^Eth\d+/\d+(?:/\d+)?:?\s*$", re.M)
 _INTF_STATUS_LINE_RE = re.compile(r"^(Eth\d+/\d+(?:/\d+)?)\s+", re.M)
 _HOSTNAME_RE = re.compile(r"^\s*Hostname\s*:\s*(\S+)", re.M | re.I)
 _VERSION_FIELD_MAP = {
@@ -280,12 +274,7 @@ def _parse_interface_status_names(text: str) -> list[str]:
 
 
 def _parse_interface_body(body: str) -> dict:
-    """Parse the key/value block printed under a ``show interfaces`` header.
-
-    Handles both Ethernet-style keys (``Admin state``, ``Operational state``,
-    ``Mac address``, ``Actual speed``) and the alternate keys MLNX-OS prints for
-    ``mgmt0`` (``Admin up``, ``Link up``, ``HW address``, ``Speed``).
-    """  # noqa: D213
+    """Parse the key/value block under ``show interfaces`` (Ethernet and mgmt0 key sets)."""
     fields = {}
     for line in body.splitlines():
         if ":" not in line:
@@ -375,12 +364,7 @@ def _column_spans(separator_line: str) -> list[tuple[int, int]]:
 
 
 def _parse_vlan_table(text: str) -> dict:
-    """Parse the ``show vlan`` table into ``{vlan_id: {name, interfaces}}``.
-
-    Uses the dashes separator beneath the column headers to determine fixed column
-    widths. This preserves whitespace within the ``Name`` column and rejects
-    footer/summary lines that don't fit the layout.
-    """  # noqa: D213
+    """Parse ``show vlan`` into ``{vlan_id: {name, interfaces}}`` using header column widths."""
     if not text.strip():
         return {}
 
