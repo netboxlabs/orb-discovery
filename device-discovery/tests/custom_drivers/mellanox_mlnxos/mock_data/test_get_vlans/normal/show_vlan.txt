@@ -1,0 +1,5 @@
+VLAN  Name             Ports
+----  ---------------  ----------------------------------------
+1     default          Eth1/3, Eth1/4
+10    mgmt-vlan        Eth1/1
+20    data-vlan        Eth1/1, Eth1/2
