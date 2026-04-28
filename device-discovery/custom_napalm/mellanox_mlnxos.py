@@ -312,16 +312,38 @@ def _parse_interface_body(body: str) -> dict:
     }
 
 
-_IPV4_HEADER_RE = re.compile(
-    r"^Interface\s+(?P<name>\S+)\s*$", re.M
+_IP_SECTION_HEADER_RE = re.compile(
+    r"""
+    ^
+    (?:
+        Interface\s+(?P<iname>\S+)(?:\s+status)?:?\s*$
+      | (?:Vlan|VLAN)\s+(?P<vlan>\d+):?\s*$
+      | (?P<short>(?:Eth|Po|Vlan|vlan|mgmt|Loopback|lo|Tunnel|tunnel)\S*):\s*$
+    )
+    """,
+    re.M | re.X,
 )
 _IPV4_ADDR_RE = re.compile(
-    r"Internet\s+address\s*:\s*(\d+\.\d+\.\d+\.\d+)/(\d+)", re.I
+    r"(?:Internet|IP)\s+address\s*:\s*(\d+\.\d+\.\d+\.\d+)\s*/\s*(\d+)", re.I
 )
 _IPV6_ADDR_RE = re.compile(
-    r"(?P<addr>[0-9A-Fa-f:]+)/(?P<prefix>\d+)"
+    r"(?P<addr>[0-9A-Fa-f:]*::?[0-9A-Fa-f:]*)\s*/\s*(?P<prefix>\d+)"
 )
-_IPV6_HEADER_RE = re.compile(r"^Interface\s+(?P<name>\S+)\s*$", re.M)
+
+
+def _iter_ip_sections(text: str):
+    """Yield ``(interface_name, body)`` tuples for every IP-interface section in ``text``."""
+    matches = list(_IP_SECTION_HEADER_RE.finditer(text))
+    for idx, match in enumerate(matches):
+        name = (
+            match.group("iname")
+            or (f"vlan{match.group('vlan')}" if match.group("vlan") else None)
+            or match.group("short")
+        )
+        if not name:
+            continue
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+        yield name, text[match.end():end]
 
 
 def _populate_ip(result: dict, text: str, family: str) -> None:
@@ -329,27 +351,18 @@ def _populate_ip(result: dict, text: str, family: str) -> None:
     if not text.strip():
         return
 
-    header = _IPV4_HEADER_RE if family == "ipv4" else _IPV6_HEADER_RE
     addr_re = _IPV4_ADDR_RE if family == "ipv4" else _IPV6_ADDR_RE
 
-    sections = _split_sections(text, header)
-    if not sections:
-        return
-
-    for header_text, body in sections:
-        m = header.match(header_text)
-        if not m:
-            continue
-        name = m.group("name")
+    for name, body in _iter_ip_sections(text):
         for addr_match in addr_re.finditer(body):
             if family == "ipv4":
                 ip = addr_match.group(1)
                 prefix = int(addr_match.group(2))
             else:
                 ip = addr_match.group("addr")
+                if ":" not in ip:
+                    continue
                 prefix = int(addr_match.group("prefix"))
-                if "::" not in ip and ":" not in ip:
-                    continue  # skip plain integers caught by the loose regex
             result.setdefault(name, {}).setdefault(family, {})[ip] = {
                 "prefix_length": prefix
             }
