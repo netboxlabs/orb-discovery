@@ -1565,3 +1565,48 @@ def test_apply_interface_vlans_skips_none_per_entry(caplog):
     assert iface.mode == ""
     assert not iface.HasField("untagged_vlan")
     assert any("is not a dict" in r.message for r in caplog.records)
+
+
+def test_apply_interface_vlans_routed_clears_stale_state():
+    """A switchport→routed transition clears prior mode/untagged_vlan/tagged_vlans."""
+    from netboxlabs.diode.sdk.ingester import VLAN
+    entities = [_make_iface_entity("Gi1/0/1")]
+    iface = entities[0].interface
+    # Pre-populate as if a prior discovery left an access port.
+    iface.mode = "access"
+    iface.untagged_vlan.CopyFrom(VLAN(vid=10, name="DATA"))
+    iface.tagged_vlans.append(VLAN(vid=20, name="OTHER"))
+    assert iface.mode == "access"
+    assert iface.HasField("untagged_vlan")
+    assert len(list(iface.tagged_vlans)) == 1
+
+    apply_interface_vlans(
+        entities,
+        {"Gi1/0/1": {"mode": "routed", "tagged": [], "untagged": None}},
+        {}, Defaults(), Options(), [],
+    )
+
+    # After the routed transition, all VLAN state is cleared.
+    assert iface.mode == ""
+    assert not iface.HasField("untagged_vlan")
+    assert list(iface.tagged_vlans) == []
+
+
+def test_apply_interface_vlans_unknown_mode_clears_stale_state():
+    """An unknown mode (not access/trunk/trunk-all/routed) clears any prior VLAN state."""
+    from netboxlabs.diode.sdk.ingester import VLAN
+    entities = [_make_iface_entity("Gi1/0/1")]
+    iface = entities[0].interface
+    iface.mode = "tagged"
+    iface.untagged_vlan.CopyFrom(VLAN(vid=1))
+    iface.tagged_vlans.append(VLAN(vid=10))
+
+    apply_interface_vlans(
+        entities,
+        {"Gi1/0/1": {"mode": "private-vlan-host", "tagged": [], "untagged": None}},
+        {}, Defaults(), Options(), [],
+    )
+
+    assert iface.mode == ""
+    assert not iface.HasField("untagged_vlan")
+    assert list(iface.tagged_vlans) == []

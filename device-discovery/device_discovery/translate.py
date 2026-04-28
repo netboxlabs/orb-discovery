@@ -383,7 +383,13 @@ def apply_interface_vlans(
 
         netbox_mode = _NAPALM_TO_NETBOX_MODE.get(info.get("mode"))
         if netbox_mode is None:
-            # routed / unknown — leave the interface alone
+            # routed / unknown — explicitly clear stale VLAN state so a
+            # switchport-to-routed conversion drops prior access/trunk
+            # associations on the next ingestion. Idempotent contract:
+            # the routed path is a clearing mutation, not a no-op.
+            iface.ClearField("mode")
+            iface.ClearField("untagged_vlan")
+            del iface.tagged_vlans[:]
             continue
 
         _apply_iface_vlan_mutation(

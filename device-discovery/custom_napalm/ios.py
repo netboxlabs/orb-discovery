@@ -10,18 +10,22 @@ from ntc_templates.parse import parse_output
 logger = logging.getLogger(__name__)
 
 
-def _expand_ios_vlan_list(items: list[str]) -> list[int]:
+def _expand_ios_vlan_list(items: list[str]) -> tuple[list[int], bool]:
     """
-    Expand ntc-templates trunking_vlans list into int VIDs.
+    Expand ntc-templates trunking_vlans list into ``(vids, is_wildcard)``.
 
     Each item is a digit ("10"), a range ("20-30"), "ALL", or "NONE".
-    Returns ``[]`` for any expansion that covers the entire 1-4094 dot1q
-    range or for the literal sentinels -- avoids fanning out to thousands
-    of stub VLANs downstream when a switch advertises a wide-open trunk.
-    Out-of-range VIDs (outside 1..4094) are dropped.
+    Returns ``([], True)`` for genuine wildcards (literal ``ALL`` or any
+    expansion that covers the full 1-4094 dot1q range). Returns
+    ``([...], False)`` for explicit lists, ``([], False)`` for empty/NONE
+    input, and ``([], False)`` for unparseable input — callers must NOT
+    treat the False-with-empty-list case as a wildcard, since that path
+    can be entered by junk tokens (e.g. "5000-9000" clamped out, "junk"
+    failing int()).
     """
     if not items:
-        return []
+        return [], False
+    has_explicit_all = any((tok or "").strip().upper() == "ALL" for tok in items)
     out: list[int] = []
     for item in items:
         token = (item or "").strip().upper()
@@ -37,8 +41,6 @@ def _expand_ios_vlan_list(items: list[str]) -> list[int]:
             hi = min(hi, 4094)
             if lo > hi:
                 continue
-            if lo == 1 and hi == 4094:
-                return []
             out.extend(range(lo, hi + 1))
         else:
             try:
@@ -46,27 +48,38 @@ def _expand_ios_vlan_list(items: list[str]) -> list[int]:
             except ValueError:
                 continue
     out = [v for v in out if 1 <= v <= 4094]
-    if out and min(out) <= 1 and max(out) >= 4094 and len(set(out)) >= 4094:
-        return []
-    return out
+    is_full_range = (
+        bool(out) and min(out) <= 1 and max(out) >= 4094 and len(set(out)) >= 4094
+    )
+    if has_explicit_all or is_full_range:
+        return [], True
+    return out, False
 
 
 def _classify_ios_trunk(raw_trunking: list, native_vid: int | None) -> dict:
-    """Classify the trunking_vlans portion of a trunk row into the jobec shape."""
-    # Literal "ALL" sentinel → tagged-all.
-    if any((tok or "").strip().upper() == "ALL" for tok in raw_trunking):
+    """
+    Classify the trunking_vlans portion of a trunk row into the jobec shape.
+
+    Returns the appropriate mode (``trunk`` / ``trunk-all``) based on the
+    typed wildcard signal from :func:`_expand_ios_vlan_list`. Logs a
+    warning when a non-empty, non-NONE input parses to an empty list
+    (likely malformed input), but does NOT promote to ``trunk-all`` in
+    that case — bad CLI rows yield a plain trunk with no tagged VLANs.
+    """
+    expanded, is_wildcard = _expand_ios_vlan_list(raw_trunking)
+    if is_wildcard:
         return {"mode": "trunk-all", "tagged": [], "untagged": native_vid}
-    tagged = _expand_ios_vlan_list(raw_trunking)
-    # Numeric full-range expansion (e.g. "1-4094" or overlapping ranges
-    # totaling 1..4094) collapses to [] inside _expand_ios_vlan_list. That
-    # is semantically identical to "ALL" — preserve it as tagged-all.
-    has_input = any((tok or "").strip() for tok in raw_trunking)
-    has_none = any((tok or "").strip().upper() == "NONE" for tok in raw_trunking)
-    if not tagged and has_input and not has_none:
-        return {"mode": "trunk-all", "tagged": [], "untagged": native_vid}
+    has_input = any((tok or "").strip() for tok in (raw_trunking or []))
+    has_none = any((tok or "").strip().upper() == "NONE" for tok in (raw_trunking or []))
+    if has_input and not has_none and not expanded:
+        logger.warning(
+            "trunking_vlans=%r could not be parsed; "
+            "treating as plain trunk with no tagged VLANs",
+            raw_trunking,
+        )
     if native_vid is not None:
-        tagged = [v for v in tagged if v != native_vid]
-    return {"mode": "trunk", "tagged": tagged, "untagged": native_vid}
+        expanded = [v for v in expanded if v != native_vid]
+    return {"mode": "trunk", "tagged": expanded, "untagged": native_vid}
 
 
 def _classify_ios_switchport_row(row: dict) -> dict:

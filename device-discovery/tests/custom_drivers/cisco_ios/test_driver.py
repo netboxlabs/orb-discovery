@@ -35,13 +35,12 @@ class TestIOSDriver(BaseDriverTest):
     def test_expand_ios_vlan_list_clamps_huge_range(self) -> None:
         """A range like 1-100000 is clamped to 1..4094 (then collapsed to wildcard)."""
         from custom_napalm.ios import _expand_ios_vlan_list
-        # Single huge range whose hi is clamped to 4094 and lo is 1 → wildcard collapse.
-        assert _expand_ios_vlan_list(["1-100000"]) == []
-        # Out-of-range single hi gets clamped; lo=10, hi=clamped(50000→4094) → expanded list.
-        result = _expand_ios_vlan_list(["10-12"])
-        assert result == [10, 11, 12]
-        # Inverted range after clamping → skipped.
-        assert _expand_ios_vlan_list(["5000-9000"]) == []
+        # Single huge range whose hi is clamped to 4094 and lo is 1 → wildcard.
+        assert _expand_ios_vlan_list(["1-100000"]) == ([], True)
+        # Plain explicit list → not a wildcard, returns expanded VIDs.
+        assert _expand_ios_vlan_list(["10-12"]) == ([10, 11, 12], False)
+        # Out-of-range-only input → empty list, NOT a wildcard.
+        assert _expand_ios_vlan_list(["5000-9000"]) == ([], False)
 
     def test_get_interfaces_vlans_trunk_all_emits_distinct_mode(self) -> None:
         """A trunk advertising ALL VLANs emits mode='trunk-all', not 'trunk'."""
@@ -84,3 +83,40 @@ class TestIOSDriver(BaseDriverTest):
         }
         result = _classify_ios_switchport_row(row)
         assert result == {"mode": "trunk", "tagged": [], "untagged": 1}
+
+    def test_get_interfaces_vlans_malformed_trunk_does_not_promote(self, caplog) -> None:
+        """Junk trunking_vlans input must NOT silently widen the trunk to all VLANs."""
+        import logging
+
+        from custom_napalm.ios import _classify_ios_switchport_row
+        row = {
+            "interface": "Gi1/0/48",
+            "switchport": "Enabled",
+            "admin_mode": "trunk",
+            "mode": "trunk",
+            "access_vlan": "1",
+            "native_vlan": "99",
+            "voice_vlan": "none",
+            "trunking_vlans": ["5000-9000"],  # all out of range after clamp
+        }
+        with caplog.at_level(logging.WARNING, logger="custom_napalm.ios"):
+            result = _classify_ios_switchport_row(row)
+        # NOT trunk-all — falls back to plain trunk with empty tagged list.
+        assert result == {"mode": "trunk", "tagged": [], "untagged": 99}
+        assert any("could not be parsed" in r.message for r in caplog.records)
+
+    def test_get_interfaces_vlans_explicit_all_still_trunk_all(self) -> None:
+        """Sanity: literal ALL still maps to trunk-all even with the typed-signal refactor."""
+        from custom_napalm.ios import _classify_ios_switchport_row
+        row = {
+            "interface": "Gi1/0/48",
+            "switchport": "Enabled",
+            "admin_mode": "trunk",
+            "mode": "trunk",
+            "access_vlan": "1",
+            "native_vlan": "99",
+            "voice_vlan": "none",
+            "trunking_vlans": ["ALL"],
+        }
+        result = _classify_ios_switchport_row(row)
+        assert result == {"mode": "trunk-all", "tagged": [], "untagged": 99}

@@ -154,45 +154,61 @@ def _parse_portchannel_status_raw(raw: str) -> dict[str, dict]:
     return result
 
 
-def _parse_s300_vlan_list(value: str) -> list[int]:
+def _expand_s300_chunk(chunk: str) -> list[int]:
     """
-    Expand "1,10-12,20" -> [1, 10, 11, 12, 20]. Empty/none/all/full-range -> [].
+    Expand a single S300 VLAN list chunk ("10" or "10-12") into VIDs.
 
-    Treats wildcard inputs (empty, ``none``, ``all``, or any expansion that
-    covers the entire 1-4094 dot1q range) as "no specific VLANs". This avoids
-    fanning out to thousands of stub VLAN entities downstream when a switch
-    advertises a wide-open trunk.
+    Out-of-range / inverted / unparseable chunks return ``[]``. Lo/hi are
+    clamped to the dot1q range 1..4094 so callers can detect wildcards
+    on the aggregated output.
     """
-    if not value or value.strip().lower() in {"", "none", "all"}:
+    chunk = chunk.strip()
+    if not chunk:
         return []
+    if "-" in chunk:
+        lo_s, hi_s = chunk.split("-", 1)
+        try:
+            lo, hi = int(lo_s), int(hi_s)
+        except ValueError:
+            return []
+        lo = max(lo, 1)
+        hi = min(hi, 4094)
+        if lo > hi:
+            return []
+        return list(range(lo, hi + 1))
+    try:
+        return [int(chunk)]
+    except ValueError:
+        return []
+
+
+def _parse_s300_vlan_list(value: str) -> tuple[list[int], bool]:
+    """
+    Expand "1,10-12,20" -> ``([1, 10, 11, 12, 20], False)``.
+
+    Returns ``([], True)`` for genuine wildcards: literal ``all`` /
+    ``"1-4094"`` / multi-range expansions covering the full 1-4094 dot1q
+    range. Returns ``([], False)`` for empty/none/unparseable input.
+    Callers must NOT treat the ``([], False)`` case as a wildcard, since
+    that path is reached by junk tokens too.
+    """
+    if not value:
+        return [], False
+    raw = value.strip().lower()
+    if raw == "all":
+        return [], True
+    if raw == "none":
+        return [], False
     out: list[int] = []
     for chunk in value.split(","):
-        chunk = chunk.strip()
-        if not chunk:
-            continue
-        if "-" in chunk:
-            lo_s, hi_s = chunk.split("-", 1)
-            try:
-                lo, hi = int(lo_s), int(hi_s)
-            except ValueError:
-                continue
-            lo = max(lo, 1)
-            hi = min(hi, 4094)
-            if lo > hi:
-                continue
-            if lo == 1 and hi == 4094:
-                return []
-            out.extend(range(lo, hi + 1))
-        else:
-            try:
-                out.append(int(chunk))
-            except ValueError:
-                continue
+        out.extend(_expand_s300_chunk(chunk))
     out = [v for v in out if 1 <= v <= 4094]
-    # Treat full 1-4094 dot1q range as a wildcard ("all VLANs").
-    if out and min(out) <= 1 and max(out) >= 4094 and len(set(out)) >= 4094:
-        return []
-    return out
+    is_full_range = (
+        bool(out) and min(out) <= 1 and max(out) >= 4094 and len(set(out)) >= 4094
+    )
+    if is_full_range:
+        return [], True
+    return out, False
 
 
 _S300_BLOCK_RE = re.compile(r"^Name:\s*(\S+)\s*$", re.MULTILINE)
@@ -217,18 +233,19 @@ def _s300_switchport_block_to_entry(fields: dict[str, str]) -> dict:
         return {"mode": "access", "tagged": [], "untagged": access_vid}
     if admin_mode in {"trunk", "general"}:
         trunk_vlans = fields.get("Trunking VLANs Enabled", "")
+        expanded, is_wildcard = _parse_s300_vlan_list(trunk_vlans or "")
+        # Only promote to trunk-all when the helper signals a real wildcard
+        # (literal "all" or a numeric full-range expansion). Junk tokens
+        # collapse to ``([], False)`` and must NOT silently widen the trunk.
+        if is_wildcard:
+            return {"mode": "trunk-all", "tagged": [], "untagged": native_vid}
         raw = (trunk_vlans or "").strip().lower()
-        # Distinguish "all VLANs" from "specific list" so downstream translation
-        # can map to NetBox tagged-all rather than tagged-with-empty-list.
-        # Cases that mean "all": literal "all", or numeric expansions that the
-        # parser collapses to [] (e.g. "1-4094" or overlapping ranges totaling
-        # 1..4094). "none" / empty trunk fields stay as plain trunk.
-        if raw == "all":
-            return {"mode": "trunk-all", "tagged": [], "untagged": native_vid}
-        expanded = _parse_s300_vlan_list(trunk_vlans)
-        if not expanded and raw and raw != "none":
-            # Parser collapsed a non-empty, non-"none" input to [] → wildcard.
-            return {"mode": "trunk-all", "tagged": [], "untagged": native_vid}
+        if raw and raw != "none" and not expanded:
+            logger.warning(
+                "Trunking VLANs Enabled=%r could not be parsed; "
+                "treating as plain trunk with no tagged VLANs",
+                trunk_vlans,
+            )
         tagged = [v for v in expanded if v != native_vid]
         return {"mode": "trunk", "tagged": tagged, "untagged": native_vid}
     return {"mode": "routed", "tagged": [], "untagged": None}
