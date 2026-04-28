@@ -191,8 +191,8 @@ class Options(BaseModel):
         description=(
             "Auto-emit VLAN entities for VIDs referenced on interfaces "
             "but absent from the device's VLAN database. Stubs inherit "
-            "group/site from defaults.vlan and defaults.site for stable "
-            "matching. Set False to drop unknown VIDs from associations."
+            "attributes from defaults.vlan for stable matching. Set "
+            "False to drop unknown VIDs from associations."
         ),
     )
 

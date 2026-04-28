@@ -3,6 +3,7 @@
 
 import logging
 
+from napalm.base.helpers import canonical_interface_name
 from napalm.ios.ios import IOSDriver as NapalmIOSDriver
 from ntc_templates.parse import parse_output
 
@@ -142,5 +143,7 @@ class IOSDriver(NapalmIOSDriver):
             ifname = row.get("interface")
             if not ifname:
                 continue
+            if getattr(self, "use_canonical_interface", False):
+                ifname = canonical_interface_name(ifname)
             result[ifname] = _classify_ios_switchport_row(row)
         return result
