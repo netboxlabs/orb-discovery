@@ -1190,9 +1190,10 @@ def test_ensure_vlan_creates_stub_when_unknown_and_flag_true():
     new_stubs: list = []
     vlan = _ensure_vlan(99, cache, Defaults(), Options(create_unknown_vlans=True), new_stubs)
     assert vlan.vid == 99
-    assert vlan.name == ""
+    assert vlan.name == "VLAN99"
     assert len(new_stubs) == 1
     assert new_stubs[0].vid == 99
+    assert new_stubs[0].name == "VLAN99"
     assert cache[99].vid == 99
 
 
@@ -1567,18 +1568,20 @@ def test_apply_interface_vlans_skips_none_per_entry(caplog):
     assert any("is not a dict" in r.message for r in caplog.records)
 
 
-def test_apply_interface_vlans_routed_clears_stale_state():
-    """A switchport→routed transition clears prior mode/untagged_vlan/tagged_vlans."""
+def test_apply_interface_vlans_routed_leaves_stale_state_untouched():
+    """
+    Documented limitation: routed mode is a no-op.
+
+    Diode plugin's PATCH semantics don't propagate field clears, so prior
+    VLAN associations remain in NetBox. Operators must clear manually
+    until Diode supports explicit field clearing.
+    """
     from netboxlabs.diode.sdk.ingester import VLAN
     entities = [_make_iface_entity("Gi1/0/1")]
     iface = entities[0].interface
-    # Pre-populate as if a prior discovery left an access port.
     iface.mode = "access"
     iface.untagged_vlan.CopyFrom(VLAN(vid=10, name="DATA"))
     iface.tagged_vlans.append(VLAN(vid=20, name="OTHER"))
-    assert iface.mode == "access"
-    assert iface.HasField("untagged_vlan")
-    assert len(list(iface.tagged_vlans)) == 1
 
     apply_interface_vlans(
         entities,
@@ -1586,14 +1589,14 @@ def test_apply_interface_vlans_routed_clears_stale_state():
         {}, Defaults(), Options(), [],
     )
 
-    # After the routed transition, all VLAN state is cleared.
-    assert iface.mode == ""
-    assert not iface.HasField("untagged_vlan")
-    assert list(iface.tagged_vlans) == []
+    # Stale state intentionally preserved (see comment in apply_interface_vlans).
+    assert iface.mode == "access"
+    assert iface.untagged_vlan.vid == 10
+    assert [v.vid for v in iface.tagged_vlans] == [20]
 
 
-def test_apply_interface_vlans_unknown_mode_clears_stale_state():
-    """An unknown mode (not access/trunk/trunk-all/routed) clears any prior VLAN state."""
+def test_apply_interface_vlans_unknown_mode_leaves_stale_state_untouched():
+    """Same documented limitation for unknown driver modes."""
     from netboxlabs.diode.sdk.ingester import VLAN
     entities = [_make_iface_entity("Gi1/0/1")]
     iface = entities[0].interface
@@ -1606,7 +1609,6 @@ def test_apply_interface_vlans_unknown_mode_clears_stale_state():
         {"Gi1/0/1": {"mode": "private-vlan-host", "tagged": [], "untagged": None}},
         {}, Defaults(), Options(), [],
     )
-
-    assert iface.mode == ""
-    assert not iface.HasField("untagged_vlan")
-    assert list(iface.tagged_vlans) == []
+    assert iface.mode == "tagged"
+    assert iface.untagged_vlan.vid == 1
+    assert [v.vid for v in iface.tagged_vlans] == [10]

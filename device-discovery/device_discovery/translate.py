@@ -223,12 +223,19 @@ def _ensure_vlan(
     options: Options,
     new_stubs: list[pb.VLAN],
 ) -> pb.VLAN | None:
-    """Return the cached VLAN for ``vid``, or synthesize a stub when allowed."""
+    """
+    Return the cached VLAN for ``vid``, or synthesize a stub when allowed.
+
+    Stubs use the placeholder name ``"VLAN<vid>"`` because NetBox's
+    ipam.vlan.name field is required (non-blank). Operators or sibling
+    switches can later overwrite the placeholder with a real name via the
+    same vid+group matcher.
+    """
     if vid in cache:
         return cache[vid]
     if not getattr(options, "create_unknown_vlans", True):
         return None
-    stub = translate_vlan(str(vid), "", defaults)
+    stub = translate_vlan(str(vid), f"VLAN{vid}", defaults)
     if stub is None:
         return None
     cache[vid] = stub
@@ -383,13 +390,16 @@ def apply_interface_vlans(
 
         netbox_mode = _NAPALM_TO_NETBOX_MODE.get(info.get("mode"))
         if netbox_mode is None:
-            # routed / unknown — explicitly clear stale VLAN state so a
-            # switchport-to-routed conversion drops prior access/trunk
-            # associations on the next ingestion. Idempotent contract:
-            # the routed path is a clearing mutation, not a no-op.
-            iface.ClearField("mode")
-            iface.ClearField("untagged_vlan")
-            del iface.tagged_vlans[:]
+            # routed / unknown / disabled — leave the Interface entity
+            # untouched. Note: ClearField()-ing mode/untagged_vlan/
+            # tagged_vlans here would NOT propagate to NetBox: the Diode
+            # plugin's apply-change-set endpoint uses PATCH semantics on
+            # the diff `data` payload, and proto3 default-value fields
+            # are omitted from serialization, so they get treated as
+            # "no change" rather than "clear". Operators converting a
+            # switchport to L3 must currently clear the stale VLAN
+            # association in NetBox manually, or wait for Diode-plugin
+            # support for explicit field clearing.
             continue
 
         _apply_iface_vlan_mutation(
