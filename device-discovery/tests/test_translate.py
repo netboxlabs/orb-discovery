@@ -1515,3 +1515,53 @@ def test_apply_interface_vlans_skips_non_dict_payload(caplog):
     assert not iface.HasField("untagged_vlan")
     assert list(iface.tagged_vlans) == []
     assert any("not a dict" in r.message for r in caplog.records)
+
+
+def test_apply_interface_vlans_skips_non_dict_per_entry(caplog):
+    """A non-dict value for a single interface key is logged and skipped."""
+    import logging
+    entities = [_make_iface_entity("Gi1/0/1"), _make_iface_entity("Gi1/0/2")]
+    defaults = Defaults()
+    cache = _build_vlan_cache({"10": {"name": "DATA"}}, defaults)
+    new_stubs: list = []
+    with caplog.at_level(logging.WARNING):
+        apply_interface_vlans(
+            entities,
+            {
+                "Gi1/0/1": {"mode": "access", "tagged": [], "untagged": 10},
+                "Gi1/0/2": "broken-string-value",  # type: ignore[dict-item]
+            },
+            cache, defaults, Options(), new_stubs,
+        )
+    iface1 = entities[0].interface
+    iface2 = entities[1].interface
+    # The good entry processed normally
+    assert iface1.mode == "access"
+    assert iface1.untagged_vlan.vid == 10
+    # The bad entry left untouched
+    assert iface2.mode == ""
+    assert not iface2.HasField("untagged_vlan")
+    # Warning logged
+    assert any(
+        "is not a dict" in r.message and "Gi1/0/2" in r.message
+        for r in caplog.records
+    )
+
+
+def test_apply_interface_vlans_skips_none_per_entry(caplog):
+    """A None value for a single interface key is logged and skipped (treated as malformed)."""
+    import logging
+    entities = [_make_iface_entity("Gi1/0/1")]
+    defaults = Defaults()
+    cache = {}
+    new_stubs: list = []
+    with caplog.at_level(logging.WARNING):
+        apply_interface_vlans(
+            entities,
+            {"Gi1/0/1": None},  # type: ignore[dict-item]
+            cache, defaults, Options(), new_stubs,
+        )
+    iface = entities[0].interface
+    assert iface.mode == ""
+    assert not iface.HasField("untagged_vlan")
+    assert any("is not a dict" in r.message for r in caplog.records)

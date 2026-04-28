@@ -373,7 +373,15 @@ def apply_interface_vlans(
             )
             continue
 
-        netbox_mode = _NAPALM_TO_NETBOX_MODE.get((info or {}).get("mode"))
+        if not isinstance(info, dict):
+            logger.warning(
+                "interfaces_vlans[%r] is not a dict (got %s); skipping interface VLAN mapping",
+                if_name,
+                type(info).__name__,
+            )
+            continue
+
+        netbox_mode = _NAPALM_TO_NETBOX_MODE.get(info.get("mode"))
         if netbox_mode is None:
             # routed / unknown — leave the interface alone
             continue
