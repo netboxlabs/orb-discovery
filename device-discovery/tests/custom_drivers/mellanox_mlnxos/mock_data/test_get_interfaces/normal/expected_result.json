@@ -5,7 +5,7 @@
     "description": "uplink-to-spine01",
     "last_flapped": -1.0,
     "mtu": 9216,
-    "speed": 40000.0,
+    "speed": 200000.0,
     "mac_address": "7C:FE:90:53:B9:80"
   },
   "Eth1/2": {
@@ -14,7 +14,7 @@
     "description": "server-rack-1",
     "last_flapped": -1.0,
     "mtu": 9216,
-    "speed": 40000.0,
+    "speed": 100000.0,
     "mac_address": "7C:FE:90:53:B9:81"
   },
   "Eth1/3": {

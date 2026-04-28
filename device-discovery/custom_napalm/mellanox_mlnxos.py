@@ -72,31 +72,26 @@ def _parse_uptime(uptime_str: str) -> float:
     return seconds
 
 
-_SPEED_UNITS = {
-    "kbps": 1e-3,
-    "kb/s": 1e-3,
-    "mbps": 1.0,
-    "mb/s": 1.0,
-    "gbps": 1e3,
-    "gb/s": 1e3,
-    "tbps": 1e6,
-    "tb/s": 1e6,
-}
+_SPEED_PREFIX_MULT = {"": 1.0, "k": 1e-3, "m": 1.0, "g": 1e3, "t": 1e6}
+_SPEED_TOKEN_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*([kmgt])?(?:b(?:p?s|/s)?)?(?:x\d+)?",
+    re.IGNORECASE,
+)
 
 
 def _parse_speed_mbps(speed_str: str) -> float:
-    """Convert ``40 Gbps``-style strings to a NAPALM speed value (Mbps as float)."""
+    """Convert speed strings (``40 Gbps``, ``200G``, ``100Gx4``, ``1000Mb/s``) to Mbps."""
     if not speed_str:
         return 0.0
     s = speed_str.strip().lower()
     if s in ("n/a", "unknown", "-", ""):
         return 0.0
-    m = re.match(r"(\d+(?:\.\d+)?)\s*([a-z/]+)?", s)
+    m = _SPEED_TOKEN_RE.match(s)
     if not m:
         return 0.0
     value = float(m.group(1))
-    unit = (m.group(2) or "mbps").strip()
-    return value * _SPEED_UNITS.get(unit, 1.0)
+    prefix = (m.group(2) or "").lower()
+    return value * _SPEED_PREFIX_MULT.get(prefix, 1.0)
 
 
 def _split_sections(text: str, header_re: re.Pattern) -> list[tuple[str, str]]:
@@ -285,7 +280,12 @@ def _parse_interface_status_names(text: str) -> list[str]:
 
 
 def _parse_interface_body(body: str) -> dict:
-    """Parse the key/value block printed under a ``show interfaces`` header."""
+    """Parse the key/value block printed under a ``show interfaces`` header.
+
+    Handles both Ethernet-style keys (``Admin state``, ``Operational state``,
+    ``Mac address``, ``Actual speed``) and the alternate keys MLNX-OS prints for
+    ``mgmt0`` (``Admin up``, ``Link up``, ``HW address``, ``Speed``).
+    """  # noqa: D213
     fields = {}
     for line in body.splitlines():
         if ":" not in line:
@@ -293,24 +293,28 @@ def _parse_interface_body(body: str) -> dict:
         key, _, value = line.partition(":")
         fields[key.strip().lower()] = value.strip()
 
-    admin_state = fields.get("admin state", "").lower()
-    oper_state = fields.get("operational state", "").lower()
+    admin_raw = (fields.get("admin state") or fields.get("admin up") or "").lower()
+    oper_raw = (
+        fields.get("operational state") or fields.get("link up") or fields.get("link state") or ""
+    ).lower()
+    is_enabled = "enabled" in admin_raw or admin_raw.startswith(("up", "yes"))
+    is_up = "up" in oper_raw or oper_raw.startswith("yes")
 
     mtu_raw = fields.get("mtu", "")
     mtu_match = re.match(r"(\d+)", mtu_raw)
     mtu = int(mtu_match.group(1)) if mtu_match else -1
 
-    speed = _parse_speed_mbps(fields.get("actual speed", ""))
+    speed = _parse_speed_mbps(fields.get("actual speed") or fields.get("speed", ""))
 
-    mac_raw = fields.get("mac address", "")
+    mac_raw = fields.get("mac address") or fields.get("hw address", "")
     try:
         mac_address = normalize_mac(mac_raw) if mac_raw else ""
     except Exception:
         mac_address = mac_raw
 
     return {
-        "is_up": "up" in oper_state,
-        "is_enabled": "enabled" in admin_state or "up" in admin_state,
+        "is_up": is_up,
+        "is_enabled": is_enabled,
         "description": fields.get("description", ""),
         "last_flapped": -1.0,
         "mtu": mtu,
@@ -366,19 +370,8 @@ _DASHES_LINE_RE = re.compile(r"^\s*-+(?:\s+-+)+\s*$")
 
 
 def _column_spans(separator_line: str) -> list[tuple[int, int]]:
-    """Return ``[(start, end), ...]`` byte offsets for each dash group on a separator line."""
+    """Return ``[(start, end), ...]`` character offsets for each dash group on a separator line."""
     return [(m.start(), m.end()) for m in re.finditer(r"-+", separator_line)]
-
-
-def _split_columns(line: str, spans: list[tuple[int, int]]) -> list[str]:
-    """Slice ``line`` by the column offsets in ``spans``; the last column extends to EOL."""
-    columns: list[str] = []
-    for idx, (start, end) in enumerate(spans):
-        if idx == len(spans) - 1:
-            columns.append(line[start:].rstrip())
-        else:
-            columns.append(line[start:end].rstrip())
-    return [c.strip() for c in columns]
 
 
 def _parse_vlan_table(text: str) -> dict:

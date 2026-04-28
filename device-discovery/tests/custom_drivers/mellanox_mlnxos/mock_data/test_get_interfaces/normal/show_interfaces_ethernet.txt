@@ -4,8 +4,7 @@ Operational state    : Up
 Description          : uplink-to-spine01
 Mac address          : 7c:fe:90:53:b9:80
 MTU                  : 9216 bytes
-Actual speed         : 40 Gbps
-Width reduction      : No
+Actual speed         : 200G
 
 Eth1/2
 Admin state          : Enabled
@@ -13,8 +12,7 @@ Operational state    : Up
 Description          : server-rack-1
 Mac address          : 7c:fe:90:53:b9:81
 MTU                  : 9216 bytes
-Actual speed         : 40 Gbps
-Width reduction      : No
+Actual speed         : 100Gx4
 
 Eth1/3
 Admin state          : Enabled
