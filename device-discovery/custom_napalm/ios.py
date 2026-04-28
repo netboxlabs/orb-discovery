@@ -143,7 +143,11 @@ class IOSDriver(NapalmIOSDriver):
             ifname = row.get("interface")
             if not ifname:
                 continue
-            if getattr(self, "use_canonical_interface", False):
-                ifname = canonical_interface_name(ifname)
+            # Always canonicalize: NAPALM IOS's default get_interfaces() returns
+            # long-form names (GigabitEthernet1/0/1) parsed from `show interfaces`,
+            # but `show interfaces switchport` emits short-form (Gi1/0/1). Without
+            # this, apply_interface_vlans()'s exact-name match silently misses
+            # associations in the common default configuration.
+            ifname = canonical_interface_name(ifname)
             result[ifname] = _classify_ios_switchport_row(row)
         return result
