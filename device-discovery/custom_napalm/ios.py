@@ -73,8 +73,8 @@ def _classify_ios_switchport_row(row: dict) -> dict:
     """
     Map one ntc-templates parsed row to NAPALM #919 jobec shape.
 
-    Returns ``{"mode": "access"|"trunk"|"routed", "tagged": list[int],
-    "untagged": int | None}``.
+    Returns ``{"mode": "access"|"trunk"|"trunk-all"|"routed",
+    "tagged": list[int], "untagged": int | None}``.
 
     Voice-VLAN promotion: an access port with a configured voice VLAN is
     reported as ``mode=trunk, untagged=access_vid, tagged=[voice_vid]``

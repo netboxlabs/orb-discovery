@@ -1497,3 +1497,21 @@ def test_apply_interface_vlans_clears_stale_untagged_when_new_has_none():
     )
     assert not iface.HasField("untagged_vlan")
     assert sorted(v.vid for v in iface.tagged_vlans) == [10]
+
+
+def test_apply_interface_vlans_skips_non_dict_payload(caplog):
+    """A non-dict interfaces_vlans payload (e.g. list) is logged and skipped, not raised."""
+    import logging
+    entities = [_make_iface_entity("Gi1/0/1")]
+    new_stubs: list = []
+    with caplog.at_level(logging.WARNING):
+        apply_interface_vlans(
+            entities,
+            ["malformed", "list"],  # type: ignore[arg-type]  # intentionally wrong
+            {}, Defaults(), Options(), new_stubs,
+        )
+    iface = entities[0].interface
+    assert iface.mode == ""
+    assert not iface.HasField("untagged_vlan")
+    assert list(iface.tagged_vlans) == []
+    assert any("not a dict" in r.message for r in caplog.records)

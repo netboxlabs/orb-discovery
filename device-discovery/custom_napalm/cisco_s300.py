@@ -494,7 +494,7 @@ class S300Driver(_napalm_base.NetworkDriver):
         Return per-interface VLAN config (NAPALM #919 jobec shape).
 
         Parses ``show interfaces switchport`` from the S300 CLI.
-        Modes: access | trunk | routed (PVLAN/customer/etc. -> routed in v1).
+        Modes: access | trunk | trunk-all | routed (PVLAN/customer/etc. -> routed in v1).
         General mode collapses to trunk with explicit untagged + tagged sets.
         """
         output = self.device.send_command("show interfaces switchport")

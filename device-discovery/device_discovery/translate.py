@@ -348,6 +348,15 @@ def apply_interface_vlans(
     """Mutate Interface entities in place with mode/untagged_vlan/tagged_vlans."""
     if not interfaces_vlans:
         return
+    if not isinstance(interfaces_vlans, dict):
+        # A custom driver may return a non-dict (list, None, str, etc.) when
+        # its parser hits an unexpected shape. Skip silently rather than
+        # aborting the whole device's ingestion with an AttributeError.
+        logger.warning(
+            "interfaces_vlans payload is not a dict (got %s); skipping interface↔VLAN mapping",
+            type(interfaces_vlans).__name__,
+        )
+        return
 
     by_name: dict[str, pb.Interface] = {
         entity.interface.name: entity.interface
