@@ -154,6 +154,67 @@ def _parse_portchannel_status_raw(raw: str) -> dict[str, dict]:
     return result
 
 
+def _parse_s300_vlan_list(value: str) -> list[int]:
+    """
+    Expand "1,10-12,20" -> [1, 10, 11, 12, 20]. Empty/none/all/full-range -> [].
+
+    Treats wildcard inputs (empty, ``none``, ``all``, or any expansion that
+    covers the entire 1-4094 dot1q range) as "no specific VLANs". This avoids
+    fanning out to thousands of stub VLAN entities downstream when a switch
+    advertises a wide-open trunk.
+    """
+    if not value or value.strip().lower() in {"", "none", "all"}:
+        return []
+    out: list[int] = []
+    for chunk in value.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "-" in chunk:
+            lo_s, hi_s = chunk.split("-", 1)
+            try:
+                lo, hi = int(lo_s), int(hi_s)
+            except ValueError:
+                continue
+            out.extend(range(lo, hi + 1))
+        else:
+            try:
+                out.append(int(chunk))
+            except ValueError:
+                continue
+    # Treat full 1-4094 dot1q range as a wildcard ("all VLANs").
+    if out and min(out) <= 1 and max(out) >= 4094 and len(set(out)) >= 4094:
+        return []
+    return out
+
+
+_S300_BLOCK_RE = re.compile(r"^Name:\s*(\S+)\s*$", re.MULTILINE)
+
+
+def _s300_switchport_block_to_entry(fields: dict[str, str]) -> dict:
+    """Map a parsed ``show interfaces switchport`` block to the NAPALM #919 jobec shape."""
+    if fields.get("Switchport", "").lower() != "enable":
+        return {"mode": "routed", "tagged": [], "untagged": None}
+
+    admin_mode = fields.get("Administrative Mode", "").lower()
+    try:
+        access_vid: int | None = int(fields.get("Access Mode VLAN", ""))
+    except (ValueError, TypeError):
+        access_vid = None
+    try:
+        native_vid: int | None = int(fields.get("Trunking Native Mode VLAN", ""))
+    except (ValueError, TypeError):
+        native_vid = None
+
+    if admin_mode == "access":
+        return {"mode": "access", "tagged": [], "untagged": access_vid}
+    if admin_mode in {"trunk", "general"}:
+        trunk_vlans = fields.get("Trunking VLANs Enabled", "")
+        tagged = [v for v in _parse_s300_vlan_list(trunk_vlans) if v != native_vid]
+        return {"mode": "trunk", "tagged": tagged, "untagged": native_vid}
+    return {"mode": "routed", "tagged": [], "untagged": None}
+
+
 def _parse_vlan_ports_raw(raw: str) -> dict[str, list[str]]:
     """
     Extract VLAN → expanded port list from raw ``show vlan`` output.
@@ -408,3 +469,31 @@ class S300Driver(_napalm_base.NetworkDriver):
             }
 
         return vlans
+
+    def get_interfaces_vlans(self) -> dict[str, dict]:
+        """
+        Return per-interface VLAN config (NAPALM #919 jobec shape).
+
+        Parses ``show interfaces switchport`` from the S300 CLI.
+        Modes: access | trunk | routed (PVLAN/customer/etc. -> routed in v1).
+        General mode collapses to trunk with explicit untagged + tagged sets.
+        """
+        output = self.device.send_command("show interfaces switchport")
+        if not output:
+            return {}
+
+        blocks: dict[str, dict[str, str]] = {}
+        current: str | None = None
+        for line in output.splitlines():
+            m = _S300_BLOCK_RE.match(line)
+            if m:
+                current = m.group(1)
+                blocks[current] = {}
+                continue
+            if current is None:
+                continue
+            if ":" in line:
+                k, _, v = line.partition(":")
+                blocks[current][k.strip()] = v.strip()
+
+        return {ifname: _s300_switchport_block_to_entry(fields) for ifname, fields in blocks.items()}
