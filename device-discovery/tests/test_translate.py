@@ -1644,3 +1644,33 @@ def test_apply_interface_vlans_clears_stale_untagged_when_create_unknown_vlans_f
         "untagged_vlan must be cleared when the new VID is unknown and "
         "create_unknown_vlans=False — otherwise the Interface keeps a stale link."
     )
+
+
+def test_apply_interface_vlans_rejects_bool_vids():
+    """
+    Booleans pretending to be VIDs (Python: bool is a subclass of int) are rejected.
+
+    Without an explicit isinstance(bool) guard in _safe_vid, True would coerce
+    to int(1) and silently associate VLAN 1.
+    """
+    entities = [_make_iface_entity("Gi1/0/1")]
+    defaults = Defaults()
+    cache = _build_vlan_cache({"1": {"name": "default"}}, defaults)
+    new_stubs: list = []
+    apply_interface_vlans(
+        entities,
+        {
+            "Gi1/0/1": {
+                "mode": "trunk",
+                "tagged": [True, False, 10],  # bool entries should be dropped
+                "untagged": True,             # bool untagged should also be rejected
+            },
+        },
+        cache, defaults, Options(), new_stubs,
+    )
+    iface = entities[0].interface
+    assert iface.mode == "tagged"
+    # untagged was True (rejected) → no untagged_vlan should be set
+    assert not iface.HasField("untagged_vlan")
+    # tagged was [True, False, 10] → only 10 survives the bool rejection
+    assert sorted(v.vid for v in iface.tagged_vlans) == [10]

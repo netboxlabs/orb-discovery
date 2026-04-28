@@ -256,8 +256,13 @@ def _safe_vid(value: object) -> int | None:
     Coerce a driver-supplied VID to an int in [1, 4094], or return None.
 
     Drivers occasionally emit malformed values; clamping/coercing here keeps
-    discovery resilient instead of aborting on a bad row.
+    discovery resilient instead of aborting on a bad row. Booleans are
+    rejected explicitly because ``bool`` is a subclass of ``int`` in Python
+    (``int(True) == 1``) — without this guard a driver accidentally emitting
+    ``True``/``False`` for a VID would silently map to VLAN 1.
     """
+    if isinstance(value, bool):
+        return None
     try:
         vid = int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
