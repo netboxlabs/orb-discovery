@@ -270,6 +270,36 @@ def _apply_iface_vlan_mutation(
             iface.tagged_vlans.append(vlan)
 
 
+def _apply_interface_vlan_associations(
+    data: dict,
+    interface_related_entities: list[Entity],
+    defaults: Defaults,
+    options: Options,
+    new_stubs: list[pb.VLAN],
+) -> None:
+    """
+    Apply interface↔VLAN associations from custom-driver method, if available.
+
+    Builds a vid→VLAN cache from ``data["vlan"]`` and mutates Interface entities
+    in ``interface_related_entities`` to set mode/untagged_vlan/tagged_vlans
+    when ``data["interfaces_vlans"]`` is present. Stubs are appended to
+    ``new_stubs`` for VIDs not in the cache when ``options.create_unknown_vlans``
+    is True.
+    """
+    ifaces_vlans = data.get("interfaces_vlans") or {}
+    if not ifaces_vlans:
+        return
+    vlan_cache = _build_vlan_cache(data.get("vlan") or {}, defaults)
+    apply_interface_vlans(
+        interface_related_entities,
+        ifaces_vlans,
+        vlan_cache,
+        defaults,
+        options,
+        new_stubs,
+    )
+
+
 def apply_interface_vlans(
     entities: list[Entity],
     interfaces_vlans: dict[str, dict],
@@ -480,6 +510,7 @@ def translate_data(data: dict) -> Iterable[Entity]:
 
     """
     entities = []
+    new_stubs: list[pb.VLAN] = []
 
     defaults = data.get("defaults") or Defaults()
     options = data.get("options") or Options()
@@ -511,6 +542,9 @@ def translate_data(data: dict) -> Iterable[Entity]:
         # because Entity(device=...) copies the message; subsequent mutations
         # on `device` would not propagate to the wrapped copy.
         assign_primary_ip(device, interface_related_entities, target_hostname)
+        _apply_interface_vlan_associations(
+            data, interface_related_entities, defaults, options, new_stubs,
+        )
         entities.append(Entity(device=device))
         entities.extend(interface_related_entities)
 
@@ -519,5 +553,14 @@ def translate_data(data: dict) -> Iterable[Entity]:
             vlan = translate_vlan(vid, vlan_info.get("name"), defaults)
             if vlan:
                 entities.append(Entity(vlan=vlan))
+
+    # Emit any auto-stubbed VLANs (referenced on interfaces but absent from
+    # get_vlans()). De-dup against VIDs already emitted above.
+    if new_stubs:
+        already_emitted = {e.vlan.vid for e in entities if e.HasField("vlan")}
+        for stub in new_stubs:
+            if stub.vid not in already_emitted:
+                entities.append(Entity(vlan=stub))
+                already_emitted.add(stub.vid)
 
     return entities

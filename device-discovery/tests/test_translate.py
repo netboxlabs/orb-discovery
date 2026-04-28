@@ -1343,3 +1343,51 @@ def test_apply_interface_vlans_handles_empty_input():
     new_stubs: list = []
     apply_interface_vlans(entities, {}, {}, Defaults(), Options(), new_stubs)
     assert new_stubs == []
+
+
+def test_translate_data_emits_interface_vlan_associations():
+    """translate_data() applies interface↔VLAN associations and emits stub VLANs."""
+    from device_discovery.translate import translate_data
+
+    data = {
+        "driver": "ios",
+        "device": {
+            "hostname": "sw1",
+            "vendor": "Cisco",
+            "model": "C9300",
+            "os_version": "17.6",
+            "serial_number": "ABC123",
+            "uptime": 1000,
+            "interface_list": ["Gi1/0/1", "Gi1/0/24"],
+            "fqdn": "sw1.example.com",
+        },
+        "interface": {
+            "Gi1/0/1": {"is_up": True, "is_enabled": True, "description": "",
+                         "last_flapped": 0.0, "mtu": 1500, "speed": 1000, "mac_address": ""},
+            "Gi1/0/24": {"is_up": True, "is_enabled": True, "description": "",
+                          "last_flapped": 0.0, "mtu": 1500, "speed": 1000, "mac_address": ""},
+        },
+        "interface_ip": {},
+        "vlan": {"1": {"name": "default"}, "10": {"name": "DATA"}},
+        "interfaces_vlans": {
+            "Gi1/0/1":  {"mode": "access", "tagged": [], "untagged": 10},
+            "Gi1/0/24": {"mode": "trunk",  "tagged": [10, 99], "untagged": 1},
+        },
+        "defaults": Defaults(),
+        "options": Options(),
+    }
+
+    entities = list(translate_data(data))
+
+    iface_by_name = {
+        e.interface.name: e.interface
+        for e in entities if e.HasField("interface")
+    }
+    assert iface_by_name["Gi1/0/1"].mode == "access"
+    assert iface_by_name["Gi1/0/1"].untagged_vlan.vid == 10
+    assert iface_by_name["Gi1/0/24"].mode == "tagged"
+    assert iface_by_name["Gi1/0/24"].untagged_vlan.vid == 1
+    assert sorted(v.vid for v in iface_by_name["Gi1/0/24"].tagged_vlans) == [10, 99]
+
+    vlan_vids = sorted(e.vlan.vid for e in entities if e.HasField("vlan"))
+    assert 99 in vlan_vids, "stub VLAN(vid=99) must be emitted alongside known VLANs"
