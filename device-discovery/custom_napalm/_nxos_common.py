@@ -123,10 +123,36 @@ def nxos_row_to_switchport_info(row: dict) -> SwitchportInfo:
     else:
         allowed = None
 
+    admin = _normalize_admin(_read_admin_mode(row))
+    oper = _normalize_oper(_read_oper_mode(row))
+
+    # NX-OS SSH oper-down inference.
+    #
+    # ntc-templates' ``cisco_nxos_show_interface_switchport`` parser does NOT
+    # capture the ``Administrative Mode`` line — only ``Operational Mode``.
+    # Both ``_read_admin_mode`` and ``_read_oper_mode`` therefore fall back
+    # to the same ``mode`` field, and a down link reports ``mode: down`` →
+    # both normalize to ``None`` → ``classify_switchport`` would emit
+    # ``routed``, dropping the configured VLAN data on every disconnected
+    # interface at collection time.
+    #
+    # Default ``admin`` to ``"access"`` when ``Switchport: Enabled`` and
+    # neither admin nor oper resolves to a known mode. Access is the
+    # most common default for an enabled switchport with no other signal,
+    # and the access_vlan field is still populated by NX-OS even on down
+    # ports. Trunks that happen to be down are misclassified as access
+    # using their trunk's access_vlan field (typically VID 1) — corrected
+    # automatically on the next discovery cycle once the link is up.
+    # NX-API rows are unaffected because they emit ``admin_mode`` and
+    # ``oper_mode`` separately, so ``admin`` is non-None and this branch
+    # does not fire.
+    if admin is None and oper is None:
+        admin = "access"
+
     return SwitchportInfo(
         enabled=True,
-        admin_mode=_normalize_admin(_read_admin_mode(row)),  # type: ignore[arg-type]
-        oper_mode=_normalize_oper(_read_oper_mode(row)),     # type: ignore[arg-type]
+        admin_mode=admin,  # type: ignore[arg-type]
+        oper_mode=oper,    # type: ignore[arg-type]
         access_vlan=_maybe_int(row.get("access_vlan")),
         native_vlan=_maybe_int(row.get("native_vlan")),
         allowed_vlans=allowed,

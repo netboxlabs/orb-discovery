@@ -94,12 +94,40 @@ def test_nxos_dynamic_admin_falls_through_to_oper():
     assert info.oper_mode == "trunk"
 
 
-def test_nxos_missing_keys_safe():
-    """Row with only 'switchport: Enabled' and no other keys is handled gracefully."""
+def test_nxos_missing_keys_safe_defaults_to_access():
+    """Row with only 'switchport: Enabled' resolves to access via the SSH oper-down heuristic."""
     info = nxos_row_to_switchport_info({"switchport": "Enabled"})
     assert info.enabled is True
-    assert info.admin_mode is None
+    assert info.admin_mode == "access"
     assert info.access_vlan is None
+
+
+def test_nxos_oper_down_defaults_to_access_to_preserve_vlan_data():
+    """Down switchport on the SSH path defaults to access so access_vlan still drives classification."""
+    info = nxos_row_to_switchport_info({
+        "switchport": "Enabled",
+        "mode": "down",
+        "access_vlan": "100",
+        "native_vlan": "1",
+        "voice_vlan": "none",
+        "trunking_vlans": "1-4094",
+    })
+    assert info.enabled is True
+    assert info.admin_mode == "access"
+    assert info.access_vlan == 100
+
+
+def test_nxos_oper_down_inference_does_not_override_explicit_admin():
+    """Heuristic must NOT fire when admin_mode is explicitly set (NX-API path)."""
+    info = nxos_row_to_switchport_info({
+        "switchport": "Enabled",
+        "admin_mode": "trunk",
+        "oper_mode": "down",
+        "native_vlan": "99",
+        "trunk_vlans": "10,20",
+    })
+    assert info.admin_mode == "trunk"
+    assert info.oper_mode is None  # "down" is not a recognized oper-mode value
 
 
 # ----- ntc-templates alias paths (cisco_nxos template emits 'mode' / 'trunking_vlans') -----
