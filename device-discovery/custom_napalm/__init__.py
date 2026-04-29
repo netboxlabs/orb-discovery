@@ -22,6 +22,7 @@ from custom_napalm.cumulus_linux import CumulusDriver
 from custom_napalm.dell_ftos import FTOSDriver
 from custom_napalm.dell_powerconnect import PowerConnectDriver
 from custom_napalm.dell_sonic import SONiCDriver
+from custom_napalm.eos import EOSDriver
 from custom_napalm.ericsson_ipos import IPOSDriver
 from custom_napalm.extreme_exos import ExosDriver
 from custom_napalm.extreme_slx import SLXOSDriver
@@ -56,6 +57,7 @@ __all__ = [
     "CumulusDriver",
     "EdgeRouterDriver",
     "EdgeSwitchDriver",
+    "EOSDriver",
     "ERSDriver",
     "ExosDriver",
     "FastIronDriver",
