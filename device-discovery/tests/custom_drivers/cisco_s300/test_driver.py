@@ -18,7 +18,8 @@ class TestS300Driver(BaseDriverTest):
         """Junk Trunking VLANs Enabled value must NOT silently widen the trunk."""
         import logging
 
-        from custom_napalm.cisco_s300 import _s300_switchport_block_to_entry
+        from custom_napalm._vlan import classify_switchport
+        from custom_napalm.cisco_s300 import _s300_block_to_switchport_info
         block = {
             "Switchport": "enable",
             "Administrative Mode": "trunk",
@@ -27,14 +28,15 @@ class TestS300Driver(BaseDriverTest):
             "Trunking VLANs Enabled": "not-a-vlan",
         }
         with caplog.at_level(logging.WARNING, logger="custom_napalm.cisco_s300"):
-            result = _s300_switchport_block_to_entry(block)
+            result = classify_switchport(_s300_block_to_switchport_info(block))
         # NOT trunk-all — fall back to plain trunk with empty tagged list.
         assert result == {"mode": "trunk", "tagged": [], "untagged": 99}
         assert any("could not be parsed" in r.message for r in caplog.records)
 
     def test_get_interfaces_vlans_explicit_all_still_trunk_all(self) -> None:
         """Sanity: literal "all" still maps to trunk-all after the typed-signal refactor."""
-        from custom_napalm.cisco_s300 import _s300_switchport_block_to_entry
+        from custom_napalm._vlan import classify_switchport
+        from custom_napalm.cisco_s300 import _s300_block_to_switchport_info
         block = {
             "Switchport": "enable",
             "Administrative Mode": "trunk",
@@ -42,5 +44,5 @@ class TestS300Driver(BaseDriverTest):
             "Trunking Native Mode VLAN": "99",
             "Trunking VLANs Enabled": "all",
         }
-        result = _s300_switchport_block_to_entry(block)
+        result = classify_switchport(_s300_block_to_switchport_info(block))
         assert result == {"mode": "trunk-all", "tagged": [], "untagged": 99}
