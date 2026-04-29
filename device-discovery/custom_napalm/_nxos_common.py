@@ -32,7 +32,17 @@ from custom_napalm._vlan import SwitchportInfo, parse_vlan_range_string
 
 
 def _maybe_int(value: object) -> int | None:
-    """Coerce to int or None; treats the string 'none' / empty / non-numeric as None."""
+    """
+    Coerce to int or None.
+
+    Returns None for the NX-OS sentinels (``None``, empty string, ``"none"``
+    / ``"None"`` / ``"NONE"``). Also rejects ``bool`` explicitly — ``bool``
+    is a subclass of ``int`` in Python (``int(True) == 1``), so without the
+    guard a buggy upstream parser passing a bool would slip past the
+    classifier's bool-rejection in ``_vlan.coerce_vid``.
+    """
+    if isinstance(value, bool):
+        return None
     if value in (None, "", "none", "None", "NONE"):
         return None
     try:

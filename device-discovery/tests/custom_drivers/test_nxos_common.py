@@ -1,6 +1,26 @@
 """Unit tests for custom_napalm._nxos_common shared NX-OS field mapper."""
 
-from custom_napalm._nxos_common import nxos_row_to_switchport_info
+from custom_napalm._nxos_common import _maybe_int, nxos_row_to_switchport_info
+
+
+def test_maybe_int_rejects_bool_true():
+    """Reject ``bool`` (int subclass) so it does not coerce to VID 1."""
+    assert _maybe_int(True) is None
+
+
+def test_maybe_int_rejects_bool_false():
+    """Mirrors True case: False must not coerce to VID 0."""
+    assert _maybe_int(False) is None
+
+
+def test_maybe_int_passes_through_string_int():
+    """Plain string-int still coerces normally."""
+    assert _maybe_int("42") == 42
+
+
+def test_maybe_int_treats_none_sentinel_as_none():
+    """NX-OS emits 'none' for absent voice VLAN; mapper returns None."""
+    assert _maybe_int("none") is None
 
 
 def test_nxos_disabled_switchport_is_routed():

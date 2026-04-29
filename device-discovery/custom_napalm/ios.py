@@ -20,7 +20,17 @@ logger = logging.getLogger(__name__)
 
 
 def _maybe_int(v: object) -> int | None:
-    """Convert a string/int to int, returning None on failure."""
+    """
+    Convert a string/int to int, returning None on failure.
+
+    Explicitly rejects ``bool`` (which is a subclass of ``int`` in Python,
+    so ``int(True) == 1``). VLAN-ID fields populated from buggy upstream
+    parsers must NOT silently turn ``True``/``False`` into VID 1/0 — the
+    classifier's bool-rejection in ``_vlan.coerce_vid`` only fires if the
+    bool reaches it un-coerced.
+    """
+    if isinstance(v, bool):
+        return None
     try:
         return int(v)  # type: ignore[arg-type]
     except (TypeError, ValueError):

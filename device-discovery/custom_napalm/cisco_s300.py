@@ -159,6 +159,23 @@ def _parse_portchannel_status_raw(raw: str) -> dict[str, dict]:
 _S300_BLOCK_RE = re.compile(r"^Name:\s*(\S+)\s*$", re.MULTILINE)
 
 
+def _maybe_int(s: object) -> int | None:
+    """
+    Convert a string/int to int, returning None on failure.
+
+    Rejects ``bool`` explicitly: ``bool`` is a subclass of ``int`` in Python,
+    so ``int(True) == 1`` — without this guard a buggy upstream parser
+    passing a bool would slip past the classifier's bool-rejection in
+    ``_vlan.coerce_vid``.
+    """
+    if isinstance(s, bool):
+        return None
+    try:
+        return int(s)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return None
+
+
 def _s300_block_to_switchport_info(fields: dict[str, str]) -> SwitchportInfo:
     """
     Build a SwitchportInfo from one parsed ``show interfaces switchport`` block.
@@ -179,12 +196,6 @@ def _s300_block_to_switchport_info(fields: dict[str, str]) -> SwitchportInfo:
         admin = "trunk"  # 'general' collapses to trunk semantics
     else:
         admin = None
-
-    def _maybe_int(s: str) -> int | None:
-        try:
-            return int(s)
-        except (ValueError, TypeError):
-            return None
 
     access_vid = _maybe_int(fields.get("Access Mode VLAN", ""))
     native_vid = _maybe_int(fields.get("Trunking Native Mode VLAN", ""))

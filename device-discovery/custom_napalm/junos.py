@@ -8,9 +8,14 @@ Handles both ELS and non-ELS configuration models. v1 skips voice VLAN
 
 XML parsing notes
 -----------------
-- lxml only supports XPath 1.0, so the ``local-name()`` predicate is NOT
-  available. We compare ``etree.QName(child.tag).localname`` instead, which
-  is namespace-agnostic and works on every element lxml can produce.
+- ``Element.find()`` / ``Element.findall()`` use ElementPath, a simplified
+  subset of XPath that does NOT accept arbitrary predicates such as
+  ``local-name()``. (Full XPath 1.0 — including ``local-name()`` — is
+  available via ``Element.xpath()``, but it's heavier and namespace-aware
+  in ways that complicate ELS/non-ELS handling.) We compare
+  ``etree.QName(child.tag).localname`` directly instead — namespace-agnostic,
+  works on every element lxml can produce, and avoids the XPath dependency
+  altogether.
 - ELS responses wrap the per-interface list in
   ``<l2ng-l2ald-iff-information>`` and use ``<interface-mode>``.
 - Non-ELS responses wrap in ``<ethernet-switching-interface-information>``
@@ -77,7 +82,7 @@ def _interface_to_switchport_info(intf_elem) -> SwitchportInfo:
     ``<interface-vlan-member>`` entries with
     ``<interface-vlan-member-tagid>`` and
     ``<interface-vlan-member-tagness>`` ("tagged"|"untagged"). Members
-    with only a name (no tagid) are dropped with a debug log — VLAN-name
+    with only a name (no tagid) are dropped with a warning log — VLAN-name
     resolution against ``self.get_vlans()`` is out-of-scope for v1.
     """
     # Mode — read whichever element is present
