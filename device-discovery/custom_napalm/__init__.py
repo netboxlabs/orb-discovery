@@ -38,6 +38,7 @@ from custom_napalm.mikrotik_routeros import ROSDriver
 from custom_napalm.nokia_srl import SRLDriver
 from custom_napalm.nokia_sros import SROSDriver
 from custom_napalm.nokia_sros_ssh import SROSSSHDriver
+from custom_napalm.nxos import NXOSDriver
 from custom_napalm.paloalto_panos import PANOSDriver
 from custom_napalm.paloalto_panos_ssh import PANOSSHDriver
 from custom_napalm.ubiquiti_edgerouter import EdgeRouterDriver
@@ -70,6 +71,7 @@ __all__ = [
     "IPOSDriver",
     "MLNXOSDriver",
     "NetIronDriver",
+    "NXOSDriver",
     "PANOSDriver",
     "PANOSSHDriver",
     "PowerConnectDriver",
