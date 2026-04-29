@@ -196,11 +196,9 @@ def _s300_block_to_switchport_info(fields: dict[str, str]) -> SwitchportInfo:
             allowed: list[int] | str | None = "all"
         else:
             allowed = vids
-            # PR #375 contract: malformed trunk input must NOT silently
-            # widen to trunk-all. Warn from the cisco_s300 logger so
-            # operators can spot drift; existing test
-            # ``test_get_interfaces_vlans_malformed_trunk_does_not_promote``
-            # asserts this warning is emitted.
+            # Malformed trunk input must NOT silently widen to trunk-all.
+            # Warn from the cisco_s300 logger so operators can spot vendor
+            # output drift.
             raw_lower = trunk_spec.strip().lower()
             if raw_lower and raw_lower != "none" and not vids:
                 logger.warning(

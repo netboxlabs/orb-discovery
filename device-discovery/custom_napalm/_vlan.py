@@ -13,7 +13,7 @@ Output shape (per interface)::
     {
         "mode":     "access" | "trunk" | "trunk-all" | "routed",
         "tagged":   list[int],          # VIDs in 1..4094, never the untagged VID
-        "untagged": int | None,         # VID in 1..4094, None for routed
+        "untagged": int | None,         # VID in 1..4094, or None when no valid VID
     }
 
 NetBox mapping is owned by ``device_discovery.translate``:

@@ -110,9 +110,9 @@ def _interface_to_switchport_info(intf_elem) -> SwitchportInfo:
         tagness = _text(_find_child(m, "interface-vlan-member-tagness")).lower()
         if vid is None:
             # Member emitted with only a name (no tagid). v1 doesn't resolve
-            # names → IDs via self.get_vlans(); skip and warn so the
-            # operator sees missing associations in logs.
-            logger.debug(
+            # names → IDs via self.get_vlans(); warn so operators see the
+            # missing association at default log levels.
+            logger.warning(
                 "Junos interface-vlan-member %r has no tagid; skipping (name resolution out-of-scope for v1)",
                 name,
             )

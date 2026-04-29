@@ -248,7 +248,7 @@ def test_classify_clamps_oob_vids_in_tagged():
     assert out == {"mode": "trunk", "tagged": [10, 20], "untagged": 1}
 
 
-# ----- additional classifier edges (Codex review P1#8) -----
+# ----- additional classifier edge cases -----
 
 
 def test_classify_trunk_all_via_full_range_list():
