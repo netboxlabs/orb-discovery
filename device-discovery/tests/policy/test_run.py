@@ -172,6 +172,7 @@ def test_update_run_sets_and_preserves_driver():
 
 
 def test_update_run_clears_driver_with_none():
+    """Clearing driver with None sets driver to None."""
     store = RunStore()
     run = store.create_run("policy1", "router1.example.com", "")
     store.update_run(
