@@ -505,11 +505,14 @@ class SONiCDriver(_napalm_base.NetworkDriver):
         return _parse_vlan_output(output)
 
     def get_interfaces_vlans(self) -> dict[str, dict]:
-        """Return per-interface VLAN config from ``show interface switchport``."""
+        """Return per-interface VLAN config from ``show interface[s] switchport``."""
         try:
-            raw = self.device.send_command("show interface switchport")
+            raw = _send_first_nonempty(
+                self.device,
+                ("show interfaces switchport", "show interface switchport"),
+            )
         except Exception:
-            logger.debug("SONiC show interface switchport failed", exc_info=True)
+            logger.debug("SONiC show interface[s] switchport failed", exc_info=True)
             return {}
         rows = _parse_show_interface_switchport(raw)
         result: dict[str, dict] = {}
