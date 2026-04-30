@@ -856,14 +856,11 @@ func (m *ObjectIDMapper) dedupIPAddresses(entities map[diode.Entity]bool) {
 		if b.modern == nil || b.legacy == nil {
 			continue
 		}
-		for entity := range entities {
-			if entity == b.legacy {
-				delete(entities, entity)
-				m.logger.Debug("deduped legacy ipAddress in favor of modern",
-					"address", *b.legacy.Address)
-				break
-			}
-		}
+		// entities is keyed by the entity pointer itself; b.legacy is
+		// that pointer, so delete directly without a second scan.
+		delete(entities, b.legacy)
+		m.logger.Debug("deduped legacy ipAddress in favor of modern",
+			"address", *b.legacy.Address)
 	}
 }
 
