@@ -12,9 +12,10 @@ import (
 // ipAddressTable column row index per RFC 4001 InetAddress.
 //
 // Layout: <addrType>.<addrLen>.<addrBytes...>
-//   addrType: 1 (ipv4) | 2 (ipv6); other values (3 ipv4z, 4 ipv6z, 16 dns)
-//   are rejected — see spec §Out of scope.
-//   addrLen:  4 for ipv4, 16 for ipv6 (anything else is malformed).
+//
+//	addrType: 1 (ipv4) | 2 (ipv6); other values (3 ipv4z, 4 ipv6z, 16 dns)
+//	are rejected — see spec §Out of scope.
+//	addrLen:  4 for ipv4, 16 for ipv6 (anything else is malformed).
 //
 // Returns the canonical address with a family-disambiguating prefix
 // ("ipv4:" or "ipv6:") so legacy-table indices (bare "a.b.c.d") and

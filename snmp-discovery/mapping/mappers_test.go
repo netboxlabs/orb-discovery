@@ -2893,13 +2893,20 @@ func TestMaskToPrefixSize(t *testing.T) {
 			entityRegistry := mapping.NewEntityRegistry(slog.Default())
 			result := mapper.Map(values, mappingEntry, entityRegistry, nil)
 
-			// All cases with prefix-only (no IP address) should result in nil address
-			// because validation now requires a complete IP/CIDR format
-			assert.NotNil(t, result)
-			ipAddress, ok := result.(*diode.IPAddress)
-			assert.True(t, ok)
-			// The address should be nil since prefix-only is not a valid IP/CIDR
-			assert.Nil(t, ipAddress.Address)
+			if tt.expectError {
+				// Invalid mask formats fail in maskToPrefixSize and
+				// the address field is never written. The mapper
+				// returns a non-nil entity with no Address set.
+				assert.NotNil(t, result)
+				ipAddress, ok := result.(*diode.IPAddress)
+				assert.True(t, ok)
+				assert.Nil(t, ipAddress.Address)
+			} else {
+				// Valid masks with no IP build an invalid CIDR string
+				// like "/24"; validation rejects it and the mapper
+				// drops the row by returning nil.
+				assert.Nil(t, result)
+			}
 		})
 	}
 }

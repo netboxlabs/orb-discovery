@@ -268,7 +268,9 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 						fieldFound = true
 					}
 				default:
-					m.logger.Warn("unknown field", "field", mappingEntry.Field)
+					m.logger.Warn("unknown field",
+						"field", propertyMappingEntry.Field,
+						"object_id", propertyMappingEntry.OID)
 				}
 			}
 		}
@@ -286,7 +288,11 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 		if !valid {
 			m.logger.Warn("invalid IP/CIDR format, skipping",
 				"address", *ipAddress.Address)
-			return &diode.IPAddress{} // Empty entity won't be added
+			// Return nil to drop the row outright. An empty
+			// &diode.IPAddress{} is still added by MapObjectIDsToEntity
+			// (the nil check there is on the entity pointer, not its
+			// fields), which would emit a malformed entity downstream.
+			return nil
 		}
 	}
 

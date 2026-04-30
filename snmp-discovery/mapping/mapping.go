@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"regexp"
 	"sort"
 	"strings"
@@ -561,15 +562,22 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 // pickPrimaryIPHit filters `entities` to IP addresses of the requested
 // family, intersects them with `candidates`, and returns the
 // deterministically-chosen winner (or nil).
+//
+// Family detection uses the textual address form rather than
+// net.IP.To4(): an IPv4-mapped IPv6 address like ::ffff:10.0.0.1 has
+// To4() != nil and would otherwise be silently reclassified as IPv4,
+// despite being encoded as RFC 4001 addrType=2 in ipAddressTable.
+// Canonicalization goes through netip.ParseAddr which preserves the
+// mapped form on String(), keeping the v4/v6 distinction intact for the
+// candidate comparison too.
 func pickPrimaryIPHit(logger *slog.Logger, target string, entities map[diode.Entity]bool, candidates []string, wantV6 bool) *diode.IPAddress {
-	// Canonicalize candidates once so we compare like-for-like.
 	canonCands := make(map[string]struct{}, len(candidates))
 	for _, c := range candidates {
-		ip := net.ParseIP(c)
-		if ip == nil {
+		addr, err := netip.ParseAddr(c)
+		if err != nil {
 			continue
 		}
-		canonCands[ip.String()] = struct{}{}
+		canonCands[addr.String()] = struct{}{}
 	}
 	if len(canonCands) == 0 {
 		return nil
@@ -591,15 +599,17 @@ func pickPrimaryIPHit(logger *slog.Logger, target string, entities map[diode.Ent
 			continue
 		}
 		stripped := stripPrefix(*ip.Address)
-		parsed := net.ParseIP(stripped)
-		if parsed == nil {
-			continue
-		}
-		isV6 := parsed.To4() == nil
+		// Detect family from the address text — a colon means IPv6,
+		// even for IPv4-mapped form (::ffff:a.b.c.d).
+		isV6 := strings.Contains(stripped, ":")
 		if isV6 != wantV6 {
 			continue
 		}
-		if _, ok := canonCands[parsed.String()]; !ok {
+		addr, err := netip.ParseAddr(stripped)
+		if err != nil {
+			continue
+		}
+		if _, ok := canonCands[addr.String()]; !ok {
 			continue
 		}
 		hits = append(hits, hit{
@@ -952,10 +962,6 @@ func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[Ob
 		objectIDIndexMap[objectIDValue.Index].Values[ObjectIDIndex(objectID)] = objectIDValue
 	}
 	return objectIDIndexMap
-}
-
-func newObjectIDValue(objectID string, value Value) (*ObjectIDValue, error) {
-	return newObjectIDValueForEntry(objectID, value, nil)
 }
 
 // newObjectIDValueForEntry parses an OID and its value into an ObjectIDValue.

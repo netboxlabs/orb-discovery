@@ -37,14 +37,14 @@ func TestDecodeInetAddressIndex_Scoped_Skipped(t *testing.T) {
 
 func TestDecodeInetAddressIndex_Malformed(t *testing.T) {
 	cases := [][]string{
-		{},                                    // empty
-		{"1"},                                 // no length
-		{"1", "5", "10", "0", "0", "1", "1"},  // wrong addrLen for ipv4
-		{"2", "16", "32", "1"},                // truncated ipv6
-		{"1", "4", "10", "0", "0", "256"},     // byte > 255
-		{"99", "4", "10", "0", "0", "1"},      // unknown addrType
-		{"1", "4", "10", "0", "0", "x"},       // non-numeric
-		{"a", "4", "10", "0", "0", "1"},       // non-numeric addrType
+		{},                                   // empty
+		{"1"},                                // no length
+		{"1", "5", "10", "0", "0", "1", "1"}, // wrong addrLen for ipv4
+		{"2", "16", "32", "1"},               // truncated ipv6
+		{"1", "4", "10", "0", "0", "256"},    // byte > 255
+		{"99", "4", "10", "0", "0", "1"},     // unknown addrType
+		{"1", "4", "10", "0", "0", "x"},      // non-numeric
+		{"a", "4", "10", "0", "0", "1"},      // non-numeric addrType
 	}
 	for _, c := range cases {
 		_, ok := decodeInetAddressIndex(c)
