@@ -3726,3 +3726,141 @@ func TestDeviceMapper_Map_DynamicModelRefResolvedFromWalked(t *testing.T) {
 	device := entity.(*diode.Device)
 	assert.Equal(t, "RouterOS CCR2004-16G-2S+", *device.DeviceType.Model)
 }
+
+// --- RFC 4293 ipAddressTable tests (OBS-2798) ---
+
+// inetAddrTableEntry builds a synthetic ipAddressTable mapping.Entry that
+// recognizes addressPrefix and the filter columns (used by Tasks 5/6).
+func inetAddrTableEntry() *mapping.Entry {
+	return &mapping.Entry{
+		OID: ".1.3.6.1.2.1.4.34.1", Entity: "ipAddress", Field: "_id",
+		IndexKind: "inet_address",
+		MappingEntries: []mapping.Entry{
+			{OID: ".1.3.6.1.2.1.4.34.1.4", Entity: "ipAddress", Field: "addressType"},
+			{OID: ".1.3.6.1.2.1.4.34.1.5", Entity: "ipAddress", Field: "addressPrefix"},
+			{OID: ".1.3.6.1.2.1.4.34.1.7", Entity: "ipAddress", Field: "addressStatus"},
+			{OID: ".1.3.6.1.2.1.4.34.1.10", Entity: "ipAddress", Field: "addressRowStatus"},
+		},
+	}
+}
+
+func TestIPAddressMapper_IPv4FromInetAddressIndex(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1": {
+			OID:    ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1",
+			Index:  "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.1.4.10.0.0.0.24",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip, ok := got.(*diode.IPAddress)
+	if !ok || ip == nil || ip.Address == nil {
+		t.Fatalf("expected non-nil *diode.IPAddress with Address, got %#v", got)
+	}
+	assert.Equal(t, "10.0.0.1/24", *ip.Address)
+}
+
+func TestIPAddressMapper_IPv6FromInetAddressIndex(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		".1.3.6.1.2.1.4.34.1.5.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1": {
+			OID:    ".1.3.6.1.2.1.4.34.1.5.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1",
+			Index:  "ipv6:2001:db8::1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.0.64",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	if ip.Address == nil {
+		t.Fatalf("expected Address to be set")
+	}
+	assert.Equal(t, "2001:db8::1/64", *ip.Address)
+}
+
+func TestIPAddressMapper_RowPointer_ZeroDotZero_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5", Value: ".0.0",
+			Type: mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address)
+}
+
+func TestIPAddressMapper_RowPointer_OversizedPrefix_Clamped(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID:    ".1.3.6.1.2.1.4.34.1.5.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1",
+			Index:  "ipv6:2001:db8::1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.0.200",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "2001:db8::1/128", *ip.Address)
+}
+
+func TestIPAddressMapper_RowPointer_NotPrefixTable_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5", Value: ".1.2.3.4.5.24",
+			Type: mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address)
+}
+
+func TestIPAddressMapper_LegacyTable_StillIPv4Only(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	entry := &mapping.Entry{
+		OID: ".1.3.6.1.2.1.4.20.1", Entity: "ipAddress", Field: "_id",
+		IdentifierSize: 4,
+		MappingEntries: []mapping.Entry{
+			{OID: ".1.3.6.1.2.1.4.20.1.1", Entity: "ipAddress", Field: "address"},
+		},
+	}
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		".1.3.6.1.2.1.4.20.1.1.10.0.0.1": {
+			OID: ".1.3.6.1.2.1.4.20.1.1.10.0.0.1", Index: "10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.20.1.1", Value: "10.0.0.1",
+			Type: mapping.IPAddress,
+		},
+	}
+	got := mapper.Map(pdus, entry, registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address)
+}

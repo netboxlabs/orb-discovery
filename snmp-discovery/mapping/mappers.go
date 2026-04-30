@@ -102,15 +102,19 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 	fieldFound := false
 	var extractedIP string // Store the IP address extracted from any field
 
+	isInetAddress := mappingEntry.IndexKind == "inet_address"
+
 	extractIPFromIndex := func(value *ObjectIDValue, field string) {
 		if extractedIP != "" {
 			return
 		}
-		if value.Index != "" {
-			if ip := net.ParseIP(string(value.Index)); ip != nil && ip.To4() != nil {
-				extractedIP = ip.String()
-				m.logger.Debug("extracted IP address", "field", field, "ip", extractedIP)
-			}
+		if value.Index == "" {
+			return
+		}
+		raw := stripIndexFamilyPrefix(string(value.Index))
+		if ip := net.ParseIP(raw); ip != nil {
+			extractedIP = ip.String()
+			m.logger.Debug("extracted IP address", "field", field, "ip", extractedIP)
 		}
 	}
 
@@ -120,7 +124,7 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 		}
 		// Try to extract from value field first
 		if value.Value != "" {
-			if ip := net.ParseIP(value.Value); ip != nil && ip.To4() != nil {
+			if ip := net.ParseIP(value.Value); ip != nil {
 				extractedIP = ip.String()
 				m.logger.Debug("extracted IP address", "field", field, "ip", extractedIP)
 				return true
@@ -133,6 +137,26 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 
 	setOrUpdateAddress := func(newAddress string) {
 		ipAddress.Address = &newAddress
+	}
+
+	// inet_address-indexed rows derive the address from the (already
+	// decoded) index, not from a separate column. Set it once up front
+	// with a host-route default; the addressPrefix handler may overwrite.
+	if isInetAddress {
+		for _, v := range values {
+			canonical := stripIndexFamilyPrefix(string(v.Index))
+			if canonical == "" {
+				continue
+			}
+			if strings.Contains(canonical, ":") {
+				setOrUpdateAddress(fmt.Sprintf("%s/128", canonical))
+			} else {
+				setOrUpdateAddress(fmt.Sprintf("%s/32", canonical))
+			}
+			extractedIP = canonical
+			fieldFound = true
+			break
+		}
 	}
 
 	for objectID, value := range values {
@@ -180,6 +204,34 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 						}
 						fieldFound = true
 					}
+				case "addressPrefix":
+					// RFC 4293 ipAddressTable .5 is a RowPointer into
+					// ipAddressPrefixTable; the last sub-OID is the
+					// prefix length. zeroDotZero, malformed pointers,
+					// and pointers outside the prefix table fall back
+					// to the host-route default already set above.
+					if ipAddress.Address == nil || *ipAddress.Address == "" {
+						continue
+					}
+					prefixLen, ok := parseAddressPrefixRowPointer(value.Value)
+					if !ok {
+						m.logger.Debug("addressPrefix not usable, keeping host route",
+							"value", value.Value, "address", *ipAddress.Address)
+						fieldFound = true
+						continue
+					}
+					canonical := stripPrefix(*ipAddress.Address)
+					maxLen := 32
+					if strings.Contains(canonical, ":") {
+						maxLen = 128
+					}
+					if prefixLen > maxLen {
+						m.logger.Debug("addressPrefix length clamped",
+							"raw", prefixLen, "clamped", maxLen, "address", canonical)
+						prefixLen = maxLen
+					}
+					setOrUpdateAddress(fmt.Sprintf("%s/%d", canonical, prefixLen))
+					fieldFound = true
 				case "assignedObject":
 					extractIPFromIndex(value, propertyMappingEntry.Field)
 					if propertyMappingEntry.Relationship != (config.Relationship{}) {
@@ -194,6 +246,10 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 							fieldFound = true
 						}
 					}
+				case "addressType", "addressStatus", "addressRowStatus":
+					// Captured in Task 6 (filtering). Recognized here so
+					// the default branch doesn't warn about them.
+					_ = value
 				default:
 					m.logger.Warn("unknown field", "field", mappingEntry.Field)
 				}
@@ -201,9 +257,16 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 		}
 	}
 
-	// Validate the final IP/CIDR before storage
+	// Validate the final IP/CIDR before storage. inet_address rows can
+	// be IPv4 or IPv6; legacy ipAddrTable rows must remain IPv4.
 	if ipAddress.Address != nil && *ipAddress.Address != "" {
-		if !ValidateIPv4CIDR(*ipAddress.Address) {
+		valid := false
+		if isInetAddress {
+			valid = ValidateIPCIDR(*ipAddress.Address)
+		} else {
+			valid = ValidateIPv4CIDR(*ipAddress.Address)
+		}
+		if !valid {
 			m.logger.Warn("invalid IP/CIDR format, skipping",
 				"address", *ipAddress.Address)
 			return &diode.IPAddress{} // Empty entity won't be added
@@ -220,6 +283,42 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 	}
 
 	return &ipAddress
+}
+
+// parseAddressPrefixRowPointer extracts the prefix length from an
+// ipAddressPrefix RowPointer value (.5 column of ipAddressTable).
+//
+// Expected shape (RFC 4293):
+//
+//	.1.3.6.1.2.1.4.32.1.5.<ifIndex>.<addrType>.<addrLen>.<addrBytes...>.<prefixLen>
+//
+// Returns ok=false for:
+//   - "0.0" / ".0.0" (zeroDotZero — RFC 4293 sentinel for "no prefix
+//     row exists")
+//   - any pointer that does not begin with .1.3.6.1.2.1.4.32.1.5
+//   - empty / non-numeric tail
+func parseAddressPrefixRowPointer(pointer string) (int, bool) {
+	if pointer == "" {
+		return 0, false
+	}
+	trimmed := strings.TrimPrefix(pointer, ".")
+	if trimmed == "0.0" || trimmed == "" {
+		return 0, false
+	}
+	const prefixTablePrefix = "1.3.6.1.2.1.4.32.1.5"
+	if trimmed != prefixTablePrefix && !strings.HasPrefix(trimmed, prefixTablePrefix+".") {
+		return 0, false
+	}
+	parts := strings.Split(trimmed, ".")
+	if len(parts) == 0 {
+		return 0, false
+	}
+	tail := parts[len(parts)-1]
+	n, err := strconv.Atoi(tail)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 func maskToPrefixSize(maskStr string) (int, error) {
@@ -247,7 +346,9 @@ func maskToPrefixSize(maskStr string) (int, error) {
 }
 
 // ValidateIPv4CIDR validates an IPv4 address in CIDR notation (e.g., "192.168.1.1/24").
-// Returns true if the format is valid, false otherwise.
+// Returns true if the format is valid, false otherwise. Used by the legacy
+// ipAddrTable path; for tables that may carry IPv6 (RFC 4293 ipAddressTable)
+// use ValidateIPCIDR instead.
 func ValidateIPv4CIDR(cidr string) bool {
 	ip, ipNet, err := net.ParseCIDR(cidr)
 	if err != nil {
@@ -266,6 +367,17 @@ func ValidateIPv4CIDR(cidr string) bool {
 	}
 
 	return true
+}
+
+// ValidateIPCIDR validates an IPv4 or IPv6 address in CIDR notation
+// (e.g., "192.168.1.1/24" or "2001:db8::1/64"). Used by the
+// inet_address-indexed ipAddressTable path which produces both families.
+func ValidateIPCIDR(cidr string) bool {
+	ip, _, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return false
+	}
+	return ip != nil
 }
 
 // InterfaceMapper is a struct that maps interfaces to entities
