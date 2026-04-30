@@ -49,7 +49,11 @@ _COMWARE_IFACE_PREFIX_MAP = {
     "RAGG": "Route-Aggregation",
     "Vlan-int": "Vlan-interface",
 }
-_COMWARE_IFACE_RE = re.compile(r"^([A-Za-z][A-Za-z0-9-]*?)([0-9].*)$")
+# Sort by descending length so longer prefixes (e.g. ``100GE``, ``XGE``,
+# ``M-GE``) are tried before the shorter ones they overlap with (``GE``).
+_COMWARE_IFACE_PREFIXES_BY_LEN = sorted(
+    _COMWARE_IFACE_PREFIX_MAP.items(), key=lambda kv: -len(kv[0])
+)
 
 
 def _expand_comware_iface(name: str) -> str:
@@ -57,17 +61,17 @@ def _expand_comware_iface(name: str) -> str:
     Expand a Comware abbreviated interface name to its full form.
 
     ``GE1/0/1`` → ``GigabitEthernet1/0/1``; ``XGE1/0/49`` →
-    ``Ten-GigabitEthernet1/0/49``. Names that don't match a known prefix
-    (or already use the full form) are returned unchanged.
+    ``Ten-GigabitEthernet1/0/49``; ``100GE1/0/1`` → ``HundredGigE1/0/1``.
+    Names that don't match a known prefix (or already use the full form)
+    are returned unchanged. The match anchors on a digit immediately after
+    the prefix to avoid false positives like ``GEORGE``.
     """
-    m = _COMWARE_IFACE_RE.match(name)
-    if not m:
-        return name
-    prefix, suffix = m.group(1), m.group(2)
-    expanded = _COMWARE_IFACE_PREFIX_MAP.get(prefix)
-    if expanded is None:
-        return name
-    return f"{expanded}{suffix}"
+    for prefix, expanded in _COMWARE_IFACE_PREFIXES_BY_LEN:
+        if name.startswith(prefix):
+            suffix = name[len(prefix):]
+            if suffix and suffix[0].isdigit():
+                return f"{expanded}{suffix}"
+    return name
 
 
 def _parse_comware_interface_brief_modes(rows: list[dict]) -> dict[str, dict]:

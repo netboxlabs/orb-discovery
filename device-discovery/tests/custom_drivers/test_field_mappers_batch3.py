@@ -182,6 +182,23 @@ def test_comware_iface_expand_known_prefixes():
     assert _expand_comware_iface("BAGG1") == "Bridge-Aggregation1"
 
 
+def test_comware_iface_expand_digit_leading_prefixes():
+    """Digit-leading abbreviations (25GE/40GE/100GE/...) expand correctly."""
+    assert _expand_comware_iface("25GE1/0/1") == "Twenty-FiveGigE1/0/1"
+    assert _expand_comware_iface("40GE1/0/1") == "FortyGigE1/0/1"
+    assert _expand_comware_iface("100GE1/0/1") == "HundredGigE1/0/1"
+    assert _expand_comware_iface("200GE1/0/1") == "TwoHundredGigE1/0/1"
+    assert _expand_comware_iface("400GE1/0/1") == "FourHundredGigE1/0/1"
+
+
+def test_comware_iface_expand_no_false_positives():
+    """A prefix without a digit suffix (or non-matching) is returned unchanged."""
+    # 'GEORGE' starts with 'GE' but the next char is a letter, not a digit.
+    assert _expand_comware_iface("GEORGE") == "GEORGE"
+    # 'GE' alone — nothing after the prefix.
+    assert _expand_comware_iface("GE") == "GE"
+
+
 def test_comware_iface_expand_passthrough():
     """Names already in full form (or unknown prefixes) are returned unchanged."""
     assert _expand_comware_iface("GigabitEthernet1/0/1") == "GigabitEthernet1/0/1"
