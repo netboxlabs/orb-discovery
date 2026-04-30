@@ -20,7 +20,118 @@ from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
+from custom_napalm._vlan import (
+    SwitchportInfo,
+    classify_switchport,
+    parse_vlan_range_string,
+)
+
 logger = logging.getLogger(__name__)
+
+
+_FTOS_PORT_HEADER_RE = re.compile(r"^\s*Name:\s+(\S.*?)\s*$", re.MULTILINE)
+_FTOS_FIELD_RE = re.compile(r"^\s*([A-Za-z][A-Za-z\- ]+?)\s*:\s*(.*?)\s*$")
+
+
+def _parse_ftos_show_interfaces_switchport(text: str) -> list[dict]:
+    """
+    Parse FTOS ``show interfaces switchport`` into per-port dicts.
+
+    Each port section starts with ``Name: <iface>`` and is followed by
+    ``Field: Value`` lines. Sections are separated by blank lines.
+    Unknown/extra fields are ignored.
+    """
+    rows: list[dict] = []
+    current: dict | None = None
+    for line in text.splitlines():
+        header = _FTOS_PORT_HEADER_RE.match(line)
+        if header:
+            if current is not None:
+                rows.append(current)
+            current = {"interface": header.group(1).strip()}
+            continue
+        if current is None:
+            continue
+        m = _FTOS_FIELD_RE.match(line)
+        if m:
+            key = (
+                m.group(1).strip().lower().replace(" ", "_").replace("-", "_")
+            )
+            current[key] = m.group(2).strip()
+    if current is not None:
+        rows.append(current)
+    return rows
+
+
+def _ftos_row_to_switchport_info(row: dict) -> SwitchportInfo:
+    """Map a parsed FTOS port section to a SwitchportInfo."""
+    sw = (row.get("switchport") or "").lower()
+    if sw in ("disabled", "off"):
+        return SwitchportInfo(
+            enabled=False,
+            admin_mode=None,
+            oper_mode=None,
+            access_vlan=None,
+            native_vlan=None,
+            allowed_vlans=None,
+        )
+
+    mode_raw = (
+        row.get("administrative_mode") or row.get("admin_mode") or ""
+    ).lower()
+    if mode_raw not in ("access", "trunk", "general"):
+        return SwitchportInfo(
+            enabled=False,
+            admin_mode=None,
+            oper_mode=None,
+            access_vlan=None,
+            native_vlan=None,
+            allowed_vlans=None,
+        )
+
+    def _vid(s: str) -> int | None:
+        try:
+            return int(s)
+        except (ValueError, TypeError):
+            return None
+
+    access_vid = _vid(
+        row.get("access_mode_vlan") or row.get("access_vlan") or ""
+    )
+    native_vid = _vid(
+        row.get("native_vlan") or row.get("trunking_native_mode_vlan") or ""
+    )
+
+    allowed_raw = (
+        row.get("trunking_vlans_enabled")
+        or row.get("trunking_vlans_active")
+        or row.get("allowed_vlans")
+        or ""
+    )
+    if allowed_raw and allowed_raw.lower() != "none":
+        vids, is_wildcard = parse_vlan_range_string(allowed_raw)
+        allowed: list[int] | str | None = "all" if is_wildcard else vids
+    else:
+        allowed = None
+
+    if mode_raw == "access":
+        return SwitchportInfo(
+            enabled=True,
+            admin_mode="access",
+            oper_mode="access",
+            access_vlan=access_vid,
+            native_vlan=None,
+            allowed_vlans=None,
+        )
+
+    return SwitchportInfo(
+        enabled=True,
+        admin_mode="trunk",
+        oper_mode="trunk",
+        access_vlan=None,
+        native_vlan=native_vid,
+        allowed_vlans=allowed,
+    )
 
 # ---------------------------------------------------------------------------
 # Config sanitization — Dell FTOS sensitive fields
@@ -467,3 +578,20 @@ class FTOSDriver(_napalm_base.NetworkDriver):
                     entry["interfaces"].append(port)
 
         return vlans
+
+    def get_interfaces_vlans(self) -> dict[str, dict]:
+        """Return per-interface VLAN config from ``show interfaces switchport``."""
+        try:
+            raw = self.device.send_command("show interfaces switchport")
+        except Exception:
+            logger.debug("FTOS show interfaces switchport failed", exc_info=True)
+            return {}
+        rows = _parse_ftos_show_interfaces_switchport(raw)
+        result: dict[str, dict] = {}
+        for row in rows:
+            ifname = row.get("interface")
+            if not ifname:
+                continue
+            info = _ftos_row_to_switchport_info(row)
+            result[ifname] = classify_switchport(info)
+        return result
