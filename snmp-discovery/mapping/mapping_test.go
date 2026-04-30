@@ -1482,6 +1482,44 @@ func TestAssignPrimaryIP_ModernIPv4_FromIpAddressTable(t *testing.T) {
 	}
 }
 
+// TestOBS2798_ModernOnlyDevice_PopulatesPrimaryIPs reproduces the bug
+// described in https://linear.app/netboxlabs/issue/OBS-2798. A device
+// that does not respond to ipAddrTable but does populate ipAddressTable
+// must still yield IP entities and have its PrimaryIp4 (and PrimaryIp6
+// where applicable) set when the SNMP target host matches.
+func TestOBS2798_ModernOnlyDevice_PopulatesPrimaryIPs(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	m := mapping.NewObjectIDMapper(cfg, logger, &config.Defaults{}, "10.0.0.1")
+	// Deliberately ipAddressTable PDUs only — no ipAddrTable rows.
+	entities := m.MapObjectIDsToEntity(primaryIPModernDualStackOIDs("10.0.0.1", "2001:db8::1", "Gi0", 24, 64))
+
+	device := findDevice(entities)
+	assert.NotNil(t, device, "device entity must be reachable")
+	assert.NotNil(t, device.PrimaryIp4, "PrimaryIp4 must be set from ipAddressTable")
+	if device.PrimaryIp4 != nil {
+		assert.Equal(t, "10.0.0.1/24", *device.PrimaryIp4.Address)
+	}
+
+	v4Count, v6Count := 0, 0
+	for _, e := range entities {
+		ip, ok := e.(*diode.IPAddress)
+		if !ok || ip.Address == nil {
+			continue
+		}
+		if strings.HasPrefix(*ip.Address, "10.0.0.1") {
+			v4Count++
+		}
+		if strings.HasPrefix(*ip.Address, "2001:db8::1") {
+			v6Count++
+		}
+	}
+	assert.Equal(t, 1, v4Count, "exactly one IPv4 entity must be emitted from ipAddressTable")
+	assert.Equal(t, 1, v6Count, "exactly one IPv6 entity must be emitted from ipAddressTable")
+}
+
 func TestMapObjectIDsToEntity_LegacyAndModernSameAddress_Deduplicates(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
