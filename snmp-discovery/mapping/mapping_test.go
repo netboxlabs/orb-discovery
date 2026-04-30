@@ -1660,11 +1660,20 @@ func TestMapObjectIDsToEntity_LegacyAndModernSameAddress_Deduplicates(t *testing
 	entities := m.MapObjectIDsToEntity(pdus)
 
 	count := 0
+	var survivingIP *diode.IPAddress
 	for _, e := range entities {
 		if ip, ok := e.(*diode.IPAddress); ok && ip.Address != nil &&
 			strings.HasPrefix(*ip.Address, "10.0.0.1") {
 			count++
+			survivingIP = ip
 		}
 	}
 	assert.Equal(t, 1, count, "duplicate IP entities must be deduped to one")
+	// The legacy fixture emits 10.0.0.1/32 (host-route default from
+	// address-only PDU); the modern fixture emits 10.0.0.1/24 (RowPointer
+	// prefix). Asserting /24 proves the modern row won the dedup.
+	if assert.NotNil(t, survivingIP, "deduped IP entity must be present") {
+		assert.Equal(t, "10.0.0.1/24", *survivingIP.Address,
+			"modern ipAddressTable row must win over legacy ipAddrTable row")
+	}
 }
