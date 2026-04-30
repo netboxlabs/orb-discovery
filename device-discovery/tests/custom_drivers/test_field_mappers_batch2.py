@@ -112,6 +112,19 @@ def test_cumulus_bad_vid_skipped():
     assert info.allowed_vlans == [100]
 
 
+def test_cumulus_bool_vid_rejected():
+    """Bool VID is rejected before int() coercion (bool is a subclass of int)."""
+    entry = {"ifname": "swp1", "vlans": [
+        {"vlan": True, "flags": ["PVID"]},
+        {"vlan": 100, "flags": []},
+    ]}
+    info = _bridge_json_to_switchport_info(entry)
+    # PVID with bool=True must NOT become PVID=1; only the valid 100 survives.
+    assert info.access_vlan is None
+    assert info.native_vlan is None
+    assert info.allowed_vlans == [100]
+
+
 # ----- AOS-CX ---------------------------------------------------------------
 
 
@@ -123,10 +136,39 @@ def test_cumulus_bad_vid_skipped():
     ("not-a-uri", None),
     (None, None),
     (True, None),
+    ({"/rest/v10.04/system/vlans/10": "/rest/v10.04/system/vlans/10"}, 10),
+    ({"/rest/v10.04/system/vlans/200": {"id": 200, "name": "FOO"}}, 200),
+    ({}, None),
 ])
 def test_aoscx_vlan_uri_parsing(value, expected):
-    """URI/int/string/bool inputs all reduce to int VID or None."""
+    """URI/int/string/bool/dict-reference inputs all reduce to int VID or None."""
     assert _vlan_uri_to_vid(value) == expected
+
+
+def test_aoscx_vlan_trunks_dict_shape():
+    """vlan_trunks can arrive as a dict (pyaoscx depth>=1 reference shape)."""
+    info = _aoscx_iface_to_switchport_info({
+        "routing": False,
+        "vlan_mode": "native-untagged",
+        "vlan_tag": {"/rest/v10.04/system/vlans/99": "/rest/v10.04/system/vlans/99"},
+        "vlan_trunks": {
+            "/rest/v10.04/system/vlans/100": "/rest/v10.04/system/vlans/100",
+            "/rest/v10.04/system/vlans/200": "/rest/v10.04/system/vlans/200",
+        },
+    })
+    assert info.native_vlan == 99
+    assert sorted(info.allowed_vlans) == [100, 200]
+
+
+def test_aoscx_trunk_dict_with_entries_is_not_wildcard():
+    """Non-empty vlan_trunks dict under vlan_mode=trunk emits explicit list, not trunk-all."""
+    info = _aoscx_iface_to_switchport_info({
+        "routing": False,
+        "vlan_mode": "trunk",
+        "vlan_tag": None,
+        "vlan_trunks": {"/rest/v10.04/system/vlans/100": "/rest/v10.04/system/vlans/100"},
+    })
+    assert info.allowed_vlans == [100]
 
 
 def test_aoscx_routing_true_yields_routed():

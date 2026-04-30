@@ -458,6 +458,35 @@ class CumulusDriver(_napalm_base.NetworkDriver):
         return result
 
 
+def _split_bridge_vlans(vlans: list) -> tuple[int | None, list[int]]:
+    """
+    Split a ``bridge -j vlan show`` vlans list into ``(pvid, tagged_vids)``.
+
+    Rejects bool VIDs (bool is a subclass of int) and silently drops malformed
+    rows. The PVID flag — when present — moves a VID into the pvid slot;
+    everything else accumulates into the tagged list.
+    """
+    pvid: int | None = None
+    tagged: list[int] = []
+    for v in vlans:
+        if not isinstance(v, dict):
+            continue
+        vid_raw = v.get("vlan")
+        if isinstance(vid_raw, bool):
+            continue
+        try:
+            vid = int(vid_raw)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        flags = v.get("flags") or []
+        is_pvid = any(f == "PVID" for f in flags) if isinstance(flags, list) else False
+        if is_pvid:
+            pvid = vid
+        else:
+            tagged.append(vid)
+    return pvid, tagged
+
+
 def _bridge_json_to_switchport_info(entry: dict) -> SwitchportInfo:
     """
     Map a ``bridge -j vlan show`` entry to a SwitchportInfo.
@@ -479,22 +508,7 @@ def _bridge_json_to_switchport_info(entry: dict) -> SwitchportInfo:
             allowed_vlans=None,
         )
 
-    pvid: int | None = None
-    tagged: list[int] = []
-    for v in vlans:
-        if not isinstance(v, dict):
-            continue
-        vid_raw = v.get("vlan")
-        try:
-            vid = int(vid_raw)  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            continue
-        flags = v.get("flags") or []
-        is_pvid = any(f == "PVID" for f in flags) if isinstance(flags, list) else False
-        if is_pvid:
-            pvid = vid
-        else:
-            tagged.append(vid)
+    pvid, tagged = _split_bridge_vlans(vlans)
 
     if pvid is not None:
         tagged = [v for v in tagged if v != pvid]

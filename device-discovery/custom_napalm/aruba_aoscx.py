@@ -34,7 +34,16 @@ _VLAN_URI_RE = re.compile(r".*/system/vlans/(\d+)\b")
 
 
 def _vlan_uri_to_vid(value: object) -> int | None:
-    """Extract an integer VID from a vlan_tag/vlan_trunks entry (URI string or int)."""
+    """
+    Extract an integer VID from a vlan_tag/vlan_trunks entry.
+
+    Accepts AOS-CX REST reference shapes:
+      - URI string: ``"/rest/v10.04/system/vlans/10"``
+      - Stringified or native int VID
+      - Single-entry dict reference: ``{"/rest/v10.04/system/vlans/10": ...}``
+        (returned by pyaoscx at depth >= 1; the value side may be a URI
+        string or the expanded VLAN object dict at depth 2).
+    """
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
@@ -50,7 +59,22 @@ def _vlan_uri_to_vid(value: object) -> int | None:
             return int(value)
         except ValueError:
             return None
+    if isinstance(value, dict) and len(value) == 1:
+        # Reference dict: {uri: uri-or-object}. The KEY carries the URI.
+        only_key = next(iter(value.keys()))
+        return _vlan_uri_to_vid(only_key)
     return None
+
+
+def _normalize_vlan_trunks(trunks_raw: object) -> list[int]:
+    """Normalize a vlan_trunks value (list/dict/None) to a list of integer VIDs."""
+    if isinstance(trunks_raw, dict):
+        trunk_iter: list = list(trunks_raw.keys())
+    elif isinstance(trunks_raw, list):
+        trunk_iter = trunks_raw
+    else:
+        trunk_iter = []
+    return [v for v in (_vlan_uri_to_vid(t) for t in trunk_iter) if v is not None]
 
 
 def _aoscx_iface_to_switchport_info(intf: dict) -> SwitchportInfo:
@@ -77,11 +101,7 @@ def _aoscx_iface_to_switchport_info(intf: dict) -> SwitchportInfo:
         )
 
     vlan_tag_vid = _vlan_uri_to_vid(intf.get("vlan_tag"))
-
-    trunks_raw = intf.get("vlan_trunks") or []
-    if not isinstance(trunks_raw, list):
-        trunks_raw = []
-    trunk_vids = [v for v in (_vlan_uri_to_vid(t) for t in trunks_raw) if v is not None]
+    trunk_vids = _normalize_vlan_trunks(intf.get("vlan_trunks"))
 
     if vlan_mode == "access":
         return SwitchportInfo(
