@@ -104,6 +104,12 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 
 	isInetAddress := mappingEntry.IndexKind == "inet_address"
 
+	// Lenient defaults match the "missing column" semantics so devices
+	// that omit one of the filter columns are not rejected.
+	addrType := 1   // unicast
+	addrStatus := 1 // preferred
+	rowStatus := 1  // active
+
 	extractIPFromIndex := func(value *ObjectIDValue, field string) {
 		if extractedIP != "" {
 			return
@@ -246,10 +252,21 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 							fieldFound = true
 						}
 					}
-				case "addressType", "addressStatus", "addressRowStatus":
-					// Captured in Task 6 (filtering). Recognized here so
-					// the default branch doesn't warn about them.
-					_ = value
+				case "addressType":
+					if n, err := strconv.Atoi(value.Value); err == nil {
+						addrType = n
+						fieldFound = true
+					}
+				case "addressStatus":
+					if n, err := strconv.Atoi(value.Value); err == nil {
+						addrStatus = n
+						fieldFound = true
+					}
+				case "addressRowStatus":
+					if n, err := strconv.Atoi(value.Value); err == nil {
+						rowStatus = n
+						fieldFound = true
+					}
 				default:
 					m.logger.Warn("unknown field", "field", mappingEntry.Field)
 				}
@@ -273,6 +290,24 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 		}
 	}
 
+	// RFC 4293 row filtering: drop non-unicast, non-preferred/deprecated,
+	// or non-active rows. Returning nil drops the row outright; an empty
+	// &diode.IPAddress{} would still be added by MapObjectIDsToEntity.
+	if isInetAddress {
+		if addrType != 1 {
+			m.logger.Debug("dropping non-unicast row", "addrType", addrType, "address", derefAddr(ipAddress.Address))
+			return nil
+		}
+		if addrStatus != 1 && addrStatus != 2 {
+			m.logger.Debug("dropping row by status", "status", addrStatus, "address", derefAddr(ipAddress.Address))
+			return nil
+		}
+		if rowStatus != 1 {
+			m.logger.Debug("dropping inactive row", "rowStatus", rowStatus, "address", derefAddr(ipAddress.Address))
+			return nil
+		}
+	}
+
 	if fieldFound {
 		m.applyDefaults(&ipAddress, defaults)
 		if ipAddress.Address != nil {
@@ -283,6 +318,13 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 	}
 
 	return &ipAddress
+}
+
+func derefAddr(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
 }
 
 // parseAddressPrefixRowPointer extracts the prefix length from an

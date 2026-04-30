@@ -3841,6 +3841,94 @@ func TestIPAddressMapper_RowPointer_NotPrefixTable_FallsBackToHostRoute(t *testi
 	assert.Equal(t, "10.0.0.1/32", *ip.Address)
 }
 
+// runIPAddressTableMap builds a synthetic ipAddressTable PDU set with
+// the given column overrides (parent OID → string value) for index
+// "ipv4:10.0.0.1" and runs the mapper. Always includes a /24 prefix
+// RowPointer so the address gets set; tests can override columns 4/7/10.
+func runIPAddressTableMap(t *testing.T, columns map[string]string) diode.Entity {
+	t.Helper()
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1": {
+			OID:    ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1",
+			Index:  "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.1.4.10.0.0.0.24",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	for parent, val := range columns {
+		oid := parent + ".1.4.10.0.0.1"
+		pdus[mapping.ObjectIDIndex(oid)] = &mapping.ObjectIDValue{
+			OID:    oid,
+			Index:  "ipv4:10.0.0.1",
+			Parent: parent,
+			Value:  val,
+			Type:   mapping.Integer,
+		}
+	}
+	return mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+}
+
+func TestIPAddressMapper_FilterAnycast_Dropped(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.4": "2", // anycast
+	})
+	assert.Nil(t, got, "anycast row must be dropped (nil)")
+}
+
+func TestIPAddressMapper_FilterBroadcast_Dropped(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.4": "3", // broadcast
+	})
+	assert.Nil(t, got)
+}
+
+func TestIPAddressMapper_FilterTentative_Dropped(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.7": "6", // tentative
+	})
+	assert.Nil(t, got)
+}
+
+func TestIPAddressMapper_FilterRowStatusInactive_Dropped(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.10": "2", // notInService
+	})
+	assert.Nil(t, got)
+}
+
+func TestIPAddressMapper_FilterPreferredUnicastActive_Kept(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.4":  "1", // unicast
+		".1.3.6.1.2.1.4.34.1.7":  "1", // preferred
+		".1.3.6.1.2.1.4.34.1.10": "1", // active
+	})
+	if got == nil {
+		t.Fatalf("expected entity, got nil")
+	}
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/24", *ip.Address)
+}
+
+func TestIPAddressMapper_FilterDeprecated_Kept(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.7": "2", // deprecated
+	})
+	if got == nil {
+		t.Fatalf("expected entity, got nil")
+	}
+}
+
+func TestIPAddressMapper_FilterColumnsMissing_Lenient(t *testing.T) {
+	got := runIPAddressTableMap(t, nil)
+	if got == nil {
+		t.Fatalf("missing filter columns must be lenient (kept), got nil")
+	}
+}
+
 func TestIPAddressMapper_LegacyTable_StillIPv4Only(t *testing.T) {
 	logger := slog.Default()
 	registry := mapping.NewEntityRegistry(logger)
