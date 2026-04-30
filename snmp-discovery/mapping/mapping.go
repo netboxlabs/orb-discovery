@@ -682,11 +682,19 @@ func detachForPrimaryIP(ip *diode.IPAddress, owner *diode.Device) *diode.IPAddre
 		ifaceCopy := *iface
 		if owner != nil {
 			deviceCopy := *owner
+			// Clear BOTH primary-IP fields on the embedded device
+			// copy. Clearing only PrimaryIp4 here would still embed
+			// the (already-set) PrimaryIp6 sub-graph, bloating the
+			// payload and re-introducing cycle risk if the v6 pass
+			// runs first or call order changes. The standalone
+			// emitted entities keep their full graph; only the
+			// snapshot is pruned.
 			deviceCopy.PrimaryIp4 = nil
+			deviceCopy.PrimaryIp6 = nil
 			ifaceCopy.Device = &deviceCopy
 		}
 		// Prune relationship pointers that can transitively reach a
-		// Device with PrimaryIp4 set. See the function doc for why.
+		// Device with PrimaryIp4/PrimaryIp6 set. See the function doc.
 		ifaceCopy.Parent = nil
 		ifaceCopy.Bridge = nil
 		ifaceCopy.Lag = nil
@@ -698,8 +706,9 @@ func detachForPrimaryIP(ip *diode.IPAddress, owner *diode.Device) *diode.IPAddre
 
 // detachForPrimaryIP6 mirrors detachForPrimaryIP for IPv6: returns a
 // shallow copy suitable to attach as Device.PrimaryIp6 without
-// introducing a reference cycle. Differs only in clearing PrimaryIp6 on
-// the embedded device copy.
+// introducing a reference cycle. Both PrimaryIp4 and PrimaryIp6 are
+// cleared on the embedded device copy so the snapshot is independent
+// of evaluation order between the v4 and v6 passes.
 func detachForPrimaryIP6(ip *diode.IPAddress, owner *diode.Device) *diode.IPAddress {
 	if ip == nil {
 		return nil
@@ -709,6 +718,7 @@ func detachForPrimaryIP6(ip *diode.IPAddress, owner *diode.Device) *diode.IPAddr
 		ifaceCopy := *iface
 		if owner != nil {
 			deviceCopy := *owner
+			deviceCopy.PrimaryIp4 = nil
 			deviceCopy.PrimaryIp6 = nil
 			ifaceCopy.Device = &deviceCopy
 		}

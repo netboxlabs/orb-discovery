@@ -643,11 +643,11 @@ func TestIPAddressIdentifierSizeInheritance(t *testing.T) {
 					IdentifierSize: 2, // Should use child's explicit size
 				},
 			},
-			expected: []diode.Entity{
-				&diode.IPAddress{
-					Address: nil, // Invalid IP format "1.2" is rejected by validation
-				},
-			},
+			// IPAddressMapper now drops invalid/empty rows by returning
+			// nil rather than emitting an IPAddress with no Address.
+			// MapObjectIDsToEntity therefore yields no IPAddress
+			// entities for this row.
+			expected:    []diode.Entity{},
 			description: "This test verifies that child mappings can override parent identifier size, but invalid IPs are still rejected",
 		},
 		{
@@ -675,11 +675,9 @@ func TestIPAddressIdentifierSizeInheritance(t *testing.T) {
 					IdentifierSize: 0, // This would default to 1 in ObjectIDs() function
 				},
 			},
-			expected: []diode.Entity{
-				&diode.IPAddress{
-					Address: nil, // Invalid IP format (incomplete) is rejected by validation
-				},
-			},
+			// Same drop semantics as above: invalid/empty rows are no
+			// longer emitted as nil-Address entities.
+			expected:    []diode.Entity{},
 			description: "This test verifies behavior when parent has zero identifier size - invalid IPs are rejected",
 		},
 	}

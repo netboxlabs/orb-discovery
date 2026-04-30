@@ -250,8 +250,11 @@ func TestIPAddressMapper_Map(t *testing.T) {
 				Entity: "ipAddress",
 				Field:  "_id",
 			},
-			expectedEntity: &diode.IPAddress{},
-			expectError:    false,
+			// IPAddressMapper now drops the row (returns nil) when no
+			// PDU populated the address, instead of emitting an
+			// empty &diode.IPAddress{}. expectError=true triggers the
+			// runner's assert.Nil branch.
+			expectError: true,
 		},
 		{
 			name: "mapping with tenant default and entity-specific defaults",
@@ -2893,20 +2896,13 @@ func TestMaskToPrefixSize(t *testing.T) {
 			entityRegistry := mapping.NewEntityRegistry(slog.Default())
 			result := mapper.Map(values, mappingEntry, entityRegistry, nil)
 
-			if tt.expectError {
-				// Invalid mask formats fail in maskToPrefixSize and
-				// the address field is never written. The mapper
-				// returns a non-nil entity with no Address set.
-				assert.NotNil(t, result)
-				ipAddress, ok := result.(*diode.IPAddress)
-				assert.True(t, ok)
-				assert.Nil(t, ipAddress.Address)
-			} else {
-				// Valid masks with no IP build an invalid CIDR string
-				// like "/24"; validation rejects it and the mapper
-				// drops the row by returning nil.
-				assert.Nil(t, result)
-			}
+			// Both branches now drop the row by returning nil:
+			//  - valid mask + no IP builds "/24", validation rejects.
+			//  - invalid mask fails maskToPrefixSize, fieldFound stays
+			//    false, the post-loop guard catches the empty address.
+			// Either way the mapper no longer leaks an empty entity.
+			assert.Nil(t, result)
+			_ = tt.expectError // Both paths now produce the same result.
 		})
 	}
 }
@@ -3568,14 +3564,25 @@ func TestIPAddressMapper_Map_InvalidCases(t *testing.T) {
 
 			result := mapper.Map(tt.values, tt.mappingEntry, entityRegistry, nil)
 
+			if tt.expectEmpty {
+				// The mapper now drops empty/invalid rows by
+				// returning nil instead of emitting an entity with
+				// no address. Either nil or an entity with no
+				// Address satisfies the contract for these cases.
+				if result == nil {
+					return
+				}
+				ipAddress, ok := result.(*diode.IPAddress)
+				assert.True(t, ok)
+				assert.True(t, ipAddress.Address == nil || *ipAddress.Address == "")
+				return
+			}
+
 			assert.NotNil(t, result)
 			ipAddress, ok := result.(*diode.IPAddress)
 			assert.True(t, ok)
 
-			if tt.expectEmpty {
-				// Empty entity should have nil or empty address
-				assert.True(t, ipAddress.Address == nil || *ipAddress.Address == "")
-			} else if tt.expectedAddress != nil {
+			if tt.expectedAddress != nil {
 				// Check the expected address
 				if ipAddress.Address != nil {
 					t.Logf("Expected: %s, Got: %s", *tt.expectedAddress, *ipAddress.Address)

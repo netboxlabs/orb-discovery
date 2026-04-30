@@ -319,14 +319,17 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 		}
 	}
 
-	if fieldFound {
-		m.applyDefaults(&ipAddress, defaults)
-		if ipAddress.Address != nil {
-			m.logger.Debug("successfully mapped IP address", "address", *ipAddress.Address)
-		} else {
-			m.logger.Debug("successfully mapped IP address (address field empty)")
-		}
+	// An IPAddress entity without a valid Address is meaningless to
+	// downstream consumers. Drop it (return nil) so MapObjectIDsToEntity
+	// doesn't emit a malformed entity. This covers the case where no
+	// PDU populated the address — an extractIPFromIndex/Value miss for
+	// legacy rows, or an unrecognized value for modern rows.
+	if !fieldFound || ipAddress.Address == nil || *ipAddress.Address == "" {
+		return nil
 	}
+
+	m.applyDefaults(&ipAddress, defaults)
+	m.logger.Debug("successfully mapped IP address", "address", *ipAddress.Address)
 
 	source := "legacy"
 	if isInetAddress {
