@@ -86,3 +86,38 @@ func TestResolveMappingEntry_FallsBackThroughPDUs(t *testing.T) {
 	_, err = m.resolveMappingEntry(details2)
 	assert.Error(t, err, "when no PDU parent resolves, the original error must propagate")
 }
+
+func TestNewObjectIDValueForEntry_InetAddressIPv4(t *testing.T) {
+	entry := &Entry{IndexKind: "inet_address"}
+	val := Value{Value: "1", Type: Integer, IdentifierSize: 0}
+	got, err := newObjectIDValueForEntry(".1.3.6.1.2.1.4.34.1.3.1.4.10.0.0.1", val, entry)
+	require.NoError(t, err)
+	assert.Equal(t, ObjectIDIndex("ipv4:10.0.0.1"), got.Index)
+	assert.Equal(t, ".1.3.6.1.2.1.4.34.1.3", got.Parent)
+}
+
+func TestNewObjectIDValueForEntry_InetAddressIPv6(t *testing.T) {
+	entry := &Entry{IndexKind: "inet_address"}
+	val := Value{Value: "1", Type: Integer, IdentifierSize: 0}
+	oid := ".1.3.6.1.2.1.4.34.1.3.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1"
+	got, err := newObjectIDValueForEntry(oid, val, entry)
+	require.NoError(t, err)
+	assert.Equal(t, ObjectIDIndex("ipv6:2001:db8::1"), got.Index)
+	assert.Equal(t, ".1.3.6.1.2.1.4.34.1.3", got.Parent)
+}
+
+func TestNewObjectIDValueForEntry_InetAddressMalformed(t *testing.T) {
+	entry := &Entry{IndexKind: "inet_address"}
+	val := Value{Value: "1", Type: Integer, IdentifierSize: 0}
+	_, err := newObjectIDValueForEntry(".1.3.6.1.2.1.4.34.1.3.99.4.1.2.3.4", val, entry)
+	require.Error(t, err)
+}
+
+func TestNewObjectIDValueForEntry_FixedIdentifierSizeUnchanged(t *testing.T) {
+	entry := &Entry{IdentifierSize: 4}
+	val := Value{Value: "10.0.0.1", Type: IPAddress, IdentifierSize: 4}
+	got, err := newObjectIDValueForEntry(".1.3.6.1.2.1.4.20.1.1.10.0.0.1", val, entry)
+	require.NoError(t, err)
+	assert.Equal(t, ObjectIDIndex("10.0.0.1"), got.Index)
+	assert.Equal(t, ".1.3.6.1.2.1.4.20.1.1", got.Parent)
+}

@@ -819,9 +819,13 @@ func (m *ObjectIDMapper) resolveMappingEntry(details *ObjectIDIndexDetails) (*En
 func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[ObjectIDIndex]*ObjectIDIndexDetails {
 	objectIDIndexMap := make(map[ObjectIDIndex]*ObjectIDIndexDetails)
 	for objectID, value := range objectIDs {
-		objectIDValue, err := newObjectIDValue(objectID, value)
+		entry, _ := m.mappingConfig.getMappingEntry(objectID)
+		objectIDValue, err := newObjectIDValueForEntry(objectID, value, entry)
 		if err != nil {
-			m.logger.Warn("error creating object ID value", "error", err, "object_id", objectID)
+			// inet_address rows that intentionally skip (scoped/dns) and
+			// truly malformed legacy rows both end up here; debug avoids
+			// log noise for the expected skip case.
+			m.logger.Debug("skipping object ID with unparseable index", "object_id", objectID, "error", err)
 			continue
 		}
 
@@ -834,18 +838,54 @@ func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[Ob
 }
 
 func newObjectIDValue(objectID string, value Value) (*ObjectIDValue, error) {
+	return newObjectIDValueForEntry(objectID, value, nil)
+}
+
+// newObjectIDValueForEntry parses an OID and its value into an ObjectIDValue.
+// When entry.IndexKind == "inet_address", the trailing sub-OIDs are decoded
+// per RFC 4001 (variable length); otherwise the legacy fixed-size slicing
+// applies, identical to historical behavior.
+func newObjectIDValueForEntry(objectID string, value Value, entry *Entry) (*ObjectIDValue, error) {
 	parts := strings.Split(objectID, ".")
+	if entry != nil && entry.IndexKind == "inet_address" {
+		// Strip the leading empty produced by a leading dot.
+		clean := parts
+		if len(clean) > 0 && clean[0] == "" {
+			clean = clean[1:]
+		}
+		// Try the two valid InetAddress suffix lengths (v4: type+len+4
+		// bytes; v6: type+len+16 bytes). Reject if neither decodes.
+		for _, suffixLen := range []int{6, 18} {
+			if len(clean) <= suffixLen {
+				continue
+			}
+			suffix := clean[len(clean)-suffixLen:]
+			canonical, ok := decodeInetAddressIndex(suffix)
+			if !ok {
+				continue
+			}
+			parent := "." + strings.Join(clean[:len(clean)-suffixLen], ".")
+			return &ObjectIDValue{
+				OID:    objectID,
+				Index:  ObjectIDIndex(canonical),
+				Parent: parent,
+				Value:  value.Value,
+				Type:   value.Type,
+			}, nil
+		}
+		return nil, errMalformedInetAddress
+	}
+
 	if len(parts) <= value.IdentifierSize {
 		return nil, fmt.Errorf("invalid ObjectID length for type")
 	}
-	objectIDValue := ObjectIDValue{
+	return &ObjectIDValue{
 		OID:    objectID,
 		Index:  ObjectIDIndex(strings.Join(parts[len(parts)-value.IdentifierSize:], ".")),
 		Parent: strings.Join(parts[:len(parts)-value.IdentifierSize], "."),
 		Value:  value.Value,
 		Type:   value.Type,
-	}
-	return &objectIDValue, nil
+	}, nil
 }
 
 // Gets the mapper for the closest parent objectID
