@@ -24,9 +24,50 @@ from ntc_templates.parse import parse_output
 from custom_napalm._vlan import (
     SwitchportInfo,
     classify_switchport,
+    coerce_vid,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Comware abbreviates interface names in `display interface brief` and
+# `display vlan all` (GE1/0/1) but emits the full names in `display interface`
+# (GigabitEthernet1/0/1). The translate layer matches interface names exactly
+# against `get_interfaces()` output, so we expand abbreviations here to keep
+# the keys consistent across both code paths.
+_COMWARE_IFACE_PREFIX_MAP = {
+    "GE": "GigabitEthernet",
+    "XGE": "Ten-GigabitEthernet",
+    "M-GE": "M-GigabitEthernet",
+    "25GE": "Twenty-FiveGigE",
+    "40GE": "FortyGigE",
+    "50GE": "FiftyGigE",
+    "100GE": "HundredGigE",
+    "200GE": "TwoHundredGigE",
+    "400GE": "FourHundredGigE",
+    "BAGG": "Bridge-Aggregation",
+    "RAGG": "Route-Aggregation",
+    "Vlan-int": "Vlan-interface",
+}
+_COMWARE_IFACE_RE = re.compile(r"^([A-Za-z][A-Za-z0-9-]*?)([0-9].*)$")
+
+
+def _expand_comware_iface(name: str) -> str:
+    """
+    Expand a Comware abbreviated interface name to its full form.
+
+    ``GE1/0/1`` → ``GigabitEthernet1/0/1``; ``XGE1/0/49`` →
+    ``Ten-GigabitEthernet1/0/49``. Names that don't match a known prefix
+    (or already use the full form) are returned unchanged.
+    """
+    m = _COMWARE_IFACE_RE.match(name)
+    if not m:
+        return name
+    prefix, suffix = m.group(1), m.group(2)
+    expanded = _COMWARE_IFACE_PREFIX_MAP.get(prefix)
+    if expanded is None:
+        return name
+    return f"{expanded}{suffix}"
 
 
 def _parse_comware_interface_brief_modes(rows: list[dict]) -> dict[str, dict]:
@@ -36,6 +77,11 @@ def _parse_comware_interface_brief_modes(rows: list[dict]) -> dict[str, dict]:
     Bridge-mode ``Type`` values: A=access, T=trunk, H=hybrid. Route-mode
     rows omit Type/PVID and are skipped here (they map to routed via the
     merger when no entry exists for that interface).
+
+    Interface names are expanded from their abbreviated form (``GE1/0/1``)
+    into the full form (``GigabitEthernet1/0/1``) so they match what
+    ``get_interfaces()`` emits — without this normalisation the translate
+    layer's exact-name matching would silently drop the VLAN data.
     """
     out: dict[str, dict] = {}
     for r in rows or []:
@@ -45,12 +91,9 @@ def _parse_comware_interface_brief_modes(rows: list[dict]) -> dict[str, dict]:
         type_letter = (r.get("type") or "").upper()
         if type_letter not in ("A", "T", "H"):
             continue
-        try:
-            pvid: int | None = int(r.get("vlan_id") or "")
-        except (ValueError, TypeError):
-            pvid = None
+        pvid = coerce_vid(r.get("vlan_id") or "")
         mode = {"A": "access", "T": "trunk", "H": "hybrid"}[type_letter]
-        out[iface] = {"mode": mode, "pvid": pvid}
+        out[_expand_comware_iface(iface)] = {"mode": mode, "pvid": pvid}
     return out
 
 
@@ -60,11 +103,17 @@ _COMWARE_VLAN_HEADER_RE = re.compile(r"^\s*VLAN\s+ID\s*:\s*(\d+)\s*$", re.IGNORE
 def _comware_record_ports(
     out: dict[str, dict], vid: int, section: str, ports_line: str
 ) -> None:
-    """Append ``vid`` to the appropriate per-port bucket for each port on the line."""
+    """
+    Append ``vid`` to the appropriate per-port bucket for each port on the line.
+
+    Port names are expanded from abbreviated form to match
+    ``get_interfaces()`` output (see ``_expand_comware_iface``).
+    """
     for port in re.split(r"[,\s]+", ports_line.strip()):
         port = port.strip()
         if not port or port.lower() == "none":
             continue
+        port = _expand_comware_iface(port)
         bucket = out.setdefault(port, {"tagged": [], "untagged": []})
         target = bucket[section]
         if vid not in target:

@@ -23,6 +23,7 @@ from ntc_templates.parse import parse_output
 from custom_napalm._vlan import (
     SwitchportInfo,
     classify_switchport,
+    coerce_vid,
     parse_vlan_range_string,
 )
 
@@ -89,16 +90,10 @@ def _ftos_row_to_switchport_info(row: dict) -> SwitchportInfo:
             allowed_vlans=None,
         )
 
-    def _vid(s: str) -> int | None:
-        try:
-            return int(s)
-        except (ValueError, TypeError):
-            return None
-
-    access_vid = _vid(
+    access_vid = coerce_vid(
         row.get("access_mode_vlan") or row.get("access_vlan") or ""
     )
-    native_vid = _vid(
+    native_vid = coerce_vid(
         row.get("native_vlan") or row.get("trunking_native_mode_vlan") or ""
     )
 

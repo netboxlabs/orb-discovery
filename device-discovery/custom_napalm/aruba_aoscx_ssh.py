@@ -25,6 +25,7 @@ from ntc_templates.parse import parse_output
 from custom_napalm._vlan import (
     SwitchportInfo,
     classify_switchport,
+    coerce_vid,
     parse_vlan_range_string,
 )
 
@@ -97,11 +98,9 @@ def _aoscx_ssh_row_to_switchport_info(row: dict) -> SwitchportInfo:
             allowed_vlans=None,
         )
 
-    native_raw = (row.get("native") or "").strip()
-    try:
-        native_vid: int | None = int(native_raw)
-    except (TypeError, ValueError):
-        native_vid = None
+    native_raw = row.get("native")
+    native_str = native_raw.strip() if isinstance(native_raw, str) else native_raw
+    native_vid = coerce_vid(native_str)
 
     tagged_raw = (row.get("tagged") or "").strip()
     if tagged_raw and tagged_raw not in ("--", "-"):

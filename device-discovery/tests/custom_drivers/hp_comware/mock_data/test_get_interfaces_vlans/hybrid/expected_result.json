@@ -1,3 +1,3 @@
 {
-  "GE1/0/1": {"mode": "trunk", "tagged": [100, 200, 300], "untagged": 50}
+  "GigabitEthernet1/0/1": {"mode": "trunk", "tagged": [100, 200, 300], "untagged": 50}
 }

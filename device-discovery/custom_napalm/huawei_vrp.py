@@ -22,6 +22,7 @@ from ntc_templates.parse import parse_output
 from custom_napalm._vlan import (
     SwitchportInfo,
     classify_switchport,
+    coerce_vid,
     parse_vlan_range_string,
 )
 
@@ -47,11 +48,7 @@ def _huawei_row_to_switchport_info(row: dict) -> SwitchportInfo:
             allowed_vlans=None,
         )
 
-    pvid_raw = row.get("vlan_id") or ""
-    try:
-        pvid: int | None = int(pvid_raw)
-    except (TypeError, ValueError):
-        pvid = None
+    pvid = coerce_vid(row.get("vlan_id"))
 
     if link_type == "access":
         return SwitchportInfo(
