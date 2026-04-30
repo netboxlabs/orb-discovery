@@ -16,6 +16,8 @@ from napalm.base import models
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output as _parse_output_raw
 
+from custom_napalm._vlan import SwitchportInfo, classify_switchport, parse_vlan_range_string
+
 logger = logging.getLogger(__name__)
 
 # Config sanitization — S300 sensitive CLI fields:
@@ -152,6 +154,80 @@ def _parse_portchannel_status_raw(raw: str) -> dict[str, dict]:
         }
 
     return result
+
+
+_S300_BLOCK_RE = re.compile(r"^Name:\s*(\S+)\s*$", re.MULTILINE)
+
+
+def _maybe_int(s: object) -> int | None:
+    """
+    Convert a string/int to int, returning None on failure.
+
+    Rejects ``bool`` explicitly: ``bool`` is a subclass of ``int`` in Python,
+    so ``int(True) == 1`` — without this guard a buggy upstream parser
+    passing a bool would slip past the classifier's bool-rejection in
+    ``_vlan.coerce_vid``.
+    """
+    if isinstance(s, bool):
+        return None
+    try:
+        return int(s)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return None
+
+
+def _s300_block_to_switchport_info(fields: dict[str, str]) -> SwitchportInfo:
+    """
+    Build a SwitchportInfo from one parsed ``show interfaces switchport`` block.
+
+    The S300 CLI emits multi-line key:value blocks per interface; this function
+    consumes the parsed dict (key strings exactly as printed by the device).
+    """
+    if fields.get("Switchport", "").lower() != "enable":
+        return SwitchportInfo(
+            enabled=False, admin_mode=None, oper_mode=None,
+            access_vlan=None, native_vlan=None, allowed_vlans=None,
+        )
+
+    admin_raw = fields.get("Administrative Mode", "").lower()
+    if admin_raw == "access":
+        admin: str | None = "access"
+    elif admin_raw in ("trunk", "general"):
+        admin = "trunk"  # 'general' collapses to trunk semantics
+    else:
+        admin = None
+
+    access_vid = _maybe_int(fields.get("Access Mode VLAN", ""))
+    native_vid = _maybe_int(fields.get("Trunking Native Mode VLAN", ""))
+
+    trunk_spec = fields.get("Trunking VLANs Enabled", "")
+    if trunk_spec:
+        vids, is_wildcard = parse_vlan_range_string(trunk_spec)
+        if is_wildcard:
+            allowed: list[int] | str | None = "all"
+        else:
+            allowed = vids
+            # Malformed trunk input must NOT silently widen to trunk-all.
+            # Warn from the cisco_s300 logger so operators can spot vendor
+            # output drift.
+            raw_lower = trunk_spec.strip().lower()
+            if raw_lower and raw_lower != "none" and not vids:
+                logger.warning(
+                    "Trunking VLANs Enabled=%r could not be parsed; "
+                    "treating as plain trunk with no tagged VLANs",
+                    trunk_spec,
+                )
+    else:
+        allowed = None
+
+    return SwitchportInfo(
+        enabled=True,
+        admin_mode=admin,  # type: ignore[arg-type]
+        oper_mode=None,    # S300 doesn't expose oper-mode separately
+        access_vlan=access_vid,
+        native_vlan=native_vid,
+        allowed_vlans=allowed,
+    )
 
 
 def _parse_vlan_ports_raw(raw: str) -> dict[str, list[str]]:
@@ -408,3 +484,44 @@ class S300Driver(_napalm_base.NetworkDriver):
             }
 
         return vlans
+
+    def get_interfaces_vlans(self) -> dict[str, dict]:
+        """
+        Return per-interface VLAN config.
+
+        Parses ``show interfaces switchport`` from the S300 CLI. Modes:
+        access | trunk | trunk-all | routed (PVLAN/customer/etc. → routed in v1).
+        General mode collapses to trunk with explicit untagged + tagged sets.
+        """
+        output = self.device.send_command("show interfaces switchport")
+        if not output:
+            return {}
+
+        blocks: dict[str, dict[str, str]] = {}
+        current: str | None = None
+        last_key: str | None = None
+        for line in output.splitlines():
+            m = _S300_BLOCK_RE.match(line)
+            if m:
+                current = m.group(1)
+                last_key = None
+                blocks[current] = {}
+                continue
+            if current is None:
+                continue
+            if ":" in line:
+                k, _, v = line.partition(":")
+                last_key = k.strip()
+                blocks[current][last_key] = v.strip()
+            elif last_key is not None and line.strip():
+                # Continuation of the previous field's value. S300 wraps long
+                # `Trunking VLANs Enabled` values across indented lines.
+                blocks[current][last_key] = (
+                    blocks[current][last_key] + line.strip()
+                )
+
+        result: dict[str, dict] = {}
+        for ifname, fields in blocks.items():
+            info = _s300_block_to_switchport_info(fields)
+            result[ifname] = classify_switchport(info)
+        return result
