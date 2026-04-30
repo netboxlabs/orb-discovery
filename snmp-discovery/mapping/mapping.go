@@ -526,25 +526,58 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 	return entities
 }
 
-// assignPrimaryIP points currentDevice.PrimaryIp4 at the surviving IPAddress
-// entity whose address matches the SNMP target host (literal IPv4 or DNS-
-// resolved). No-op when the target is not IPv4-addressable, when DNS lookup
-// fails, or when no surviving IPAddress entity matches.
+// assignPrimaryIP points currentDevice.PrimaryIp4 / PrimaryIp6 at
+// surviving IPAddress entities whose address matches the SNMP target
+// host. The two families are matched independently: a missing v4 hit
+// does not block a v6 assignment and vice-versa. No-op when the target
+// resolves to no IPs of either family or when no surviving IPAddress
+// entity matches.
 func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diode.Entity]bool) {
 	if m.targetHost == "" {
 		return
 	}
 
-	candidates := m.resolveTargetIPv4s()
-	if len(candidates) == 0 {
+	v4Cands, v6Cands := m.resolveTargetIPs()
+
+	if len(v4Cands) > 0 {
+		if hit := pickPrimaryIPHit(m.logger, m.targetHost, entities, v4Cands, false); hit != nil {
+			// Break the reference cycle before attaching. See
+			// detachForPrimaryIP doc.
+			device.PrimaryIp4 = detachForPrimaryIP(hit, device)
+		}
+	} else {
 		m.logger.Debug("no IPv4 candidates for primary IP assignment", "target", m.targetHost)
-		return
+	}
+
+	if len(v6Cands) > 0 {
+		if hit := pickPrimaryIPHit(m.logger, m.targetHost, entities, v6Cands, true); hit != nil {
+			device.PrimaryIp6 = detachForPrimaryIP6(hit, device)
+		}
+	} else {
+		m.logger.Debug("no IPv6 candidates for primary IP assignment", "target", m.targetHost)
+	}
+}
+
+// pickPrimaryIPHit filters `entities` to IP addresses of the requested
+// family, intersects them with `candidates`, and returns the
+// deterministically-chosen winner (or nil).
+func pickPrimaryIPHit(logger *slog.Logger, target string, entities map[diode.Entity]bool, candidates []string, wantV6 bool) *diode.IPAddress {
+	// Canonicalize candidates once so we compare like-for-like.
+	canonCands := make(map[string]struct{}, len(candidates))
+	for _, c := range candidates {
+		ip := net.ParseIP(c)
+		if ip == nil {
+			continue
+		}
+		canonCands[ip.String()] = struct{}{}
+	}
+	if len(canonCands) == 0 {
+		return nil
 	}
 
 	type hit struct {
-		key     string
-		ip      *diode.IPAddress
-		content string // stable, data-derived tiebreaker when key collides
+		key, content string
+		ip           *diode.IPAddress
 	}
 	var hits []hit
 	for entity := range entities {
@@ -558,55 +591,50 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 			continue
 		}
 		stripped := stripPrefix(*ip.Address)
-		for _, cand := range candidates {
-			if stripped == cand {
-				hits = append(hits, hit{
-					key:     primaryIPSortKey(ip),
-					ip:      ip,
-					content: primaryIPContentKey(ip),
-				})
-				break
-			}
+		parsed := net.ParseIP(stripped)
+		if parsed == nil {
+			continue
 		}
+		isV6 := parsed.To4() == nil
+		if isV6 != wantV6 {
+			continue
+		}
+		if _, ok := canonCands[parsed.String()]; !ok {
+			continue
+		}
+		hits = append(hits, hit{
+			key:     primaryIPSortKey(ip),
+			content: primaryIPContentKey(ip),
+			ip:      ip,
+		})
 	}
-
 	if len(hits) == 0 {
-		m.logger.Debug("no matching IP for primary IP assignment", "target", m.targetHost)
-		return
+		family := "v4"
+		if wantV6 {
+			family = "v6"
+		}
+		logger.Debug("no matching IP for primary-IP assignment", "target", target, "family", family)
+		return nil
 	}
-
-	// Primary sort by composite key; content hash is a data-derived,
-	// run-to-run-stable tiebreaker for the rare case of two entries
-	// sharing a key.
 	sort.Slice(hits, func(i, j int) bool {
 		if hits[i].key != hits[j].key {
 			return hits[i].key < hits[j].key
 		}
 		return hits[i].content < hits[j].content
 	})
-
 	if len(hits) > 1 {
 		all := make([]string, 0, len(hits))
 		for _, h := range hits {
 			all = append(all, h.key)
 		}
-		m.logger.Warn("multiple IP candidates for primary IP assignment; picking deterministic first",
-			"target", m.targetHost, "candidates", all)
+		family := "v4"
+		if wantV6 {
+			family = "v6"
+		}
+		logger.Warn("multiple IP candidates for primary IP assignment; picking deterministic first",
+			"target", target, "family", family, "candidates", all)
 	}
-
-	// Break the reference cycle before attaching. The matched IPAddress is
-	// also emitted as a standalone entity whose AssignedObject points at an
-	// Interface whose Device points back at the same currentDevice. Sharing
-	// that pointer graph into device.PrimaryIp4 would make the diode SDK's
-	// proto serializer recurse forever (device -> primary_ip4 -> ip ->
-	// interface -> device -> ...). We detach with a shallow snapshot: copy
-	// the IPAddress and (if present) the assigned Interface, then replace
-	// the interface's Device with a Device copy that has PrimaryIp4 nil.
-	// The snapshot is then a tree (no back-edge), and the nested Device
-	// still satisfies Diode's validation requirement that an Interface
-	// reference a Device. The standalone emitted entities keep their full
-	// graph untouched.
-	device.PrimaryIp4 = detachForPrimaryIP(hits[0].ip, device)
+	return hits[0].ip
 }
 
 // detachForPrimaryIP returns a shallow copy of the matched IPAddress
@@ -633,6 +661,31 @@ func detachForPrimaryIP(ip *diode.IPAddress, owner *diode.Device) *diode.IPAddre
 		}
 		// Prune relationship pointers that can transitively reach a
 		// Device with PrimaryIp4 set. See the function doc for why.
+		ifaceCopy.Parent = nil
+		ifaceCopy.Bridge = nil
+		ifaceCopy.Lag = nil
+		ifaceCopy.Module = nil
+		snapshot.AssignedObject = &ifaceCopy
+	}
+	return &snapshot
+}
+
+// detachForPrimaryIP6 mirrors detachForPrimaryIP for IPv6: returns a
+// shallow copy suitable to attach as Device.PrimaryIp6 without
+// introducing a reference cycle. Differs only in clearing PrimaryIp6 on
+// the embedded device copy.
+func detachForPrimaryIP6(ip *diode.IPAddress, owner *diode.Device) *diode.IPAddress {
+	if ip == nil {
+		return nil
+	}
+	snapshot := *ip
+	if iface, ok := snapshot.AssignedObject.(*diode.Interface); ok && iface != nil {
+		ifaceCopy := *iface
+		if owner != nil {
+			deviceCopy := *owner
+			deviceCopy.PrimaryIp6 = nil
+			ifaceCopy.Device = &deviceCopy
+		}
 		ifaceCopy.Parent = nil
 		ifaceCopy.Bridge = nil
 		ifaceCopy.Lag = nil
@@ -715,19 +768,19 @@ func derefString(s *string) string {
 	return *s
 }
 
-// resolveTargetIPv4s returns the IPv4 candidate addresses for the current
-// SNMP target. If targetHost is an IPv4 literal, the single address is
-// returned. Otherwise DNS is consulted with a 2s timeout and IPv4 results
-// are returned. Returns an empty slice on any failure.
-func (m *ObjectIDMapper) resolveTargetIPv4s() []string {
+// resolveTargetIPs returns the IPv4 and IPv6 candidate addresses for the
+// current SNMP target. Literal IPs populate the matching family slice;
+// hostname targets are resolved via DNS (2s timeout) and split by
+// family. Empty slices are returned on lookup failure.
+func (m *ObjectIDMapper) resolveTargetIPs() (v4, v6 []string) {
 	if ip := net.ParseIP(m.targetHost); ip != nil {
-		if v4 := ip.To4(); v4 != nil {
-			return []string{v4.String()}
+		if x := ip.To4(); x != nil {
+			return []string{x.String()}, nil
 		}
-		return nil
+		return nil, []string{ip.String()}
 	}
 	if m.resolver == nil {
-		return nil
+		return nil, nil
 	}
 	parent := m.ctx
 	if parent == nil {
@@ -738,17 +791,20 @@ func (m *ObjectIDMapper) resolveTargetIPv4s() []string {
 	addrs, err := m.resolver.LookupHost(ctx, m.targetHost)
 	if err != nil {
 		m.logger.Debug("target host DNS lookup failed", "target", m.targetHost, "error", err)
-		return nil
+		return nil, nil
 	}
-	out := make([]string, 0, len(addrs))
 	for _, a := range addrs {
-		if ip := net.ParseIP(a); ip != nil {
-			if v4 := ip.To4(); v4 != nil {
-				out = append(out, v4.String())
-			}
+		ip := net.ParseIP(a)
+		if ip == nil {
+			continue
 		}
+		if x := ip.To4(); x != nil {
+			v4 = append(v4, x.String())
+			continue
+		}
+		v6 = append(v6, ip.String())
 	}
-	return out
+	return v4, v6
 }
 
 // stripPrefix removes a "/prefix" suffix from an IP/CIDR string.

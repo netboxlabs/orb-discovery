@@ -1389,6 +1389,99 @@ func mergeOIDs(maps ...mapping.ObjectIDValueMap) mapping.ObjectIDValueMap {
 	return out
 }
 
+// primaryIPModernOIDs seeds one interface "Gi0" (ifIndex 1) plus an
+// inet_address-indexed ipAddressTable row at the given v4 address with
+// the chosen prefix length. Used to exercise the new IPv4 primary-IP
+// path through ipAddressTable.
+func primaryIPModernOIDs(addr, ifName string, plen int) mapping.ObjectIDValueMap {
+	out := mapping.ObjectIDValueMap{
+		".1.3.6.1.2.1.2.2.1.2.1": mapping.Value{
+			Value: ifName, Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1,
+		},
+	}
+	for k, v := range modernIPv4PDUs(addr, plen) {
+		out[k] = v
+	}
+	return out
+}
+
+// primaryIPModernIPv6OIDs is the v6 sibling of primaryIPModernOIDs.
+func primaryIPModernIPv6OIDs(addr, ifName string, plen int) mapping.ObjectIDValueMap {
+	out := mapping.ObjectIDValueMap{
+		".1.3.6.1.2.1.2.2.1.2.1": mapping.Value{
+			Value: ifName, Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1,
+		},
+	}
+	for k, v := range modernIPv6PDUs(addr, plen) {
+		out[k] = v
+	}
+	return out
+}
+
+// primaryIPModernDualStackOIDs combines modern v4 + v6 rows on ifIndex 1.
+func primaryIPModernDualStackOIDs(v4, v6, ifName string, v4Plen, v6Plen int) mapping.ObjectIDValueMap {
+	out := primaryIPModernOIDs(v4, ifName, v4Plen)
+	for k, v := range modernIPv6PDUs(v6, v6Plen) {
+		out[k] = v
+	}
+	return out
+}
+
+func TestAssignPrimaryIP_IPv6Literal_FromIpAddressTable(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	m := mapping.NewObjectIDMapperForTest(cfg, logger, &config.Defaults{}, "2001:db8::1", &fakeResolver{})
+	entities := m.MapObjectIDsToEntity(primaryIPModernIPv6OIDs("2001:db8::1", "Gi0", 64))
+	device := findDevice(entities)
+	assert.NotNil(t, device.PrimaryIp6, "v6 literal target must yield PrimaryIp6")
+	if device.PrimaryIp6 != nil {
+		assert.Equal(t, "2001:db8::1/64", *device.PrimaryIp6.Address)
+	}
+	assert.Nil(t, device.PrimaryIp4, "no v4 candidates → PrimaryIp4 stays nil")
+}
+
+func TestAssignPrimaryIP_HostnameResolvesToIPv6_AssignsPrimaryIp6(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	resolver := &fakeResolver{addrs: []string{"2001:db8::1"}}
+	m := mapping.NewObjectIDMapperForTest(cfg, logger, &config.Defaults{}, "router.example", resolver)
+	entities := m.MapObjectIDsToEntity(primaryIPModernIPv6OIDs("2001:db8::1", "Gi0", 64))
+	device := findDevice(entities)
+	assert.NotNil(t, device.PrimaryIp6, "v6 DNS-only target must yield PrimaryIp6")
+	assert.Nil(t, device.PrimaryIp4)
+}
+
+func TestAssignPrimaryIP_DualStackHostname_AssignsBoth(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	resolver := &fakeResolver{addrs: []string{"10.0.0.1", "2001:db8::1"}}
+	m := mapping.NewObjectIDMapperForTest(cfg, logger, &config.Defaults{}, "router.example", resolver)
+	entities := m.MapObjectIDsToEntity(primaryIPModernDualStackOIDs("10.0.0.1", "2001:db8::1", "Gi0", 24, 64))
+	device := findDevice(entities)
+	assert.NotNil(t, device.PrimaryIp4, "dual-stack target must yield PrimaryIp4")
+	assert.NotNil(t, device.PrimaryIp6, "dual-stack target must yield PrimaryIp6")
+}
+
+func TestAssignPrimaryIP_ModernIPv4_FromIpAddressTable(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	m := mapping.NewObjectIDMapper(cfg, logger, &config.Defaults{}, "10.0.0.1")
+	entities := m.MapObjectIDsToEntity(primaryIPModernOIDs("10.0.0.1", "Gi0", 24))
+	device := findDevice(entities)
+	assert.NotNil(t, device.PrimaryIp4)
+	if device.PrimaryIp4 != nil {
+		assert.Equal(t, "10.0.0.1/24", *device.PrimaryIp4.Address)
+	}
+}
+
 func TestMapObjectIDsToEntity_LegacyAndModernSameAddress_Deduplicates(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
