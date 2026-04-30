@@ -526,6 +526,7 @@ _SONIC_SWITCHPORT_HEADER_RE = re.compile(
     r"^\s*Interface\s+Mode\s+Untagged\s+Tagged\s*$",
     re.IGNORECASE,
 )
+_SONIC_SEPARATOR_RE = re.compile(r"^[-\s]+$")
 
 
 def _parse_show_interface_switchport(text: str) -> list[dict]:
@@ -543,12 +544,16 @@ def _parse_show_interface_switchport(text: str) -> list[dict]:
                 seen_header = True
             continue
         stripped = line.strip()
-        if not stripped or set(stripped) <= {"-"}:
+        if not stripped or _SONIC_SEPARATOR_RE.match(stripped):
             continue
         parts = re.split(r"\s{2,}", stripped)
         if len(parts) < 4:
             parts = stripped.split()
         if len(parts) < 4:
+            continue
+        # Defensive: drop rows where the interface column is a dash-run
+        # (table separators with internal whitespace).
+        if set(parts[0]) <= {"-"}:
             continue
         rows.append({
             "interface": parts[0],

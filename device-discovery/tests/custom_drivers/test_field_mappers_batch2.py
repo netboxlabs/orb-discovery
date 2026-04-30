@@ -70,6 +70,19 @@ def test_sonic_all_tagged_token_wildcard():
     assert info.allowed_vlans == "all"
 
 
+def test_sonic_parse_drops_separator_rows():
+    """Table separator rows (dashes with whitespace) must not become bogus interface entries."""
+    from custom_napalm.dell_sonic import _parse_show_interface_switchport
+
+    text = (
+        "Interface     Mode    Untagged    Tagged\n"
+        "---------     ----    --------    ------\n"
+        "Ethernet0     access  10          -\n"
+    )
+    rows = _parse_show_interface_switchport(text)
+    assert [r["interface"] for r in rows] == ["Ethernet0"]
+
+
 # ----- Cumulus Linux --------------------------------------------------------
 
 
