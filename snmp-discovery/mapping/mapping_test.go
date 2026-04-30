@@ -3,8 +3,11 @@ package mapping_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -1285,4 +1288,125 @@ func TestAssignPrimaryIP_NonDefaultPrefix(t *testing.T) {
 	assert.NotNil(t, device.PrimaryIp4)
 	assert.Equal(t, "10.0.0.1/24", *device.PrimaryIp4.Address,
 		"primary IP must carry the discovered /24 prefix, and stripPrefix must still match against the bare target")
+}
+
+// --- RFC 4293 ipAddressTable + dedup integration (OBS-2798) ---
+
+// primaryIPFixtureBothTables returns a mapping config with both the legacy
+// ipAddrTable and the modern ipAddressTable wired up against the shared
+// interface entry. Used by dedup and primary-IP integration tests.
+func primaryIPFixtureBothTables() []config.MappingEntry {
+	entries := primaryIPFixture()
+	entries = append(entries, config.MappingEntry{
+		OID:       ".1.3.6.1.2.1.4.34.1",
+		Entity:    "ipAddress",
+		Field:     "_id",
+		IndexKind: "inet_address",
+		MappingEntries: []config.MappingEntry{
+			{
+				OID: ".1.3.6.1.2.1.4.34.1.3", Entity: "ipAddress", Field: "assignedObject",
+				Relationship: config.Relationship{Type: "interface"},
+			},
+			{OID: ".1.3.6.1.2.1.4.34.1.4", Entity: "ipAddress", Field: "addressType"},
+			{OID: ".1.3.6.1.2.1.4.34.1.5", Entity: "ipAddress", Field: "addressPrefix"},
+			{OID: ".1.3.6.1.2.1.4.34.1.7", Entity: "ipAddress", Field: "addressStatus"},
+			{OID: ".1.3.6.1.2.1.4.34.1.10", Entity: "ipAddress", Field: "addressRowStatus"},
+		},
+	})
+	return entries
+}
+
+// modernIPv4PDUs adds RFC 4293 ipAddressTable PDUs for the given IPv4
+// address assigned to ifIndex 1, with the given prefix length. The
+// RowPointer encodes <ifIndex>=1, <addrType>=1, <addrLen>=4, <bytes>,
+// <prefixLen>=plen.
+func modernIPv4PDUs(addr string, plen int) mapping.ObjectIDValueMap {
+	octets := strings.Split(addr, ".")
+	rowSuffix := "1.4." + strings.Join(octets, ".")
+	rowPtr := fmt.Sprintf(".1.3.6.1.2.1.4.32.1.5.1.1.4.%s.0.%d", strings.Join(octets, "."), plen)
+	return mapping.ObjectIDValueMap{
+		".1.3.6.1.2.1.4.34.1.3." + rowSuffix: mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.4." + rowSuffix: mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.5." + rowSuffix: mapping.Value{
+			Value: rowPtr, Type: mapping.Asn1BER(mapping.ObjectIdentifier), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.7." + rowSuffix: mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.10." + rowSuffix: mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+	}
+}
+
+// modernIPv6PDUs is the IPv6 sibling of modernIPv4PDUs. Encodes addrType=2
+// addrLen=16 followed by 16 decimal bytes.
+func modernIPv6PDUs(addr string, plen int) mapping.ObjectIDValueMap {
+	ip := net.ParseIP(addr)
+	if ip == nil || ip.To4() != nil {
+		panic("modernIPv6PDUs requires an IPv6 literal: " + addr)
+	}
+	ip = ip.To16()
+	bytes := make([]string, 16)
+	for i, b := range ip {
+		bytes[i] = fmt.Sprintf("%d", b)
+	}
+	rowSuffix := "2.16." + strings.Join(bytes, ".")
+	rowPtr := fmt.Sprintf(".1.3.6.1.2.1.4.32.1.5.1.2.16.%s.0.%d", strings.Join(bytes, "."), plen)
+	return mapping.ObjectIDValueMap{
+		".1.3.6.1.2.1.4.34.1.3." + rowSuffix: mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.4." + rowSuffix: mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.5." + rowSuffix: mapping.Value{
+			Value: rowPtr, Type: mapping.Asn1BER(mapping.ObjectIdentifier), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.7." + rowSuffix: mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.10." + rowSuffix: mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+	}
+}
+
+// mergeOIDs combines several ObjectIDValueMaps into one. Later entries
+// overwrite earlier ones on key collision (intentional for tests that
+// want to override a default).
+func mergeOIDs(maps ...mapping.ObjectIDValueMap) mapping.ObjectIDValueMap {
+	out := mapping.ObjectIDValueMap{}
+	for _, m := range maps {
+		for k, v := range m {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func TestMapObjectIDsToEntity_LegacyAndModernSameAddress_Deduplicates(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "")
+	pdus := mergeOIDs(
+		primaryIPOneInterfaceOIDs("10.0.0.1", "Gi0"),
+		modernIPv4PDUs("10.0.0.1", 24),
+	)
+	entities := m.MapObjectIDsToEntity(pdus)
+
+	count := 0
+	for _, e := range entities {
+		if ip, ok := e.(*diode.IPAddress); ok && ip.Address != nil &&
+			strings.HasPrefix(*ip.Address, "10.0.0.1") {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "duplicate IP entities must be deduped to one")
 }

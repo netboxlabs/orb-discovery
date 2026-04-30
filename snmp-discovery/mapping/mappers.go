@@ -317,6 +317,12 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 		}
 	}
 
+	source := "legacy"
+	if isInetAddress {
+		source = "modern"
+	}
+	entityRegistry.MarkIPSource(&ipAddress, source)
+
 	return &ipAddress
 }
 

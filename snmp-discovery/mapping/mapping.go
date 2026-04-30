@@ -57,6 +57,7 @@ type EntityRegistry struct {
 	entities           map[EntityType]map[ObjectIDIndex]diode.Entity
 	logger             *slog.Logger
 	excludedInterfaces map[string]struct{}
+	ipSource           map[*diode.IPAddress]string
 }
 
 // NewEntityRegistry creates a new EntityRegistry
@@ -65,7 +66,24 @@ func NewEntityRegistry(logger *slog.Logger) *EntityRegistry {
 		entities:           make(map[EntityType]map[ObjectIDIndex]diode.Entity),
 		logger:             logger,
 		excludedInterfaces: make(map[string]struct{}),
+		ipSource:           make(map[*diode.IPAddress]string),
 	}
+}
+
+// MarkIPSource records the source table ("legacy" or "modern") for an
+// IP address entity. Used by cross-table dedup to prefer the modern
+// (RFC 4293) table over the legacy (RFC 1213) table when both have a
+// row for the same address.
+func (r *EntityRegistry) MarkIPSource(ip *diode.IPAddress, source string) {
+	if r.ipSource == nil {
+		r.ipSource = make(map[*diode.IPAddress]string)
+	}
+	r.ipSource[ip] = source
+}
+
+// IPSource returns the source table for an IP address, or "" if unknown.
+func (r *EntityRegistry) IPSource(ip *diode.IPAddress) string {
+	return r.ipSource[ip]
 }
 
 // ExcludeInterface marks an interface name as excluded so it is skipped during lookups
@@ -472,6 +490,7 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 	}
 
 	m.filterExcludedEntities(uniqueEntities)
+	m.dedupIPAddresses(uniqueEntities)
 
 	currentDevice := m.registry.GetOrCreateEntity(DeviceEntityType, CurrentDeviceIndex).(*diode.Device)
 
@@ -738,6 +757,48 @@ func stripPrefix(addr string) string {
 		return addr[:i]
 	}
 	return addr
+}
+
+// dedupIPAddresses removes duplicate *diode.IPAddress entities sharing
+// the same canonical address (prefix-stripped). When both legacy
+// (ipAddrTable) and modern (ipAddressTable) entries exist for the same
+// address, the modern entry wins — it carries the authoritative
+// RFC 4293 metadata and is IPv6-capable.
+func (m *ObjectIDMapper) dedupIPAddresses(entities map[diode.Entity]bool) {
+	type bucket struct {
+		modern *diode.IPAddress
+		legacy *diode.IPAddress
+	}
+	groups := make(map[string]*bucket)
+	for entity := range entities {
+		ip, ok := entity.(*diode.IPAddress)
+		if !ok || ip.Address == nil {
+			continue
+		}
+		key := stripPrefix(*ip.Address)
+		if groups[key] == nil {
+			groups[key] = &bucket{}
+		}
+		switch m.registry.IPSource(ip) {
+		case "modern":
+			groups[key].modern = ip
+		default:
+			groups[key].legacy = ip
+		}
+	}
+	for _, b := range groups {
+		if b.modern == nil || b.legacy == nil {
+			continue
+		}
+		for entity := range entities {
+			if entity == b.legacy {
+				delete(entities, entity)
+				m.logger.Debug("deduped legacy ipAddress in favor of modern",
+					"address", *b.legacy.Address)
+				break
+			}
+		}
+	}
 }
 
 func (m *ObjectIDMapper) filterExcludedEntities(entities map[diode.Entity]bool) {
