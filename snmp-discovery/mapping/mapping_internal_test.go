@@ -88,7 +88,7 @@ func TestResolveMappingEntry_FallsBackThroughPDUs(t *testing.T) {
 }
 
 func TestNewObjectIDValueForEntry_InetAddressIPv4(t *testing.T) {
-	entry := &Entry{IndexKind: "inet_address"}
+	entry := &Entry{OID: ".1.3.6.1.2.1.4.34.1", IndexKind: "inet_address"}
 	val := Value{Value: "1", Type: Integer, IdentifierSize: 0}
 	got, err := newObjectIDValueForEntry(".1.3.6.1.2.1.4.34.1.3.1.4.10.0.0.1", val, entry)
 	require.NoError(t, err)
@@ -97,7 +97,7 @@ func TestNewObjectIDValueForEntry_InetAddressIPv4(t *testing.T) {
 }
 
 func TestNewObjectIDValueForEntry_InetAddressIPv6(t *testing.T) {
-	entry := &Entry{IndexKind: "inet_address"}
+	entry := &Entry{OID: ".1.3.6.1.2.1.4.34.1", IndexKind: "inet_address"}
 	val := Value{Value: "1", Type: Integer, IdentifierSize: 0}
 	oid := ".1.3.6.1.2.1.4.34.1.3.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1"
 	got, err := newObjectIDValueForEntry(oid, val, entry)
@@ -106,8 +106,30 @@ func TestNewObjectIDValueForEntry_InetAddressIPv6(t *testing.T) {
 	assert.Equal(t, ".1.3.6.1.2.1.4.34.1.3", got.Parent)
 }
 
+// TestNewObjectIDValueForEntry_InetAddressIPv6TailLooksLikeIPv4 is the
+// regression test for the suffix-guessing bug Codex flagged: an IPv6 row
+// whose final 6 sub-OIDs spell out a valid IPv4 InetAddress shape
+// (`1.4.x.x.x.x`) would have been silently classified as IPv4 by the
+// original implementation. With the entry-OID anchor, the addrType byte
+// is read at the correct position (right after the column sub-OID) and
+// the row decodes as IPv6.
+func TestNewObjectIDValueForEntry_InetAddressIPv6TailLooksLikeIPv4(t *testing.T) {
+	entry := &Entry{OID: ".1.3.6.1.2.1.4.34.1", IndexKind: "inet_address"}
+	val := Value{Value: "1", Type: Integer, IdentifierSize: 0}
+	// IPv6 with 16 address bytes whose final 6 spell `1.4.10.0.0.1`.
+	// Bytes: 0,0,0,0,0,0,0,0,0,0,1,4,10,0,0,1 (10 zeros + the trap pattern).
+	oid := ".1.3.6.1.2.1.4.34.1.3.2.16.0.0.0.0.0.0.0.0.0.0.1.4.10.0.0.1"
+	got, err := newObjectIDValueForEntry(oid, val, entry)
+	require.NoError(t, err)
+	// netip.AddrFrom16 normalizes to canonical RFC 5952 form. The trailing
+	// IPv4-mapped-octet pattern must NOT be mistaken for an IPv4 row.
+	assert.True(t, len(string(got.Index)) > len("ipv6:"), "must decode as ipv6: prefix, got %q", got.Index)
+	assert.NotEqual(t, ObjectIDIndex("ipv4:10.0.0.1"), got.Index)
+	assert.Contains(t, string(got.Index), "ipv6:")
+}
+
 func TestNewObjectIDValueForEntry_InetAddressMalformed(t *testing.T) {
-	entry := &Entry{IndexKind: "inet_address"}
+	entry := &Entry{OID: ".1.3.6.1.2.1.4.34.1", IndexKind: "inet_address"}
 	val := Value{Value: "1", Type: Integer, IdentifierSize: 0}
 	_, err := newObjectIDValueForEntry(".1.3.6.1.2.1.4.34.1.3.99.4.1.2.3.4", val, entry)
 	require.Error(t, err)

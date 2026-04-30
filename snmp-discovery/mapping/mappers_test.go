@@ -3922,6 +3922,15 @@ func TestIPAddressMapper_FilterDeprecated_Kept(t *testing.T) {
 	}
 }
 
+func TestIPAddressMapper_FilterOptimistic_Kept(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.7": "8", // optimistic
+	})
+	if got == nil {
+		t.Fatalf("optimistic addresses should be kept (RFC 4862 says usable with caveats), got nil")
+	}
+}
+
 func TestIPAddressMapper_FilterColumnsMissing_Lenient(t *testing.T) {
 	got := runIPAddressTableMap(t, nil)
 	if got == nil {

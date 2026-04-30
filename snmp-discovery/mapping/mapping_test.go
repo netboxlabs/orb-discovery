@@ -1316,14 +1316,47 @@ func primaryIPFixtureBothTables() []config.MappingEntry {
 	return entries
 }
 
+// ipv4NetworkOctets returns the dotted network address (host bits
+// zeroed) for an IPv4 address + prefix length, formatted as decimal
+// octets joined by dots. Used to build RFC 4293-compliant test
+// RowPointers into ipAddressPrefixTable.
+func ipv4NetworkOctets(addr string, plen int) string {
+	ip := net.ParseIP(addr).To4()
+	if ip == nil {
+		panic("ipv4NetworkOctets requires an IPv4 literal: " + addr)
+	}
+	mask := net.CIDRMask(plen, 32)
+	network := ip.Mask(mask)
+	return fmt.Sprintf("%d.%d.%d.%d", network[0], network[1], network[2], network[3])
+}
+
+// ipv6NetworkBytes returns the 16-byte network address (host bits
+// zeroed) for an IPv6 address + prefix length, formatted as decimal
+// octets joined by dots.
+func ipv6NetworkBytes(addr string, plen int) string {
+	ip := net.ParseIP(addr).To16()
+	if ip == nil || ip.To4() != nil {
+		panic("ipv6NetworkBytes requires an IPv6 literal: " + addr)
+	}
+	mask := net.CIDRMask(plen, 128)
+	network := ip.Mask(mask)
+	parts := make([]string, 16)
+	for i, b := range network {
+		parts[i] = fmt.Sprintf("%d", b)
+	}
+	return strings.Join(parts, ".")
+}
+
 // modernIPv4PDUs adds RFC 4293 ipAddressTable PDUs for the given IPv4
 // address assigned to ifIndex 1, with the given prefix length. The
-// RowPointer encodes <ifIndex>=1, <addrType>=1, <addrLen>=4, <bytes>,
-// <prefixLen>=plen.
+// RowPointer encodes ipAddressPrefixEntry's index per RFC 4293:
+// <ifIndex=1>.<addrType=1>.<addrLen=4>.<prefixBytes>.<prefixLen>,
+// where prefixBytes is the network address (host bits zeroed).
 func modernIPv4PDUs(addr string, plen int) mapping.ObjectIDValueMap {
 	octets := strings.Split(addr, ".")
 	rowSuffix := "1.4." + strings.Join(octets, ".")
-	rowPtr := fmt.Sprintf(".1.3.6.1.2.1.4.32.1.5.1.1.4.%s.0.%d", strings.Join(octets, "."), plen)
+	prefixOctets := ipv4NetworkOctets(addr, plen)
+	rowPtr := fmt.Sprintf(".1.3.6.1.2.1.4.32.1.5.1.1.4.%s.%d", prefixOctets, plen)
 	return mapping.ObjectIDValueMap{
 		".1.3.6.1.2.1.4.34.1.3." + rowSuffix: mapping.Value{
 			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
@@ -1344,7 +1377,8 @@ func modernIPv4PDUs(addr string, plen int) mapping.ObjectIDValueMap {
 }
 
 // modernIPv6PDUs is the IPv6 sibling of modernIPv4PDUs. Encodes addrType=2
-// addrLen=16 followed by 16 decimal bytes.
+// addrLen=16 followed by 16 decimal bytes. The RowPointer's prefix
+// portion uses the network bytes (host bits zeroed) per RFC 4293.
 func modernIPv6PDUs(addr string, plen int) mapping.ObjectIDValueMap {
 	ip := net.ParseIP(addr)
 	if ip == nil || ip.To4() != nil {
@@ -1356,7 +1390,7 @@ func modernIPv6PDUs(addr string, plen int) mapping.ObjectIDValueMap {
 		bytes[i] = fmt.Sprintf("%d", b)
 	}
 	rowSuffix := "2.16." + strings.Join(bytes, ".")
-	rowPtr := fmt.Sprintf(".1.3.6.1.2.1.4.32.1.5.1.2.16.%s.0.%d", strings.Join(bytes, "."), plen)
+	rowPtr := fmt.Sprintf(".1.3.6.1.2.1.4.32.1.5.1.2.16.%s.%d", ipv6NetworkBytes(addr, plen), plen)
 	return mapping.ObjectIDValueMap{
 		".1.3.6.1.2.1.4.34.1.3." + rowSuffix: mapping.Value{
 			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,

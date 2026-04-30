@@ -962,35 +962,37 @@ func newObjectIDValue(objectID string, value Value) (*ObjectIDValue, error) {
 // When entry.IndexKind == "inet_address", the trailing sub-OIDs are decoded
 // per RFC 4001 (variable length); otherwise the legacy fixed-size slicing
 // applies, identical to historical behavior.
+//
+// For inet_address entries, the column boundary is computed from
+// entry.OID rather than guessed from the suffix length. Suffix-based
+// guessing is unsound: an IPv6 row whose final 6 sub-OIDs happen to
+// look like a valid IPv4 InetAddress (`1.4.x.x.x.x`) would be silently
+// misclassified as IPv4. Using the entry OID's depth as the anchor
+// removes the ambiguity.
 func newObjectIDValueForEntry(objectID string, value Value, entry *Entry) (*ObjectIDValue, error) {
 	parts := strings.Split(objectID, ".")
 	if entry != nil && entry.IndexKind == "inet_address" {
-		// Strip the leading empty produced by a leading dot.
-		clean := parts
-		if len(clean) > 0 && clean[0] == "" {
-			clean = clean[1:]
+		entryParts := strings.Split(entry.OID, ".")
+		// Resolved entry's OID is the table-row prefix
+		// (e.g. ".1.3.6.1.2.1.4.34.1"). The column sub-OID immediately
+		// follows, then the InetAddress index.
+		columnDepth := len(entryParts) + 1
+		if len(parts) <= columnDepth {
+			return nil, errMalformedInetAddress
 		}
-		// Try the two valid InetAddress suffix lengths (v4: type+len+4
-		// bytes; v6: type+len+16 bytes). Reject if neither decodes.
-		for _, suffixLen := range []int{6, 18} {
-			if len(clean) <= suffixLen {
-				continue
-			}
-			suffix := clean[len(clean)-suffixLen:]
-			canonical, ok := decodeInetAddressIndex(suffix)
-			if !ok {
-				continue
-			}
-			parent := "." + strings.Join(clean[:len(clean)-suffixLen], ".")
-			return &ObjectIDValue{
-				OID:    objectID,
-				Index:  ObjectIDIndex(canonical),
-				Parent: parent,
-				Value:  value.Value,
-				Type:   value.Type,
-			}, nil
+		suffix := parts[columnDepth:]
+		canonical, ok := decodeInetAddressIndex(suffix)
+		if !ok {
+			return nil, errMalformedInetAddress
 		}
-		return nil, errMalformedInetAddress
+		parent := strings.Join(parts[:columnDepth], ".")
+		return &ObjectIDValue{
+			OID:    objectID,
+			Index:  ObjectIDIndex(canonical),
+			Parent: parent,
+			Value:  value.Value,
+			Type:   value.Type,
+		}, nil
 	}
 
 	if len(parts) <= value.IdentifierSize {

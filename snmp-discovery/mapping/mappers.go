@@ -298,7 +298,12 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 			m.logger.Debug("dropping non-unicast row", "addrType", addrType, "address", derefAddr(ipAddress.Address))
 			return nil
 		}
-		if addrStatus != 1 && addrStatus != 2 {
+		// Accept preferred(1), deprecated(2), and optimistic(8). The
+		// last is "may be used freely with caveats" per RFC 4862;
+		// rejecting it while keeping deprecated would be inconsistent.
+		// Reject tentative(6) / invalid(3) / inaccessible(4) /
+		// unknown(5) / duplicate(7).
+		if addrStatus != 1 && addrStatus != 2 && addrStatus != 8 {
 			m.logger.Debug("dropping row by status", "status", addrStatus, "address", derefAddr(ipAddress.Address))
 			return nil
 		}
@@ -340,10 +345,15 @@ func derefAddr(s *string) string {
 //
 //	.1.3.6.1.2.1.4.32.1.5.<ifIndex>.<addrType>.<addrLen>.<addrBytes...>.<prefixLen>
 //
+// The minimum well-formed shape carries 1 (ifIndex) + 1 (addrType) +
+// 1 (addrLen) + 4 (IPv4 address) + 1 (prefixLen) = 8 trailing sub-OIDs
+// after the column prefix; IPv6 carries 20. We require at least 8.
+//
 // Returns ok=false for:
 //   - "0.0" / ".0.0" (zeroDotZero — RFC 4293 sentinel for "no prefix
 //     row exists")
 //   - any pointer that does not begin with .1.3.6.1.2.1.4.32.1.5
+//   - the bare column OID with no row index appended
 //   - empty / non-numeric tail
 func parseAddressPrefixRowPointer(pointer string) (int, bool) {
 	if pointer == "" {
@@ -354,14 +364,17 @@ func parseAddressPrefixRowPointer(pointer string) (int, bool) {
 		return 0, false
 	}
 	const prefixTablePrefix = "1.3.6.1.2.1.4.32.1.5"
-	if trimmed != prefixTablePrefix && !strings.HasPrefix(trimmed, prefixTablePrefix+".") {
+	if !strings.HasPrefix(trimmed, prefixTablePrefix+".") {
 		return 0, false
 	}
-	parts := strings.Split(trimmed, ".")
-	if len(parts) == 0 {
+	suffix := trimmed[len(prefixTablePrefix)+1:]
+	suffixParts := strings.Split(suffix, ".")
+	// Minimum: ifIndex + addrType + addrLen + 4 IPv4 bytes + prefixLen.
+	const minSuffixParts = 8
+	if len(suffixParts) < minSuffixParts {
 		return 0, false
 	}
-	tail := parts[len(parts)-1]
+	tail := suffixParts[len(suffixParts)-1]
 	n, err := strconv.Atoi(tail)
 	if err != nil || n < 0 {
 		return 0, false

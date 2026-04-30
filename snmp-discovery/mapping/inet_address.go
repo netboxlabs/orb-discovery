@@ -3,6 +3,7 @@ package mapping
 import (
 	"errors"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 )
@@ -54,11 +55,14 @@ func decodeInetAddressIndex(suffix []string) (string, bool) {
 		if !ok {
 			return "", false
 		}
-		ip := net.IP(bytes).To16()
-		if ip == nil {
-			return "", false
-		}
-		return "ipv6:" + ip.String(), true
+		// Use netip.AddrFrom16 to preserve the IPv6 textual form even
+		// for IPv4-mapped addresses (e.g. ::ffff:10.0.0.1). net.IP.String
+		// would render those as dotted IPv4, which would silently
+		// reclassify the row as IPv4 in IPAddressMapper's family check
+		// downstream.
+		var arr [16]byte
+		copy(arr[:], bytes)
+		return "ipv6:" + netip.AddrFrom16(arr).String(), true
 	default:
 		// 3 ipv4z, 4 ipv6z, 16 dns, or unknown — explicitly skipped.
 		return "", false

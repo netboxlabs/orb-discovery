@@ -52,6 +52,17 @@ func TestDecodeInetAddressIndex_Malformed(t *testing.T) {
 	}
 }
 
+func TestDecodeInetAddressIndex_IPv4MappedIPv6_KeepsIPv6Form(t *testing.T) {
+	// ::ffff:10.0.0.1  — bytes 0,0,0,0,0,0,0,0,0,0,255,255,10,0,0,1
+	suffix := []string{"2", "16", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "255", "255", "10", "0", "0", "1"}
+	got, ok := decodeInetAddressIndex(suffix)
+	assert.True(t, ok)
+	// Must NOT collapse to ipv4: form. RFC 4001 says addrType=2 is
+	// canonical IPv6; the dotted-quad rendering would silently
+	// reclassify the row as IPv4 in the IPAddressMapper family check.
+	assert.Equal(t, "ipv6:::ffff:10.0.0.1", got)
+}
+
 func TestStripIndexFamilyPrefix(t *testing.T) {
 	assert.Equal(t, "10.0.0.1", stripIndexFamilyPrefix("ipv4:10.0.0.1"))
 	assert.Equal(t, "2001:db8::1", stripIndexFamilyPrefix("ipv6:2001:db8::1"))
