@@ -123,7 +123,7 @@ func TestNewObjectIDValueForEntry_InetAddressIPv6TailLooksLikeIPv4(t *testing.T)
 	require.NoError(t, err)
 	// netip.AddrFrom16 normalizes to canonical RFC 5952 form. The trailing
 	// IPv4-mapped-octet pattern must NOT be mistaken for an IPv4 row.
-	assert.True(t, len(string(got.Index)) > len("ipv6:"), "must decode as ipv6: prefix, got %q", got.Index)
+	assert.Truef(t, len(string(got.Index)) > len("ipv6:"), "must decode as ipv6: prefix, got %q", got.Index)
 	assert.NotEqual(t, ObjectIDIndex("ipv4:10.0.0.1"), got.Index)
 	assert.Contains(t, string(got.Index), "ipv6:")
 }

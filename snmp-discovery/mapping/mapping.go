@@ -280,7 +280,12 @@ func (m *Entry) MapToEntity(pdus map[ObjectIDIndex]*ObjectIDValue, entityRegistr
 	entity := m.Mapper.Map(pdus, m, entityRegistry, defaults)
 	logger.Debug("entity returned from mapper", "entity", entity)
 	if entity == nil {
-		logger.Warn("no entity returned from mapper, ignoring", "entity", m.Entity)
+		// Mappers return nil to intentionally drop a row — RFC 4293
+		// filters (non-unicast, tentative, non-active) and invalid
+		// CIDR validation are the common cases. These are expected on
+		// normal walks, so a warn would create noise. Debug keeps
+		// it observable without flooding.
+		logger.Debug("entity dropped by mapper", "entity", m.Entity)
 		return nil
 	}
 	return entity
