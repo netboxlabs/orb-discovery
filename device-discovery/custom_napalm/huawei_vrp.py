@@ -55,6 +55,11 @@ def _huawei_row_to_switchport_info(row: dict) -> SwitchportInfo:
     if link_type in ("auto", "desirable"):
         # LNP-negotiated: trunk if there's a tagged-VLAN list, otherwise access.
         link_type = "trunk" if (allowed not in (None, [])) else "access"
+    elif link_type == "dot1q-tunnel":
+        # QinQ tunnel ports are L2 access ports on the service VID. Q-in-Q
+        # outer/inner tagging is out of scope for v1, but treat the port
+        # as access on the PVID rather than dropping VLAN data entirely.
+        link_type = "access"
 
     if link_type == "access":
         return SwitchportInfo(

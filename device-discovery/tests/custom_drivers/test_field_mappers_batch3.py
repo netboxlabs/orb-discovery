@@ -40,11 +40,20 @@ def test_huawei_lnp_link_type_inferred_from_membership():
     assert info.allowed_vlans == [100, 200]
 
 
+def test_huawei_dot1q_tunnel_classifies_as_access():
+    """dot1q-tunnel L2 ports keep VLAN data — classified as access on PVID."""
+    info = _huawei_row_to_switchport_info(
+        {"link_type": "dot1q-tunnel", "vlan_id": "100", "trunk_vlan_list": []}
+    )
+    assert info.admin_mode == "access"
+    assert info.access_vlan == 100
+
+
 def test_huawei_unknown_link_type_routed():
-    """Genuinely unknown link-types (e.g. dot1q-tunnel, blank) still map to routed."""
-    info = _huawei_row_to_switchport_info({"link_type": "dot1q-tunnel", "vlan_id": "1"})
-    assert info.enabled is False
+    """Blank / genuinely unknown link-types still map to routed."""
     info = _huawei_row_to_switchport_info({"link_type": "", "vlan_id": "1"})
+    assert info.enabled is False
+    info = _huawei_row_to_switchport_info({"link_type": "weird-mode", "vlan_id": "1"})
     assert info.enabled is False
 
 
@@ -362,6 +371,22 @@ def test_comware_hybrid_collapses_to_trunk():
     assert info.admin_mode == "trunk"
     assert info.native_vlan == 50
     assert info.allowed_vlans == [100, 200]
+
+
+def test_comware_strips_port_status_suffix():
+    """Comware members like `GE1/0/1(U)` get the link-state suffix stripped."""
+    text = (
+        " VLAN ID: 100\n"
+        " Tagged Ports:\n"
+        "   GE1/0/1(U), GE1/0/2(D)\n"
+        " Untagged Ports:\n"
+        "   None\n"
+    )
+    membership = _parse_comware_display_vlan_all(text)
+    assert membership == {
+        "GigabitEthernet1/0/1": {"tagged": [100], "untagged": []},
+        "GigabitEthernet1/0/2": {"tagged": [100], "untagged": []},
+    }
 
 
 def test_comware_invert_vlan_all():

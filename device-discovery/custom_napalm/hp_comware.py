@@ -102,6 +102,12 @@ def _parse_comware_interface_brief_modes(rows: list[dict]) -> dict[str, dict]:
 
 
 _COMWARE_VLAN_HEADER_RE = re.compile(r"^\s*VLAN\s+ID\s*:\s*(\d+)\s*$", re.IGNORECASE)
+_COMWARE_PORT_STATUS_SUFFIX_RE = re.compile(r"\([A-Za-z]+\)$")
+
+
+def _strip_comware_port_status(token: str) -> str:
+    """Strip ``(U)`` / ``(D)`` / ``(T)`` style link-state suffixes from a port token."""
+    return _COMWARE_PORT_STATUS_SUFFIX_RE.sub("", token)
 
 
 def _comware_record_ports(
@@ -110,11 +116,12 @@ def _comware_record_ports(
     """
     Append ``vid`` to the appropriate per-port bucket for each port on the line.
 
-    Port names are expanded from abbreviated form to match
-    ``get_interfaces()`` output (see ``_expand_comware_iface``).
+    Port names are stripped of any trailing link-state suffix
+    (``GE1/0/1(U)`` → ``GE1/0/1``) and then expanded from abbreviated form
+    to match ``get_interfaces()`` output (see ``_expand_comware_iface``).
     """
-    for port in re.split(r"[,\s]+", ports_line.strip()):
-        port = port.strip()
+    for raw in re.split(r"[,\s]+", ports_line.strip()):
+        port = _strip_comware_port_status(raw.strip())
         if not port or port.lower() == "none":
             continue
         port = _expand_comware_iface(port)
