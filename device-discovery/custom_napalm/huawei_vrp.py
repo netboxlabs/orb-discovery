@@ -34,31 +34,13 @@ def _huawei_row_to_switchport_info(row: dict) -> SwitchportInfo:
     Map an ntc-templates ``display port vlan`` row to a SwitchportInfo.
 
     LINK_TYPE values from VRP: access, trunk, hybrid, desirable, auto.
-    Hybrid collapses to trunk (native + tagged set). Unknown link-types
-    map to routed.
+    Hybrid collapses to trunk (native + tagged set). LNP-negotiated link
+    types (``auto`` / ``desirable``) still carry VLAN state — mode is
+    inferred from membership shape (any trunk VLAN list ⇒ trunk;
+    otherwise access). Unknown / blank link-types map to routed.
     """
     link_type = (row.get("link_type") or "").strip().lower()
-    if link_type not in ("access", "trunk", "hybrid"):
-        return SwitchportInfo(
-            enabled=False,
-            admin_mode=None,
-            oper_mode=None,
-            access_vlan=None,
-            native_vlan=None,
-            allowed_vlans=None,
-        )
-
     pvid = coerce_vid(row.get("vlan_id"))
-
-    if link_type == "access":
-        return SwitchportInfo(
-            enabled=True,
-            admin_mode="access",
-            oper_mode="access",
-            access_vlan=pvid,
-            native_vlan=None,
-            allowed_vlans=None,
-        )
 
     trunk_list = row.get("trunk_vlan_list") or []
     if isinstance(trunk_list, str):
@@ -69,13 +51,36 @@ def _huawei_row_to_switchport_info(row: dict) -> SwitchportInfo:
         allowed: list[int] | str | None = "all" if is_wildcard else vids
     else:
         allowed = None
+
+    if link_type in ("auto", "desirable"):
+        # LNP-negotiated: trunk if there's a tagged-VLAN list, otherwise access.
+        link_type = "trunk" if (allowed not in (None, [])) else "access"
+
+    if link_type == "access":
+        return SwitchportInfo(
+            enabled=True,
+            admin_mode="access",
+            oper_mode="access",
+            access_vlan=pvid,
+            native_vlan=None,
+            allowed_vlans=None,
+        )
+    if link_type in ("trunk", "hybrid"):
+        return SwitchportInfo(
+            enabled=True,
+            admin_mode="trunk",
+            oper_mode="trunk",
+            access_vlan=None,
+            native_vlan=pvid,
+            allowed_vlans=allowed,
+        )
     return SwitchportInfo(
-        enabled=True,
-        admin_mode="trunk",
-        oper_mode="trunk",
+        enabled=False,
+        admin_mode=None,
+        oper_mode=None,
         access_vlan=None,
-        native_vlan=pvid,
-        allowed_vlans=allowed,
+        native_vlan=None,
+        allowed_vlans=None,
     )
 
 # "password cipher <hash>" / "psk cipher <hash>" / "key cipher <hash>"

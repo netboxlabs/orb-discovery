@@ -23,9 +23,28 @@ from custom_napalm.huawei_vrp import _huawei_row_to_switchport_info
 # ----- Huawei VRP -----------------------------------------------------------
 
 
+def test_huawei_lnp_link_type_inferred_from_membership():
+    """LNP link-types (auto/desirable) infer mode from VLAN membership shape."""
+    # No tagged VLANs → access on PVID
+    info = _huawei_row_to_switchport_info(
+        {"link_type": "desirable", "vlan_id": "1", "trunk_vlan_list": []}
+    )
+    assert info.admin_mode == "access"
+    assert info.access_vlan == 1
+    # Tagged VLANs present → trunk with PVID as native
+    info = _huawei_row_to_switchport_info(
+        {"link_type": "auto", "vlan_id": "99", "trunk_vlan_list": ["100", "200"]}
+    )
+    assert info.admin_mode == "trunk"
+    assert info.native_vlan == 99
+    assert info.allowed_vlans == [100, 200]
+
+
 def test_huawei_unknown_link_type_routed():
-    """Desirable / auto / dot1q-tunnel link-types map to routed."""
-    info = _huawei_row_to_switchport_info({"link_type": "desirable", "vlan_id": "1"})
+    """Genuinely unknown link-types (e.g. dot1q-tunnel, blank) still map to routed."""
+    info = _huawei_row_to_switchport_info({"link_type": "dot1q-tunnel", "vlan_id": "1"})
+    assert info.enabled is False
+    info = _huawei_row_to_switchport_info({"link_type": "", "vlan_id": "1"})
     assert info.enabled is False
 
 
