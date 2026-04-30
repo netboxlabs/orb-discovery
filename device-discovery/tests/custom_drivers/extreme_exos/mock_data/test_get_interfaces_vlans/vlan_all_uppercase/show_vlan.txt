@@ -1,0 +1,4 @@
+VLAN Tag: 10
+   1 (u)
+VLAN Tag: 100
+   1 (t)

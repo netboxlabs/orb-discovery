@@ -17,7 +17,94 @@ from napalm.base import models
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
+from custom_napalm._vlan import (
+    SwitchportInfo,
+    classify_switchport,
+)
+
 logger = logging.getLogger(__name__)
+
+
+_EXOS_SHOW_VLAN_TAG_RE = re.compile(
+    r"^\s*VLAN\s+Tag\s*:\s+(?P<vid>\d+)\s*$", re.IGNORECASE
+)
+_EXOS_VLAN_PORT_LINE_RE = re.compile(
+    r"(?P<port>\d+(?::\d+)?)\s*\((?P<flags>[A-Za-z]+)\)"
+)
+
+
+def _parse_exos_show_vlan(text: str) -> dict[str, dict]:
+    """
+    Parse EXOS ``show vlan`` output into per-port membership.
+
+    Returns ``{port: {tagged: list[int], untagged: list[int]}}``. Each VLAN
+    section starts with ``VLAN Tag: <n>`` and lists ports as ``<port> (<flags>)``
+    where flags include ``T`` (tagged) and ``U`` (untagged).
+    """
+    out: dict[str, dict] = {}
+    current_vid: int | None = None
+    for line in text.splitlines():
+        tag_match = _EXOS_SHOW_VLAN_TAG_RE.match(line)
+        if tag_match:
+            try:
+                current_vid = int(tag_match.group("vid"))
+            except ValueError:
+                current_vid = None
+            continue
+        if current_vid is None:
+            continue
+        for m in _EXOS_VLAN_PORT_LINE_RE.finditer(line):
+            port = m.group("port")
+            flags = m.group("flags").upper()
+            bucket = out.setdefault(port, {"tagged": [], "untagged": []})
+            if "T" in flags:
+                if current_vid not in bucket["tagged"]:
+                    bucket["tagged"].append(current_vid)
+            elif "U" in flags:
+                if current_vid not in bucket["untagged"]:
+                    bucket["untagged"].append(current_vid)
+    return out
+
+
+def _exos_merge_to_switchport_info(membership: dict) -> SwitchportInfo:
+    """
+    Map per-port EXOS membership to a SwitchportInfo.
+
+    EXOS does not have an explicit access/trunk mode field — we derive mode
+    from membership shape:
+      - exactly one untagged, no tagged   → access
+      - one untagged + ≥1 tagged          → trunk with native
+      - no untagged + ≥1 tagged           → trunk with no native
+      - no membership                     → routed
+    """
+    untagged = membership.get("untagged") or []
+    tagged = membership.get("tagged") or []
+    if not untagged and not tagged:
+        return SwitchportInfo(
+            enabled=False,
+            admin_mode=None,
+            oper_mode=None,
+            access_vlan=None,
+            native_vlan=None,
+            allowed_vlans=None,
+        )
+    if untagged and not tagged:
+        return SwitchportInfo(
+            enabled=True,
+            admin_mode="access",
+            oper_mode="access",
+            access_vlan=untagged[0],
+            native_vlan=None,
+            allowed_vlans=None,
+        )
+    return SwitchportInfo(
+        enabled=True,
+        admin_mode="trunk",
+        oper_mode="trunk",
+        access_vlan=None,
+        native_vlan=untagged[0] if untagged else None,
+        allowed_vlans=list(tagged),
+    )
 
 # --- config sanitization -------------------------------------------------- #
 # "create account admin encrypted-secret "$1$xxx""
@@ -369,6 +456,20 @@ class ExosDriver(_napalm_base.NetworkDriver):
             self._add_untagged_vlan_ports(vlans, ports_output)
 
         return vlans
+
+    def get_interfaces_vlans(self) -> dict[str, dict]:
+        """Return per-interface VLAN config inverted from ``show vlan``."""
+        try:
+            raw = self.device.send_command("show vlan")
+        except Exception:
+            logger.debug("EXOS show vlan failed", exc_info=True)
+            return {}
+        membership = _parse_exos_show_vlan(raw or "")
+        result: dict[str, dict] = {}
+        for port, member in membership.items():
+            info = _exos_merge_to_switchport_info(member)
+            result[port] = classify_switchport(info)
+        return result
 
     def _add_tagged_vlan_ports(self, vlans: dict, ports_output: str) -> None:
         """
