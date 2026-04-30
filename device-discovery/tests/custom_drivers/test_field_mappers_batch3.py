@@ -155,6 +155,62 @@ def test_ftos_os9_parser_captures_membership_block():
     assert rows[0]["os9_tagged"] == ["100,200"]
 
 
+def test_ftos_os9_vlan_token_form_hybrid_uses_native():
+    """Alt OS9 form `Vlan <vid>` + Hybrid + Native VlanId resolves native + tagged."""
+    info = _ftos_row_to_switchport_info({
+        "switchport": "Enabled",
+        "802.1qtagged": "Hybrid",
+        "os9_untagged": [],
+        "os9_tagged": [],
+        "os9_vlans": [1, 100, 200],
+        "native_vlanid": "1.",
+    })
+    assert info.admin_mode == "trunk"
+    assert info.native_vlan == 1
+    assert info.allowed_vlans == [100, 200]
+
+
+def test_ftos_os9_vlan_token_form_true_all_tagged():
+    """Alt OS9 form + 802.1QTagged=True puts every VID in the tagged list."""
+    info = _ftos_row_to_switchport_info({
+        "switchport": "Enabled",
+        "802.1qtagged": "True",
+        "os9_untagged": [],
+        "os9_tagged": [],
+        "os9_vlans": [100, 200, 300],
+    })
+    assert info.admin_mode == "trunk"
+    assert info.native_vlan is None
+    assert info.allowed_vlans == [100, 200, 300]
+
+
+def test_ftos_os9_vlan_token_form_false_single_vlan_access():
+    """Alt OS9 form + 802.1QTagged=False with one VID classifies as access."""
+    info = _ftos_row_to_switchport_info({
+        "switchport": "Enabled",
+        "802.1qtagged": "False",
+        "os9_untagged": [],
+        "os9_tagged": [],
+        "os9_vlans": [10],
+    })
+    assert info.admin_mode == "access"
+    assert info.access_vlan == 10
+
+
+def test_ftos_os9_parser_captures_vlan_token_form():
+    """Parser captures `Vlan <vid>, Vlan <vid>` tokens into `os9_vlans`."""
+    text = (
+        "\nName: GigabitEthernet 0/3\n"
+        "802.1QTagged: Hybrid\n"
+        "Vlan membership:\n"
+        "Vlan 1, Vlan 100, Vlan 200\n"
+        "Native VlanId: 1.\n"
+    )
+    rows = _parse_ftos_show_interfaces_switchport(text)
+    assert rows[0]["os9_vlans"] == [1, 100, 200]
+    assert rows[0]["native_vlanid"] == "1."
+
+
 def test_ftos_section_parser_handles_multiple_ports():
     """Section parser separates ports correctly on `Name:` header."""
     text = (
