@@ -853,11 +853,13 @@ func stripPrefix(addr string) string {
 	return addr
 }
 
-// dedupIPAddresses removes duplicate *diode.IPAddress entities sharing
-// the same canonical address (prefix-stripped). When both legacy
-// (ipAddrTable) and modern (ipAddressTable) entries exist for the same
-// address, the modern entry wins — it carries the authoritative
-// RFC 4293 metadata and is IPv6-capable.
+// dedupIPAddresses resolves cross-table overlap for *diode.IPAddress
+// entities that share the same canonical address (prefix-stripped).
+// When both a legacy (ipAddrTable) and modern (ipAddressTable) entry
+// exist for the same address, the modern entry wins — it carries the
+// authoritative RFC 4293 metadata and is IPv6-capable. Same-source
+// duplicates are not collapsed here; the upstream grouping prevents
+// them within a single table.
 func (m *ObjectIDMapper) dedupIPAddresses(entities map[diode.Entity]bool) {
 	type bucket struct {
 		modern *diode.IPAddress
