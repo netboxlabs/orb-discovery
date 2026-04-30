@@ -1,8 +1,0 @@
-VLAN Tag: 100
-   1 (T)
-VLAN Tag: 200
-   1 (T)
-VLAN Tag: 300
-   1 (T)
-VLAN Tag: 400
-   1 (T)

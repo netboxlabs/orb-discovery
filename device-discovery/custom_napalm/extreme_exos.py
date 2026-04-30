@@ -25,44 +25,43 @@ from custom_napalm._vlan import (
 logger = logging.getLogger(__name__)
 
 
-_EXOS_SHOW_VLAN_TAG_RE = re.compile(
-    r"^\s*VLAN\s+Tag\s*:\s+(?P<vid>\d+)\s*$", re.IGNORECASE
-)
-_EXOS_VLAN_PORT_LINE_RE = re.compile(
-    r"(?P<port>\d+(?::\d+)?)\s*\((?P<flags>[A-Za-z]+)\)"
-)
+_EXOS_DOT1Q_TAG_RE = re.compile(r"802\.1Q\s+Tag\s*=\s*(\d+)", re.IGNORECASE)
 
 
-def _parse_exos_show_vlan(text: str) -> dict[str, dict]:
+def _parse_exos_show_ports_membership(text: str) -> dict[str, dict]:
     """
-    Parse EXOS ``show vlan`` output into per-port membership.
+    Parse EXOS ``show ports information detail`` into per-port VLAN membership.
 
-    Returns ``{port: {tagged: list[int], untagged: list[int]}}``. Each VLAN
-    section starts with ``VLAN Tag: <n>`` and lists ports as ``<port> (<flags>)``
-    where flags include ``T`` (tagged) and ``U`` (untagged).
+    Each per-port section starts with ``Port: <id>`` and exposes:
+      - ``Internal Tag = <vid>`` — the port's untagged/PVID VLAN.
+      - ``802.1Q Tag = <vid>`` — one entry per tagged VLAN membership.
+
+    Returns ``{port: {tagged: list[int], untagged: list[int]}}``. Reuses the
+    same regex anchors as the existing ``get_vlans()`` path
+    (``_PORT_SECTION_RE``, ``_PORT_NUM_RE``, ``_INTERNAL_TAG_RE``) so per-port
+    enrichment matches the per-VLAN view exactly.
     """
     out: dict[str, dict] = {}
-    current_vid: int | None = None
-    for line in text.splitlines():
-        tag_match = _EXOS_SHOW_VLAN_TAG_RE.match(line)
-        if tag_match:
+    for section in _PORT_SECTION_RE.split(text):
+        port_m = _PORT_NUM_RE.search(section)
+        if not port_m:
+            continue
+        port = port_m.group(1)
+        bucket = out.setdefault(port, {"tagged": [], "untagged": []})
+        for tag_m in _INTERNAL_TAG_RE.finditer(section):
             try:
-                current_vid = int(tag_match.group("vid"))
+                vid = int(tag_m.group(1))
             except ValueError:
-                current_vid = None
-            continue
-        if current_vid is None:
-            continue
-        for m in _EXOS_VLAN_PORT_LINE_RE.finditer(line):
-            port = m.group("port")
-            flags = m.group("flags").upper()
-            bucket = out.setdefault(port, {"tagged": [], "untagged": []})
-            if "T" in flags:
-                if current_vid not in bucket["tagged"]:
-                    bucket["tagged"].append(current_vid)
-            elif "U" in flags:
-                if current_vid not in bucket["untagged"]:
-                    bucket["untagged"].append(current_vid)
+                continue
+            if vid not in bucket["untagged"]:
+                bucket["untagged"].append(vid)
+        for tag_m in _EXOS_DOT1Q_TAG_RE.finditer(section):
+            try:
+                vid = int(tag_m.group(1))
+            except ValueError:
+                continue
+            if vid not in bucket["tagged"]:
+                bucket["tagged"].append(vid)
     return out
 
 
@@ -458,13 +457,13 @@ class ExosDriver(_napalm_base.NetworkDriver):
         return vlans
 
     def get_interfaces_vlans(self) -> dict[str, dict]:
-        """Return per-interface VLAN config inverted from ``show vlan``."""
+        """Return per-interface VLAN config from ``show ports information detail``."""
         try:
-            raw = self.device.send_command("show vlan")
+            raw = self.device.send_command("show ports information detail")
         except Exception:
-            logger.debug("EXOS show vlan failed", exc_info=True)
+            logger.debug("EXOS show ports information detail failed", exc_info=True)
             return {}
-        membership = _parse_exos_show_vlan(raw or "")
+        membership = _parse_exos_show_ports_membership(raw or "")
         result: dict[str, dict] = {}
         for port, member in membership.items():
             info = _exos_merge_to_switchport_info(member)

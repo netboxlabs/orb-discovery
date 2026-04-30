@@ -10,7 +10,7 @@ from custom_napalm.dell_ftos import (
 )
 from custom_napalm.extreme_exos import (
     _exos_merge_to_switchport_info,
-    _parse_exos_show_vlan,
+    _parse_exos_show_ports_membership,
 )
 from custom_napalm.hp_comware import (
     _comware_merge_to_switchport_info,
@@ -93,6 +93,47 @@ def test_ftos_bool_vid_rejected():
     })
     assert info.native_vlan is None
     assert info.allowed_vlans == [100]
+
+
+def test_ftos_os9_hybrid_collapses_to_trunk():
+    """OS9 802.1QTagged=Hybrid with native + tagged classifies as trunk."""
+    info = _ftos_row_to_switchport_info({
+        "switchport": "Enabled",
+        "802.1qtagged": "Hybrid",
+        "os9_untagged": ["20"],
+        "os9_tagged": ["100,200,300"],
+    })
+    assert info.admin_mode == "trunk"
+    assert info.native_vlan == 20
+    assert info.allowed_vlans == [100, 200, 300]
+
+
+def test_ftos_os9_false_yields_access():
+    """OS9 802.1QTagged=False with one untagged VID classifies as access."""
+    info = _ftos_row_to_switchport_info({
+        "switchport": "Enabled",
+        "802.1qtagged": "False",
+        "os9_untagged": ["10"],
+        "os9_tagged": [],
+    })
+    assert info.admin_mode == "access"
+    assert info.access_vlan == 10
+
+
+def test_ftos_os9_parser_captures_membership_block():
+    """OS9 Vlan-membership block lines (`U`/`T`) populate os9_* lists."""
+    text = (
+        "\nName: GigabitEthernet 0/1\n"
+        "802.1QTagged: Hybrid\n"
+        "Vlan membership:\n"
+        "Q Vlans\n"
+        "U  20\n"
+        "T  100,200\n"
+    )
+    rows = _parse_ftos_show_interfaces_switchport(text)
+    assert rows[0]["802.1qtagged"] == "Hybrid"
+    assert rows[0]["os9_untagged"] == ["20"]
+    assert rows[0]["os9_tagged"] == ["100,200"]
 
 
 def test_ftos_section_parser_handles_multiple_ports():
@@ -279,11 +320,28 @@ def test_comware_invert_vlan_all():
 # ----- Extreme EXOS ---------------------------------------------------------
 
 
-def test_exos_parse_show_vlan_with_lowercase_flags():
-    """`(t)` and `(u)` lowercase parse as tagged/untagged."""
-    text = "VLAN Tag: 10\n   1 (u)\nVLAN Tag: 100\n   1 (t)\n"
-    membership = _parse_exos_show_vlan(text)
-    assert membership == {"1": {"tagged": [100], "untagged": [10]}}
+def test_exos_parse_show_ports_membership():
+    """`Internal Tag` and `802.1Q Tag` lines per port populate untagged/tagged."""
+    text = (
+        "Port:\t1\n"
+        "\tVLAN cfg:\n"
+        "\t\t Name: native, Internal Tag = 99, MAC-limit = No-limit\n"
+        "\t\t Name: vlan100, 802.1Q Tag = 100, MAC-limit = No-limit\n"
+        "\t\t Name: vlan200, 802.1Q Tag = 200, MAC-limit = No-limit\n"
+    )
+    membership = _parse_exos_show_ports_membership(text)
+    assert membership == {"1": {"tagged": [100, 200], "untagged": [99]}}
+
+
+def test_exos_parse_show_ports_handles_stacked_port_ids():
+    """Stacked port notation `1:1` is preserved as-is."""
+    text = (
+        "Port:\t1:1\n"
+        "\tVLAN cfg:\n"
+        "\t\t Name: vlan10, Internal Tag = 10, MAC-limit = No-limit\n"
+    )
+    membership = _parse_exos_show_ports_membership(text)
+    assert membership == {"1:1": {"tagged": [], "untagged": [10]}}
 
 
 def test_exos_merge_no_untagged_yields_trunk_no_native():

@@ -31,7 +31,12 @@ logger = logging.getLogger(__name__)
 
 
 _FTOS_PORT_HEADER_RE = re.compile(r"^\s*Name:\s+(\S.*?)\s*$", re.MULTILINE)
-_FTOS_FIELD_RE = re.compile(r"^\s*([A-Za-z][A-Za-z\- ]+?)\s*:\s*(.*?)\s*$")
+# Accept keys starting with a letter OR a digit so OS9 fields like
+# ``802.1QTagged`` are captured (key normalised to ``802.1qtagged``).
+_FTOS_FIELD_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9\.\- ]+?)\s*:\s*(.*?)\s*$")
+# OS9 ``Vlan membership`` block emits indented lines of the form
+# ``U  <vid>[,<vid>...]`` and ``T  <vid>[,<vid>...|<lo>-<hi>]``.
+_FTOS_OS9_VLAN_TAG_RE = re.compile(r"^\s*([UT])\s+(.+?)\s*$")
 
 
 def _parse_ftos_show_interfaces_switchport(text: str) -> list[dict]:
@@ -40,16 +45,25 @@ def _parse_ftos_show_interfaces_switchport(text: str) -> list[dict]:
 
     Each port section starts with ``Name: <iface>`` and is followed by
     ``Field: Value`` lines. Sections are separated by blank lines.
-    Unknown/extra fields are ignored.
+    Captures both OS10/IOS-style (``Administrative mode``,
+    ``Trunking VLANs Enabled``) and OS9-style (``802.1QTagged``,
+    ``Native VlanId``, ``Vlan membership`` block with ``U``/``T`` rows)
+    formats. Unknown/extra fields are ignored.
     """
     rows: list[dict] = []
     current: dict | None = None
+    in_vlan_membership = False
     for line in text.splitlines():
         header = _FTOS_PORT_HEADER_RE.match(line)
         if header:
             if current is not None:
                 rows.append(current)
-            current = {"interface": header.group(1).strip()}
+            current = {
+                "interface": header.group(1).strip(),
+                "os9_untagged": [],
+                "os9_tagged": [],
+            }
+            in_vlan_membership = False
             continue
         if current is None:
             continue
@@ -59,36 +73,36 @@ def _parse_ftos_show_interfaces_switchport(text: str) -> list[dict]:
                 m.group(1).strip().lower().replace(" ", "_").replace("-", "_")
             )
             current[key] = m.group(2).strip()
+            in_vlan_membership = key == "vlan_membership"
+            continue
+        if in_vlan_membership:
+            tag_m = _FTOS_OS9_VLAN_TAG_RE.match(line)
+            if tag_m:
+                bucket = "os9_untagged" if tag_m.group(1) == "U" else "os9_tagged"
+                current[bucket].append(tag_m.group(2).strip())
     if current is not None:
         rows.append(current)
     return rows
 
 
-def _ftos_row_to_switchport_info(row: dict) -> SwitchportInfo:
-    """Map a parsed FTOS port section to a SwitchportInfo."""
-    sw = (row.get("switchport") or "").lower()
-    if sw in ("disabled", "off"):
-        return SwitchportInfo(
-            enabled=False,
-            admin_mode=None,
-            oper_mode=None,
-            access_vlan=None,
-            native_vlan=None,
-            allowed_vlans=None,
-        )
+def _ftos_routed() -> SwitchportInfo:
+    return SwitchportInfo(
+        enabled=False,
+        admin_mode=None,
+        oper_mode=None,
+        access_vlan=None,
+        native_vlan=None,
+        allowed_vlans=None,
+    )
 
+
+def _ftos_os10_row_to_info(row: dict) -> SwitchportInfo:
+    """Map an OS10/IOS-style FTOS row (``Administrative mode``: …) to a SwitchportInfo."""
     mode_raw = (
         row.get("administrative_mode") or row.get("admin_mode") or ""
     ).lower()
     if mode_raw not in ("access", "trunk", "general"):
-        return SwitchportInfo(
-            enabled=False,
-            admin_mode=None,
-            oper_mode=None,
-            access_vlan=None,
-            native_vlan=None,
-            allowed_vlans=None,
-        )
+        return _ftos_routed()
 
     access_vid = coerce_vid(
         row.get("access_mode_vlan") or row.get("access_vlan") or ""
@@ -118,7 +132,6 @@ def _ftos_row_to_switchport_info(row: dict) -> SwitchportInfo:
             native_vlan=None,
             allowed_vlans=None,
         )
-
     return SwitchportInfo(
         enabled=True,
         admin_mode="trunk",
@@ -127,6 +140,70 @@ def _ftos_row_to_switchport_info(row: dict) -> SwitchportInfo:
         native_vlan=native_vid,
         allowed_vlans=allowed,
     )
+
+
+def _ftos_os9_row_to_info(row: dict) -> SwitchportInfo:
+    """
+    Map an OS9-style FTOS row to a SwitchportInfo.
+
+    OS9 ``show interfaces switchport`` emits ``802.1QTagged: True/False/Hybrid``
+    plus a ``Vlan membership`` block of ``U  <vids>`` and ``T  <vids>`` rows.
+    Hybrid means trunk-with-untagged-native (collapsed to trunk for our
+    NetBox-aligned classification).
+    """
+    qtag_raw = (row.get("802.1qtagged") or "").strip().lower()
+    untagged_specs = row.get("os9_untagged") or []
+    tagged_specs = row.get("os9_tagged") or []
+
+    untagged_vids: list[int] = []
+    for spec in untagged_specs:
+        vids, _ = parse_vlan_range_string(spec)
+        untagged_vids.extend(vids)
+    tagged_vids: list[int] = []
+    for spec in tagged_specs:
+        vids, _ = parse_vlan_range_string(spec)
+        tagged_vids.extend(vids)
+
+    if not qtag_raw and not untagged_vids and not tagged_vids:
+        return _ftos_routed()
+
+    if qtag_raw == "false":
+        return SwitchportInfo(
+            enabled=True,
+            admin_mode="access",
+            oper_mode="access",
+            access_vlan=untagged_vids[0] if untagged_vids else None,
+            native_vlan=None,
+            allowed_vlans=None,
+        )
+
+    # qtag_raw in ("true", "hybrid"); also fall through here when False has no untagged.
+    native_vid = untagged_vids[0] if untagged_vids else None
+    if not tagged_vids and native_vid is None:
+        return _ftos_routed()
+    return SwitchportInfo(
+        enabled=True,
+        admin_mode="trunk",
+        oper_mode="trunk",
+        access_vlan=None,
+        native_vlan=native_vid,
+        allowed_vlans=tagged_vids if tagged_vids else None,
+    )
+
+
+def _ftos_row_to_switchport_info(row: dict) -> SwitchportInfo:
+    """Map a parsed FTOS port section to a SwitchportInfo (OS9 + OS10)."""
+    sw = (row.get("switchport") or "").lower()
+    if sw in ("disabled", "off"):
+        return _ftos_routed()
+
+    if row.get("administrative_mode") or row.get("admin_mode"):
+        return _ftos_os10_row_to_info(row)
+
+    if row.get("802.1qtagged") or row.get("os9_untagged") or row.get("os9_tagged"):
+        return _ftos_os9_row_to_info(row)
+
+    return _ftos_routed()
 
 # ---------------------------------------------------------------------------
 # Config sanitization — Dell FTOS sensitive fields
