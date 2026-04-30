@@ -288,6 +288,11 @@ func (m *Entry) MapToEntity(pdus map[ObjectIDIndex]*ObjectIDValue, entityRegistr
 // Config is a struct that contains a mapping of ObjectIDs to Entries
 type Config struct {
 	mapping map[string]*Entry
+	// inetAddressEntries is the subset of `mapping` whose IndexKind is
+	// "inet_address". Pre-computed so groupByObjectIDIndex can skip the
+	// per-PDU getMappingEntry call (an O(depth) prefix walk) when the
+	// OID falls outside any inet_address-using table.
+	inetAddressEntries map[string]*Entry
 }
 
 // NewConfig creates a new Config
@@ -317,6 +322,7 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 		},
 	}
 	mapping := make(map[string]*Entry)
+	inetAddressEntries := make(map[string]*Entry)
 	for _, m := range mappings {
 		logger.Debug("adding mapping", "oid", m.OID, "entity", m.Entity, "field", m.Field, "relationship", m.Relationship)
 		Entry := newMappingEntry(m, logger, entityMappers)
@@ -324,9 +330,13 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 			continue
 		}
 		mapping[m.OID] = Entry
+		if Entry.IndexKind == "inet_address" {
+			inetAddressEntries[m.OID] = Entry
+		}
 	}
 	return &Config{
-		mapping: mapping,
+		mapping:            mapping,
+		inetAddressEntries: inetAddressEntries,
 	}, nil
 }
 
@@ -782,12 +792,29 @@ func derefString(s *string) string {
 // current SNMP target. Literal IPs populate the matching family slice;
 // hostname targets are resolved via DNS (2s timeout) and split by
 // family. Empty slices are returned on lookup failure.
+//
+// Family detection uses the textual form: any address containing a
+// colon is IPv6, even IPv4-mapped IPv6 literals like "::ffff:10.0.0.1".
+// This matches the way ipAddressTable rows preserve the mapped form,
+// so a target literal of "::ffff:10.0.0.1" lines up against an IP
+// entity emitted as "::ffff:10.0.0.1/N" rather than being collapsed
+// to v4 here and missing the v6 entity in pickPrimaryIPHit.
 func (m *ObjectIDMapper) resolveTargetIPs() (v4, v6 []string) {
-	if ip := net.ParseIP(m.targetHost); ip != nil {
-		if x := ip.To4(); x != nil {
-			return []string{x.String()}, nil
+	classifyLiteral := func(s string) (canonical string, isV6 bool, ok bool) {
+		addr, err := netip.ParseAddr(s)
+		if err != nil {
+			return "", false, false
 		}
-		return nil, []string{ip.String()}
+		// netip preserves the textual form: an IPv4-mapped IPv6
+		// literal stays Is6() and Is4In6(); only a plain IPv4 literal
+		// is purely Is4().
+		return addr.String(), addr.Is6(), true
+	}
+	if canonical, isV6, ok := classifyLiteral(m.targetHost); ok {
+		if isV6 {
+			return nil, []string{canonical}
+		}
+		return []string{canonical}, nil
 	}
 	if m.resolver == nil {
 		return nil, nil
@@ -804,15 +831,15 @@ func (m *ObjectIDMapper) resolveTargetIPs() (v4, v6 []string) {
 		return nil, nil
 	}
 	for _, a := range addrs {
-		ip := net.ParseIP(a)
-		if ip == nil {
+		canonical, isV6, ok := classifyLiteral(a)
+		if !ok {
 			continue
 		}
-		if x := ip.To4(); x != nil {
-			v4 = append(v4, x.String())
+		if isV6 {
+			v6 = append(v6, canonical)
 			continue
 		}
-		v6 = append(v6, ip.String())
+		v4 = append(v4, canonical)
 	}
 	return v4, v6
 }
@@ -943,7 +970,13 @@ func (m *ObjectIDMapper) resolveMappingEntry(details *ObjectIDIndexDetails) (*En
 func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[ObjectIDIndex]*ObjectIDIndexDetails {
 	objectIDIndexMap := make(map[ObjectIDIndex]*ObjectIDIndexDetails)
 	for objectID, value := range objectIDs {
-		entry, _ := m.mappingConfig.getMappingEntry(objectID)
+		// Fast path: only inet_address-indexed tables need an Entry to
+		// switch on IndexKind during parsing. The legacy fixed-size
+		// path uses value.IdentifierSize and ignores entry. Skipping
+		// the per-PDU getMappingEntry call (an O(depth) prefix walk)
+		// avoids a noticeable CPU hit on large walks where 99% of PDUs
+		// belong to fixed-index tables.
+		entry := m.mappingConfig.inetAddressEntryFor(objectID)
 		objectIDValue, err := newObjectIDValueForEntry(objectID, value, entry)
 		if err != nil {
 			// inet_address rows that intentionally skip (scoped/dns) and
@@ -1024,6 +1057,25 @@ func (m *Config) getMappingEntry(objectID string) (*Entry, error) {
 		objectID = objectID[:lastDotIndex]
 	}
 	return nil, fmt.Errorf("no mapping entry found")
+}
+
+// inetAddressEntryFor returns the inet_address-indexed Entry whose OID
+// is a prefix of the given objectID, or nil when no such entry exists.
+// It walks `inetAddressEntries` (a small set: typically just
+// ipAddressTable) instead of the full `mapping`, so the common case
+// where no inet_address table is configured is a single map-len check.
+// When inet_address tables are present, we still do a HasPrefix scan of
+// that small set rather than the O(depth) trim loop in getMappingEntry.
+func (m *Config) inetAddressEntryFor(objectID string) *Entry {
+	if len(m.inetAddressEntries) == 0 {
+		return nil
+	}
+	for prefix, entry := range m.inetAddressEntries {
+		if strings.HasPrefix(objectID, prefix+".") || objectID == prefix {
+			return entry
+		}
+	}
+	return nil
 }
 
 // ObjectIDs returns the ObjectIDs that the ObjectIDMapper can map

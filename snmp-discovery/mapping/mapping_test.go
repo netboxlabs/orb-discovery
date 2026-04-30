@@ -1502,6 +1502,49 @@ func TestAssignPrimaryIP_DualStackHostname_AssignsBoth(t *testing.T) {
 	assert.NotNil(t, device.PrimaryIp6, "dual-stack target must yield PrimaryIp6")
 }
 
+// TestAssignPrimaryIP_IPv4MappedIPv6Target_AssignsPrimaryIp6 covers
+// the candidate side of the mapped-IPv6 family-detection bug: when the
+// SNMP target is given as `::ffff:10.0.0.1`, resolveTargetIPs must put
+// it in the v6 candidate list (not collapse to v4) so a discovered
+// v6 entity emitted as `::ffff:10.0.0.1/N` matches and PrimaryIp6 is
+// set.
+func TestAssignPrimaryIP_IPv4MappedIPv6Target_AssignsPrimaryIp6(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	// Build a single ipAddressTable row for ::ffff:10.0.0.1.
+	v6Bytes := []string{"0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "255", "255", "10", "0", "0", "1"}
+	rowSuffix := "2.16." + strings.Join(v6Bytes, ".")
+	rowPtr := fmt.Sprintf(".1.3.6.1.2.1.4.32.1.5.1.2.16.%s.%d", strings.Join(v6Bytes, "."), 96)
+	pdus := mapping.ObjectIDValueMap{
+		".1.3.6.1.2.1.2.2.1.2.1": mapping.Value{
+			Value: "Gi0", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1,
+		},
+		".1.3.6.1.2.1.4.34.1.3." + rowSuffix: mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.4." + rowSuffix: mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.5." + rowSuffix: mapping.Value{
+			Value: rowPtr, Type: mapping.Asn1BER(mapping.ObjectIdentifier), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.7." + rowSuffix: mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.10." + rowSuffix: mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+	}
+
+	m := mapping.NewObjectIDMapper(cfg, logger, &config.Defaults{}, "::ffff:10.0.0.1")
+	entities := m.MapObjectIDsToEntity(pdus)
+	device := findDevice(entities)
+	assert.NotNil(t, device.PrimaryIp6, "mapped-IPv6 literal target must yield PrimaryIp6")
+	assert.Nil(t, device.PrimaryIp4, "mapped-IPv6 literal target must not be collapsed to PrimaryIp4")
+}
+
 // TestAssignPrimaryIP_IPv4MappedIPv6_NotMisclassifiedAsIPv4 is the
 // regression test for the family-detection bug Codex flagged: a row
 // decoded as ipv6:::ffff:10.0.0.1 had `parsed.To4() != nil`, so
