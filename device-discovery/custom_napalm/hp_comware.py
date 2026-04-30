@@ -21,7 +21,134 @@ from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
+from custom_napalm._vlan import (
+    SwitchportInfo,
+    classify_switchport,
+)
+
 logger = logging.getLogger(__name__)
+
+
+def _parse_comware_interface_brief_modes(rows: list[dict]) -> dict[str, dict]:
+    """
+    Build per-port mode + PVID dict from `display interface brief` rows.
+
+    Bridge-mode ``Type`` values: A=access, T=trunk, H=hybrid. Route-mode
+    rows omit Type/PVID and are skipped here (they map to routed via the
+    merger when no entry exists for that interface).
+    """
+    out: dict[str, dict] = {}
+    for r in rows or []:
+        iface = r.get("interface")
+        if not iface:
+            continue
+        type_letter = (r.get("type") or "").upper()
+        if type_letter not in ("A", "T", "H"):
+            continue
+        try:
+            pvid: int | None = int(r.get("vlan_id") or "")
+        except (ValueError, TypeError):
+            pvid = None
+        mode = {"A": "access", "T": "trunk", "H": "hybrid"}[type_letter]
+        out[iface] = {"mode": mode, "pvid": pvid}
+    return out
+
+
+_COMWARE_VLAN_HEADER_RE = re.compile(r"^\s*VLAN\s+ID\s*:\s*(\d+)\s*$", re.IGNORECASE)
+
+
+def _comware_record_ports(
+    out: dict[str, dict], vid: int, section: str, ports_line: str
+) -> None:
+    """Append ``vid`` to the appropriate per-port bucket for each port on the line."""
+    for port in re.split(r"[,\s]+", ports_line.strip()):
+        port = port.strip()
+        if not port or port.lower() == "none":
+            continue
+        bucket = out.setdefault(port, {"tagged": [], "untagged": []})
+        target = bucket[section]
+        if vid not in target:
+            target.append(vid)
+
+
+def _parse_comware_display_vlan_all(text: str) -> dict[str, dict]:
+    """
+    Invert Comware ``display vlan all`` per-VLAN port lists into per-port membership.
+
+    Returns ``{ifname: {tagged: list[int], untagged: list[int]}}``. Each VLAN
+    section is delimited by ``VLAN ID: <n>`` and exposes ports under
+    ``Tagged Ports:`` and ``Untagged Ports:`` headings; ``None`` is the empty
+    marker.
+    """
+    out: dict[str, dict] = {}
+    current_vid: int | None = None
+    section: str | None = None
+    for line in text.splitlines():
+        m = _COMWARE_VLAN_HEADER_RE.match(line)
+        if m:
+            try:
+                current_vid = int(m.group(1))
+            except ValueError:
+                current_vid = None
+            section = None
+            continue
+        stripped = line.strip()
+        if not stripped:
+            section = None
+            continue
+        low = stripped.lower()
+        if low.startswith("tagged ports") and current_vid is not None:
+            section = "tagged"
+            continue
+        if low.startswith("untagged ports") and current_vid is not None:
+            section = "untagged"
+            continue
+        if section is None or current_vid is None:
+            continue
+        _comware_record_ports(out, current_vid, section, stripped)
+    return out
+
+
+def _comware_merge_to_switchport_info(
+    iface: str,
+    modes: dict[str, dict],
+    membership: dict[str, dict],
+) -> SwitchportInfo:
+    """Merge per-port mode + PVID with per-port membership into SwitchportInfo."""
+    mode_entry = modes.get(iface)
+    if not mode_entry:
+        return SwitchportInfo(
+            enabled=False,
+            admin_mode=None,
+            oper_mode=None,
+            access_vlan=None,
+            native_vlan=None,
+            allowed_vlans=None,
+        )
+    mode = mode_entry["mode"]
+    pvid = mode_entry["pvid"]
+    member = membership.get(iface) or {"tagged": [], "untagged": []}
+    tagged_vids = list(member["tagged"])
+
+    if mode == "access":
+        return SwitchportInfo(
+            enabled=True,
+            admin_mode="access",
+            oper_mode="access",
+            access_vlan=pvid,
+            native_vlan=None,
+            allowed_vlans=None,
+        )
+
+    tagged_filtered = [v for v in tagged_vids if v != pvid]
+    return SwitchportInfo(
+        enabled=True,
+        admin_mode="trunk",
+        oper_mode="trunk",
+        access_vlan=None,
+        native_vlan=pvid,
+        allowed_vlans=tagged_filtered if tagged_filtered else None,
+    )
 
 # --- config sanitization ---
 # "password cipher/simple <value>" — local user passwords
@@ -358,3 +485,30 @@ class ComwareDriver(_napalm_base.NetworkDriver):
             vlans[vlan_id] = {"name": vlan_name, "interfaces": []}
 
         return vlans
+
+    def get_interfaces_vlans(self) -> dict[str, dict]:
+        """Return per-interface VLAN config from `display interface brief` + `display vlan all`."""
+        try:
+            brief_raw = self.device.send_command("display interface brief")
+            vlan_raw = self.device.send_command("display vlan all")
+        except Exception:
+            logger.debug("Comware switchport command failed", exc_info=True)
+            return {}
+        try:
+            brief_rows = parse_output(
+                platform="hp_comware",
+                command="display interface brief",
+                data=brief_raw,
+            )
+        except Exception:
+            logger.debug("Comware display interface brief parse failed", exc_info=True)
+            return {}
+        modes = _parse_comware_interface_brief_modes(brief_rows)
+        membership = _parse_comware_display_vlan_all(vlan_raw or "")
+
+        all_ifaces = set(modes.keys()) | set(membership.keys())
+        result: dict[str, dict] = {}
+        for iface in sorted(all_ifaces):
+            info = _comware_merge_to_switchport_info(iface, modes, membership)
+            result[iface] = classify_switchport(info)
+        return result
