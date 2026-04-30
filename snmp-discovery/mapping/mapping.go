@@ -245,6 +245,7 @@ type Entry struct {
 	MappingEntries []Entry
 	Mapper         orbToEntityMapper
 	IdentifierSize int
+	IndexKind      string
 	Relationship   config.Relationship
 }
 
@@ -373,12 +374,13 @@ func newMappingEntry(m config.MappingEntry, logger *slog.Logger, entityMappers m
 		Field:          m.Field,
 		Mapper:         mapper,
 		IdentifierSize: m.IdentifierSize,
-		MappingEntries: newChildMappingEntries(m.MappingEntries, logger, m.IdentifierSize),
+		IndexKind:      m.IndexKind,
+		MappingEntries: newChildMappingEntries(m.MappingEntries, logger, m.IdentifierSize, m.IndexKind),
 		Relationship:   m.Relationship,
 	}
 }
 
-func newChildMappingEntries(configMappingEntries []config.MappingEntry, logger *slog.Logger, parentIdentifierSize int) []Entry {
+func newChildMappingEntries(configMappingEntries []config.MappingEntry, logger *slog.Logger, parentIdentifierSize int, parentIndexKind string) []Entry {
 	childMappingEntries := make([]Entry, 0, len(configMappingEntries))
 	for _, m := range configMappingEntries {
 		logger.Debug("adding child mapping entry", "oid", m.OID, "entity", m.Entity, "field", m.Field, "relationship", m.Relationship)
@@ -388,13 +390,18 @@ func newChildMappingEntries(configMappingEntries []config.MappingEntry, logger *
 		if identifierSize == 0 {
 			identifierSize = parentIdentifierSize
 		}
+		indexKind := m.IndexKind
+		if indexKind == "" {
+			indexKind = parentIndexKind
+		}
 
 		child := &Entry{
 			OID:            m.OID,
 			Entity:         m.Entity,
 			Field:          m.Field,
 			IdentifierSize: identifierSize,
-			MappingEntries: newChildMappingEntries(m.MappingEntries, logger, identifierSize),
+			IndexKind:      indexKind,
+			MappingEntries: newChildMappingEntries(m.MappingEntries, logger, identifierSize, indexKind),
 			Relationship:   m.Relationship,
 		}
 		childMappingEntries = append(childMappingEntries, *child)
