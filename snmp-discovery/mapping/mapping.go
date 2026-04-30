@@ -3,6 +3,7 @@ package mapping
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -979,10 +980,17 @@ func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[Ob
 		entry := m.mappingConfig.inetAddressEntryFor(objectID)
 		objectIDValue, err := newObjectIDValueForEntry(objectID, value, entry)
 		if err != nil {
-			// inet_address rows that intentionally skip (scoped/dns) and
-			// truly malformed legacy rows both end up here; debug avoids
-			// log noise for the expected skip case.
-			m.logger.Debug("skipping object ID with unparseable index", "object_id", objectID, "error", err)
+			// errMalformedInetAddress covers the expected skip cases —
+			// scoped IPv6 (ipv4z/ipv6z), dns-form rows, and otherwise
+			// malformed inet_address indices. Anything else (e.g., a
+			// legacy fixed-index parse failure from an unexpected
+			// IdentifierSize / OID-depth mismatch) likely indicates a
+			// real walk or config problem and should remain visible.
+			if errors.Is(err, errMalformedInetAddress) {
+				m.logger.Debug("skipping inet_address row with unparseable index", "object_id", objectID, "error", err)
+			} else {
+				m.logger.Warn("error creating object ID value", "object_id", objectID, "error", err)
+			}
 			continue
 		}
 
