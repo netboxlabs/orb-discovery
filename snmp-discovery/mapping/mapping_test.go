@@ -1675,3 +1675,66 @@ func TestMapObjectIDsToEntity_LegacyAndModernSameAddress_Deduplicates(t *testing
 			"modern ipAddressTable row must win over legacy ipAddrTable row")
 	}
 }
+
+// TestMapObjectIDsToEntity_LegacyKeptWhenModernLacksInterface verifies
+// that the dedup pass keeps the legacy row when the modern row is
+// missing AssignedObject (e.g. partial walk where ipAddressIfIndex was
+// not returned). Without this priority, the legacy row would be
+// dropped, both candidates leaving pickPrimaryIPHit empty-handed and
+// primary-IP selection regressing for the device.
+func TestMapObjectIDsToEntity_LegacyKeptWhenModernLacksInterface(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	// Build a modern row WITHOUT the .3 (ipAddressIfIndex) PDU, so
+	// AssignedObject stays nil for that entity. Filter columns are
+	// still present so the row isn't dropped.
+	modernNoIfIndex := mapping.ObjectIDValueMap{
+		".1.3.6.1.2.1.4.34.1.4.1.4.10.0.0.1": mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1": mapping.Value{
+			Value: ".1.3.6.1.2.1.4.32.1.5.1.1.4." + ipv4NetworkOctets("10.0.0.1", 24) + ".24",
+			Type:  mapping.Asn1BER(mapping.ObjectIdentifier), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.7.1.4.10.0.0.1": mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.10.1.4.10.0.0.1": mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+	}
+	pdus := mergeOIDs(
+		primaryIPOneInterfaceOIDs("10.0.0.1", "Gi0"),
+		modernNoIfIndex,
+	)
+
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
+	entities := m.MapObjectIDsToEntity(pdus)
+
+	count := 0
+	var survivingIP *diode.IPAddress
+	for _, e := range entities {
+		if ip, ok := e.(*diode.IPAddress); ok && ip.Address != nil &&
+			strings.HasPrefix(*ip.Address, "10.0.0.1") {
+			count++
+			survivingIP = ip
+		}
+	}
+	assert.Equal(t, 1, count, "exactly one IP entity must survive dedup")
+	if assert.NotNil(t, survivingIP) {
+		// The legacy row carries the interface binding (host-route /32);
+		// the modern row would be /24 but has no AssignedObject.
+		assert.Equal(t, "10.0.0.1/32", *survivingIP.Address,
+			"legacy entry with interface binding must win when modern lacks one")
+		_, assigned := survivingIP.AssignedObject.(*diode.Interface)
+		assert.True(t, assigned, "surviving entity must keep its interface assignment")
+	}
+
+	// Sanity: pickPrimaryIPHit can now find the surviving entity, so
+	// PrimaryIp4 is set despite the modern row's missing ifIndex.
+	device := findDevice(entities)
+	assert.NotNil(t, device.PrimaryIp4,
+		"PrimaryIp4 must still be assigned via the legacy row")
+}

@@ -878,10 +878,18 @@ func stripPrefix(addr string) string {
 // dedupIPAddresses resolves cross-table overlap for *diode.IPAddress
 // entities that share the same canonical address (prefix-stripped).
 // When both a legacy (ipAddrTable) and modern (ipAddressTable) entry
-// exist for the same address, the modern entry wins — it carries the
-// authoritative RFC 4293 metadata and is IPv6-capable. Same-source
-// duplicates are not collapsed here; the upstream grouping prevents
-// them within a single table.
+// exist for the same address, the modern entry wins by default — it
+// carries the authoritative RFC 4293 metadata and is IPv6-capable.
+//
+// The interface binding (AssignedObject) takes priority over source:
+// if the modern row is missing AssignedObject (e.g. an ACL hid
+// ipAddressIfIndex during the walk, or the row was a partial response)
+// but the legacy row carries one, we keep the legacy row instead.
+// Otherwise pickPrimaryIPHit (which requires an Interface assignment)
+// would drop both candidates and primary-IP selection would regress.
+//
+// Same-source duplicates are not collapsed here; the upstream grouping
+// prevents them within a single table.
 func (m *ObjectIDMapper) dedupIPAddresses(entities map[diode.Entity]bool) {
 	type bucket struct {
 		modern *diode.IPAddress
@@ -904,15 +912,32 @@ func (m *ObjectIDMapper) dedupIPAddresses(entities map[diode.Entity]bool) {
 			groups[key].legacy = ip
 		}
 	}
+	hasAssignedInterface := func(ip *diode.IPAddress) bool {
+		if ip == nil {
+			return false
+		}
+		_, ok := ip.AssignedObject.(*diode.Interface)
+		return ok
+	}
 	for _, b := range groups {
 		if b.modern == nil || b.legacy == nil {
 			continue
 		}
-		// entities is keyed by the entity pointer itself; b.legacy is
-		// that pointer, so delete directly without a second scan.
-		delete(entities, b.legacy)
-		m.logger.Debug("deduped legacy ipAddress in favor of modern",
-			"address", *b.legacy.Address)
+		// Prefer the entry with an interface binding when only one of
+		// them has it; otherwise default to modern.
+		modernAssigned := hasAssignedInterface(b.modern)
+		legacyAssigned := hasAssignedInterface(b.legacy)
+		drop := b.legacy
+		kept := "modern"
+		if !modernAssigned && legacyAssigned {
+			drop = b.modern
+			kept = "legacy"
+		}
+		// entities is keyed by the entity pointer itself; drop is that
+		// pointer, so delete directly without a second scan.
+		delete(entities, drop)
+		m.logger.Debug("deduped overlapping ipAddress",
+			"address", *drop.Address, "kept", kept)
 	}
 }
 
