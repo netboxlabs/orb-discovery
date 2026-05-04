@@ -206,6 +206,15 @@ func (r *EntityRegistry) ResolveSubinterfaceParents() {
 	}
 }
 
+// GetEntity returns the entity for (entityType, index), or nil if absent.
+// Differs from GetOrCreateEntity in that it never creates a new entity.
+func (r *EntityRegistry) GetEntity(entityType EntityType, index ObjectIDIndex) diode.Entity {
+	if r.entities[entityType] == nil {
+		return nil
+	}
+	return r.entities[entityType][index]
+}
+
 // GetOrCreateEntity returns an entity from the EntityRegistry or creates a new one if it doesn't exist
 func (r *EntityRegistry) GetOrCreateEntity(entityType EntityType, index ObjectIDIndex) diode.Entity {
 	r.logger.Debug("getting entity", "entity_type", entityType, "index", index, "from", r.entities)

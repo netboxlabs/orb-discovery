@@ -1,0 +1,310 @@
+package mapping
+
+import (
+	"log/slog"
+	"strconv"
+	"strings"
+
+	"github.com/netboxlabs/diode-sdk-go/diode"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/mapping/qbridge"
+)
+
+// OID prefixes for VlanMapper input.
+const (
+	oidDot1dBasePortIfIndex         = ".1.3.6.1.2.1.17.1.4.1.2."
+	oidDot1qPvid                    = ".1.3.6.1.2.1.17.7.1.4.5.1.1."
+	oidDot1qVlanStaticName          = ".1.3.6.1.2.1.17.7.1.4.3.1.1."
+	oidDot1qVlanStaticEgressPorts   = ".1.3.6.1.2.1.17.7.1.4.3.1.2."
+	oidDot1qVlanStaticUntaggedPorts = ".1.3.6.1.2.1.17.7.1.4.3.1.4."
+	oidDot1qVlanStaticRowStatus     = ".1.3.6.1.2.1.17.7.1.4.3.1.5."
+	oidIfAdminStatus                = ".1.3.6.1.2.1.2.2.1.7."
+	oidIfType                       = ".1.3.6.1.2.1.2.2.1.3."
+	// Cisco overlay
+	oidCiscoVmVlan        = ".1.3.6.1.4.1.9.9.68.1.2.2.1.2."
+	oidCiscoVmVoiceVlanID = ".1.3.6.1.4.1.9.9.68.1.5.1.1."
+)
+
+// ifTypeNumericToString maps a small subset of IANAifType numeric values
+// to the strings qbridge.isL3Capable understands.
+var ifTypeNumericToString = map[int]string{
+	6:   "ethernetCsmacd",
+	161: "ieee8023adLag",
+}
+
+// VlanMapper bridges Q-BRIDGE / Cisco-overlay SNMP rows to diode.VLAN
+// emission and *diode.Interface mutation. It is a postPassMapper:
+// VlanMapper.Map is a no-op stub; the real work happens in PostMap.
+type VlanMapper struct {
+	logger *slog.Logger
+}
+
+// NewVlanMapper constructs a VlanMapper.
+func NewVlanMapper(logger *slog.Logger) *VlanMapper {
+	return &VlanMapper{logger: logger}
+}
+
+// Map is the row-scoped no-op required by the orbToEntityMapper interface.
+func (m *VlanMapper) Map(
+	_ map[ObjectIDIndex]*ObjectIDValue,
+	_ *Entry,
+	_ *EntityRegistry,
+	_ *config.Defaults,
+) diode.Entity {
+	return nil
+}
+
+// PostMap performs the host-level VLAN classification pass.
+func (m *VlanMapper) PostMap(
+	allObjectIDs ObjectIDValueMap,
+	registry *EntityRegistry,
+	defaults *config.Defaults,
+) []diode.Entity {
+	gen := m.buildGenericRows(allObjectIDs)
+	if len(gen.BasePortToIfIndex) == 0 {
+		// No bridge port table — refuse Interface mutation. Still emit
+		// VLAN entities below from the static table; they don't need
+		// per-port translation.
+		m.logger.Warn("vlan: missing dot1dBasePortIfIndex; skipping interface mutations",
+			"reason", "bridge-port-translation-unavailable")
+		return m.emitVLANs(allObjectIDs, defaults)
+	}
+
+	infos, err := qbridge.ExtractGeneric(gen)
+	if err != nil {
+		m.logger.Warn("vlan: ExtractGeneric failed", "error", err)
+		return m.emitVLANs(allObjectIDs, defaults)
+	}
+	cisco := m.buildCiscoRows(allObjectIDs)
+	qbridge.ApplyCisco(infos, cisco)
+
+	// Build VLAN entities first — interface refs link to them by VID.
+	vlanEntities := m.emitVLANs(allObjectIDs, defaults)
+	vlanByVid := make(map[int]*diode.VLAN, len(vlanEntities))
+	for _, e := range vlanEntities {
+		v, ok := e.(*diode.VLAN)
+		if !ok || v.Vid == nil {
+			continue
+		}
+		vlanByVid[int(*v.Vid)] = v
+	}
+
+	// Mutate interfaces in place. The registry holds *diode.Interface
+	// instances InterfaceMapper produced; we look them up by ifIndex
+	// using string-form ifIndex as ObjectIDIndex.
+	for ifIndex, info := range infos {
+		key := ObjectIDIndex(strconv.Itoa(ifIndex))
+		raw := registry.GetEntity(InterfaceEntityType, key)
+		iface, ok := raw.(*diode.Interface)
+		if !ok || iface == nil {
+			continue
+		}
+		c := qbridge.Classify(*info)
+		applyClassification(iface, c, vlanByVid)
+	}
+	return vlanEntities
+}
+
+// applyClassification mutates iface to carry the classified VLAN refs.
+// Modes ModeRouted and ModeUnknown are no-ops (matches PR #378).
+func applyClassification(iface *diode.Interface, c qbridge.Classification, vlanByVid map[int]*diode.VLAN) {
+	mode := classificationToNetboxMode(c.Mode)
+	if mode == "" {
+		return
+	}
+	iface.Mode = StringPtr(mode)
+	if c.Untagged != nil {
+		if v, ok := vlanByVid[*c.Untagged]; ok {
+			iface.UntaggedVlan = v
+		}
+	}
+	if len(c.Tagged) > 0 {
+		tagged := make([]*diode.VLAN, 0, len(c.Tagged))
+		for _, vid := range c.Tagged {
+			if v, ok := vlanByVid[vid]; ok {
+				tagged = append(tagged, v)
+			}
+		}
+		iface.TaggedVlans = tagged
+	}
+}
+
+func classificationToNetboxMode(m qbridge.Mode) string {
+	switch m {
+	case qbridge.ModeAccess:
+		return "access"
+	case qbridge.ModeTrunk:
+		return "tagged"
+	case qbridge.ModeTrunkAll:
+		return "tagged-all"
+	}
+	return ""
+}
+
+// buildGenericRows extracts Q-BRIDGE + BRIDGE-MIB rows from the host's
+// flat ObjectIDValueMap.
+func (m *VlanMapper) buildGenericRows(all ObjectIDValueMap) qbridge.GenericRows {
+	rows := qbridge.GenericRows{
+		BasePortToIfIndex: map[int]int{},
+		PortPvid:          map[int]int{},
+		VlanEgressPorts:   map[int][]byte{},
+		VlanUntaggedPorts: map[int][]byte{},
+		IfAdminStatus:     map[int]int{},
+		IfTypes:           map[int]string{},
+	}
+	for oid, v := range all {
+		switch {
+		case strings.HasPrefix(oid, oidDot1dBasePortIfIndex):
+			bp, ok1 := atoi(strings.TrimPrefix(oid, oidDot1dBasePortIfIndex))
+			ifx, ok2 := atoi(v.Value)
+			if ok1 && ok2 {
+				rows.BasePortToIfIndex[bp] = ifx
+			}
+		case strings.HasPrefix(oid, oidDot1qPvid):
+			ifx, ok1 := atoi(strings.TrimPrefix(oid, oidDot1qPvid))
+			vid, ok2 := atoi(v.Value)
+			if ok1 && ok2 {
+				rows.PortPvid[ifx] = vid
+			}
+		case strings.HasPrefix(oid, oidDot1qVlanStaticEgressPorts):
+			vid, ok := atoi(strings.TrimPrefix(oid, oidDot1qVlanStaticEgressPorts))
+			if ok {
+				rows.VlanEgressPorts[vid] = []byte(v.Value)
+			}
+		case strings.HasPrefix(oid, oidDot1qVlanStaticUntaggedPorts):
+			vid, ok := atoi(strings.TrimPrefix(oid, oidDot1qVlanStaticUntaggedPorts))
+			if ok {
+				rows.VlanUntaggedPorts[vid] = []byte(v.Value)
+			}
+		case strings.HasPrefix(oid, oidIfAdminStatus):
+			ifx, ok1 := atoi(strings.TrimPrefix(oid, oidIfAdminStatus))
+			s, ok2 := atoi(v.Value)
+			if ok1 && ok2 {
+				rows.IfAdminStatus[ifx] = s
+			}
+		case strings.HasPrefix(oid, oidIfType):
+			ifx, ok1 := atoi(strings.TrimPrefix(oid, oidIfType))
+			n, ok2 := atoi(v.Value)
+			if ok1 && ok2 {
+				if name, found := ifTypeNumericToString[n]; found {
+					rows.IfTypes[ifx] = name
+				}
+			}
+		}
+	}
+	return rows
+}
+
+// buildCiscoRows extracts Cisco overlay rows.
+func (m *VlanMapper) buildCiscoRows(all ObjectIDValueMap) qbridge.CiscoRows {
+	rows := qbridge.CiscoRows{
+		MembershipAccessVlan: map[int]int{},
+		VoiceVlanByIfIndex:   map[int]int{},
+	}
+	for oid, v := range all {
+		switch {
+		case strings.HasPrefix(oid, oidCiscoVmVlan):
+			ifx, ok1 := atoi(strings.TrimPrefix(oid, oidCiscoVmVlan))
+			vid, ok2 := atoi(v.Value)
+			if ok1 && ok2 {
+				rows.MembershipAccessVlan[ifx] = vid
+			}
+		case strings.HasPrefix(oid, oidCiscoVmVoiceVlanID):
+			ifx, ok1 := atoi(strings.TrimPrefix(oid, oidCiscoVmVoiceVlanID))
+			vid, ok2 := atoi(v.Value)
+			if ok1 && ok2 {
+				rows.VoiceVlanByIfIndex[ifx] = vid
+			}
+		}
+	}
+	return rows
+}
+
+// emitVLANs scans dot1qVlanStaticName / RowStatus and constructs one
+// *diode.VLAN per discovered VID. Names default to "VLAN<vid>" when the
+// SNMP value is empty (matches device-discovery behavior). Status comes
+// from defaults.VLAN.Status; if empty, derived from RowStatus
+// (active(1)->active, notInService(2)->reserved, else unset).
+func (m *VlanMapper) emitVLANs(all ObjectIDValueMap, defaults *config.Defaults) []diode.Entity {
+	type pending struct {
+		name      string
+		rowStatus int
+	}
+	byVid := map[int]*pending{}
+	for oid, v := range all {
+		switch {
+		case strings.HasPrefix(oid, oidDot1qVlanStaticName):
+			vid, ok := atoi(strings.TrimPrefix(oid, oidDot1qVlanStaticName))
+			if !ok {
+				continue
+			}
+			p, exists := byVid[vid]
+			if !exists {
+				p = &pending{}
+				byVid[vid] = p
+			}
+			p.name = v.Value
+		case strings.HasPrefix(oid, oidDot1qVlanStaticRowStatus):
+			vid, ok := atoi(strings.TrimPrefix(oid, oidDot1qVlanStaticRowStatus))
+			if !ok {
+				continue
+			}
+			st, ok2 := atoi(v.Value)
+			if !ok2 {
+				continue
+			}
+			p, exists := byVid[vid]
+			if !exists {
+				p = &pending{}
+				byVid[vid] = p
+			}
+			p.rowStatus = st
+		}
+	}
+	out := make([]diode.Entity, 0, len(byVid))
+	for vid, p := range byVid {
+		if vid < 1 || vid > 4094 {
+			continue
+		}
+		name := p.name
+		if name == "" {
+			name = "VLAN" + strconv.Itoa(vid)
+		}
+		v := &diode.VLAN{
+			Vid:  int64Ptr(int64(vid)),
+			Name: StringPtr(name),
+		}
+		if status := resolveVLANStatus(p.rowStatus, defaults); status != "" {
+			v.Status = StringPtr(status)
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+func resolveVLANStatus(rowStatus int, defaults *config.Defaults) string {
+	if defaults != nil && defaults.VLAN.Status != "" {
+		return defaults.VLAN.Status
+	}
+	switch rowStatus {
+	case 1: // active
+		return "active"
+	case 2: // notInService
+		return "reserved"
+	}
+	return ""
+}
+
+// atoi is strconv.Atoi with a single-return ok flag.
+func atoi(s string) (int, bool) {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// int64Ptr is a local helper for *int64 values (diode.VLAN.Vid is *int64).
+func int64Ptr(v int64) *int64 {
+	return &v
+}
