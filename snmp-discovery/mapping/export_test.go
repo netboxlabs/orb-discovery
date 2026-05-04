@@ -10,6 +10,14 @@ import (
 // HostResolverForTest is the resolver interface re-exported for tests.
 type HostResolverForTest = hostResolver
 
+// OrbToEntityMapper is the mapper interface re-exported for tests.
+type OrbToEntityMapper = orbToEntityMapper
+
+// NewMappingEntry is the newMappingEntry constructor re-exported for tests.
+func NewMappingEntry(m config.MappingEntry, logger *slog.Logger, entityMappers map[string]OrbToEntityMapper) *Entry {
+	return newMappingEntry(m, logger, entityMappers)
+}
+
 // NewObjectIDMapperForTest exposes the resolver-injection constructor to
 // tests in other files of this package.
 func NewObjectIDMapperForTest(mappingConfig *Config, logger *slog.Logger, defaults *config.Defaults, targetHost string, resolver HostResolverForTest) *ObjectIDMapper {

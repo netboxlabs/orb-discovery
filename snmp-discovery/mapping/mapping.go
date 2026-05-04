@@ -303,6 +303,7 @@ type Entry struct {
 	IdentifierSize int
 	IndexKind      string
 	Relationship   config.Relationship
+	Vendor         string
 }
 
 // MapToEntity maps a value to an entity
@@ -533,6 +534,7 @@ func newMappingEntry(m config.MappingEntry, logger *slog.Logger, entityMappers m
 		IndexKind:      m.IndexKind,
 		MappingEntries: newChildMappingEntries(m.MappingEntries, logger, m.IdentifierSize, m.IndexKind),
 		Relationship:   m.Relationship,
+		Vendor:         m.Vendor,
 	}
 }
 

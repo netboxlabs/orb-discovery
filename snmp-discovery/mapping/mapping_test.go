@@ -1947,3 +1947,27 @@ func TestMapObjectIDsToEntity_LegacyKeptWhenModernLacksInterface(t *testing.T) {
 	assert.NotNil(t, device.PrimaryIp4,
 		"PrimaryIp4 must still be assigned via the legacy row")
 }
+
+func TestEntry_VendorPropagated(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	mappers := map[string]mapping.OrbToEntityMapper{
+		"interface_vlan": &noopMapper{},
+	}
+	entry := mapping.NewMappingEntry(config.MappingEntry{
+		OID:    ".1.3.6.1.4.1.9.9.68.1.2.2.1",
+		Entity: "interface_vlan",
+		Vendor: "cisco",
+	}, logger, mappers)
+	if entry == nil {
+		t.Fatal("entry is nil")
+	}
+	if entry.Vendor != "cisco" {
+		t.Errorf("Vendor: got %q, want %q", entry.Vendor, "cisco")
+	}
+}
+
+type noopMapper struct{}
+
+func (n *noopMapper) Map(map[mapping.ObjectIDIndex]*mapping.ObjectIDValue, *mapping.Entry, *mapping.EntityRegistry, *config.Defaults) diode.Entity {
+	return nil
+}
