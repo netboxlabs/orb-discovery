@@ -197,6 +197,11 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 	return &merged
 }
 
+// Options represents per-policy global behavior toggles peer to Defaults.
+type Options struct {
+	CreateUnknownVlans bool `yaml:"create_unknown_vlans"`
+}
+
 // PolicyConfig represents the configuration of a policy
 type PolicyConfig struct {
 	Schedule            *string  `yaml:"schedule,omitempty"`
@@ -206,6 +211,7 @@ type PolicyConfig struct {
 	SNMPProbeTimeout    int      `yaml:"snmp_probe_timeout"`
 	Retries             int      `yaml:"retries"`
 	LookupExtensionsDir string   `yaml:"lookup_extensions_dir,omitempty"`
+	Options             Options  `yaml:"options,omitempty"`
 }
 
 // Policy represents a snmp-discovery policy

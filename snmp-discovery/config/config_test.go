@@ -260,6 +260,39 @@ func TestMergeDefaults(t *testing.T) {
 	})
 }
 
+func TestPolicyOptions_Defaults(t *testing.T) {
+	yamlBody := []byte(`
+schedule: "0 */6 * * *"
+defaults: {}
+timeout: 300
+snmp_timeout: 5
+options:
+  create_unknown_vlans: true
+`)
+	var pc PolicyConfig
+	if err := yaml.Unmarshal(yamlBody, &pc); err != nil {
+		t.Fatalf("yaml: %v", err)
+	}
+	if !pc.Options.CreateUnknownVlans {
+		t.Error("CreateUnknownVlans: got false, want true")
+	}
+}
+
+func TestPolicyOptions_Omitted(t *testing.T) {
+	yamlBody := []byte(`
+schedule: "0 */6 * * *"
+defaults: {}
+timeout: 300
+`)
+	var pc PolicyConfig
+	if err := yaml.Unmarshal(yamlBody, &pc); err != nil {
+		t.Fatalf("yaml: %v", err)
+	}
+	if pc.Options.CreateUnknownVlans {
+		t.Error("CreateUnknownVlans: got true, want zero-valued (false)")
+	}
+}
+
 func TestMergeDefaults_DeviceModelManufacturerPlatform(t *testing.T) {
 	policy := &Defaults{
 		Device: DeviceDefaults{
