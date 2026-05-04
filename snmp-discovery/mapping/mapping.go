@@ -684,8 +684,14 @@ func pickPrimaryIPHit(logger *slog.Logger, target string, entities map[diode.Ent
 			continue
 		}
 		// Enforce the "verified interface IP" guarantee: only accept
-		// addresses that were discovered on an interface during the walk.
-		if _, assigned := ip.AssignedObject.(*diode.Interface); !assigned {
+		// addresses that were discovered on an interface during the
+		// walk. assignedObject creates a placeholder Interface with
+		// Name=DefaultInterfaceName whenever the row's ifIndex was
+		// referenced but the corresponding ifTable row was never
+		// walked; treating that placeholder as "verified" would
+		// point primary IP at an interface we didn't actually
+		// discover.
+		if !hasVerifiedInterface(ip) {
 			continue
 		}
 		stripped := stripPrefix(*ip.Address)
@@ -942,6 +948,26 @@ func stripPrefix(addr string) string {
 	return addr
 }
 
+// hasVerifiedInterface reports whether the IPAddress entity is bound
+// to an interface that was actually discovered during the walk (as
+// opposed to the placeholder Interface that GetOrCreateEntity
+// fabricates whenever ipAddressIfIndex references an ifIndex whose
+// ifTable row never came back). The interface mapper overwrites the
+// placeholder Name with the discovered ifDescr/ifName, so a name
+// that is still equal to DefaultInterfaceName is the signal that the
+// row was a partial walk: dedup, exclusion, and primary-IP selection
+// all treat that as unassigned.
+func hasVerifiedInterface(ip *diode.IPAddress) bool {
+	if ip == nil {
+		return false
+	}
+	iface, ok := ip.AssignedObject.(*diode.Interface)
+	if !ok || iface == nil || iface.Name == nil {
+		return false
+	}
+	return *iface.Name != DefaultInterfaceName
+}
+
 // dedupIPAddresses resolves cross-table overlap for *diode.IPAddress
 // entities that share the same canonical address (prefix-stripped).
 // When both a legacy (ipAddrTable) and modern (ipAddressTable) entry
@@ -979,13 +1005,7 @@ func (m *ObjectIDMapper) dedupIPAddresses(entities map[diode.Entity]bool) {
 			groups[key].legacy = ip
 		}
 	}
-	hasAssignedInterface := func(ip *diode.IPAddress) bool {
-		if ip == nil {
-			return false
-		}
-		_, ok := ip.AssignedObject.(*diode.Interface)
-		return ok
-	}
+	hasAssignedInterface := hasVerifiedInterface
 	for _, b := range groups {
 		if b.modern == nil || b.legacy == nil {
 			continue
@@ -1185,13 +1205,14 @@ func (m *Config) getMappingEntry(objectID string) (*Entry, error) {
 
 // inetAddressEntryFor returns the inet_address-indexed Entry whose OID
 // is the longest prefix of the given objectID, or nil when no such
-// entry exists. It walks `inetAddressEntries` (a small set: typically
-// just ipAddressTable and its column children) instead of the full
-// `mapping`, so the common case where no inet_address table is
-// configured is a single map-len check. Returning the longest match
-// matches getMappingEntry's most-specific-wins semantics so
-// newObjectIDValueForEntry splits the column/index boundary at the
-// correct depth even when overlapping prefixes are registered.
+// entry exists. It walks `inetAddressEntries` (which contains ONLY the
+// top-level table OIDs, not their column children — caching children
+// would let a column OID win the longest-prefix scan and miscompute
+// columnDepth in newObjectIDValueForEntry; see NewConfig) instead of
+// the full `mapping`, so the common case where no inet_address table
+// is configured is a single map-len check. Returning the longest match
+// matches getMappingEntry's most-specific-wins semantics, which
+// matters when two distinct inet_address tables are registered.
 //
 // Nil receiver is treated as "no inet_address tables configured" so
 // that an ObjectIDMapper constructed without a Config (used in some

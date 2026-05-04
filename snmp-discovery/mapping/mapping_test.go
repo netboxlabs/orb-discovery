@@ -1724,6 +1724,115 @@ func TestMapObjectIDsToEntity_LegacyAndModernSameAddress_Deduplicates(t *testing
 	}
 }
 
+// TestAssignPrimaryIP_RejectsPlaceholderInterface verifies the
+// "verified interface IP" guarantee tightening Copilot flagged: a
+// modern row whose ipAddressIfIndex column referenced an ifIndex that
+// never had a corresponding ifTable row walked produces a placeholder
+// Interface with Name=DefaultInterfaceName ("unknown"). That
+// placeholder must NOT count as a verified interface for primary-IP
+// selection — otherwise device.PrimaryIp4 would point at an
+// interface that wasn't actually discovered.
+func TestAssignPrimaryIP_RejectsPlaceholderInterface(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	// Modern row references ifIndex=99 but no ifTable PDU is included,
+	// so GetOrCreateEntity fabricates an Interface with Name="unknown".
+	pdus := mapping.ObjectIDValueMap{
+		".1.3.6.1.2.1.4.34.1.3.1.4.10.0.0.1": mapping.Value{
+			Value: "99", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.4.1.4.10.0.0.1": mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1": mapping.Value{
+			Value: ".1.3.6.1.2.1.4.32.1.5.1.1.4." + ipv4NetworkOctets("10.0.0.1", 24) + ".24",
+			Type:  mapping.Asn1BER(mapping.ObjectIdentifier), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.7.1.4.10.0.0.1": mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.10.1.4.10.0.0.1": mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+	}
+
+	m := mapping.NewObjectIDMapper(cfg, logger, &config.Defaults{}, "10.0.0.1")
+	entities := m.MapObjectIDsToEntity(pdus)
+	// Use CurrentDevice so we observe the device pointer even when no
+	// emitted entity carries it back to findDevice.
+	device := m.CurrentDevice()
+	if assert.NotNil(t, device) {
+		assert.Nil(t, device.PrimaryIp4,
+			"placeholder Interface (Name=DefaultInterfaceName) must not satisfy the verified-interface check")
+	}
+	_ = entities
+}
+
+// TestMapObjectIDsToEntity_DedupTreatsPlaceholderAsUnassigned ensures
+// the same hardening applies in dedup: a modern row whose Interface
+// is the placeholder "unknown" must not displace a legacy row that
+// has a real ifDescr-named interface binding.
+func TestMapObjectIDsToEntity_DedupTreatsPlaceholderAsUnassigned(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	// Legacy row provides interface "Gi0" (real, named). Modern row
+	// references ifIndex=99 (placeholder, no ifTable PDU). Without
+	// the verified-interface check, modern would win dedup; with it,
+	// the legacy real-interface row wins.
+	modernPlaceholder := mapping.ObjectIDValueMap{
+		".1.3.6.1.2.1.4.34.1.3.1.4.10.0.0.1": mapping.Value{
+			Value: "99", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.4.1.4.10.0.0.1": mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1": mapping.Value{
+			Value: ".1.3.6.1.2.1.4.32.1.5.1.1.4." + ipv4NetworkOctets("10.0.0.1", 24) + ".24",
+			Type:  mapping.Asn1BER(mapping.ObjectIdentifier), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.7.1.4.10.0.0.1": mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.10.1.4.10.0.0.1": mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+	}
+	pdus := mergeOIDs(
+		primaryIPOneInterfaceOIDs("10.0.0.1", "Gi0"),
+		modernPlaceholder,
+	)
+
+	m := mapping.NewObjectIDMapper(cfg, logger, &config.Defaults{}, "10.0.0.1")
+	entities := m.MapObjectIDsToEntity(pdus)
+
+	count := 0
+	var survivingIP *diode.IPAddress
+	for _, e := range entities {
+		if ip, ok := e.(*diode.IPAddress); ok && ip.Address != nil &&
+			strings.HasPrefix(*ip.Address, "10.0.0.1") {
+			count++
+			survivingIP = ip
+		}
+	}
+	assert.Equal(t, 1, count)
+	if assert.NotNil(t, survivingIP) {
+		// Legacy row wins because its "Gi0" interface is real, while
+		// the modern row's "99" is just a placeholder.
+		iface, ok := survivingIP.AssignedObject.(*diode.Interface)
+		if assert.True(t, ok) && assert.NotNil(t, iface.Name) {
+			assert.Equal(t, "Gi0", *iface.Name,
+				"legacy entry with real interface must win when modern has only a placeholder")
+		}
+	}
+	device := findDevice(entities)
+	assert.NotNil(t, device.PrimaryIp4,
+		"PrimaryIp4 must be assigned via the legacy row's real interface")
+}
+
 // TestMapObjectIDsToEntity_ExcludedInterfaceDropsBothLegacyAndModern
 // verifies the dedup-before-exclude ordering: when the legacy row is
 // bound to an excluded interface and the modern row is missing
