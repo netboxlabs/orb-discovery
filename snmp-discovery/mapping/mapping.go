@@ -1175,6 +1175,17 @@ func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[Ob
 // per RFC 4001 (variable length); otherwise the legacy fixed-size slicing
 // applies, identical to historical behavior.
 //
+// IMPORTANT: index_kind="inet_address" only handles tables whose row
+// index is a *pure* InetAddress: the suffix immediately after the
+// column sub-OID must be exactly <addrType>.<addrLen>.<addrBytes...>.
+// Tables with composite indices that include other components before
+// or after the InetAddress (e.g. ifIndex + InetAddress, or
+// InetAddress + something) will have all rows skipped as malformed.
+// Today this knob is wired up only for ipAddressTable, which has a
+// pure InetAddress index. Reusing it for a composite-index table
+// requires extending the parser; reviewers and contributors should
+// validate the table shape before adding new entries.
+//
 // For inet_address entries, the column boundary is computed from
 // entry.OID rather than guessed from the suffix length. Suffix-based
 // guessing is unsound: an IPv6 row whose final 6 sub-OIDs happen to

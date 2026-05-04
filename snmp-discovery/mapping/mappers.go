@@ -273,6 +273,18 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					fieldFound = true
 				case "assignedObject":
 					extractIPFromIndex(value, propertyMappingEntry.Field)
+					// RFC 4293 ipAddressIfIndex is InterfaceIndexOrZero;
+					// 0 means the address is not associated with any
+					// interface (e.g. a globally-scoped address that
+					// has not been bound, or a partial walk where the
+					// agent could not resolve the binding). Skip the
+					// relationship in that case so we don't fabricate
+					// a placeholder Interface for ifIndex 0.
+					if propertyMappingEntry.Relationship.Type == "interface" && (value.Value == "" || value.Value == "0") {
+						m.logger.Debug("ipAddressIfIndex is zero; leaving address unassigned",
+							"index", string(value.Index))
+						continue
+					}
 					if propertyMappingEntry.Relationship != (config.Relationship{}) {
 						linkedEntity := entityRegistry.GetOrCreateEntity(EntityType(propertyMappingEntry.Relationship.Type), ObjectIDIndex(value.Value))
 						if linkedEntity == nil {
@@ -380,11 +392,17 @@ func derefAddr(s *string) string {
 	return *s
 }
 
-// addressInsidePrefix returns true if the canonical IP address falls
-// within the prefix described by network bytes + prefix length. The
-// network bytes' family must match the address (4 bytes for v4, 16
-// for v6); a mismatch is treated as "not inside" so the caller falls
-// back to the host-route default.
+// addressInsidePrefix returns true if (1) the encoded network bytes
+// are already a valid prefix-table row index — i.e. all host bits are
+// zero — and (2) the canonical IP address falls within that prefix.
+//
+// RFC 4293 specifies that ipAddressPrefixTable rows are indexed by
+// the network address with host bits zeroed; a pointer carrying the
+// host-bits-set form (e.g. addrBytes=10.0.0.1 with prefixLen=24
+// instead of addrBytes=10.0.0.0) is structurally invalid even if the
+// row's own address would fall inside the masked prefix. We treat
+// such pointers as malformed and let the caller fall back to the
+// host-route default.
 func addressInsidePrefix(canonical string, networkBytes []byte, prefixLen int) bool {
 	ip := net.ParseIP(canonical)
 	if ip == nil {
@@ -415,8 +433,15 @@ func addressInsidePrefix(canonical string, networkBytes []byte, prefixLen int) b
 		return false
 	}
 	mask := net.CIDRMask(prefixLen, bits)
+	// (1) Reject pointers whose addrBytes still carry host bits.
 	for i := range networkBytes {
-		if (ipBytes[i] & mask[i]) != (networkBytes[i] & mask[i]) {
+		if networkBytes[i]&^mask[i] != 0 {
+			return false
+		}
+	}
+	// (2) Confirm the row's address falls within that prefix.
+	for i := range networkBytes {
+		if (ipBytes[i] & mask[i]) != networkBytes[i] {
 			return false
 		}
 	}

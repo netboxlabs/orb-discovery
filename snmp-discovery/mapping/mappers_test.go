@@ -4201,6 +4201,75 @@ func TestIPAddressMapper_RowPointer_AddrLenMismatch_FallsBackToHostRoute(t *test
 	assert.Equal(t, "10.0.0.1/32", *ip.Address)
 }
 
+// TestIPAddressMapper_AssignedObject_IfIndexZero_LeavesUnassigned
+// covers the InterfaceIndexOrZero=0 case: per RFC 4293,
+// ipAddressIfIndex=0 means the address is not bound to any
+// interface. The mapper must NOT fabricate a placeholder Interface
+// for ifIndex 0.
+func TestIPAddressMapper_AssignedObject_IfIndexZero_LeavesUnassigned(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	entry := &mapping.Entry{
+		OID: ".1.3.6.1.2.1.4.34.1", Entity: "ipAddress", Field: "_id",
+		IndexKind: "inet_address",
+		MappingEntries: []mapping.Entry{
+			{
+				OID: ".1.3.6.1.2.1.4.34.1.3", Entity: "ipAddress", Field: "assignedObject",
+				Relationship: config.Relationship{Type: "interface"},
+			},
+			{OID: ".1.3.6.1.2.1.4.34.1.5", Entity: "ipAddress", Field: "addressPrefix"},
+		},
+	}
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		".1.3.6.1.2.1.4.34.1.3.1.4.10.0.0.1": {
+			OID: ".1.3.6.1.2.1.4.34.1.3.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.3", Value: "0", Type: mapping.Integer,
+		},
+		".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.1.4.10.0.0.0.24",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, entry, registry, nil)
+	if !assert.NotNil(t, got) {
+		return
+	}
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/24", *ip.Address)
+	assert.Nil(t, ip.AssignedObject,
+		"ipAddressIfIndex=0 (InterfaceIndexOrZero) must not produce a placeholder Interface")
+}
+
+// TestIPAddressMapper_RowPointer_HostBitsNotZeroed_FallsBackToHostRoute
+// covers the strict prefix-row index check: a pointer whose addrBytes
+// still carry host bits (e.g. addrBytes=10.0.0.1 with prefixLen=24
+// instead of the proper addrBytes=10.0.0.0) is structurally not a
+// valid ipAddressPrefixTable row index per RFC 4293, even though the
+// row's address would fall inside the masked prefix.
+func TestIPAddressMapper_RowPointer_HostBitsNotZeroed_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			// Bytes 10.0.0.1 with prefixLen 24 — host bits not zeroed.
+			Value: ".1.3.6.1.2.1.4.32.1.5.1.1.4.10.0.0.1.24",
+			Type:  mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address,
+		"RowPointer with host bits set in addrBytes must fall back to host route")
+}
+
 // TestIPAddressMapper_RowPointer_AddressOutsidePrefix_FallsBackToHostRoute
 // covers the unrelated-prefix-row case Copilot flagged: the pointer
 // is structurally valid for the row's family but its network bytes
