@@ -1971,3 +1971,21 @@ type noopMapper struct{}
 func (n *noopMapper) Map(map[mapping.ObjectIDIndex]*mapping.ObjectIDValue, *mapping.Entry, *mapping.EntityRegistry, *config.Defaults) diode.Entity {
 	return nil
 }
+
+func TestCreateEntity_VLAN(t *testing.T) {
+	e, err := mapping.CreateEntity(mapping.VLANEntityType)
+	if err != nil {
+		t.Fatalf("createEntity(VLANEntityType): %v", err)
+	}
+	if _, ok := e.(*diode.VLAN); !ok {
+		t.Errorf("got %T, want *diode.VLAN", e)
+	}
+}
+
+func TestCreateEntity_InterfaceVLAN(t *testing.T) {
+	// interface_vlan is consumed by VlanMapper.PostMap; createEntity
+	// should not produce a row-scoped entity for it.
+	if _, err := mapping.CreateEntity(mapping.InterfaceVLANEntityType); err == nil {
+		t.Error("expected error for interface_vlan, got nil")
+	}
+}

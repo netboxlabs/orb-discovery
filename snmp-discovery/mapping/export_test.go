@@ -52,3 +52,6 @@ func (m *ObjectIDMapper) AssignPrimaryIPForTest(device *diode.Device, entities m
 	}
 	m.assignPrimaryIP(device, entities)
 }
+
+// CreateEntity exposes the createEntity function for tests.
+var CreateEntity = createEntity

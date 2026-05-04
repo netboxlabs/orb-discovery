@@ -242,6 +242,10 @@ func createEntity(entityType EntityType) (diode.Entity, error) {
 		}, nil
 	case "device":
 		return &diode.Device{}, nil
+	case "vlan":
+		return &diode.VLAN{}, nil
+	case "interface_vlan":
+		return nil, fmt.Errorf("entity type %q is post-pass only and has no row entity", entityType)
 	}
 	return nil, fmt.Errorf("unimplemented entity type: %s", entityType)
 }
@@ -264,6 +268,13 @@ const (
 	InterfaceEntityType EntityType = "interface"
 	// IPAddressEntityType is the type of the IP address entity
 	IPAddressEntityType EntityType = "ipAddress"
+	// VLANEntityType is the type of the VLAN entity (Q-BRIDGE-MIB derived).
+	VLANEntityType EntityType = "vlan"
+	// InterfaceVLANEntityType is a pseudo-entity that flags an OID as
+	// belonging to the VlanMapper PostMap pipeline (e.g., Cisco-overlay
+	// rows). createEntity returns an error for this type — there is no
+	// row-scoped entity to construct.
+	InterfaceVLANEntityType EntityType = "interface_vlan"
 )
 
 // ObjectIDMapper is a struct that maps ObjectIDs to entities
