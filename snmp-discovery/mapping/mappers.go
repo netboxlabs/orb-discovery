@@ -219,7 +219,7 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					if ipAddress.Address == nil || *ipAddress.Address == "" {
 						continue
 					}
-					prefixLen, pointerIsV6, networkBytes, ok := parseAddressPrefixRowPointer(value.Value)
+					prefixLen, pointerIsV6, pointerIfIndex, networkBytes, ok := parseAddressPrefixRowPointer(value.Value)
 					if !ok {
 						m.logger.Debug("addressPrefix not usable, keeping host route",
 							"value", value.Value, "address", *ipAddress.Address)
@@ -237,6 +237,24 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 						m.logger.Debug("addressPrefix family mismatch, keeping host route",
 							"value", value.Value, "address", *ipAddress.Address,
 							"pointer_v6", pointerIsV6, "row_v6", rowIsV6)
+						fieldFound = true
+						continue
+					}
+					// Verify the pointer's <ifIndex> component matches
+					// the row's own ipAddressIfIndex. Without this
+					// check, a row could silently borrow another
+					// interface's prefix length on devices with
+					// overlapping subnets. The companion .3 PDU lives
+					// at the same row OID with the column bit
+					// rewritten from .5 to .3; missing or "0" ifIndex
+					// is treated as "no constraint" since the row
+					// itself is unbound (per RFC 4293
+					// InterfaceIndexOrZero).
+					rowIfIndex := lookupSiblingValue(values, value.OID, ".5.", ".3.")
+					if rowIfIndex != "" && rowIfIndex != "0" && pointerIfIndex != rowIfIndex {
+						m.logger.Debug("addressPrefix ifIndex mismatch, keeping host route",
+							"value", value.Value, "address", *ipAddress.Address,
+							"pointer_ifindex", pointerIfIndex, "row_ifindex", rowIfIndex)
 						fieldFound = true
 						continue
 					}
@@ -392,6 +410,19 @@ func derefAddr(s *string) string {
 	return *s
 }
 
+// lookupSiblingValue returns the .Value of the PDU whose OID matches
+// the given OID with one column-substitution applied. Used by the
+// addressPrefix handler to fetch the companion ipAddressIfIndex (.3)
+// PDU value from the same ipAddressTable row. Empty string when no
+// sibling PDU is present.
+func lookupSiblingValue(values map[ObjectIDIndex]*ObjectIDValue, sourceOID, fromColumn, toColumn string) string {
+	siblingOID := strings.Replace(sourceOID, fromColumn, toColumn, 1)
+	if pdu, ok := values[ObjectIDIndex(siblingOID)]; ok && pdu != nil {
+		return pdu.Value
+	}
+	return ""
+}
+
 // addressInsidePrefix returns true if (1) the encoded network bytes
 // are already a valid prefix-table row index — i.e. all host bits are
 // zero — and (2) the canonical IP address falls within that prefix.
@@ -448,9 +479,9 @@ func addressInsidePrefix(canonical string, networkBytes []byte, prefixLen int) b
 	return true
 }
 
-// parseAddressPrefixRowPointer extracts the prefix length, family, and
-// network bytes from an ipAddressPrefix RowPointer value (.5 column of
-// ipAddressTable).
+// parseAddressPrefixRowPointer extracts the prefix length, family,
+// pointed-to ifIndex, and network bytes from an ipAddressPrefix
+// RowPointer value (.5 column of ipAddressTable).
 //
 // Expected shape (RFC 4293):
 //
@@ -460,7 +491,11 @@ func addressInsidePrefix(canonical string, networkBytes []byte, prefixLen int) b
 // the row's address with the host bits zeroed. Callers can use the
 // returned bytes to verify that the IP being mapped actually falls
 // within the prefix described by the pointer; a pointer to an
-// unrelated prefix row is treated as malformed.
+// unrelated prefix row is treated as malformed. The returned ifIndex
+// lets callers verify the prefix row belongs to the same interface
+// as the source ipAddressTable row — without that check, a row could
+// silently pick up another interface's prefix length when subnets
+// overlap.
 //
 // Returns ok=false for:
 //   - "0.0" / ".0.0" (zeroDotZero — RFC 4293 sentinel for "no prefix
@@ -473,32 +508,38 @@ func addressInsidePrefix(canonical string, networkBytes []byte, prefixLen int) b
 //     Only structurally valid pointers are accepted; misshapen ones
 //     fall back to the host-route default upstream rather than
 //     silently producing a bogus prefix length.
-func parseAddressPrefixRowPointer(pointer string) (prefixLen int, isV6 bool, networkBytes []byte, ok bool) {
+func parseAddressPrefixRowPointer(pointer string) (prefixLen int, isV6 bool, ifIndex string, networkBytes []byte, ok bool) {
 	if pointer == "" {
-		return 0, false, nil, false
+		return 0, false, "", nil, false
 	}
 	trimmed := strings.TrimPrefix(pointer, ".")
 	if trimmed == "0.0" || trimmed == "" {
-		return 0, false, nil, false
+		return 0, false, "", nil, false
 	}
 	const prefixTablePrefix = "1.3.6.1.2.1.4.32.1.5"
 	if !strings.HasPrefix(trimmed, prefixTablePrefix+".") {
-		return 0, false, nil, false
+		return 0, false, "", nil, false
 	}
 	suffix := trimmed[len(prefixTablePrefix)+1:]
 	suffixParts := strings.Split(suffix, ".")
 	// Layout positions: [0]=ifIndex, [1]=addrType, [2]=addrLen,
 	// [3 .. 3+addrLen-1]=addrBytes, [last]=prefixLen.
 	if len(suffixParts) < 4 {
-		return 0, false, nil, false
+		return 0, false, "", nil, false
+	}
+	// Validate ifIndex parses as a non-negative integer. We surface
+	// the textual form so callers can compare it against the row's
+	// own ipAddressIfIndex value, which is also a string.
+	if iv, err := strconv.Atoi(suffixParts[0]); err != nil || iv < 0 {
+		return 0, false, "", nil, false
 	}
 	addrType, err := strconv.Atoi(suffixParts[1])
 	if err != nil {
-		return 0, false, nil, false
+		return 0, false, "", nil, false
 	}
 	addrLen, err := strconv.Atoi(suffixParts[2])
 	if err != nil {
-		return 0, false, nil, false
+		return 0, false, "", nil, false
 	}
 	// Reject scoped (3=ipv4z, 4=ipv6z) and dns(16); their lengths are
 	// not 4 or 16 and the spec already excludes them from the modern
@@ -510,27 +551,27 @@ func parseAddressPrefixRowPointer(pointer string) (prefixLen int, isV6 bool, net
 	case addrType == 2 && addrLen == 16:
 		pointerIsV6 = true
 	default:
-		return 0, false, nil, false
+		return 0, false, "", nil, false
 	}
 	// Total expected sub-OIDs: 1 ifIndex + 1 addrType + 1 addrLen +
 	// addrLen address bytes + 1 prefixLen.
 	if len(suffixParts) != addrLen+4 {
-		return 0, false, nil, false
+		return 0, false, "", nil, false
 	}
 	tail := suffixParts[len(suffixParts)-1]
 	n, err := strconv.Atoi(tail)
 	if err != nil || n < 0 {
-		return 0, false, nil, false
+		return 0, false, "", nil, false
 	}
 	bytes := make([]byte, addrLen)
 	for i := 0; i < addrLen; i++ {
 		b, err := strconv.Atoi(suffixParts[3+i])
 		if err != nil || b < 0 || b > 255 {
-			return 0, false, nil, false
+			return 0, false, "", nil, false
 		}
 		bytes[i] = byte(b)
 	}
-	return n, pointerIsV6, bytes, true
+	return n, pointerIsV6, suffixParts[0], bytes, true
 }
 
 func maskToPrefixSize(maskStr string) (int, error) {

@@ -4201,6 +4201,53 @@ func TestIPAddressMapper_RowPointer_AddrLenMismatch_FallsBackToHostRoute(t *test
 	assert.Equal(t, "10.0.0.1/32", *ip.Address)
 }
 
+// TestIPAddressMapper_RowPointer_IfIndexMismatch_FallsBackToHostRoute
+// covers the cross-interface prefix-row case Copilot flagged: a
+// modern row whose ipAddressIfIndex is 1 must NOT silently accept a
+// prefix entry that lives under a different ifIndex. On devices with
+// overlapping subnets, the row would otherwise pick up another
+// interface's prefix length.
+func TestIPAddressMapper_RowPointer_IfIndexMismatch_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	entry := &mapping.Entry{
+		OID: ".1.3.6.1.2.1.4.34.1", Entity: "ipAddress", Field: "_id",
+		IndexKind: "inet_address",
+		MappingEntries: []mapping.Entry{
+			{
+				OID: ".1.3.6.1.2.1.4.34.1.3", Entity: "ipAddress", Field: "assignedObject",
+				Relationship: config.Relationship{Type: "interface"},
+			},
+			{OID: ".1.3.6.1.2.1.4.34.1.5", Entity: "ipAddress", Field: "addressPrefix"},
+		},
+	}
+	// Row with ifIndex=1, but the RowPointer claims ifIndex=2 (a
+	// different interface). Both addrBytes describe a prefix that
+	// would contain 10.0.0.1 if accepted.
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		".1.3.6.1.2.1.4.34.1.3.1.4.10.0.0.1": {
+			OID: ".1.3.6.1.2.1.4.34.1.3.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.3", Value: "1", Type: mapping.Integer,
+		},
+		".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			// Pointer's first component is ifIndex=2, not 1.
+			Value: ".1.3.6.1.2.1.4.32.1.5.2.1.4.10.0.0.0.24",
+			Type:  mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, entry, registry, nil)
+	if got == nil {
+		t.Fatalf("expected entity, got nil")
+	}
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address,
+		"RowPointer with ifIndex differing from row's ipAddressIfIndex must fall back to host route")
+}
+
 // TestIPAddressMapper_AssignedObject_IfIndexZero_LeavesUnassigned
 // covers the InterfaceIndexOrZero=0 case: per RFC 4293,
 // ipAddressIfIndex=0 means the address is not bound to any
