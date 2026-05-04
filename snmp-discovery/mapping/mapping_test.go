@@ -924,6 +924,44 @@ func TestAssignPrimaryIP_DeviceIsProtoSerializable(t *testing.T) {
 	}
 }
 
+// TestAssignPrimaryIP_DeviceIsProtoSerializable_IPv6 mirrors
+// TestAssignPrimaryIP_DeviceIsProtoSerializable for the v6 path. The
+// detachForPrimaryIP6 helper is duplicated from its v4 sibling and
+// could drift independently, reintroducing the cycle bug for
+// PrimaryIp6 without tripping any existing PrimaryIp4 coverage.
+func TestAssignPrimaryIP_DeviceIsProtoSerializable_IPv6(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	assert.NoError(t, err)
+
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "2001:db8::1")
+	entities := m.MapObjectIDsToEntity(primaryIPModernIPv6OIDs("2001:db8::1", "Gi0", 64))
+
+	device := m.CurrentDevice()
+	assert.NotNil(t, device.PrimaryIp6, "v6 literal target must yield PrimaryIp6")
+
+	// Every emitted entity must serialize without recursing into the
+	// primary_ip6 -> interface -> device cycle.
+	for _, e := range entities {
+		proto := e.ConvertToProtoEntity()
+		assert.NotNil(t, proto)
+	}
+	proto := device.ConvertToProtoEntity()
+	assert.NotNil(t, proto)
+
+	// The snapshot keeps the nested Device reference but that nested
+	// Device must have BOTH primary IPs cleared so the graph is a
+	// tree, not a cycle (regardless of evaluation order between v4
+	// and v6 passes).
+	if iface, ok := device.PrimaryIp6.AssignedObject.(*diode.Interface); ok && iface != nil {
+		assert.NotNil(t, iface.Device, "PrimaryIp6 snapshot must keep a Device on the assigned interface")
+		if iface.Device != nil {
+			assert.Nil(t, iface.Device.PrimaryIp4, "nested Device must have PrimaryIp4 cleared to break the cycle")
+			assert.Nil(t, iface.Device.PrimaryIp6, "nested Device must have PrimaryIp6 cleared to break the cycle")
+		}
+	}
+}
+
 // TestAssignPrimaryIP_DeviceIsProtoSerializable_WithSubinterfaceParent
 // covers the specific regression flagged by the PR #368 review: if the
 // matched IPAddress is assigned to a subinterface (which has a Parent
@@ -1330,11 +1368,18 @@ func ipv4NetworkOctets(addr string, plen int) string {
 
 // ipv6NetworkBytes returns the 16-byte network address (host bits
 // zeroed) for an IPv6 address + prefix length, formatted as decimal
-// octets joined by dots.
+// octets joined by dots. IPv4-mapped IPv6 inputs (e.g. ::ffff:10.0.0.1)
+// are accepted — they're encoded as addrType=2/addrLen=16 in
+// ipAddressTable, so callers building RowPointers for them still need
+// 16-byte network output.
 func ipv6NetworkBytes(addr string, plen int) string {
-	ip := net.ParseIP(addr).To16()
-	if ip == nil || ip.To4() != nil {
-		panic("ipv6NetworkBytes requires an IPv6 literal: " + addr)
+	ip := net.ParseIP(addr)
+	if ip == nil {
+		panic("ipv6NetworkBytes requires a parseable IP literal: " + addr)
+	}
+	ip = ip.To16()
+	if ip == nil {
+		panic("ipv6NetworkBytes requires a 16-byte address: " + addr)
 	}
 	mask := net.CIDRMask(plen, 128)
 	network := ip.Mask(mask)
@@ -1511,10 +1556,12 @@ func TestAssignPrimaryIP_IPv4MappedIPv6Target_AssignsPrimaryIp6(t *testing.T) {
 	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
 	assert.NoError(t, err)
 
-	// Build a single ipAddressTable row for ::ffff:10.0.0.1.
+	// Build a single ipAddressTable row for ::ffff:10.0.0.1. The row's
+	// suffix uses the host bytes; the RowPointer to ipAddressPrefixTable
+	// uses the prefix's network bytes (host bits zeroed) per RFC 4293.
 	v6Bytes := []string{"0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "255", "255", "10", "0", "0", "1"}
 	rowSuffix := "2.16." + strings.Join(v6Bytes, ".")
-	rowPtr := fmt.Sprintf(".1.3.6.1.2.1.4.32.1.5.1.2.16.%s.%d", strings.Join(v6Bytes, "."), 96)
+	rowPtr := fmt.Sprintf(".1.3.6.1.2.1.4.32.1.5.1.2.16.%s.%d", ipv6NetworkBytes("::ffff:10.0.0.1", 96), 96)
 	pdus := mapping.ObjectIDValueMap{
 		".1.3.6.1.2.1.2.2.1.2.1": mapping.Value{
 			Value: "Gi0", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1,
@@ -1555,10 +1602,11 @@ func TestAssignPrimaryIP_IPv4MappedIPv6_NotMisclassifiedAsIPv4(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Build an ipAddressTable row for ::ffff:10.0.0.1 with addrType=2,
-	// addrLen=16. Bytes: 0,0,0,0,0,0,0,0,0,0,255,255,10,0,0,1.
+	// addrLen=16. The row's suffix uses the host bytes; the RowPointer
+	// uses the prefix's network bytes (host bits zeroed) per RFC 4293.
 	v6Bytes := []string{"0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "255", "255", "10", "0", "0", "1"}
 	rowSuffix := "2.16." + strings.Join(v6Bytes, ".")
-	rowPtr := fmt.Sprintf(".1.3.6.1.2.1.4.32.1.5.1.2.16.%s.%d", strings.Join(v6Bytes, "."), 96)
+	rowPtr := fmt.Sprintf(".1.3.6.1.2.1.4.32.1.5.1.2.16.%s.%d", ipv6NetworkBytes("::ffff:10.0.0.1", 96), 96)
 	pdus := mapping.ObjectIDValueMap{
 		".1.3.6.1.2.1.2.2.1.2.1": mapping.Value{
 			Value: "Gi0", Type: mapping.Asn1BER(mapping.OctetString), IdentifierSize: 1,

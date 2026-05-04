@@ -4201,6 +4201,34 @@ func TestIPAddressMapper_RowPointer_AddrLenMismatch_FallsBackToHostRoute(t *test
 	assert.Equal(t, "10.0.0.1/32", *ip.Address)
 }
 
+// TestIPAddressMapper_RowPointer_AddressOutsidePrefix_FallsBackToHostRoute
+// covers the unrelated-prefix-row case Copilot flagged: the pointer
+// is structurally valid for the row's family but its network bytes
+// describe a prefix that doesn't contain the row's address (e.g. a
+// 10.0.0.1 row pointing at 192.168.0.0/16). Pre-fix the mapper would
+// have emitted "10.0.0.1/16"; post-fix it falls back to host route.
+func TestIPAddressMapper_RowPointer_AddressOutsidePrefix_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID:    ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1",
+			Index:  "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			// Pointer to ipAddressPrefixTable for 192.168.0.0/16 —
+			// a different network than the row's 10.0.0.1.
+			Value: ".1.3.6.1.2.1.4.32.1.5.1.1.4.192.168.0.0.16",
+			Type:  mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address,
+		"row whose address is outside the pointed-to prefix must fall back to host route")
+}
+
 // TestIPAddressMapper_RowPointer_FamilyMismatch_FallsBackToHostRoute
 // covers Copilot's family-cross concern: an IPv6 row that points at a
 // well-formed IPv4 prefix entry must NOT silently borrow the v4

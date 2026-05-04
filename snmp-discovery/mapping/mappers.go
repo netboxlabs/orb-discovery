@@ -219,7 +219,7 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					if ipAddress.Address == nil || *ipAddress.Address == "" {
 						continue
 					}
-					prefixLen, pointerIsV6, ok := parseAddressPrefixRowPointer(value.Value)
+					prefixLen, pointerIsV6, networkBytes, ok := parseAddressPrefixRowPointer(value.Value)
 					if !ok {
 						m.logger.Debug("addressPrefix not usable, keeping host route",
 							"value", value.Value, "address", *ipAddress.Address)
@@ -243,6 +243,26 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					maxLen := 32
 					if rowIsV6 {
 						maxLen = 128
+					}
+					// Verify the row's address actually falls within
+					// the prefix described by the pointer. RFC 4293
+					// indexes ipAddressPrefixTable rows by the
+					// network address (host bits zeroed), so a
+					// pointer with addrBytes=192.168.0.0/16 attached
+					// to a row whose address is 10.0.0.1 is
+					// structurally wrong — fall back to the host
+					// route rather than emitting a bogus prefix. A
+					// length-clamped value is treated as the
+					// family's maximum for the containment check.
+					checkLen := prefixLen
+					if checkLen > maxLen {
+						checkLen = maxLen
+					}
+					if !addressInsidePrefix(canonical, networkBytes, checkLen) {
+						m.logger.Debug("addressPrefix points at an unrelated prefix row, keeping host route",
+							"value", value.Value, "address", *ipAddress.Address)
+						fieldFound = true
+						continue
 					}
 					if prefixLen > maxLen {
 						m.logger.Debug("addressPrefix length clamped",
@@ -360,13 +380,62 @@ func derefAddr(s *string) string {
 	return *s
 }
 
-// parseAddressPrefixRowPointer extracts the prefix length and family
-// from an ipAddressPrefix RowPointer value (.5 column of
+// addressInsidePrefix returns true if the canonical IP address falls
+// within the prefix described by network bytes + prefix length. The
+// network bytes' family must match the address (4 bytes for v4, 16
+// for v6); a mismatch is treated as "not inside" so the caller falls
+// back to the host-route default.
+func addressInsidePrefix(canonical string, networkBytes []byte, prefixLen int) bool {
+	ip := net.ParseIP(canonical)
+	if ip == nil {
+		return false
+	}
+	var ipBytes []byte
+	switch len(networkBytes) {
+	case 4:
+		v4 := ip.To4()
+		if v4 == nil {
+			return false
+		}
+		ipBytes = v4
+	case 16:
+		// To16() returns the 16-byte representation, but a v4-mapped
+		// v6 like ::ffff:10.0.0.1 will then carry the same 16 bytes
+		// as the embedded prefix encoding — exactly what we need to
+		// compare against an addrType=2/addrLen=16 pointer.
+		ipBytes = ip.To16()
+		if ipBytes == nil {
+			return false
+		}
+	default:
+		return false
+	}
+	bits := len(networkBytes) * 8
+	if prefixLen < 0 || prefixLen > bits {
+		return false
+	}
+	mask := net.CIDRMask(prefixLen, bits)
+	for i := range networkBytes {
+		if (ipBytes[i] & mask[i]) != (networkBytes[i] & mask[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// parseAddressPrefixRowPointer extracts the prefix length, family, and
+// network bytes from an ipAddressPrefix RowPointer value (.5 column of
 // ipAddressTable).
 //
 // Expected shape (RFC 4293):
 //
 //	.1.3.6.1.2.1.4.32.1.5.<ifIndex>.<addrType>.<addrLen>.<addrBytes...>.<prefixLen>
+//
+// Per RFC 4293 the addrBytes are the prefix's network address — i.e.
+// the row's address with the host bits zeroed. Callers can use the
+// returned bytes to verify that the IP being mapped actually falls
+// within the prefix described by the pointer; a pointer to an
+// unrelated prefix row is treated as malformed.
 //
 // Returns ok=false for:
 //   - "0.0" / ".0.0" (zeroDotZero — RFC 4293 sentinel for "no prefix
@@ -379,35 +448,32 @@ func derefAddr(s *string) string {
 //     Only structurally valid pointers are accepted; misshapen ones
 //     fall back to the host-route default upstream rather than
 //     silently producing a bogus prefix length.
-//
-// isV6 reflects the pointer's declared addrType so callers can verify
-// the prefix entry's family matches the row being mapped.
-func parseAddressPrefixRowPointer(pointer string) (prefixLen int, isV6 bool, ok bool) {
+func parseAddressPrefixRowPointer(pointer string) (prefixLen int, isV6 bool, networkBytes []byte, ok bool) {
 	if pointer == "" {
-		return 0, false, false
+		return 0, false, nil, false
 	}
 	trimmed := strings.TrimPrefix(pointer, ".")
 	if trimmed == "0.0" || trimmed == "" {
-		return 0, false, false
+		return 0, false, nil, false
 	}
 	const prefixTablePrefix = "1.3.6.1.2.1.4.32.1.5"
 	if !strings.HasPrefix(trimmed, prefixTablePrefix+".") {
-		return 0, false, false
+		return 0, false, nil, false
 	}
 	suffix := trimmed[len(prefixTablePrefix)+1:]
 	suffixParts := strings.Split(suffix, ".")
 	// Layout positions: [0]=ifIndex, [1]=addrType, [2]=addrLen,
 	// [3 .. 3+addrLen-1]=addrBytes, [last]=prefixLen.
 	if len(suffixParts) < 4 {
-		return 0, false, false
+		return 0, false, nil, false
 	}
 	addrType, err := strconv.Atoi(suffixParts[1])
 	if err != nil {
-		return 0, false, false
+		return 0, false, nil, false
 	}
 	addrLen, err := strconv.Atoi(suffixParts[2])
 	if err != nil {
-		return 0, false, false
+		return 0, false, nil, false
 	}
 	// Reject scoped (3=ipv4z, 4=ipv6z) and dns(16); their lengths are
 	// not 4 or 16 and the spec already excludes them from the modern
@@ -419,19 +485,27 @@ func parseAddressPrefixRowPointer(pointer string) (prefixLen int, isV6 bool, ok 
 	case addrType == 2 && addrLen == 16:
 		pointerIsV6 = true
 	default:
-		return 0, false, false
+		return 0, false, nil, false
 	}
 	// Total expected sub-OIDs: 1 ifIndex + 1 addrType + 1 addrLen +
 	// addrLen address bytes + 1 prefixLen.
 	if len(suffixParts) != addrLen+4 {
-		return 0, false, false
+		return 0, false, nil, false
 	}
 	tail := suffixParts[len(suffixParts)-1]
 	n, err := strconv.Atoi(tail)
 	if err != nil || n < 0 {
-		return 0, false, false
+		return 0, false, nil, false
 	}
-	return n, pointerIsV6, true
+	bytes := make([]byte, addrLen)
+	for i := 0; i < addrLen; i++ {
+		b, err := strconv.Atoi(suffixParts[3+i])
+		if err != nil || b < 0 || b > 255 {
+			return 0, false, nil, false
+		}
+		bytes[i] = byte(b)
+	}
+	return n, pointerIsV6, bytes, true
 }
 
 func maskToPrefixSize(maskStr string) (int, error) {
