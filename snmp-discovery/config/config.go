@@ -69,6 +69,15 @@ type DeviceDefaults struct {
 	Platform     string   `yaml:"platform,omitempty"`
 }
 
+// VLANDefaults represents default values applied to discovered VLAN entities.
+type VLANDefaults struct {
+	Description string   `yaml:"description,omitempty"`
+	Tags        []string `yaml:"tags,omitempty"`
+	Group       string   `yaml:"group,omitempty"`
+	Tenant      string   `yaml:"tenant,omitempty"`
+	Status      string   `yaml:"status,omitempty"`
+}
+
 // Defaults represents the supported default values for a policy
 type Defaults struct {
 	Tags                     []string           `yaml:"tags,omitempty"`
@@ -78,6 +87,7 @@ type Defaults struct {
 	IPAddress                IPAddressDefaults  `yaml:"ip_address,omitempty"`
 	Interface                InterfaceDefaults  `yaml:"interface,omitempty"`
 	Device                   DeviceDefaults     `yaml:"device,omitempty"`
+	VLAN                     VLANDefaults       `yaml:"vlan,omitempty"`
 	InterfacePatterns        []InterfacePattern `yaml:"interface_patterns,omitempty"`
 	InterfaceExcludePatterns []string           `yaml:"interface_exclude_patterns,omitempty"`
 }
@@ -155,6 +165,23 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 	}
 	if overrideDefaults.Device.Platform != "" {
 		merged.Device.Platform = overrideDefaults.Device.Platform
+	}
+
+	// Merge VLAN defaults
+	if overrideDefaults.VLAN.Description != "" {
+		merged.VLAN.Description = overrideDefaults.VLAN.Description
+	}
+	if len(overrideDefaults.VLAN.Tags) > 0 {
+		merged.VLAN.Tags = overrideDefaults.VLAN.Tags
+	}
+	if overrideDefaults.VLAN.Group != "" {
+		merged.VLAN.Group = overrideDefaults.VLAN.Group
+	}
+	if overrideDefaults.VLAN.Tenant != "" {
+		merged.VLAN.Tenant = overrideDefaults.VLAN.Tenant
+	}
+	if overrideDefaults.VLAN.Status != "" {
+		merged.VLAN.Status = overrideDefaults.VLAN.Status
 	}
 
 	// Override InterfacePatterns if provided

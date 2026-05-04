@@ -360,3 +360,29 @@ entries:
 	require.Len(t, m.Entries, 1)
 	assert.Equal(t, "", m.Entries[0].IndexKind)
 }
+
+func TestMergeDefaults_VLAN(t *testing.T) {
+	policy := &Defaults{
+		VLAN: VLANDefaults{
+			Description: "policy desc",
+			Tags:        []string{"policy-tag"},
+			Group:       "policy-group",
+			Tenant:      "policy-tenant",
+			Status:      "active",
+		},
+	}
+	override := &Defaults{
+		VLAN: VLANDefaults{
+			Description: "override desc",
+			Tags:        []string{"override-tag"},
+			Tenant:      "override-tenant",
+		},
+	}
+	merged := MergeDefaults(policy, override)
+
+	assert.Equal(t, "override desc", merged.VLAN.Description)
+	assert.Equal(t, []string{"override-tag"}, merged.VLAN.Tags)
+	assert.Equal(t, "policy-group", merged.VLAN.Group, "Group should be preserved from policy")
+	assert.Equal(t, "override-tenant", merged.VLAN.Tenant)
+	assert.Equal(t, "active", merged.VLAN.Status, "Status should be preserved from policy")
+}
