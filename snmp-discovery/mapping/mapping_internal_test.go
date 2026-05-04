@@ -165,3 +165,69 @@ func TestGroupByObjectIDIndex_SerialDoesNotCollideWithIfIndex(t *testing.T) {
 	assert.True(t, hasIfIndex, "ifIndex group '1' should exist")
 	assert.True(t, hasSerialIndex, "serial group '11.1' should exist")
 }
+
+// TestNewConfig_RejectsUnknownIndexKind ensures NewConfig fails fast
+// when index_kind carries a value outside the documented enum. A typo
+// that silently fell through to the legacy fixed-size path would
+// regress modern-only devices to "no IPs discovered".
+func TestNewConfig_RejectsUnknownIndexKind(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	entries := []config.MappingEntry{
+		{
+			OID:       ".1.3.6.1.2.1.4.34.1",
+			Entity:    "ipAddress",
+			Field:     "_id",
+			IndexKind: "InetAddress", // wrong case — typo
+		},
+	}
+	_, err := NewConfig(entries, logger, nil, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid index_kind")
+}
+
+// TestNewConfig_RejectsChildIndexKindOverridingParent prevents a child
+// from declaring a different index_kind than its parent. The
+// fast-path cache anchors on the top-level entry's OID, so an
+// inconsistent child would silently fall through to fixed-size
+// parsing.
+func TestNewConfig_RejectsChildIndexKindOverridingParent(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	entries := []config.MappingEntry{
+		{
+			OID:       ".1.3.6.1.2.1.4.34.1",
+			Entity:    "ipAddress",
+			Field:     "_id",
+			IndexKind: "inet_address",
+			MappingEntries: []config.MappingEntry{
+				{
+					OID:       ".1.3.6.1.2.1.4.34.1.5",
+					Entity:    "ipAddress",
+					Field:     "addressPrefix",
+					IndexKind: "fixed", // disagrees with parent
+				},
+			},
+		},
+	}
+	_, err := NewConfig(entries, logger, nil, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must match parent")
+}
+
+// TestInetAddressEntryFor_LongestPrefixWins guards against the
+// random-map-iteration bug Copilot flagged: when two inet_address
+// entries overlap, the longest matching prefix must win so
+// newObjectIDValueForEntry splits the column boundary at the right
+// depth.
+func TestInetAddressEntryFor_LongestPrefixWins(t *testing.T) {
+	short := &Entry{OID: ".1.3.6.1.2.1.4.34.1", IndexKind: "inet_address"}
+	long := &Entry{OID: ".1.3.6.1.2.1.4.34.1.X.Y", IndexKind: "inet_address"}
+	cfg := &Config{
+		inetAddressEntries: map[string]*Entry{
+			short.OID: short,
+			long.OID:  long,
+		},
+	}
+	got := cfg.inetAddressEntryFor(".1.3.6.1.2.1.4.34.1.X.Y.suffix")
+	require.NotNil(t, got)
+	assert.Equal(t, long.OID, got.OID, "longest matching prefix must win")
+}

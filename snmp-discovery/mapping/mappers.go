@@ -354,16 +354,17 @@ func derefAddr(s *string) string {
 //
 //	.1.3.6.1.2.1.4.32.1.5.<ifIndex>.<addrType>.<addrLen>.<addrBytes...>.<prefixLen>
 //
-// The minimum well-formed shape carries 1 (ifIndex) + 1 (addrType) +
-// 1 (addrLen) + 4 (IPv4 address) + 1 (prefixLen) = 8 trailing sub-OIDs
-// after the column prefix; IPv6 carries 20. We require at least 8.
-//
 // Returns ok=false for:
 //   - "0.0" / ".0.0" (zeroDotZero — RFC 4293 sentinel for "no prefix
 //     row exists")
 //   - any pointer that does not begin with .1.3.6.1.2.1.4.32.1.5
 //   - the bare column OID with no row index appended
 //   - empty / non-numeric tail
+//   - addrType not in {1 (ipv4), 2 (ipv6)}, addrLen mismatch with the
+//     declared family, or a byte-count that doesn't match addrLen.
+//     Only structurally valid pointers are accepted; misshapen ones
+//     fall back to the host-route default upstream rather than
+//     silently producing a bogus prefix length.
 func parseAddressPrefixRowPointer(pointer string) (int, bool) {
 	if pointer == "" {
 		return 0, false
@@ -378,9 +379,31 @@ func parseAddressPrefixRowPointer(pointer string) (int, bool) {
 	}
 	suffix := trimmed[len(prefixTablePrefix)+1:]
 	suffixParts := strings.Split(suffix, ".")
-	// Minimum: ifIndex + addrType + addrLen + 4 IPv4 bytes + prefixLen.
-	const minSuffixParts = 8
-	if len(suffixParts) < minSuffixParts {
+	// Layout positions: [0]=ifIndex, [1]=addrType, [2]=addrLen,
+	// [3 .. 3+addrLen-1]=addrBytes, [last]=prefixLen.
+	if len(suffixParts) < 4 {
+		return 0, false
+	}
+	addrType, err := strconv.Atoi(suffixParts[1])
+	if err != nil {
+		return 0, false
+	}
+	addrLen, err := strconv.Atoi(suffixParts[2])
+	if err != nil {
+		return 0, false
+	}
+	// Reject scoped (3=ipv4z, 4=ipv6z) and dns(16); their lengths are
+	// not 4 or 16 and the spec already excludes them from the modern
+	// ipAddressTable handling we support.
+	switch {
+	case addrType == 1 && addrLen == 4:
+	case addrType == 2 && addrLen == 16:
+	default:
+		return 0, false
+	}
+	// Total expected sub-OIDs: 1 ifIndex + 1 addrType + 1 addrLen +
+	// addrLen address bytes + 1 prefixLen.
+	if len(suffixParts) != addrLen+4 {
 		return 0, false
 	}
 	tail := suffixParts[len(suffixParts)-1]

@@ -4174,6 +4174,55 @@ func TestIPAddressMapper_RowPointer_NotPrefixTable_FallsBackToHostRoute(t *testi
 	assert.Equal(t, "10.0.0.1/32", *ip.Address)
 }
 
+// TestIPAddressMapper_RowPointer_AddrLenMismatch_FallsBackToHostRoute
+// covers the strict-shape case Copilot flagged: a pointer that declares
+// addrLen=99 but carries fewer (or different-count) address bytes is
+// structurally invalid. Pre-fix this would have parsed the trailing
+// numeric component as the prefix length; post-fix the row falls back
+// to the host-route default.
+func TestIPAddressMapper_RowPointer_AddrLenMismatch_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	// .1.3.6.1.2.1.4.32.1.5.<ifIndex=1>.<addrType=2>.<addrLen=99>.1.2.3.4.24
+	// addrType=2 implies addrLen=16, not 99; suffixParts = 8, expected 20.
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.2.99.1.2.3.4.24",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	// Host-route default rather than a fabricated /24.
+	assert.Equal(t, "10.0.0.1/32", *ip.Address)
+}
+
+// TestIPAddressMapper_RowPointer_BadAddrType_FallsBackToHostRoute
+// rejects addrType values outside the {1, 2} set we support
+// (e.g. ipv4z=3, ipv6z=4, dns=16) regardless of byte count.
+func TestIPAddressMapper_RowPointer_BadAddrType_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	// addrType=3 (ipv4z) — even with otherwise plausible shape, reject.
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.3.4.10.0.0.0.24",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address)
+}
+
 // runIPAddressTableMap builds a synthetic ipAddressTable PDU set with
 // the given column overrides (parent OID → string value) for index
 // "ipv4:10.0.0.1" and runs the mapper. Always includes a /24 prefix

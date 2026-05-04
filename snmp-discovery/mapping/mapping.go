@@ -328,6 +328,14 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 			deviceLookup:  deviceLookup,
 		},
 	}
+	// Validate index_kind on every entry (top-level and nested). A typo
+	// would otherwise silently fall through to the legacy fixed-size
+	// path and could regress modern-only devices to "no IPs discovered"
+	// — fail fast at config load instead.
+	if err := validateIndexKind(mappings); err != nil {
+		return nil, err
+	}
+
 	mapping := make(map[string]*Entry)
 	inetAddressEntries := make(map[string]*Entry)
 	for _, m := range mappings {
@@ -337,6 +345,12 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 			continue
 		}
 		mapping[m.OID] = Entry
+		// inetAddressEntryFor uses these to anchor the column boundary
+		// in newObjectIDValueForEntry. Only top-level table entries
+		// belong here: the anchor is `<table-OID>` (column sub-OID is
+		// the next sub-OID under it). Children inherit IndexKind via
+		// newChildMappingEntries; caching them too would let a column
+		// OID win the longest-prefix scan and miscompute columnDepth.
 		if Entry.IndexKind == "inet_address" {
 			inetAddressEntries[m.OID] = Entry
 		}
@@ -345,6 +359,48 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 		mapping:            mapping,
 		inetAddressEntries: inetAddressEntries,
 	}, nil
+}
+
+// validIndexKinds enumerates the values index_kind may take. An empty
+// string keeps the historical fixed-size behavior. Anything else must
+// match exactly — typos like "inetaddress" or "InetAddress" are
+// rejected so misconfigurations surface immediately.
+var validIndexKinds = map[string]struct{}{
+	"":             {},
+	"fixed":        {},
+	"inet_address": {},
+}
+
+// validateIndexKind walks every entry (top-level and nested) and
+// rejects unknown index_kind values. It also rejects a child whose
+// index_kind disagrees with its parent's, since the framework's
+// column-anchor model assumes IndexKind is declared on the table
+// (top-level) entry and inherited downward; an inconsistent value on
+// a child would silently fall through to the legacy fixed-size path
+// at the cache layer.
+func validateIndexKind(entries []config.MappingEntry) error {
+	return validateIndexKindWithParent(entries, "")
+}
+
+func validateIndexKindWithParent(entries []config.MappingEntry, parentKind string) error {
+	for _, m := range entries {
+		if _, ok := validIndexKinds[m.IndexKind]; !ok {
+			return fmt.Errorf("invalid index_kind %q on mapping entry %q (allowed: \"\", \"fixed\", \"inet_address\")", m.IndexKind, m.OID)
+		}
+		// Children may omit (inherit) but must not set a different
+		// index_kind than their parent.
+		if parentKind != "" && m.IndexKind != "" && m.IndexKind != parentKind {
+			return fmt.Errorf("index_kind on child %q (%q) must match parent (%q)", m.OID, m.IndexKind, parentKind)
+		}
+		effective := m.IndexKind
+		if effective == "" {
+			effective = parentKind
+		}
+		if err := validateIndexKindWithParent(m.MappingEntries, effective); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // NewObjectIDMapper creates a new ObjectIDMapper for a given SNMP target host.
@@ -1117,12 +1173,14 @@ func (m *Config) getMappingEntry(objectID string) (*Entry, error) {
 }
 
 // inetAddressEntryFor returns the inet_address-indexed Entry whose OID
-// is a prefix of the given objectID, or nil when no such entry exists.
-// It walks `inetAddressEntries` (a small set: typically just
-// ipAddressTable) instead of the full `mapping`, so the common case
-// where no inet_address table is configured is a single map-len check.
-// When inet_address tables are present, we still do a HasPrefix scan of
-// that small set rather than the O(depth) trim loop in getMappingEntry.
+// is the longest prefix of the given objectID, or nil when no such
+// entry exists. It walks `inetAddressEntries` (a small set: typically
+// just ipAddressTable and its column children) instead of the full
+// `mapping`, so the common case where no inet_address table is
+// configured is a single map-len check. Returning the longest match
+// matches getMappingEntry's most-specific-wins semantics so
+// newObjectIDValueForEntry splits the column/index boundary at the
+// correct depth even when overlapping prefixes are registered.
 //
 // Nil receiver is treated as "no inet_address tables configured" so
 // that an ObjectIDMapper constructed without a Config (used in some
@@ -1131,12 +1189,18 @@ func (m *Config) inetAddressEntryFor(objectID string) *Entry {
 	if m == nil || len(m.inetAddressEntries) == 0 {
 		return nil
 	}
+	var best *Entry
+	bestLen := -1
 	for prefix, entry := range m.inetAddressEntries {
-		if strings.HasPrefix(objectID, prefix+".") || objectID == prefix {
-			return entry
+		if objectID != prefix && !strings.HasPrefix(objectID, prefix+".") {
+			continue
+		}
+		if len(prefix) > bestLen {
+			best = entry
+			bestLen = len(prefix)
 		}
 	}
-	return nil
+	return best
 }
 
 // ObjectIDs returns the ObjectIDs that the ObjectIDMapper can map
