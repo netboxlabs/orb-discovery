@@ -1676,6 +1676,58 @@ func TestMapObjectIDsToEntity_LegacyAndModernSameAddress_Deduplicates(t *testing
 	}
 }
 
+// TestMapObjectIDsToEntity_ExcludedInterfaceDropsBothLegacyAndModern
+// verifies the dedup-before-exclude ordering: when the legacy row is
+// bound to an excluded interface and the modern row is missing
+// AssignedObject, an exclude-then-dedup order would have removed the
+// legacy row first and left the unassigned modern duplicate behind,
+// emitting an IP that should have been suppressed. With dedup first,
+// assigned-wins consolidates to the legacy row, then the exclusion
+// sweep drops both copies.
+func TestMapObjectIDsToEntity_ExcludedInterfaceDropsBothLegacyAndModern(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	defaults := &config.Defaults{
+		InterfaceExcludePatterns: []string{"^Gi0$"},
+	}
+	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, defaults)
+	assert.NoError(t, err)
+
+	// Legacy row binds to "Gi0" (will be excluded). Modern row carries
+	// the same IP but no ipAddressIfIndex (so AssignedObject stays
+	// nil).
+	modernNoIfIndex := mapping.ObjectIDValueMap{
+		".1.3.6.1.2.1.4.34.1.4.1.4.10.0.0.1": mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1": mapping.Value{
+			Value: ".1.3.6.1.2.1.4.32.1.5.1.1.4." + ipv4NetworkOctets("10.0.0.1", 24) + ".24",
+			Type:  mapping.Asn1BER(mapping.ObjectIdentifier), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.7.1.4.10.0.0.1": mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+		".1.3.6.1.2.1.4.34.1.10.1.4.10.0.0.1": mapping.Value{
+			Value: "1", Type: mapping.Asn1BER(mapping.Integer), IdentifierSize: 0,
+		},
+	}
+	pdus := mergeOIDs(
+		primaryIPOneInterfaceOIDs("10.0.0.1", "Gi0"),
+		modernNoIfIndex,
+	)
+
+	m := mapping.NewObjectIDMapper(mappingConfig, logger, defaults, "10.0.0.1")
+	entities := m.MapObjectIDsToEntity(pdus)
+
+	for _, e := range entities {
+		ip, ok := e.(*diode.IPAddress)
+		if !ok || ip.Address == nil {
+			continue
+		}
+		assert.NotContains(t, *ip.Address, "10.0.0.1",
+			"IP from excluded interface must not survive via the unassigned modern duplicate")
+	}
+}
+
 // TestMapObjectIDsToEntity_LegacyKeptWhenModernLacksInterface verifies
 // that the dedup pass keeps the legacy row when the modern row is
 // missing AssignedObject (e.g. partial walk where ipAddressIfIndex was

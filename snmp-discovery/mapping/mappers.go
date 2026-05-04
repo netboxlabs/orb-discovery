@@ -219,7 +219,7 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 					if ipAddress.Address == nil || *ipAddress.Address == "" {
 						continue
 					}
-					prefixLen, ok := parseAddressPrefixRowPointer(value.Value)
+					prefixLen, pointerIsV6, ok := parseAddressPrefixRowPointer(value.Value)
 					if !ok {
 						m.logger.Debug("addressPrefix not usable, keeping host route",
 							"value", value.Value, "address", *ipAddress.Address)
@@ -227,8 +227,21 @@ func (m *IPAddressMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 						continue
 					}
 					canonical := stripPrefix(*ipAddress.Address)
+					rowIsV6 := strings.Contains(canonical, ":")
+					if pointerIsV6 != rowIsV6 {
+						// A row that points at a prefix entry of a
+						// different family is structurally invalid
+						// (e.g. an IPv6 row pointing at an IPv4
+						// prefix entry). Keep the host-route default
+						// rather than emitting a wrong prefix.
+						m.logger.Debug("addressPrefix family mismatch, keeping host route",
+							"value", value.Value, "address", *ipAddress.Address,
+							"pointer_v6", pointerIsV6, "row_v6", rowIsV6)
+						fieldFound = true
+						continue
+					}
 					maxLen := 32
-					if strings.Contains(canonical, ":") {
+					if rowIsV6 {
 						maxLen = 128
 					}
 					if prefixLen > maxLen {
@@ -347,8 +360,9 @@ func derefAddr(s *string) string {
 	return *s
 }
 
-// parseAddressPrefixRowPointer extracts the prefix length from an
-// ipAddressPrefix RowPointer value (.5 column of ipAddressTable).
+// parseAddressPrefixRowPointer extracts the prefix length and family
+// from an ipAddressPrefix RowPointer value (.5 column of
+// ipAddressTable).
 //
 // Expected shape (RFC 4293):
 //
@@ -365,53 +379,59 @@ func derefAddr(s *string) string {
 //     Only structurally valid pointers are accepted; misshapen ones
 //     fall back to the host-route default upstream rather than
 //     silently producing a bogus prefix length.
-func parseAddressPrefixRowPointer(pointer string) (int, bool) {
+//
+// isV6 reflects the pointer's declared addrType so callers can verify
+// the prefix entry's family matches the row being mapped.
+func parseAddressPrefixRowPointer(pointer string) (prefixLen int, isV6 bool, ok bool) {
 	if pointer == "" {
-		return 0, false
+		return 0, false, false
 	}
 	trimmed := strings.TrimPrefix(pointer, ".")
 	if trimmed == "0.0" || trimmed == "" {
-		return 0, false
+		return 0, false, false
 	}
 	const prefixTablePrefix = "1.3.6.1.2.1.4.32.1.5"
 	if !strings.HasPrefix(trimmed, prefixTablePrefix+".") {
-		return 0, false
+		return 0, false, false
 	}
 	suffix := trimmed[len(prefixTablePrefix)+1:]
 	suffixParts := strings.Split(suffix, ".")
 	// Layout positions: [0]=ifIndex, [1]=addrType, [2]=addrLen,
 	// [3 .. 3+addrLen-1]=addrBytes, [last]=prefixLen.
 	if len(suffixParts) < 4 {
-		return 0, false
+		return 0, false, false
 	}
 	addrType, err := strconv.Atoi(suffixParts[1])
 	if err != nil {
-		return 0, false
+		return 0, false, false
 	}
 	addrLen, err := strconv.Atoi(suffixParts[2])
 	if err != nil {
-		return 0, false
+		return 0, false, false
 	}
 	// Reject scoped (3=ipv4z, 4=ipv6z) and dns(16); their lengths are
 	// not 4 or 16 and the spec already excludes them from the modern
 	// ipAddressTable handling we support.
+	var pointerIsV6 bool
 	switch {
 	case addrType == 1 && addrLen == 4:
+		pointerIsV6 = false
 	case addrType == 2 && addrLen == 16:
+		pointerIsV6 = true
 	default:
-		return 0, false
+		return 0, false, false
 	}
 	// Total expected sub-OIDs: 1 ifIndex + 1 addrType + 1 addrLen +
 	// addrLen address bytes + 1 prefixLen.
 	if len(suffixParts) != addrLen+4 {
-		return 0, false
+		return 0, false, false
 	}
 	tail := suffixParts[len(suffixParts)-1]
 	n, err := strconv.Atoi(tail)
 	if err != nil || n < 0 {
-		return 0, false
+		return 0, false, false
 	}
-	return n, true
+	return n, pointerIsV6, true
 }
 
 func maskToPrefixSize(maskStr string) (int, error) {

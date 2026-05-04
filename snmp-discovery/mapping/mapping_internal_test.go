@@ -185,32 +185,47 @@ func TestNewConfig_RejectsUnknownIndexKind(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid index_kind")
 }
 
-// TestNewConfig_RejectsChildIndexKindOverridingParent prevents a child
-// from declaring a different index_kind than its parent. The
-// fast-path cache anchors on the top-level entry's OID, so an
-// inconsistent child would silently fall through to fixed-size
-// parsing.
+// TestNewConfig_RejectsChildIndexKindOverridingParent verifies the
+// stricter rule: index_kind may only be declared on the top-level
+// table entry. Any explicit child-level declaration — whether it
+// matches the parent, differs from it, or appears with no parent
+// declaration at all — is rejected, since the fast-path cache only
+// sees top-level entries and a child-only declaration would silently
+// drop the table back to fixed-size parsing.
 func TestNewConfig_RejectsChildIndexKindOverridingParent(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	entries := []config.MappingEntry{
-		{
-			OID:       ".1.3.6.1.2.1.4.34.1",
-			Entity:    "ipAddress",
-			Field:     "_id",
-			IndexKind: "inet_address",
-			MappingEntries: []config.MappingEntry{
-				{
-					OID:       ".1.3.6.1.2.1.4.34.1.5",
-					Entity:    "ipAddress",
-					Field:     "addressPrefix",
-					IndexKind: "fixed", // disagrees with parent
-				},
-			},
-		},
+	cases := []struct {
+		name   string
+		parent string
+		child  string
+	}{
+		{name: "child differs from parent", parent: "inet_address", child: "fixed"},
+		{name: "child set with empty parent", parent: "", child: "inet_address"},
+		{name: "child duplicates parent", parent: "inet_address", child: "inet_address"},
 	}
-	_, err := NewConfig(entries, logger, nil, nil, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must match parent")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			entries := []config.MappingEntry{
+				{
+					OID:       ".1.3.6.1.2.1.4.34.1",
+					Entity:    "ipAddress",
+					Field:     "_id",
+					IndexKind: c.parent,
+					MappingEntries: []config.MappingEntry{
+						{
+							OID:       ".1.3.6.1.2.1.4.34.1.5",
+							Entity:    "ipAddress",
+							Field:     "addressPrefix",
+							IndexKind: c.child,
+						},
+					},
+				},
+			}
+			_, err := NewConfig(entries, logger, nil, nil, nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "must be declared only on the top-level")
+		})
+	}
 }
 
 // TestInetAddressEntryFor_LongestPrefixWins guards against the

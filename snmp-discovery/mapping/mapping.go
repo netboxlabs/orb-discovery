@@ -372,31 +372,35 @@ var validIndexKinds = map[string]struct{}{
 }
 
 // validateIndexKind walks every entry (top-level and nested) and
-// rejects unknown index_kind values. It also rejects a child whose
-// index_kind disagrees with its parent's, since the framework's
-// column-anchor model assumes IndexKind is declared on the table
-// (top-level) entry and inherited downward; an inconsistent value on
-// a child would silently fall through to the legacy fixed-size path
-// at the cache layer.
+// rejects unknown index_kind values. It also enforces that
+// index_kind is declared ONLY on a top-level table entry: the
+// fast-path cache keys on top-level OIDs, and a child-only
+// declaration would pass YAML loading but silently fall through to
+// fixed-size parsing at the cache layer (re-triggering the
+// "modern-only device, no IPs" regression). Children inherit
+// IndexKind by leaving the field empty.
 func validateIndexKind(entries []config.MappingEntry) error {
-	return validateIndexKindWithParent(entries, "")
+	return validateIndexKindWithParent(entries, "", true)
 }
 
-func validateIndexKindWithParent(entries []config.MappingEntry, parentKind string) error {
+func validateIndexKindWithParent(entries []config.MappingEntry, parentKind string, isTopLevel bool) error {
 	for _, m := range entries {
 		if _, ok := validIndexKinds[m.IndexKind]; !ok {
 			return fmt.Errorf("invalid index_kind %q on mapping entry %q (allowed: \"\", \"fixed\", \"inet_address\")", m.IndexKind, m.OID)
 		}
-		// Children may omit (inherit) but must not set a different
-		// index_kind than their parent.
-		if parentKind != "" && m.IndexKind != "" && m.IndexKind != parentKind {
-			return fmt.Errorf("index_kind on child %q (%q) must match parent (%q)", m.OID, m.IndexKind, parentKind)
+		if !isTopLevel && m.IndexKind != "" {
+			// Child explicitly setting index_kind is rejected even
+			// when it matches the parent: it adds noise to the YAML
+			// without changing semantics, and a divergent value
+			// would silently misbehave (the cache only sees
+			// top-level entries).
+			return fmt.Errorf("index_kind must be declared only on the top-level table entry; child %q sets it explicitly (parent's effective kind is %q)", m.OID, parentKind)
 		}
 		effective := m.IndexKind
 		if effective == "" {
 			effective = parentKind
 		}
-		if err := validateIndexKindWithParent(m.MappingEntries, effective); err != nil {
+		if err := validateIndexKindWithParent(m.MappingEntries, effective, false); err != nil {
 			return err
 		}
 	}
@@ -569,8 +573,15 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 		}
 	}
 
-	m.filterExcludedEntities(uniqueEntities)
+	// Dedup must run BEFORE filterExcludedEntities. Otherwise:
+	// legacy row (assigned to excluded interface) + modern row
+	// (missing ipAddressIfIndex) would have the legacy row removed
+	// by exclusion first, leaving only the unassigned modern
+	// duplicate. Dedup with assigned-wins consolidates to the
+	// legacy row so the subsequent exclusion sweep can drop the
+	// IP entirely.
 	m.dedupIPAddresses(uniqueEntities)
+	m.filterExcludedEntities(uniqueEntities)
 
 	currentDevice := m.registry.GetOrCreateEntity(DeviceEntityType, CurrentDeviceIndex).(*diode.Device)
 

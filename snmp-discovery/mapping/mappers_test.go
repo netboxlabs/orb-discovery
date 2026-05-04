@@ -4201,6 +4201,34 @@ func TestIPAddressMapper_RowPointer_AddrLenMismatch_FallsBackToHostRoute(t *test
 	assert.Equal(t, "10.0.0.1/32", *ip.Address)
 }
 
+// TestIPAddressMapper_RowPointer_FamilyMismatch_FallsBackToHostRoute
+// covers Copilot's family-cross concern: an IPv6 row that points at a
+// well-formed IPv4 prefix entry must NOT silently borrow the v4
+// prefix length. Pre-fix this would emit "2001:db8::1/24"; post-fix
+// the row keeps its host-route default.
+func TestIPAddressMapper_RowPointer_FamilyMismatch_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	// IPv6 row (Index = "ipv6:..."). Pointer is structurally valid for
+	// IPv4 (addrType=1, addrLen=4, ifIndex=1, addrBytes=10.0.0.0,
+	// prefixLen=24) but its family doesn't match the row.
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID:    ".1.3.6.1.2.1.4.34.1.5.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1",
+			Index:  "ipv6:2001:db8::1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.1.4.10.0.0.0.24",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	// Host-route fallback for the IPv6 row.
+	assert.Equal(t, "2001:db8::1/128", *ip.Address)
+}
+
 // TestIPAddressMapper_RowPointer_BadAddrType_FallsBackToHostRoute
 // rejects addrType values outside the {1, 2} set we support
 // (e.g. ipv4z=3, ipv6z=4, dns=16) regardless of byte count.
