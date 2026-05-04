@@ -55,3 +55,6 @@ func (m *ObjectIDMapper) AssignPrimaryIPForTest(device *diode.Device, entities m
 
 // CreateEntity exposes the createEntity function for tests.
 var CreateEntity = createEntity
+
+// ConfigEntries exposes the unexported mapping field of Config for tests.
+var ConfigEntries = func(c *Config) map[string]*Entry { return c.mapping }

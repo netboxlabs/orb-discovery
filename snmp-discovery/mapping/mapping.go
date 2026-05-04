@@ -356,6 +356,7 @@ type Config struct {
 	// per-PDU getMappingEntry call (an O(depth) prefix walk) when the
 	// OID falls outside any inet_address-using table.
 	inetAddressEntries map[string]*Entry
+	postPassMappers    []postPassMapper
 }
 
 // NewConfig creates a new Config
@@ -373,6 +374,7 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 		return nil, fmt.Errorf("failed to create interface mapper: %w", err)
 	}
 
+	vlanMapper := NewVlanMapper(logger)
 	entityMappers := map[string]orbToEntityMapper{
 		"ipAddress": &IPAddressMapper{
 			logger: logger,
@@ -383,7 +385,10 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 			manufacturers: manufacturers,
 			deviceLookup:  deviceLookup,
 		},
+		"vlan":           vlanMapper,
+		"interface_vlan": vlanMapper,
 	}
+	postPassMappers := []postPassMapper{vlanMapper}
 	// Validate index_kind on every entry (top-level and nested). A typo
 	// would otherwise silently fall through to the legacy fixed-size
 	// path and could regress modern-only devices to "no IPs discovered"
@@ -414,6 +419,7 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 	return &Config{
 		mapping:            mapping,
 		inetAddressEntries: inetAddressEntries,
+		postPassMappers:    postPassMappers,
 	}, nil
 }
 
@@ -488,6 +494,7 @@ func newObjectIDMapperWithResolver(mappingConfig *Config, logger *slog.Logger, d
 		excludePatterns: compileExcludePatterns(defaults, logger),
 		targetHost:      targetHost,
 		resolver:        resolver,
+		postPassMappers: mappingConfig.postPassMappers,
 	}
 }
 

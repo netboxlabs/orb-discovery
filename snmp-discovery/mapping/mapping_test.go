@@ -1989,3 +1989,29 @@ func TestCreateEntity_InterfaceVLAN(t *testing.T) {
 		t.Error("expected error for interface_vlan, got nil")
 	}
 }
+
+func TestNewConfig_RegistersVlanMapper(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	mappings := []config.MappingEntry{
+		{OID: ".1.3.6.1.2.1.17.7.1.4.3.1", Entity: "vlan", Field: "_id"},
+		{OID: ".1.3.6.1.4.1.9.9.68.1.5.1.1", Entity: "interface_vlan", Vendor: "cisco"},
+	}
+	cfg, err := mapping.NewConfig(mappings, logger, nil, nil, &config.Defaults{})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("cfg is nil")
+	}
+	entries := mapping.ConfigEntries(cfg)
+	for _, oid := range []string{".1.3.6.1.2.1.17.7.1.4.3.1", ".1.3.6.1.4.1.9.9.68.1.5.1.1"} {
+		entry, ok := entries[oid]
+		if !ok {
+			t.Errorf("entry not registered: %s", oid)
+			continue
+		}
+		if entry.Mapper == nil {
+			t.Errorf("entry %s has nil Mapper", oid)
+		}
+	}
+}
