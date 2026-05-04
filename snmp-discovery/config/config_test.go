@@ -419,3 +419,32 @@ func TestMergeDefaults_VLAN(t *testing.T) {
 	assert.Equal(t, "override-tenant", merged.VLAN.Tenant)
 	assert.Equal(t, "active", merged.VLAN.Status, "Status should be preserved from policy")
 }
+
+func TestMappingEntry_VendorField(t *testing.T) {
+	yamlBody := []byte(`
+oid: ".1.3.6.1.4.1.9.9.68.1.2.2.1"
+entity: "interface_vlan"
+vendor: "cisco"
+`)
+	var m MappingEntry
+	if err := yaml.Unmarshal(yamlBody, &m); err != nil {
+		t.Fatalf("yaml: %v", err)
+	}
+	if m.Vendor != "cisco" {
+		t.Errorf("Vendor: got %q, want %q", m.Vendor, "cisco")
+	}
+}
+
+func TestMappingEntry_VendorOmitted(t *testing.T) {
+	yamlBody := []byte(`
+oid: ".1.3.6.1.2.1.2.2.1"
+entity: "interface"
+`)
+	var m MappingEntry
+	if err := yaml.Unmarshal(yamlBody, &m); err != nil {
+		t.Fatalf("yaml: %v", err)
+	}
+	if m.Vendor != "" {
+		t.Errorf("Vendor: got %q, want empty (generic)", m.Vendor)
+	}
+}

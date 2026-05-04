@@ -240,6 +240,7 @@ type MappingEntry struct {
 	IdentifierSize int            `yaml:"identifier_size"`
 	IndexKind      string         `yaml:"index_kind"`
 	Relationship   Relationship   `yaml:"relationship"`
+	Vendor         string         `yaml:"vendor,omitempty"`
 }
 
 // Relationship represents a relationship between two entities
