@@ -15,6 +15,7 @@ import (
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/mapping"
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/yaml.v3"
 )
 
 type FakeManufacturers struct{}
@@ -2040,5 +2041,31 @@ func TestConfig_VendorPartitioning(t *testing.T) {
 	}
 	if len(cfg.VendorObjectIDs("juniper")) != 0 {
 		t.Error("juniper set must be empty (no juniper-scoped entries)")
+	}
+}
+
+func TestMappingYAML_QBridgeEntriesPresent(t *testing.T) {
+	body, err := os.ReadFile("../policy/mapping.yaml")
+	if err != nil {
+		t.Fatalf("read mapping.yaml: %v", err)
+	}
+	var doc config.Mapping
+	if err := yaml.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("yaml: %v", err)
+	}
+	wanted := map[string]bool{
+		".1.3.6.1.2.1.17.1.4.1":   false, // dot1dBasePortTable
+		".1.3.6.1.2.1.17.7.1.4.3": false, // dot1qVlanStaticTable
+		".1.3.6.1.2.1.17.7.1.4.5": false, // dot1qPortVlanTable
+	}
+	for _, e := range doc.Entries {
+		if _, want := wanted[e.OID]; want {
+			wanted[e.OID] = true
+		}
+	}
+	for oid, found := range wanted {
+		if !found {
+			t.Errorf("mapping.yaml missing OID %s", oid)
+		}
 	}
 }
