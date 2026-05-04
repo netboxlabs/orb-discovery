@@ -276,6 +276,7 @@ type ObjectIDMapper struct {
 	targetHost      string
 	resolver        hostResolver
 	ctx             context.Context
+	postPassMappers []postPassMapper
 }
 
 // SetContext stores the scan's context on the mapper. If set, the primary-IP
@@ -494,6 +495,22 @@ type orbToEntityMapper interface {
 	Map(pdus map[ObjectIDIndex]*ObjectIDValue, Entry *Entry, entityRegistry *EntityRegistry, defaults *config.Defaults) diode.Entity
 }
 
+// postPassMapper is the optional second-pass interface implemented by
+// mappers that need full host context (every Map() call already complete)
+// before they can do their work — typically because they cross-reference
+// entities the per-row Map pipeline produces.
+//
+// PostMap runs once per host, after every registered mapper's Map has been
+// called for every row, and after the standard dedup/exclusion sweep
+// inside MapObjectIDsToEntity. It can both mutate registry-resident
+// entities in place AND return new entities to append to the host output.
+//
+// Ordering: post-pass mappers run in the order they were registered in
+// ObjectIDMapper.postPassMappers (see post_pass_test.go).
+type postPassMapper interface {
+	PostMap(allObjectIDs ObjectIDValueMap, entityRegistry *EntityRegistry, defaults *config.Defaults) []diode.Entity
+}
+
 func getIndex(values map[ObjectIDIndex]*ObjectIDValue) ObjectIDIndex {
 	for _, pdu := range values {
 		return pdu.Index
@@ -656,6 +673,15 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 	}
 
 	m.assignPrimaryIP(currentDevice, uniqueEntities)
+
+	// Phase 2: PostMap pass. Mappers that need cross-row / cross-mapper
+	// context (e.g., VlanMapper which must see all *diode.Interface
+	// instances before it can emit VLAN refs) run here. Order is
+	// registration order; new mappers append to the slice.
+	for _, ppm := range m.postPassMappers {
+		extra := ppm.PostMap(objectIDs, m.registry, m.defaults)
+		entities = append(entities, extra...)
+	}
 
 	return entities
 }
