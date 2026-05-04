@@ -148,3 +148,28 @@ entries:
       - oid: ".1.3.6.1.2.1.17.7.1.4.5.1.1"
         entity: "interface_vlan"
         field: "pvid"
+
+  # CISCO-VLAN-MEMBERSHIP-MIB vmMembershipTable — non-trunk access VLAN per ifIndex.
+  - oid: ".1.3.6.1.4.1.9.9.68.1.2.2.1"
+    entity: "interface_vlan"
+    field: "_id"
+    identifier_size: 1
+    vendor: "cisco"
+    description: "CISCO-VLAN-MEMBERSHIP-MIB vmMembershipTable (access VLAN refinement)"
+    mapping_entries:
+      - oid: ".1.3.6.1.4.1.9.9.68.1.2.2.1.2"
+        entity: "interface_vlan"
+        field: "vmVlan"
+
+  # CISCO-VOICE-VLAN-MIB vmVoiceVlanTable — per-port voice VLAN.
+  # Sentinels: 0 = none, 4095 = dot1p-only, 4096 = untagged.
+  - oid: ".1.3.6.1.4.1.9.9.68.1.5.1"
+    entity: "interface_vlan"
+    field: "_id"
+    identifier_size: 1
+    vendor: "cisco"
+    description: "CISCO-VOICE-VLAN-MIB vmVoiceVlanTable (voice VLAN promotion)"
+    mapping_entries:
+      - oid: ".1.3.6.1.4.1.9.9.68.1.5.1.1"
+        entity: "interface_vlan"
+        field: "vmVoiceVlanId"

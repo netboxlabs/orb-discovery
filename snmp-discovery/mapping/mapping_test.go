@@ -2069,3 +2069,31 @@ func TestMappingYAML_QBridgeEntriesPresent(t *testing.T) {
 		}
 	}
 }
+
+func TestMappingYAML_CiscoOverlayEntriesPresent(t *testing.T) {
+	body, err := os.ReadFile("../policy/mapping.yaml")
+	if err != nil {
+		t.Fatalf("read mapping.yaml: %v", err)
+	}
+	var doc config.Mapping
+	if err := yaml.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("yaml: %v", err)
+	}
+	wanted := map[string]bool{
+		".1.3.6.1.4.1.9.9.68.1.2.2.1": false, // vmMembershipTable
+		".1.3.6.1.4.1.9.9.68.1.5.1":   false, // vmVoiceVlanTable
+	}
+	for _, e := range doc.Entries {
+		if e.Vendor != "cisco" {
+			continue
+		}
+		if _, want := wanted[e.OID]; want {
+			wanted[e.OID] = true
+		}
+	}
+	for oid, found := range wanted {
+		if !found {
+			t.Errorf("mapping.yaml missing cisco-scoped OID %s", oid)
+		}
+	}
+}
