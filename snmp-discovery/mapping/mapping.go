@@ -61,6 +61,7 @@ type EntityRegistry struct {
 	logger             *slog.Logger
 	excludedInterfaces map[string]struct{}
 	ipSource           map[*diode.IPAddress]string
+	verifiedInterfaces map[*diode.Interface]struct{}
 }
 
 // NewEntityRegistry creates a new EntityRegistry
@@ -70,7 +71,34 @@ func NewEntityRegistry(logger *slog.Logger) *EntityRegistry {
 		logger:             logger,
 		excludedInterfaces: make(map[string]struct{}),
 		ipSource:           make(map[*diode.IPAddress]string),
+		verifiedInterfaces: make(map[*diode.Interface]struct{}),
 	}
+}
+
+// MarkInterfaceVerified records that an Interface has been the subject
+// of an InterfaceMapper.Map call — i.e. ifTable PDUs were actually
+// walked for it. Used to distinguish real (but possibly unnamed)
+// interfaces from placeholder Interfaces fabricated by
+// GetOrCreateEntity when ipAddressIfIndex references an unwalked
+// ifIndex.
+func (r *EntityRegistry) MarkInterfaceVerified(iface *diode.Interface) {
+	if iface == nil {
+		return
+	}
+	if r.verifiedInterfaces == nil {
+		r.verifiedInterfaces = make(map[*diode.Interface]struct{})
+	}
+	r.verifiedInterfaces[iface] = struct{}{}
+}
+
+// IsInterfaceVerified reports whether the given Interface was marked
+// via MarkInterfaceVerified.
+func (r *EntityRegistry) IsInterfaceVerified(iface *diode.Interface) bool {
+	if iface == nil {
+		return false
+	}
+	_, ok := r.verifiedInterfaces[iface]
+	return ok
 }
 
 // MarkIPSource records the source table ("legacy" or "modern") for an
@@ -631,7 +659,7 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 	v4Cands, v6Cands := m.resolveTargetIPs()
 
 	if len(v4Cands) > 0 {
-		if hit := pickPrimaryIPHit(m.logger, m.targetHost, entities, v4Cands, false); hit != nil {
+		if hit := pickPrimaryIPHit(m.logger, m.registry, m.targetHost, entities, v4Cands, false); hit != nil {
 			// Break the reference cycle before attaching. See
 			// detachForPrimaryIP doc.
 			device.PrimaryIp4 = detachForPrimaryIP(hit, device)
@@ -641,7 +669,7 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 	}
 
 	if len(v6Cands) > 0 {
-		if hit := pickPrimaryIPHit(m.logger, m.targetHost, entities, v6Cands, true); hit != nil {
+		if hit := pickPrimaryIPHit(m.logger, m.registry, m.targetHost, entities, v6Cands, true); hit != nil {
 			device.PrimaryIp6 = detachForPrimaryIP6(hit, device)
 		}
 	} else {
@@ -660,7 +688,7 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 // Canonicalization goes through netip.ParseAddr which preserves the
 // mapped form on String(), keeping the v4/v6 distinction intact for the
 // candidate comparison too.
-func pickPrimaryIPHit(logger *slog.Logger, target string, entities map[diode.Entity]bool, candidates []string, wantV6 bool) *diode.IPAddress {
+func pickPrimaryIPHit(logger *slog.Logger, registry *EntityRegistry, target string, entities map[diode.Entity]bool, candidates []string, wantV6 bool) *diode.IPAddress {
 	canonCands := make(map[string]struct{}, len(candidates))
 	for _, c := range candidates {
 		addr, err := netip.ParseAddr(c)
@@ -691,7 +719,7 @@ func pickPrimaryIPHit(logger *slog.Logger, target string, entities map[diode.Ent
 		// walked; treating that placeholder as "verified" would
 		// point primary IP at an interface we didn't actually
 		// discover.
-		if !hasVerifiedInterface(ip) {
+		if !registry.hasVerifiedInterface(ip) {
 			continue
 		}
 		stripped := stripPrefix(*ip.Address)
@@ -952,20 +980,24 @@ func stripPrefix(addr string) string {
 // to an interface that was actually discovered during the walk (as
 // opposed to the placeholder Interface that GetOrCreateEntity
 // fabricates whenever ipAddressIfIndex references an ifIndex whose
-// ifTable row never came back). The interface mapper overwrites the
-// placeholder Name with the discovered ifDescr/ifName, so a name
-// that is still equal to DefaultInterfaceName is the signal that the
-// row was a partial walk: dedup, exclusion, and primary-IP selection
-// all treat that as unassigned.
-func hasVerifiedInterface(ip *diode.IPAddress) bool {
+// ifTable row never came back).
+//
+// The signal is the registry's verified set, populated by
+// InterfaceMapper.Map. Checking only Name != DefaultInterfaceName
+// would also reject legitimately-walked interfaces whose ifDescr and
+// ifName happened to be empty (the existing
+// "both name sources empty leaves default unknown" path in
+// InterfaceMapper); the registry-backed check accepts those because
+// the Interface DID receive a Map() call.
+func (r *EntityRegistry) hasVerifiedInterface(ip *diode.IPAddress) bool {
 	if ip == nil {
 		return false
 	}
 	iface, ok := ip.AssignedObject.(*diode.Interface)
-	if !ok || iface == nil || iface.Name == nil {
+	if !ok || iface == nil {
 		return false
 	}
-	return *iface.Name != DefaultInterfaceName
+	return r.IsInterfaceVerified(iface)
 }
 
 // dedupIPAddresses resolves cross-table overlap for *diode.IPAddress
@@ -1005,7 +1037,7 @@ func (m *ObjectIDMapper) dedupIPAddresses(entities map[diode.Entity]bool) {
 			groups[key].legacy = ip
 		}
 	}
-	hasAssignedInterface := hasVerifiedInterface
+	hasAssignedInterface := m.registry.hasVerifiedInterface
 	for _, b := range groups {
 		if b.modern == nil || b.legacy == nil {
 			continue

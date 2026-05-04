@@ -814,6 +814,13 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 		}
 	}
 
+	// Mark this interface as actually walked (regardless of whether
+	// ifDescr/ifName populated the Name). Downstream code uses this
+	// to distinguish a real ifTable row from the placeholder Interface
+	// fabricated by GetOrCreateEntity when ipAddressIfIndex references
+	// an ifIndex whose ifTable row was never walked.
+	entityRegistry.MarkInterfaceVerified(interfaceEntity)
+
 	return interfaceEntity
 }
 
