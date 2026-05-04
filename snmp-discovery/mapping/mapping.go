@@ -76,11 +76,17 @@ func NewEntityRegistry(logger *slog.Logger) *EntityRegistry {
 }
 
 // MarkInterfaceVerified records that an Interface has been the subject
-// of an InterfaceMapper.Map call — i.e. ifTable PDUs were actually
-// walked for it. Used to distinguish real (but possibly unnamed)
-// interfaces from placeholder Interfaces fabricated by
-// GetOrCreateEntity when ipAddressIfIndex references an unwalked
-// ifIndex.
+// of an InterfaceMapper.Map call — i.e. real interface-related PDUs
+// (from ifTable, ifXTable, or any other column wired into the
+// interface mapping) populated it during this walk. Used to
+// distinguish such interfaces from placeholders fabricated by
+// GetOrCreateEntity when ipAddressIfIndex references an ifIndex that
+// no interface PDUs ever populated.
+//
+// Note: an interface marked here may have been observed only via
+// ifXTable columns (e.g. ifName) without any ifTable column being
+// returned; the guarantee is "the interface mapper saw at least one
+// PDU for this entity," not "ifTable was specifically walked."
 func (r *EntityRegistry) MarkInterfaceVerified(iface *diode.Interface) {
 	if iface == nil {
 		return
@@ -423,6 +429,15 @@ func validateIndexKindWithParent(entries []config.MappingEntry, parentKind strin
 			// would silently misbehave (the cache only sees
 			// top-level entries).
 			return fmt.Errorf("index_kind must be declared only on the top-level table entry; child %q sets it explicitly (parent's effective kind is %q)", m.OID, parentKind)
+		}
+		// inet_address requires the top-level OID to be a table-row
+		// prefix with at least one child column underneath it: the
+		// parser builds full row OIDs as `<entry.OID>.<column>.<index>`.
+		// A scalar or childless entry would pass every other check
+		// here and then silently skip all rows in
+		// newObjectIDValueForEntry as malformed.
+		if isTopLevel && m.IndexKind == "inet_address" && len(m.MappingEntries) == 0 {
+			return fmt.Errorf("index_kind \"inet_address\" requires the top-level entry %q to have at least one child mapping_entry (column OID); a scalar/childless entry would skip every row as malformed", m.OID)
 		}
 		effective := m.IndexKind
 		if effective == "" {

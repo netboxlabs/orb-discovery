@@ -185,6 +185,29 @@ func TestNewConfig_RejectsUnknownIndexKind(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid index_kind")
 }
 
+// TestNewConfig_RejectsInetAddressOnChildlessTopLevel verifies that
+// index_kind:"inet_address" requires the top-level entry to have at
+// least one child mapping_entry. A childless entry would pass every
+// other validation, then newObjectIDValueForEntry would treat every
+// row as malformed (because its column boundary lands inside the
+// InetAddress index, not the column sub-OID).
+func TestNewConfig_RejectsInetAddressOnChildlessTopLevel(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	entries := []config.MappingEntry{
+		{
+			OID:       ".1.3.6.1.2.1.4.34.1",
+			Entity:    "ipAddress",
+			Field:     "_id",
+			IndexKind: "inet_address",
+			// No child columns — would parse as scalar / table-prefix
+			// without the column boundary the parser assumes.
+		},
+	}
+	_, err := NewConfig(entries, logger, nil, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one child mapping_entry")
+}
+
 // TestNewConfig_RejectsChildIndexKindOverridingParent verifies the
 // stricter rule: index_kind may only be declared on the top-level
 // table entry. Any explicit child-level declaration — whether it
