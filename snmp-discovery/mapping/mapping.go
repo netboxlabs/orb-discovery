@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/netip"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -493,7 +494,13 @@ func NewObjectIDIndexDetails(index string) *ObjectIDIndexDetails {
 func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diode.Entity {
 	objectIDIndexMap := m.groupByObjectIDIndex(objectIDs)
 	uniqueEntities := make(map[diode.Entity]bool)
-	for index, value := range objectIDIndexMap {
+	sortedIndexes := make([]ObjectIDIndex, 0, len(objectIDIndexMap))
+	for index := range objectIDIndexMap {
+		sortedIndexes = append(sortedIndexes, index)
+	}
+	slices.SortFunc(sortedIndexes, compareOIDsNumerically)
+	for _, index := range sortedIndexes {
+		value := objectIDIndexMap[index]
 		m.logger.Debug("mapping object ID index", "object_id_index", index, "values", value.Values)
 		entry, err := m.resolveMappingEntry(value)
 		if err != nil {
@@ -1091,8 +1098,12 @@ func (m *Config) getMappingEntry(objectID string) (*Entry, error) {
 // where no inet_address table is configured is a single map-len check.
 // When inet_address tables are present, we still do a HasPrefix scan of
 // that small set rather than the O(depth) trim loop in getMappingEntry.
+//
+// Nil receiver is treated as "no inet_address tables configured" so
+// that an ObjectIDMapper constructed without a Config (used in some
+// internal tests) doesn't panic on the hot path.
 func (m *Config) inetAddressEntryFor(objectID string) *Entry {
-	if len(m.inetAddressEntries) == 0 {
+	if m == nil || len(m.inetAddressEntries) == 0 {
 		return nil
 	}
 	for prefix, entry := range m.inetAddressEntries {
