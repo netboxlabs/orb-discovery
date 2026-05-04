@@ -152,6 +152,11 @@ func (m *VlanMapper) buildGenericRows(all ObjectIDValueMap) qbridge.GenericRows 
 		IfAdminStatus:     map[int]int{},
 		IfTypes:           map[int]string{},
 	}
+	// dot1qPortVlanTable is INDEX { dot1dBasePort } per RFC 4363, so the OID
+	// suffix is a bridge port number, NOT an ifIndex. Collect raw bridge-port-
+	// keyed PVIDs first; translate to ifIndex after the loop once
+	// BasePortToIfIndex is fully populated.
+	bridgePortPvid := map[int]int{}
 	for oid, v := range all {
 		switch {
 		case strings.HasPrefix(oid, oidDot1dBasePortIfIndex):
@@ -161,10 +166,10 @@ func (m *VlanMapper) buildGenericRows(all ObjectIDValueMap) qbridge.GenericRows 
 				rows.BasePortToIfIndex[bp] = ifx
 			}
 		case strings.HasPrefix(oid, oidDot1qPvid):
-			ifx, ok1 := atoi(strings.TrimPrefix(oid, oidDot1qPvid))
+			bp, ok1 := atoi(strings.TrimPrefix(oid, oidDot1qPvid))
 			vid, ok2 := atoi(v.Value)
 			if ok1 && ok2 {
-				rows.PortPvid[ifx] = vid
+				bridgePortPvid[bp] = vid
 			}
 		case strings.HasPrefix(oid, oidDot1qVlanStaticEgressPorts):
 			vid, ok := atoi(strings.TrimPrefix(oid, oidDot1qVlanStaticEgressPorts))
@@ -190,6 +195,12 @@ func (m *VlanMapper) buildGenericRows(all ObjectIDValueMap) qbridge.GenericRows 
 					rows.IfTypes[ifx] = name
 				}
 			}
+		}
+	}
+	// Translate bridge-port-keyed PVIDs to ifIndex using the now-complete map.
+	for bp, vid := range bridgePortPvid {
+		if ifx, ok := rows.BasePortToIfIndex[bp]; ok {
+			rows.PortPvid[ifx] = vid
 		}
 	}
 	return rows

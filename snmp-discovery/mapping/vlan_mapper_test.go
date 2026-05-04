@@ -68,15 +68,21 @@ func TestVlanMapper_PostMap_AccessPort_MutatesInterface(t *testing.T) {
 // buildAccessPortFixture constructs a minimal ObjectIDValueMap covering an
 // access port with one VLAN. Mirrors the OID layout the runtime walker
 // produces.
+// NOTE: in this fixture, bridge port 1 maps to the given ifIndex
+// (dot1dBasePortIfIndex.1 = ifIndex). The dot1qPvid OID is therefore rooted
+// at bridge port 1, NOT at ifIndex. The new
+// TestVlanMapper_PostMap_BridgePortIfIndexTranslation test exercises the
+// non-identity case (bridge port 1 → ifIndex 101) explicitly.
 func buildAccessPortFixture(ifIndex, vid int) ObjectIDValueMap {
 	out := ObjectIDValueMap{}
 	put := func(oid string, val string, t Asn1BER) {
 		out[oid] = Value{Value: val, Type: t}
 	}
-	// dot1dBasePortIfIndex.1 = ifIndex
+	// dot1dBasePortIfIndex.1 = ifIndex  (bridge port 1 -> ifIndex)
 	put(".1.3.6.1.2.1.17.1.4.1.2.1", strconv.Itoa(ifIndex), Integer)
-	// dot1qPvid.<ifIndex>
-	put(".1.3.6.1.2.1.17.7.1.4.5.1.1."+strconv.Itoa(ifIndex), strconv.Itoa(vid), Integer)
+	// dot1qPvid is indexed by dot1dBasePort (bridge port), not ifIndex.
+	// In this fixture, bridge port 1 maps to the single port (ifIndex).
+	put(".1.3.6.1.2.1.17.7.1.4.5.1.1.1", strconv.Itoa(vid), Integer)
 	// dot1qVlanStaticName.<vid>
 	put(".1.3.6.1.2.1.17.7.1.4.3.1.1."+strconv.Itoa(vid), "Eng", OctetString)
 	// dot1qVlanStaticEgressPorts.<vid> = 0x80 (port 1)
@@ -90,4 +96,82 @@ func buildAccessPortFixture(ifIndex, vid int) ObjectIDValueMap {
 	// ifType.<ifIndex> = 6 (ethernetCsmacd)
 	put(".1.3.6.1.2.1.2.2.1.3."+strconv.Itoa(ifIndex), "6", Integer)
 	return out
+}
+
+func TestVlanMapper_PostMap_BridgePortIfIndexTranslation(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	registry := NewEntityRegistry(logger)
+	iface := &diode.Interface{Name: StringPtr("Ethernet1")}
+	if registry.entities[InterfaceEntityType] == nil {
+		registry.entities[InterfaceEntityType] = map[ObjectIDIndex]diode.Entity{}
+	}
+	registry.entities[InterfaceEntityType]["101"] = iface
+	registry.MarkInterfaceVerified(iface)
+
+	// Build fixture with bridge port 1 -> ifIndex 101 (NON-identity).
+	// PVID and membership masks are indexed by bridge port (1), NOT ifIndex.
+	rows := ObjectIDValueMap{
+		// dot1dBasePortIfIndex: bridge port 1 -> ifIndex 101
+		".1.3.6.1.2.1.17.1.4.1.2.1": Value{Value: "101", Type: Integer},
+		// dot1qPvid keyed by BRIDGE PORT (1), not ifIndex (101)
+		".1.3.6.1.2.1.17.7.1.4.5.1.1.1": Value{Value: "10", Type: Integer},
+		// VLAN 10 static name + status
+		".1.3.6.1.2.1.17.7.1.4.3.1.1.10": Value{Value: "Eng", Type: OctetString},
+		".1.3.6.1.2.1.17.7.1.4.3.1.5.10": Value{Value: "1", Type: Integer},
+		// Egress + untagged masks for VLAN 10: bit 0 (port 1) set
+		".1.3.6.1.2.1.17.7.1.4.3.1.2.10": Value{Value: "\x80", Type: OctetString},
+		".1.3.6.1.2.1.17.7.1.4.3.1.4.10": Value{Value: "\x80", Type: OctetString},
+		// IF-MIB ifAdminStatus + ifType for ifIndex 101
+		".1.3.6.1.2.1.2.2.1.7.101": Value{Value: "1", Type: Integer},
+		".1.3.6.1.2.1.2.2.1.3.101": Value{Value: "6", Type: Integer},
+	}
+
+	vm := NewVlanMapper(logger)
+	_ = vm.PostMap(rows, registry, &config.Defaults{})
+
+	if iface.Mode == nil || *iface.Mode != "access" {
+		t.Errorf("Mode: got %v, want access; bridge-port->ifIndex translation likely failed", iface.Mode)
+	}
+	if iface.UntaggedVlan == nil || iface.UntaggedVlan.Vid == nil || *iface.UntaggedVlan.Vid != 10 {
+		t.Errorf("UntaggedVlan.Vid: got %+v, want 10", iface.UntaggedVlan)
+	}
+}
+
+func TestVlanMapper_PostMap_MissingBridgeTable_EmitsVLANsOnly(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	registry := NewEntityRegistry(logger)
+	iface := &diode.Interface{Name: StringPtr("Ethernet1")}
+	if registry.entities[InterfaceEntityType] == nil {
+		registry.entities[InterfaceEntityType] = map[ObjectIDIndex]diode.Entity{}
+	}
+	registry.entities[InterfaceEntityType]["101"] = iface
+	registry.MarkInterfaceVerified(iface)
+
+	// VLAN static rows present, but NO dot1dBasePortIfIndex.
+	rows := ObjectIDValueMap{
+		".1.3.6.1.2.1.17.7.1.4.3.1.1.10": Value{Value: "Eng", Type: OctetString},
+		".1.3.6.1.2.1.17.7.1.4.3.1.5.10": Value{Value: "1", Type: Integer},
+	}
+
+	vm := NewVlanMapper(logger)
+	emitted := vm.PostMap(rows, registry, &config.Defaults{})
+
+	// VLAN entity emitted.
+	vlanCount := 0
+	for _, e := range emitted {
+		if _, ok := e.(*diode.VLAN); ok {
+			vlanCount++
+		}
+	}
+	if vlanCount != 1 {
+		t.Errorf("expected 1 VLAN entity, got %d", vlanCount)
+	}
+
+	// Interface NOT mutated.
+	if iface.Mode != nil {
+		t.Errorf("Interface.Mode should be nil (no mutation), got %v", iface.Mode)
+	}
+	if iface.UntaggedVlan != nil {
+		t.Errorf("Interface.UntaggedVlan should be nil (no mutation), got %+v", iface.UntaggedVlan)
+	}
 }
