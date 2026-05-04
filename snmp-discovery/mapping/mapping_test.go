@@ -2015,3 +2015,30 @@ func TestNewConfig_RegistersVlanMapper(t *testing.T) {
 		}
 	}
 }
+
+func TestConfig_VendorPartitioning(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	mappings := []config.MappingEntry{
+		{OID: ".1.3.6.1.2.1.2.2.1", Entity: "interface", Field: "_id"},
+		{OID: ".1.3.6.1.2.1.17.7.1.4.3.1", Entity: "vlan", Field: "_id"},
+		{OID: ".1.3.6.1.4.1.9.9.68.1.2.2.1", Entity: "interface_vlan", Field: "_id", Vendor: "cisco"},
+	}
+	cfg, err := mapping.NewConfig(mappings, logger, nil, nil, &config.Defaults{})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	gen := cfg.GenericObjectIDs()
+	if _, hasCisco := gen[".1.3.6.1.4.1.9.9.68.1.2.2.1"]; hasCisco {
+		t.Error("generic set must not include vendor=cisco entry")
+	}
+	if _, hasIface := gen[".1.3.6.1.2.1.2.2.1"]; !hasIface {
+		t.Error("generic set must include unscoped entry")
+	}
+	cisco := cfg.VendorObjectIDs("cisco")
+	if _, ok := cisco[".1.3.6.1.4.1.9.9.68.1.2.2.1"]; !ok {
+		t.Error("cisco set missing the cisco-scoped entry")
+	}
+	if len(cfg.VendorObjectIDs("juniper")) != 0 {
+		t.Error("juniper set must be empty (no juniper-scoped entries)")
+	}
+}

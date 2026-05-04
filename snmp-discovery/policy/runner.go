@@ -412,9 +412,7 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 		r.logger.Error("error creating mapping config", "error", err)
 		return nil, err
 	}
-	objectIDs := mappingConfig.ObjectIDs()
 	targetHost := strings.TrimSpace(target.Host)
-	r.logger.Info("querying target", "host", targetHost, "port", target.Port, "object_count", len(objectIDs))
 
 	mapper := mapping.NewObjectIDMapper(mappingConfig, r.logger, targetDefaults, targetHost)
 	mapper.SetContext(ctx)
@@ -437,12 +435,18 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 		oids mapping.ObjectIDValueMap
 		err  error
 	}
+
+	// Phase 1: walk generic OIDs (sysObjectID/sysDescr included).
+	genericOIDs := mappingConfig.GenericObjectIDs()
+	r.logger.Info("querying target", "host", targetHost, "port", target.Port, "object_count", len(genericOIDs))
+	r.logger.Debug("phase 1 walk", "host", targetHost, "oid_count", len(genericOIDs))
+
 	// The buffered channel ensures the goroutine can always send its result and exit,
 	// even if we have already returned due to context cancellation. The goroutine is
 	// bounded by snmpTimeout (set on the SNMP client), so it is not a permanent leak.
 	resultCh := make(chan walkResult, 1)
 	go func() {
-		oids, err := host.Walk(objectIDs)
+		oids, err := host.Walk(genericOIDs)
 		resultCh <- walkResult{oids, err}
 	}()
 
@@ -470,6 +474,37 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 			return nil, res.err
 		}
 		oids = res.oids
+	}
+
+	// Phase 2: resolve vendor from phase-1 results, walk vendor-scoped OIDs.
+	sysOID, sysDescr := ExtractSysIdentity(oids)
+	vendor := ResolveVendor(sysOID, sysDescr, defaultVendorMatchers)
+	if vendor != "" {
+		vendorOIDs := mappingConfig.VendorObjectIDs(vendor)
+		if len(vendorOIDs) > 0 {
+			r.logger.Debug("phase 2 walk",
+				"host", targetHost, "vendor", vendor, "oid_count", len(vendorOIDs))
+			vendorCh := make(chan walkResult, 1)
+			go func() {
+				out, err := host.Walk(vendorOIDs)
+				vendorCh <- walkResult{out, err}
+			}()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case res := <-vendorCh:
+				if res.err != nil {
+					r.logger.Warn("phase 2 walk failed; continuing with generic only",
+						"host", targetHost, "vendor", vendor, "error", res.err)
+				} else {
+					for k, v := range res.oids {
+						oids[k] = v
+					}
+				}
+			}
+		}
+	} else {
+		r.logger.Debug("no vendor matched; generic-only path", "host", targetHost)
 	}
 
 	// Track successful discovery
