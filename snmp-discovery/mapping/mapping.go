@@ -357,11 +357,12 @@ type Config struct {
 	// OID falls outside any inet_address-using table.
 	inetAddressEntries map[string]*Entry
 	postPassMappers    []postPassMapper
+	options            config.Options
 }
 
 // NewConfig creates a new Config
 func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturers data.ManufacturerRetriever,
-	deviceLookup data.DeviceRetriever, defaults *config.Defaults,
+	deviceLookup data.DeviceRetriever, defaults *config.Defaults, options config.Options,
 ) (*Config, error) {
 	// Create InterfaceMapper with pattern support
 	var interfacePatterns []config.InterfacePattern
@@ -374,7 +375,7 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 		return nil, fmt.Errorf("failed to create interface mapper: %w", err)
 	}
 
-	vlanMapper := NewVlanMapper(logger)
+	vlanMapper := NewVlanMapper(logger, options)
 	entityMappers := map[string]orbToEntityMapper{
 		"ipAddress": &IPAddressMapper{
 			logger: logger,
@@ -420,6 +421,7 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 		mapping:            mapping,
 		inetAddressEntries: inetAddressEntries,
 		postPassMappers:    postPassMappers,
+		options:            options,
 	}, nil
 }
 

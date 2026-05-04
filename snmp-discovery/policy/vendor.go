@@ -19,13 +19,6 @@ type VendorMatcher struct {
 	Vendor              string
 	SysObjectIDPrefixes []string
 	SysDescrRegex       *regexp.Regexp
-	// RequireTable, when set, gates the matcher on a successful probe
-	// of the named OID prefix. Probe execution is performed by the
-	// caller (Runner) using PolicyConfig.SNMPProbeTimeout. v1 ships
-	// no matchers using RequireTable; the field is reserved for
-	// future overlays where a single sysObjectID prefix is shared
-	// across vendors with disjoint MIB support.
-	RequireTable string
 }
 
 // defaultVendorMatchers is the v1 vendor table. Order matters: more

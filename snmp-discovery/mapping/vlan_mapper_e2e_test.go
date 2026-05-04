@@ -57,7 +57,7 @@ func TestVlanMapper_E2E_AristaEOS(t *testing.T) {
 	registry.entities[InterfaceEntityType]["1"] = iface
 	registry.MarkInterfaceVerified(iface)
 
-	vm := NewVlanMapper(logger)
+	vm := NewVlanMapper(logger, config.Options{})
 	emitted := vm.PostMap(rows, registry, &config.Defaults{})
 
 	if iface.Mode == nil || *iface.Mode != "access" {
@@ -83,7 +83,7 @@ func TestVlanMapper_E2E_CiscoIOSXE_VoicePromotion(t *testing.T) {
 	registry.entities[InterfaceEntityType]["1"] = iface
 	registry.MarkInterfaceVerified(iface)
 
-	vm := NewVlanMapper(logger)
+	vm := NewVlanMapper(logger, config.Options{})
 	emitted := vm.PostMap(rows, registry, &config.Defaults{})
 
 	if iface.Mode == nil || *iface.Mode != "tagged" {

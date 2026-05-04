@@ -424,7 +424,7 @@ func TestMapObjectIDsToEntity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mappingConfig, err := mapping.NewConfig(tt.mapping, slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false})), &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+			mappingConfig, err := mapping.NewConfig(tt.mapping, slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false})), &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 			assert.NoError(t, err)
 			defaults := tt.defaults
 			if defaults == nil {
@@ -492,7 +492,7 @@ func TestObjectIDs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mappingConfig, err := mapping.NewConfig(tt.mapping, slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false})), &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+			mappingConfig, err := mapping.NewConfig(tt.mapping, slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false})), &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 			assert.NoError(t, err)
 			objectIDs := mappingConfig.ObjectIDs()
 
@@ -686,7 +686,7 @@ func TestIPAddressIdentifierSizeInheritance(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-			mappingConfig, err := mapping.NewConfig(tt.mapping, logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+			mappingConfig, err := mapping.NewConfig(tt.mapping, logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 			assert.NoError(t, err)
 			objectIDMapper := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "")
 
@@ -781,7 +781,7 @@ func TestObjectIDsMethodWithIdentifierSizeInheritance(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
-			mappingConfig, err := mapping.NewConfig(tt.mapping, logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+			mappingConfig, err := mapping.NewConfig(tt.mapping, logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 			assert.NoError(t, err)
 			objectIDs := mappingConfig.ObjectIDs()
 
@@ -872,7 +872,7 @@ func findDevice(entities []diode.Entity) *diode.Device {
 func TestAssignPrimaryIP_DirectIPv4Match(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
@@ -894,7 +894,7 @@ func TestAssignPrimaryIP_DirectIPv4Match(t *testing.T) {
 func TestAssignPrimaryIP_DeviceIsProtoSerializable(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
@@ -932,7 +932,7 @@ func TestAssignPrimaryIP_DeviceIsProtoSerializable(t *testing.T) {
 // PrimaryIp6 without tripping any existing PrimaryIp4 coverage.
 func TestAssignPrimaryIP_DeviceIsProtoSerializable_IPv6(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "2001:db8::1")
@@ -972,7 +972,7 @@ func TestAssignPrimaryIP_DeviceIsProtoSerializable_IPv6(t *testing.T) {
 func TestAssignPrimaryIP_DeviceIsProtoSerializable_WithSubinterfaceParent(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
@@ -1025,7 +1025,7 @@ func TestAssignPrimaryIP_DeviceIsProtoSerializable_WithSubinterfaceParent(t *tes
 func TestAssignPrimaryIP_NoMatch(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	// Target 10.0.0.1, discovered only 10.0.0.2.
@@ -1078,7 +1078,7 @@ func (f *fakeResolver) LookupHost(_ context.Context, _ string) ([]string, error)
 func TestAssignPrimaryIP_HostnameResolvesToIPv4(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	resolver := &fakeResolver{addrs: []string{"10.0.0.1"}}
@@ -1093,7 +1093,7 @@ func TestAssignPrimaryIP_HostnameResolvesToIPv4(t *testing.T) {
 func TestAssignPrimaryIP_HostnameResolvesToIPv6Only(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	resolver := &fakeResolver{addrs: []string{"2001:db8::1"}}
@@ -1108,7 +1108,7 @@ func TestAssignPrimaryIP_HostnameResolvesToIPv6Only(t *testing.T) {
 func TestAssignPrimaryIP_InvalidHost(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	resolver := &fakeResolver{err: errors.New("nxdomain")}
@@ -1124,7 +1124,7 @@ func TestAssignPrimaryIP_MultipleMatches(t *testing.T) {
 	handler := &bufferHandler{}
 	logger := slog.New(handler)
 
-	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
@@ -1170,7 +1170,7 @@ func TestAssignPrimaryIP_MultipleMatches_EqualCompositeKey(t *testing.T) {
 	handler := &bufferHandler{}
 	logger := slog.New(handler)
 
-	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
@@ -1213,7 +1213,7 @@ func TestAssignPrimaryIP_MultipleMatches_EqualCompositeKey(t *testing.T) {
 func TestAssignPrimaryIP_UnassignedIPIgnored(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
@@ -1237,7 +1237,7 @@ func TestAssignPrimaryIP_ExcludedInterfaceIP(t *testing.T) {
 	defaults := &config.Defaults{
 		InterfaceExcludePatterns: []string{"^Null.*"},
 	}
-	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, defaults)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, defaults, config.Options{})
 	assert.NoError(t, err)
 
 	m := mapping.NewObjectIDMapper(mappingConfig, logger, defaults, "10.0.0.1")
@@ -1255,7 +1255,7 @@ func TestAssignPrimaryIP_PrefixStripping(t *testing.T) {
 
 	// Reuses the default /32 emission: verifies stripPrefix drops "/32"
 	// before comparing to the bare target literal.
-	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixture(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "10.0.0.1")
@@ -1300,7 +1300,7 @@ func TestAssignPrimaryIP_NonDefaultPrefix(t *testing.T) {
 			},
 		},
 	}
-	mappingConfig, err := mapping.NewConfig(entries, logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(entries, logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	oids := mapping.ObjectIDValueMap{
@@ -1507,7 +1507,7 @@ func primaryIPModernDualStackOIDs(v4, v6, ifName string, v4Plen, v6Plen int) map
 
 func TestAssignPrimaryIP_IPv6Literal_FromIpAddressTable(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	m := mapping.NewObjectIDMapperForTest(cfg, logger, &config.Defaults{}, "2001:db8::1", &fakeResolver{})
@@ -1522,7 +1522,7 @@ func TestAssignPrimaryIP_IPv6Literal_FromIpAddressTable(t *testing.T) {
 
 func TestAssignPrimaryIP_HostnameResolvesToIPv6_AssignsPrimaryIp6(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	resolver := &fakeResolver{addrs: []string{"2001:db8::1"}}
@@ -1535,7 +1535,7 @@ func TestAssignPrimaryIP_HostnameResolvesToIPv6_AssignsPrimaryIp6(t *testing.T) 
 
 func TestAssignPrimaryIP_DualStackHostname_AssignsBoth(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	resolver := &fakeResolver{addrs: []string{"10.0.0.1", "2001:db8::1"}}
@@ -1554,7 +1554,7 @@ func TestAssignPrimaryIP_DualStackHostname_AssignsBoth(t *testing.T) {
 // set.
 func TestAssignPrimaryIP_IPv4MappedIPv6Target_AssignsPrimaryIp6(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	// Build a single ipAddressTable row for ::ffff:10.0.0.1. The row's
@@ -1599,7 +1599,7 @@ func TestAssignPrimaryIP_IPv4MappedIPv6Target_AssignsPrimaryIp6(t *testing.T) {
 // textual address.
 func TestAssignPrimaryIP_IPv4MappedIPv6_NotMisclassifiedAsIPv4(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	// Build an ipAddressTable row for ::ffff:10.0.0.1 with addrType=2,
@@ -1644,7 +1644,7 @@ func TestAssignPrimaryIP_IPv4MappedIPv6_NotMisclassifiedAsIPv4(t *testing.T) {
 
 func TestAssignPrimaryIP_ModernIPv4_FromIpAddressTable(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	m := mapping.NewObjectIDMapper(cfg, logger, &config.Defaults{}, "10.0.0.1")
@@ -1663,7 +1663,7 @@ func TestAssignPrimaryIP_ModernIPv4_FromIpAddressTable(t *testing.T) {
 // where applicable) set when the SNMP target host matches.
 func TestOBS2798_ModernOnlyDevice_PopulatesPrimaryIPs(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	m := mapping.NewObjectIDMapper(cfg, logger, &config.Defaults{}, "10.0.0.1")
@@ -1696,7 +1696,7 @@ func TestOBS2798_ModernOnlyDevice_PopulatesPrimaryIPs(t *testing.T) {
 
 func TestMapObjectIDsToEntity_LegacyAndModernSameAddress_Deduplicates(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	m := mapping.NewObjectIDMapper(mappingConfig, logger, &config.Defaults{}, "")
@@ -1735,7 +1735,7 @@ func TestMapObjectIDsToEntity_LegacyAndModernSameAddress_Deduplicates(t *testing
 // interface that wasn't actually discovered.
 func TestAssignPrimaryIP_RejectsPlaceholderInterface(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	// Modern row references ifIndex=99 but no ifTable PDU is included,
@@ -1777,7 +1777,7 @@ func TestAssignPrimaryIP_RejectsPlaceholderInterface(t *testing.T) {
 // has a real ifDescr-named interface binding.
 func TestMapObjectIDsToEntity_DedupTreatsPlaceholderAsUnassigned(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	cfg, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	// Legacy row provides interface "Gi0" (real, named). Modern row
@@ -1847,7 +1847,7 @@ func TestMapObjectIDsToEntity_ExcludedInterfaceDropsBothLegacyAndModern(t *testi
 	defaults := &config.Defaults{
 		InterfaceExcludePatterns: []string{"^Gi0$"},
 	}
-	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, defaults)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, defaults, config.Options{})
 	assert.NoError(t, err)
 
 	// Legacy row binds to "Gi0" (will be excluded). Modern row carries
@@ -1894,7 +1894,7 @@ func TestMapObjectIDsToEntity_ExcludedInterfaceDropsBothLegacyAndModern(t *testi
 // primary-IP selection regressing for the device.
 func TestMapObjectIDsToEntity_LegacyKeptWhenModernLacksInterface(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil)
+	mappingConfig, err := mapping.NewConfig(primaryIPFixtureBothTables(), logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
 	assert.NoError(t, err)
 
 	// Build a modern row WITHOUT the .3 (ipAddressIfIndex) PDU, so
@@ -1997,7 +1997,7 @@ func TestNewConfig_RegistersVlanMapper(t *testing.T) {
 		{OID: ".1.3.6.1.2.1.17.7.1.4.3.1", Entity: "vlan", Field: "_id"},
 		{OID: ".1.3.6.1.4.1.9.9.68.1.5.1.1", Entity: "interface_vlan", Vendor: "cisco"},
 	}
-	cfg, err := mapping.NewConfig(mappings, logger, nil, nil, &config.Defaults{})
+	cfg, err := mapping.NewConfig(mappings, logger, nil, nil, &config.Defaults{}, config.Options{})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
 	}
@@ -2024,7 +2024,7 @@ func TestConfig_VendorPartitioning(t *testing.T) {
 		{OID: ".1.3.6.1.2.1.17.7.1.4.3.1", Entity: "vlan", Field: "_id"},
 		{OID: ".1.3.6.1.4.1.9.9.68.1.2.2.1", Entity: "interface_vlan", Field: "_id", Vendor: "cisco"},
 	}
-	cfg, err := mapping.NewConfig(mappings, logger, nil, nil, &config.Defaults{})
+	cfg, err := mapping.NewConfig(mappings, logger, nil, nil, &config.Defaults{}, config.Options{})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
 	}

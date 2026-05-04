@@ -12,7 +12,7 @@ import (
 
 func TestVlanMapper_MapIsNoop(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	vm := NewVlanMapper(logger)
+	vm := NewVlanMapper(logger, config.Options{})
 	got := vm.Map(nil, nil, nil, nil)
 	if got != nil {
 		t.Errorf("Map returned non-nil entity: %v", got)
@@ -21,7 +21,7 @@ func TestVlanMapper_MapIsNoop(t *testing.T) {
 
 func TestVlanMapper_PostMap_NoVLANRows(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	vm := NewVlanMapper(logger)
+	vm := NewVlanMapper(logger, config.Options{})
 	registry := NewEntityRegistry(logger)
 	defaults := &config.Defaults{}
 	got := vm.PostMap(ObjectIDValueMap{}, registry, defaults)
@@ -43,7 +43,7 @@ func TestVlanMapper_PostMap_AccessPort_MutatesInterface(t *testing.T) {
 
 	rows := buildAccessPortFixture(101, 10)
 
-	vm := NewVlanMapper(logger)
+	vm := NewVlanMapper(logger, config.Options{})
 	defaults := &config.Defaults{VLAN: config.VLANDefaults{Status: "active"}}
 	emitted := vm.PostMap(rows, registry, defaults)
 
@@ -126,7 +126,7 @@ func TestVlanMapper_PostMap_BridgePortIfIndexTranslation(t *testing.T) {
 		".1.3.6.1.2.1.2.2.1.3.101": Value{Value: "6", Type: Integer},
 	}
 
-	vm := NewVlanMapper(logger)
+	vm := NewVlanMapper(logger, config.Options{})
 	_ = vm.PostMap(rows, registry, &config.Defaults{})
 
 	if iface.Mode == nil || *iface.Mode != "access" {
@@ -153,7 +153,7 @@ func TestVlanMapper_PostMap_MissingBridgeTable_EmitsVLANsOnly(t *testing.T) {
 		".1.3.6.1.2.1.17.7.1.4.3.1.5.10": Value{Value: "1", Type: Integer},
 	}
 
-	vm := NewVlanMapper(logger)
+	vm := NewVlanMapper(logger, config.Options{})
 	emitted := vm.PostMap(rows, registry, &config.Defaults{})
 
 	// VLAN entity emitted.
@@ -173,5 +173,108 @@ func TestVlanMapper_PostMap_MissingBridgeTable_EmitsVLANsOnly(t *testing.T) {
 	}
 	if iface.UntaggedVlan != nil {
 		t.Errorf("Interface.UntaggedVlan should be nil (no mutation), got %+v", iface.UntaggedVlan)
+	}
+}
+
+// TestVlanMapper_PostMap_CreateUnknownVlans_False verifies that when
+// CreateUnknownVlans is false, VIDs with no dot1qVlanStaticName row are
+// not emitted as VLAN entities.
+func TestVlanMapper_PostMap_CreateUnknownVlans_False(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	registry := NewEntityRegistry(logger)
+
+	// Pre-populate an interface as if InterfaceMapper had run.
+	iface := &diode.Interface{Name: StringPtr("Ethernet1")}
+	if registry.entities[InterfaceEntityType] == nil {
+		registry.entities[InterfaceEntityType] = map[ObjectIDIndex]diode.Entity{}
+	}
+	registry.entities[InterfaceEntityType]["101"] = iface
+	registry.MarkInterfaceVerified(iface)
+
+	// VID 100: only RowStatus present, NO dot1qVlanStaticName row.
+	// Also include an access port for ifIndex 101 / VID 100.
+	rows := ObjectIDValueMap{
+		// dot1dBasePortIfIndex: bridge port 1 -> ifIndex 101
+		".1.3.6.1.2.1.17.1.4.1.2.1": Value{Value: "101", Type: Integer},
+		// dot1qPvid (bridge port 1) -> VLAN 100
+		".1.3.6.1.2.1.17.7.1.4.5.1.1.1": Value{Value: "100", Type: Integer},
+		// dot1qVlanStaticRowStatus.100 = active(1) — status row present
+		".1.3.6.1.2.1.17.7.1.4.3.1.5.100": Value{Value: "1", Type: Integer},
+		// dot1qVlanStaticEgressPorts.100 — port 1 member
+		".1.3.6.1.2.1.17.7.1.4.3.1.2.100": Value{Value: "\x80", Type: OctetString},
+		// dot1qVlanStaticUntaggedPorts.100
+		".1.3.6.1.2.1.17.7.1.4.3.1.4.100": Value{Value: "\x80", Type: OctetString},
+		// ifAdminStatus + ifType for ifIndex 101
+		".1.3.6.1.2.1.2.2.1.7.101": Value{Value: "1", Type: Integer},
+		".1.3.6.1.2.1.2.2.1.3.101": Value{Value: "6", Type: Integer},
+		// NOTE: dot1qVlanStaticName.100 is intentionally absent.
+	}
+
+	vm := NewVlanMapper(logger, config.Options{CreateUnknownVlans: false})
+	emitted := vm.PostMap(rows, registry, &config.Defaults{})
+
+	// No VLAN entity should be emitted for VID 100 (no name row).
+	for _, e := range emitted {
+		if v, ok := e.(*diode.VLAN); ok {
+			if v.Vid != nil && *v.Vid == 100 {
+				t.Errorf("unexpected VLAN entity emitted for VID 100 when create_unknown_vlans=false")
+			}
+		}
+	}
+}
+
+// TestVlanMapper_EmitVLANs_AppliesDefaults confirms that Description,
+// Tags, Tenant, and Group from defaults.VLAN are applied to emitted
+// VLAN entities.
+func TestVlanMapper_EmitVLANs_AppliesDefaults(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	registry := NewEntityRegistry(logger)
+
+	// Minimal: one VLAN with a static name row so it will always be emitted.
+	rows := ObjectIDValueMap{
+		".1.3.6.1.2.1.17.7.1.4.3.1.1.10": Value{Value: "Engineering", Type: OctetString},
+		".1.3.6.1.2.1.17.7.1.4.3.1.5.10": Value{Value: "1", Type: Integer},
+	}
+
+	defaults := &config.Defaults{
+		VLAN: config.VLANDefaults{
+			Description: "auto-discovered",
+			Tags:        []string{"snmp", "auto"},
+			Tenant:      "NetOps",
+			Group:       "campus-vlans",
+		},
+	}
+
+	vm := NewVlanMapper(logger, config.Options{CreateUnknownVlans: true})
+	emitted := vm.PostMap(rows, registry, defaults)
+
+	var got *diode.VLAN
+	for _, e := range emitted {
+		if v, ok := e.(*diode.VLAN); ok && v.Vid != nil && *v.Vid == 10 {
+			got = v
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("expected VLAN entity for VID 10, got none")
+	}
+	if got.Description == nil || *got.Description != "auto-discovered" {
+		t.Errorf("Description: got %v, want \"auto-discovered\"", got.Description)
+	}
+	if len(got.Tags) != 2 {
+		t.Errorf("Tags: got %d tags, want 2", len(got.Tags))
+	} else {
+		if got.Tags[0].Name == nil || *got.Tags[0].Name != "snmp" {
+			t.Errorf("Tags[0].Name: got %v, want \"snmp\"", got.Tags[0].Name)
+		}
+		if got.Tags[1].Name == nil || *got.Tags[1].Name != "auto" {
+			t.Errorf("Tags[1].Name: got %v, want \"auto\"", got.Tags[1].Name)
+		}
+	}
+	if got.Tenant == nil || got.Tenant.Name == nil || *got.Tenant.Name != "NetOps" {
+		t.Errorf("Tenant.Name: got %v, want \"NetOps\"", got.Tenant)
+	}
+	if got.Group == nil || got.Group.Name == nil || *got.Group.Name != "campus-vlans" {
+		t.Errorf("Group.Name: got %v, want \"campus-vlans\"", got.Group)
 	}
 }

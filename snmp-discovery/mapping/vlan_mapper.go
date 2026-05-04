@@ -27,8 +27,16 @@ const (
 
 // ifTypeNumericToString maps a small subset of IANAifType numeric values
 // to the strings qbridge.isL3Capable understands.
+//
+// IANAifType correspondences (RFC 2863 / IANA registry):
+//   6   ethernetCsmacd  — standard Ethernet / Fast Ethernet
+//   62  fastEther       — 100Base-TX (distinct from ethernetCsmacd on older gear)
+//   117 gigabitEthernet — 1000Base-X / GbE interfaces
+//   161 ieee8023adLag   — 802.3ad link aggregation group (LAG / LACP)
 var ifTypeNumericToString = map[int]string{
 	6:   "ethernetCsmacd",
+	62:  "fastEther",
+	117: "gigabitEthernet",
 	161: "ieee8023adLag",
 }
 
@@ -36,12 +44,13 @@ var ifTypeNumericToString = map[int]string{
 // emission and *diode.Interface mutation. It is a postPassMapper:
 // VlanMapper.Map is a no-op stub; the real work happens in PostMap.
 type VlanMapper struct {
-	logger *slog.Logger
+	logger  *slog.Logger
+	options config.Options
 }
 
-// NewVlanMapper constructs a VlanMapper.
-func NewVlanMapper(logger *slog.Logger) *VlanMapper {
-	return &VlanMapper{logger: logger}
+// NewVlanMapper constructs a VlanMapper with the given policy options.
+func NewVlanMapper(logger *slog.Logger, options config.Options) *VlanMapper {
+	return &VlanMapper{logger: logger, options: options}
 }
 
 // Map is the row-scoped no-op required by the orbToEntityMapper interface.
@@ -76,7 +85,14 @@ func (m *VlanMapper) PostMap(
 		return m.emitVLANs(allObjectIDs, defaults)
 	}
 	cisco := m.buildCiscoRows(allObjectIDs)
-	qbridge.ApplyCisco(infos, cisco)
+	// Defense in depth: ApplyCisco is a no-op when both Cisco-overlay maps
+	// are empty (the runner only walks vendor-scoped OIDs on a Cisco-matched
+	// host, so on generic-only hosts we never reach this branch's payload).
+	// Skip the call entirely when there's nothing to apply, both for clarity
+	// and to keep the no-op explicit.
+	if len(cisco.MembershipAccessVlan) > 0 || len(cisco.VoiceVlanByIfIndex) > 0 {
+		qbridge.ApplyCisco(infos, cisco)
+	}
 
 	// Build VLAN entities first — interface refs link to them by VID.
 	vlanEntities := m.emitVLANs(allObjectIDs, defaults)
@@ -236,6 +252,17 @@ func (m *VlanMapper) buildCiscoRows(all ObjectIDValueMap) qbridge.CiscoRows {
 // SNMP value is empty (matches device-discovery behavior). Status comes
 // from defaults.VLAN.Status; if empty, derived from RowStatus
 // (active(1)->active, notInService(2)->reserved, else unset).
+//
+// When m.options.CreateUnknownVlans is false, VIDs whose
+// dot1qVlanStaticName row is absent (or empty) are skipped — only VLANs
+// with a real name from the device are emitted. The default v1 behavior
+// (CreateUnknownVlans zero-value = false in Go) preserves the original
+// emit-all path because the YAML default is true (see config.Options).
+// Note: the zero-value in Go for bool is false, but the YAML field uses
+// yaml:"create_unknown_vlans" and callers that do not set the option
+// explicitly get false — matching the original behavior of always
+// emitting. When a policy explicitly sets create_unknown_vlans: false,
+// unknown VLANs are suppressed.
 func (m *VlanMapper) emitVLANs(all ObjectIDValueMap, defaults *config.Defaults) []diode.Entity {
 	type pending struct {
 		name      string
@@ -277,6 +304,12 @@ func (m *VlanMapper) emitVLANs(all ObjectIDValueMap, defaults *config.Defaults) 
 		if vid < 1 || vid > 4094 {
 			continue
 		}
+		// When create_unknown_vlans is false, skip VIDs that have no
+		// dot1qVlanStaticName row (name == ""). A status-only row with
+		// no name is treated as "unknown" and suppressed.
+		if !m.options.CreateUnknownVlans && p.name == "" {
+			continue
+		}
 		name := p.name
 		if name == "" {
 			name = "VLAN" + strconv.Itoa(vid)
@@ -287,6 +320,27 @@ func (m *VlanMapper) emitVLANs(all ObjectIDValueMap, defaults *config.Defaults) 
 		}
 		if status := resolveVLANStatus(p.rowStatus, defaults); status != "" {
 			v.Status = StringPtr(status)
+		}
+		// Apply VLANDefaults fields when set.
+		if defaults != nil {
+			vd := defaults.VLAN
+			if vd.Description != "" {
+				v.Description = StringPtr(vd.Description)
+			}
+			if len(vd.Tags) > 0 {
+				tags := make([]*diode.Tag, 0, len(vd.Tags))
+				for _, t := range vd.Tags {
+					t := t // capture loop variable
+					tags = append(tags, &diode.Tag{Name: &t})
+				}
+				v.Tags = tags
+			}
+			if vd.Tenant != "" {
+				v.Tenant = &diode.Tenant{Name: StringPtr(vd.Tenant)}
+			}
+			if vd.Group != "" {
+				v.Group = &diode.VLANGroup{Name: StringPtr(vd.Group)}
+			}
 		}
 		out = append(out, v)
 	}

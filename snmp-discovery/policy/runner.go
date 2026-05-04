@@ -407,7 +407,7 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 
 	targetDefaults := r.resolveTargetDefaults(target)
 
-	mappingConfig, err := mapping.NewConfig(r.mappingConfig.Entries, r.logger, r.manufacturers, r.deviceLookup, targetDefaults)
+	mappingConfig, err := mapping.NewConfig(r.mappingConfig.Entries, r.logger, r.manufacturers, r.deviceLookup, targetDefaults, r.config.Options)
 	if err != nil {
 		r.logger.Error("error creating mapping config", "error", err)
 		return nil, err
