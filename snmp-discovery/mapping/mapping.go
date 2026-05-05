@@ -3,10 +3,13 @@ package mapping
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -57,6 +60,8 @@ type EntityRegistry struct {
 	entities           map[EntityType]map[ObjectIDIndex]diode.Entity
 	logger             *slog.Logger
 	excludedInterfaces map[string]struct{}
+	ipSource           map[*diode.IPAddress]string
+	verifiedInterfaces map[*diode.Interface]struct{}
 }
 
 // NewEntityRegistry creates a new EntityRegistry
@@ -65,7 +70,57 @@ func NewEntityRegistry(logger *slog.Logger) *EntityRegistry {
 		entities:           make(map[EntityType]map[ObjectIDIndex]diode.Entity),
 		logger:             logger,
 		excludedInterfaces: make(map[string]struct{}),
+		ipSource:           make(map[*diode.IPAddress]string),
+		verifiedInterfaces: make(map[*diode.Interface]struct{}),
 	}
+}
+
+// MarkInterfaceVerified records that an Interface has been the subject
+// of an InterfaceMapper.Map call — i.e. real interface-related PDUs
+// (from ifTable, ifXTable, or any other column wired into the
+// interface mapping) populated it during this walk. Used to
+// distinguish such interfaces from placeholders fabricated by
+// GetOrCreateEntity when ipAddressIfIndex references an ifIndex that
+// no interface PDUs ever populated.
+//
+// Note: an interface marked here may have been observed only via
+// ifXTable columns (e.g. ifName) without any ifTable column being
+// returned; the guarantee is "the interface mapper saw at least one
+// PDU for this entity," not "ifTable was specifically walked."
+func (r *EntityRegistry) MarkInterfaceVerified(iface *diode.Interface) {
+	if iface == nil {
+		return
+	}
+	if r.verifiedInterfaces == nil {
+		r.verifiedInterfaces = make(map[*diode.Interface]struct{})
+	}
+	r.verifiedInterfaces[iface] = struct{}{}
+}
+
+// IsInterfaceVerified reports whether the given Interface was marked
+// via MarkInterfaceVerified.
+func (r *EntityRegistry) IsInterfaceVerified(iface *diode.Interface) bool {
+	if iface == nil {
+		return false
+	}
+	_, ok := r.verifiedInterfaces[iface]
+	return ok
+}
+
+// MarkIPSource records the source table ("legacy" or "modern") for an
+// IP address entity. Used by cross-table dedup to prefer the modern
+// (RFC 4293) table over the legacy (RFC 1213) table when both have a
+// row for the same address.
+func (r *EntityRegistry) MarkIPSource(ip *diode.IPAddress, source string) {
+	if r.ipSource == nil {
+		r.ipSource = make(map[*diode.IPAddress]string)
+	}
+	r.ipSource[ip] = source
+}
+
+// IPSource returns the source table for an IP address, or "" if unknown.
+func (r *EntityRegistry) IPSource(ip *diode.IPAddress) string {
+	return r.ipSource[ip]
 }
 
 // ExcludeInterface marks an interface name as excluded so it is skipped during lookups
@@ -151,6 +206,15 @@ func (r *EntityRegistry) ResolveSubinterfaceParents() {
 	}
 }
 
+// GetEntity returns the entity for (entityType, index), or nil if absent.
+// Differs from GetOrCreateEntity in that it never creates a new entity.
+func (r *EntityRegistry) GetEntity(entityType EntityType, index ObjectIDIndex) diode.Entity {
+	if r.entities[entityType] == nil {
+		return nil
+	}
+	return r.entities[entityType][index]
+}
+
 // GetOrCreateEntity returns an entity from the EntityRegistry or creates a new one if it doesn't exist
 func (r *EntityRegistry) GetOrCreateEntity(entityType EntityType, index ObjectIDIndex) diode.Entity {
 	r.logger.Debug("getting entity", "entity_type", entityType, "index", index, "from", r.entities)
@@ -187,6 +251,10 @@ func createEntity(entityType EntityType) (diode.Entity, error) {
 		}, nil
 	case "device":
 		return &diode.Device{}, nil
+	case "vlan":
+		return &diode.VLAN{}, nil
+	case "interface_vlan":
+		return nil, fmt.Errorf("entity type %q is post-pass only and has no row entity", entityType)
 	}
 	return nil, fmt.Errorf("unimplemented entity type: %s", entityType)
 }
@@ -209,6 +277,13 @@ const (
 	InterfaceEntityType EntityType = "interface"
 	// IPAddressEntityType is the type of the IP address entity
 	IPAddressEntityType EntityType = "ipAddress"
+	// VLANEntityType is the type of the VLAN entity (Q-BRIDGE-MIB derived).
+	VLANEntityType EntityType = "vlan"
+	// InterfaceVLANEntityType is a pseudo-entity that flags an OID as
+	// belonging to the VlanMapper PostMap pipeline (e.g., Cisco-overlay
+	// rows). createEntity returns an error for this type — there is no
+	// row-scoped entity to construct.
+	InterfaceVLANEntityType EntityType = "interface_vlan"
 )
 
 // ObjectIDMapper is a struct that maps ObjectIDs to entities
@@ -221,6 +296,7 @@ type ObjectIDMapper struct {
 	targetHost      string
 	resolver        hostResolver
 	ctx             context.Context
+	postPassMappers []postPassMapper
 }
 
 // SetContext stores the scan's context on the mapper. If set, the primary-IP
@@ -245,7 +321,9 @@ type Entry struct {
 	MappingEntries []Entry
 	Mapper         orbToEntityMapper
 	IdentifierSize int
+	IndexKind      string
 	Relationship   config.Relationship
+	Vendor         string
 }
 
 // MapToEntity maps a value to an entity
@@ -259,7 +337,12 @@ func (m *Entry) MapToEntity(pdus map[ObjectIDIndex]*ObjectIDValue, entityRegistr
 	entity := m.Mapper.Map(pdus, m, entityRegistry, defaults)
 	logger.Debug("entity returned from mapper", "entity", entity)
 	if entity == nil {
-		logger.Warn("no entity returned from mapper, ignoring", "entity", m.Entity)
+		// Mappers return nil to intentionally drop a row — RFC 4293
+		// filters (non-unicast, tentative, non-active) and invalid
+		// CIDR validation are the common cases. These are expected on
+		// normal walks, so a warn would create noise. Debug keeps
+		// it observable without flooding.
+		logger.Debug("entity dropped by mapper", "entity", m.Entity)
 		return nil
 	}
 	return entity
@@ -268,11 +351,26 @@ func (m *Entry) MapToEntity(pdus map[ObjectIDIndex]*ObjectIDValue, entityRegistr
 // Config is a struct that contains a mapping of ObjectIDs to Entries
 type Config struct {
 	mapping map[string]*Entry
+	// inetAddressEntries is the subset of `mapping` whose IndexKind is
+	// "inet_address". Pre-computed so groupByObjectIDIndex can skip the
+	// per-PDU getMappingEntry call (an O(depth) prefix walk) when the
+	// OID falls outside any inet_address-using table.
+	inetAddressEntries map[string]*Entry
+	// postPassPrefixes is the pre-computed list of OID prefixes that
+	// belong to post-pass-only entity types (vlan, interface_vlan).
+	// groupByObjectIDIndex consults this slice via HasPrefix per PDU
+	// instead of resolving the parent entry for every walked OID
+	// (which would defeat the inet_address fast-path optimization).
+	// Each prefix ends with a literal "." so a parent OID does not
+	// accidentally match a sibling sharing a numeric prefix.
+	postPassPrefixes []string
+	postPassMappers  []postPassMapper
+	options          config.Options
 }
 
 // NewConfig creates a new Config
 func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturers data.ManufacturerRetriever,
-	deviceLookup data.DeviceRetriever, defaults *config.Defaults,
+	deviceLookup data.DeviceRetriever, defaults *config.Defaults, options config.Options,
 ) (*Config, error) {
 	// Create InterfaceMapper with pattern support
 	var interfacePatterns []config.InterfacePattern
@@ -285,6 +383,7 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 		return nil, fmt.Errorf("failed to create interface mapper: %w", err)
 	}
 
+	vlanMapper := NewVlanMapper(logger, options)
 	entityMappers := map[string]orbToEntityMapper{
 		"ipAddress": &IPAddressMapper{
 			logger: logger,
@@ -295,8 +394,21 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 			manufacturers: manufacturers,
 			deviceLookup:  deviceLookup,
 		},
+		"vlan":           vlanMapper,
+		"interface_vlan": vlanMapper,
 	}
+	postPassMappers := []postPassMapper{vlanMapper}
+	// Validate index_kind on every entry (top-level and nested). A typo
+	// would otherwise silently fall through to the legacy fixed-size
+	// path and could regress modern-only devices to "no IPs discovered"
+	// — fail fast at config load instead.
+	if err := validateIndexKind(mappings); err != nil {
+		return nil, err
+	}
+
 	mapping := make(map[string]*Entry)
+	inetAddressEntries := make(map[string]*Entry)
+	var postPassPrefixes []string
 	for _, m := range mappings {
 		logger.Debug("adding mapping", "oid", m.OID, "entity", m.Entity, "field", m.Field, "relationship", m.Relationship)
 		Entry := newMappingEntry(m, logger, entityMappers)
@@ -304,10 +416,86 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 			continue
 		}
 		mapping[m.OID] = Entry
+		// inetAddressEntryFor uses these to anchor the column boundary
+		// in newObjectIDValueForEntry. Only top-level table entries
+		// belong here: the anchor is `<table-OID>` (column sub-OID is
+		// the next sub-OID under it). Children inherit IndexKind via
+		// newChildMappingEntries; caching them too would let a column
+		// OID win the longest-prefix scan and miscompute columnDepth.
+		if Entry.IndexKind == "inet_address" {
+			inetAddressEntries[m.OID] = Entry
+		}
+		// Cache top-level OID prefixes for post-pass-only entity types
+		// so groupByObjectIDIndex can skip these PDUs without doing a
+		// per-PDU getMappingEntry walk. Adding the trailing "." prevents
+		// a parent OID from accidentally matching a sibling whose OID
+		// starts with the same numeric prefix.
+		if Entry.Entity == string(VLANEntityType) || Entry.Entity == string(InterfaceVLANEntityType) {
+			postPassPrefixes = append(postPassPrefixes, m.OID+".")
+		}
 	}
 	return &Config{
-		mapping: mapping,
+		mapping:            mapping,
+		inetAddressEntries: inetAddressEntries,
+		postPassPrefixes:   postPassPrefixes,
+		postPassMappers:    postPassMappers,
+		options:            options,
 	}, nil
+}
+
+// validIndexKinds enumerates the values index_kind may take. An empty
+// string keeps the historical fixed-size behavior. Anything else must
+// match exactly — typos like "inetaddress" or "InetAddress" are
+// rejected so misconfigurations surface immediately.
+var validIndexKinds = map[string]struct{}{
+	"":             {},
+	"fixed":        {},
+	"inet_address": {},
+}
+
+// validateIndexKind walks every entry (top-level and nested) and
+// rejects unknown index_kind values. It also enforces that
+// index_kind is declared ONLY on a top-level table entry: the
+// fast-path cache keys on top-level OIDs, and a child-only
+// declaration would pass YAML loading but silently fall through to
+// fixed-size parsing at the cache layer (re-triggering the
+// "modern-only device, no IPs" regression). Children inherit
+// IndexKind by leaving the field empty.
+func validateIndexKind(entries []config.MappingEntry) error {
+	return validateIndexKindWithParent(entries, "", true)
+}
+
+func validateIndexKindWithParent(entries []config.MappingEntry, parentKind string, isTopLevel bool) error {
+	for _, m := range entries {
+		if _, ok := validIndexKinds[m.IndexKind]; !ok {
+			return fmt.Errorf("invalid index_kind %q on mapping entry %q (allowed: \"\", \"fixed\", \"inet_address\")", m.IndexKind, m.OID)
+		}
+		if !isTopLevel && m.IndexKind != "" {
+			// Child explicitly setting index_kind is rejected even
+			// when it matches the parent: it adds noise to the YAML
+			// without changing semantics, and a divergent value
+			// would silently misbehave (the cache only sees
+			// top-level entries).
+			return fmt.Errorf("index_kind must be declared only on the top-level table entry; child %q sets it explicitly (parent's effective kind is %q)", m.OID, parentKind)
+		}
+		// inet_address requires the top-level OID to be a table-row
+		// prefix with at least one child column underneath it: the
+		// parser builds full row OIDs as `<entry.OID>.<column>.<index>`.
+		// A scalar or childless entry would pass every other check
+		// here and then silently skip all rows in
+		// newObjectIDValueForEntry as malformed.
+		if isTopLevel && m.IndexKind == "inet_address" && len(m.MappingEntries) == 0 {
+			return fmt.Errorf("index_kind \"inet_address\" requires the top-level entry %q to have at least one child mapping_entry (column OID); a scalar/childless entry would skip every row as malformed", m.OID)
+		}
+		effective := m.IndexKind
+		if effective == "" {
+			effective = parentKind
+		}
+		if err := validateIndexKindWithParent(m.MappingEntries, effective, false); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // NewObjectIDMapper creates a new ObjectIDMapper for a given SNMP target host.
@@ -326,6 +514,7 @@ func newObjectIDMapperWithResolver(mappingConfig *Config, logger *slog.Logger, d
 		excludePatterns: compileExcludePatterns(defaults, logger),
 		targetHost:      targetHost,
 		resolver:        resolver,
+		postPassMappers: mappingConfig.postPassMappers,
 	}
 }
 
@@ -354,6 +543,22 @@ type orbToEntityMapper interface {
 	Map(pdus map[ObjectIDIndex]*ObjectIDValue, Entry *Entry, entityRegistry *EntityRegistry, defaults *config.Defaults) diode.Entity
 }
 
+// postPassMapper is the optional second-pass interface implemented by
+// mappers that need full host context (every Map() call already complete)
+// before they can do their work — typically because they cross-reference
+// entities the per-row Map pipeline produces.
+//
+// PostMap runs once per host, after every registered mapper's Map has been
+// called for every row, and after the standard dedup/exclusion sweep
+// inside MapObjectIDsToEntity. It can both mutate registry-resident
+// entities in place AND return new entities to append to the host output.
+//
+// Ordering: post-pass mappers run in the order they were registered in
+// ObjectIDMapper.postPassMappers (see post_pass_test.go).
+type postPassMapper interface {
+	PostMap(allObjectIDs ObjectIDValueMap, entityRegistry *EntityRegistry, defaults *config.Defaults) []diode.Entity
+}
+
 func getIndex(values map[ObjectIDIndex]*ObjectIDValue) ObjectIDIndex {
 	for _, pdu := range values {
 		return pdu.Index
@@ -373,12 +578,14 @@ func newMappingEntry(m config.MappingEntry, logger *slog.Logger, entityMappers m
 		Field:          m.Field,
 		Mapper:         mapper,
 		IdentifierSize: m.IdentifierSize,
-		MappingEntries: newChildMappingEntries(m.MappingEntries, logger, m.IdentifierSize),
+		IndexKind:      m.IndexKind,
+		MappingEntries: newChildMappingEntries(m.MappingEntries, logger, m.IdentifierSize, m.IndexKind),
 		Relationship:   m.Relationship,
+		Vendor:         m.Vendor,
 	}
 }
 
-func newChildMappingEntries(configMappingEntries []config.MappingEntry, logger *slog.Logger, parentIdentifierSize int) []Entry {
+func newChildMappingEntries(configMappingEntries []config.MappingEntry, logger *slog.Logger, parentIdentifierSize int, parentIndexKind string) []Entry {
 	childMappingEntries := make([]Entry, 0, len(configMappingEntries))
 	for _, m := range configMappingEntries {
 		logger.Debug("adding child mapping entry", "oid", m.OID, "entity", m.Entity, "field", m.Field, "relationship", m.Relationship)
@@ -388,13 +595,18 @@ func newChildMappingEntries(configMappingEntries []config.MappingEntry, logger *
 		if identifierSize == 0 {
 			identifierSize = parentIdentifierSize
 		}
+		indexKind := m.IndexKind
+		if indexKind == "" {
+			indexKind = parentIndexKind
+		}
 
 		child := &Entry{
 			OID:            m.OID,
 			Entity:         m.Entity,
 			Field:          m.Field,
 			IdentifierSize: identifierSize,
-			MappingEntries: newChildMappingEntries(m.MappingEntries, logger, identifierSize),
+			IndexKind:      indexKind,
+			MappingEntries: newChildMappingEntries(m.MappingEntries, logger, identifierSize, indexKind),
 			Relationship:   m.Relationship,
 		}
 		childMappingEntries = append(childMappingEntries, *child)
@@ -451,7 +663,13 @@ func NewObjectIDIndexDetails(index string) *ObjectIDIndexDetails {
 func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diode.Entity {
 	objectIDIndexMap := m.groupByObjectIDIndex(objectIDs)
 	uniqueEntities := make(map[diode.Entity]bool)
-	for index, value := range objectIDIndexMap {
+	sortedIndexes := make([]ObjectIDIndex, 0, len(objectIDIndexMap))
+	for index := range objectIDIndexMap {
+		sortedIndexes = append(sortedIndexes, index)
+	}
+	slices.SortFunc(sortedIndexes, compareOIDsNumerically)
+	for _, index := range sortedIndexes {
+		value := objectIDIndexMap[index]
 		m.logger.Debug("mapping object ID index", "object_id_index", index, "values", value.Values)
 		entry, err := m.resolveMappingEntry(value)
 		if err != nil {
@@ -464,6 +682,14 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 		}
 	}
 
+	// Dedup must run BEFORE filterExcludedEntities. Otherwise:
+	// legacy row (assigned to excluded interface) + modern row
+	// (missing ipAddressIfIndex) would have the legacy row removed
+	// by exclusion first, leaving only the unassigned modern
+	// duplicate. Dedup with assigned-wins consolidates to the
+	// legacy row so the subsequent exclusion sweep can drop the
+	// IP entirely.
+	m.dedupIPAddresses(uniqueEntities)
 	m.filterExcludedEntities(uniqueEntities)
 
 	currentDevice := m.registry.GetOrCreateEntity(DeviceEntityType, CurrentDeviceIndex).(*diode.Device)
@@ -497,28 +723,77 @@ func (m *ObjectIDMapper) MapObjectIDsToEntity(objectIDs ObjectIDValueMap) []diod
 
 	m.assignPrimaryIP(currentDevice, uniqueEntities)
 
+	// Phase 2: PostMap pass. Mappers that need cross-row / cross-mapper
+	// context (e.g., VlanMapper which must see all *diode.Interface
+	// instances before it can emit VLAN refs) run here. Order is
+	// registration order; new mappers append to the slice.
+	for _, ppm := range m.postPassMappers {
+		extra := ppm.PostMap(objectIDs, m.registry, m.defaults)
+		entities = append(entities, extra...)
+	}
+
 	return entities
 }
 
-// assignPrimaryIP points currentDevice.PrimaryIp4 at the surviving IPAddress
-// entity whose address matches the SNMP target host (literal IPv4 or DNS-
-// resolved). No-op when the target is not IPv4-addressable, when DNS lookup
-// fails, or when no surviving IPAddress entity matches.
+// assignPrimaryIP points currentDevice.PrimaryIp4 / PrimaryIp6 at
+// surviving IPAddress entities whose address matches the SNMP target
+// host. The two families are matched independently: a missing v4 hit
+// does not block a v6 assignment and vice-versa. No-op when the target
+// resolves to no IPs of either family or when no surviving IPAddress
+// entity matches.
 func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diode.Entity]bool) {
 	if m.targetHost == "" {
 		return
 	}
 
-	candidates := m.resolveTargetIPv4s()
-	if len(candidates) == 0 {
+	v4Cands, v6Cands := m.resolveTargetIPs()
+
+	if len(v4Cands) > 0 {
+		if hit := pickPrimaryIPHit(m.logger, m.registry, m.targetHost, entities, v4Cands, false); hit != nil {
+			// Break the reference cycle before attaching. See
+			// detachForPrimaryIP doc.
+			device.PrimaryIp4 = detachForPrimaryIP(hit, device)
+		}
+	} else {
 		m.logger.Debug("no IPv4 candidates for primary IP assignment", "target", m.targetHost)
-		return
+	}
+
+	if len(v6Cands) > 0 {
+		if hit := pickPrimaryIPHit(m.logger, m.registry, m.targetHost, entities, v6Cands, true); hit != nil {
+			device.PrimaryIp6 = detachForPrimaryIP6(hit, device)
+		}
+	} else {
+		m.logger.Debug("no IPv6 candidates for primary IP assignment", "target", m.targetHost)
+	}
+}
+
+// pickPrimaryIPHit filters `entities` to IP addresses of the requested
+// family, intersects them with `candidates`, and returns the
+// deterministically-chosen winner (or nil).
+//
+// Family detection uses the textual address form rather than
+// net.IP.To4(): an IPv4-mapped IPv6 address like ::ffff:10.0.0.1 has
+// To4() != nil and would otherwise be silently reclassified as IPv4,
+// despite being encoded as RFC 4001 addrType=2 in ipAddressTable.
+// Canonicalization goes through netip.ParseAddr which preserves the
+// mapped form on String(), keeping the v4/v6 distinction intact for the
+// candidate comparison too.
+func pickPrimaryIPHit(logger *slog.Logger, registry *EntityRegistry, target string, entities map[diode.Entity]bool, candidates []string, wantV6 bool) *diode.IPAddress {
+	canonCands := make(map[string]struct{}, len(candidates))
+	for _, c := range candidates {
+		addr, err := netip.ParseAddr(c)
+		if err != nil {
+			continue
+		}
+		canonCands[addr.String()] = struct{}{}
+	}
+	if len(canonCands) == 0 {
+		return nil
 	}
 
 	type hit struct {
-		key     string
-		ip      *diode.IPAddress
-		content string // stable, data-derived tiebreaker when key collides
+		key, content string
+		ip           *diode.IPAddress
 	}
 	var hits []hit
 	for entity := range entities {
@@ -527,60 +802,63 @@ func (m *ObjectIDMapper) assignPrimaryIP(device *diode.Device, entities map[diod
 			continue
 		}
 		// Enforce the "verified interface IP" guarantee: only accept
-		// addresses that were discovered on an interface during the walk.
-		if _, assigned := ip.AssignedObject.(*diode.Interface); !assigned {
+		// addresses that were discovered on an interface during the
+		// walk. assignedObject creates a placeholder Interface with
+		// Name=DefaultInterfaceName whenever the row's ifIndex was
+		// referenced but the corresponding ifTable row was never
+		// walked; treating that placeholder as "verified" would
+		// point primary IP at an interface we didn't actually
+		// discover.
+		if !registry.hasVerifiedInterface(ip) {
 			continue
 		}
 		stripped := stripPrefix(*ip.Address)
-		for _, cand := range candidates {
-			if stripped == cand {
-				hits = append(hits, hit{
-					key:     primaryIPSortKey(ip),
-					ip:      ip,
-					content: primaryIPContentKey(ip),
-				})
-				break
-			}
+		// Detect family from the address text — a colon means IPv6,
+		// even for IPv4-mapped form (::ffff:a.b.c.d).
+		isV6 := strings.Contains(stripped, ":")
+		if isV6 != wantV6 {
+			continue
 		}
+		addr, err := netip.ParseAddr(stripped)
+		if err != nil {
+			continue
+		}
+		if _, ok := canonCands[addr.String()]; !ok {
+			continue
+		}
+		hits = append(hits, hit{
+			key:     primaryIPSortKey(ip),
+			content: primaryIPContentKey(ip),
+			ip:      ip,
+		})
 	}
-
 	if len(hits) == 0 {
-		m.logger.Debug("no matching IP for primary IP assignment", "target", m.targetHost)
-		return
+		family := "v4"
+		if wantV6 {
+			family = "v6"
+		}
+		logger.Debug("no matching IP for primary-IP assignment", "target", target, "family", family)
+		return nil
 	}
-
-	// Primary sort by composite key; content hash is a data-derived,
-	// run-to-run-stable tiebreaker for the rare case of two entries
-	// sharing a key.
 	sort.Slice(hits, func(i, j int) bool {
 		if hits[i].key != hits[j].key {
 			return hits[i].key < hits[j].key
 		}
 		return hits[i].content < hits[j].content
 	})
-
 	if len(hits) > 1 {
 		all := make([]string, 0, len(hits))
 		for _, h := range hits {
 			all = append(all, h.key)
 		}
-		m.logger.Warn("multiple IP candidates for primary IP assignment; picking deterministic first",
-			"target", m.targetHost, "candidates", all)
+		family := "v4"
+		if wantV6 {
+			family = "v6"
+		}
+		logger.Warn("multiple IP candidates for primary IP assignment; picking deterministic first",
+			"target", target, "family", family, "candidates", all)
 	}
-
-	// Break the reference cycle before attaching. The matched IPAddress is
-	// also emitted as a standalone entity whose AssignedObject points at an
-	// Interface whose Device points back at the same currentDevice. Sharing
-	// that pointer graph into device.PrimaryIp4 would make the diode SDK's
-	// proto serializer recurse forever (device -> primary_ip4 -> ip ->
-	// interface -> device -> ...). We detach with a shallow snapshot: copy
-	// the IPAddress and (if present) the assigned Interface, then replace
-	// the interface's Device with a Device copy that has PrimaryIp4 nil.
-	// The snapshot is then a tree (no back-edge), and the nested Device
-	// still satisfies Diode's validation requirement that an Interface
-	// reference a Device. The standalone emitted entities keep their full
-	// graph untouched.
-	device.PrimaryIp4 = detachForPrimaryIP(hits[0].ip, device)
+	return hits[0].ip
 }
 
 // detachForPrimaryIP returns a shallow copy of the matched IPAddress
@@ -602,11 +880,46 @@ func detachForPrimaryIP(ip *diode.IPAddress, owner *diode.Device) *diode.IPAddre
 		ifaceCopy := *iface
 		if owner != nil {
 			deviceCopy := *owner
+			// Clear BOTH primary-IP fields on the embedded device
+			// copy. Clearing only PrimaryIp4 here would still embed
+			// the (already-set) PrimaryIp6 sub-graph, bloating the
+			// payload and re-introducing cycle risk if the v6 pass
+			// runs first or call order changes. The standalone
+			// emitted entities keep their full graph; only the
+			// snapshot is pruned.
 			deviceCopy.PrimaryIp4 = nil
+			deviceCopy.PrimaryIp6 = nil
 			ifaceCopy.Device = &deviceCopy
 		}
 		// Prune relationship pointers that can transitively reach a
-		// Device with PrimaryIp4 set. See the function doc for why.
+		// Device with PrimaryIp4/PrimaryIp6 set. See the function doc.
+		ifaceCopy.Parent = nil
+		ifaceCopy.Bridge = nil
+		ifaceCopy.Lag = nil
+		ifaceCopy.Module = nil
+		snapshot.AssignedObject = &ifaceCopy
+	}
+	return &snapshot
+}
+
+// detachForPrimaryIP6 mirrors detachForPrimaryIP for IPv6: returns a
+// shallow copy suitable to attach as Device.PrimaryIp6 without
+// introducing a reference cycle. Both PrimaryIp4 and PrimaryIp6 are
+// cleared on the embedded device copy so the snapshot is independent
+// of evaluation order between the v4 and v6 passes.
+func detachForPrimaryIP6(ip *diode.IPAddress, owner *diode.Device) *diode.IPAddress {
+	if ip == nil {
+		return nil
+	}
+	snapshot := *ip
+	if iface, ok := snapshot.AssignedObject.(*diode.Interface); ok && iface != nil {
+		ifaceCopy := *iface
+		if owner != nil {
+			deviceCopy := *owner
+			deviceCopy.PrimaryIp4 = nil
+			deviceCopy.PrimaryIp6 = nil
+			ifaceCopy.Device = &deviceCopy
+		}
 		ifaceCopy.Parent = nil
 		ifaceCopy.Bridge = nil
 		ifaceCopy.Lag = nil
@@ -689,19 +1002,36 @@ func derefString(s *string) string {
 	return *s
 }
 
-// resolveTargetIPv4s returns the IPv4 candidate addresses for the current
-// SNMP target. If targetHost is an IPv4 literal, the single address is
-// returned. Otherwise DNS is consulted with a 2s timeout and IPv4 results
-// are returned. Returns an empty slice on any failure.
-func (m *ObjectIDMapper) resolveTargetIPv4s() []string {
-	if ip := net.ParseIP(m.targetHost); ip != nil {
-		if v4 := ip.To4(); v4 != nil {
-			return []string{v4.String()}
+// resolveTargetIPs returns the IPv4 and IPv6 candidate addresses for the
+// current SNMP target. Literal IPs populate the matching family slice;
+// hostname targets are resolved via DNS (2s timeout) and split by
+// family. Empty slices are returned on lookup failure.
+//
+// Family detection uses the textual form: any address containing a
+// colon is IPv6, even IPv4-mapped IPv6 literals like "::ffff:10.0.0.1".
+// This matches the way ipAddressTable rows preserve the mapped form,
+// so a target literal of "::ffff:10.0.0.1" lines up against an IP
+// entity emitted as "::ffff:10.0.0.1/N" rather than being collapsed
+// to v4 here and missing the v6 entity in pickPrimaryIPHit.
+func (m *ObjectIDMapper) resolveTargetIPs() (v4, v6 []string) {
+	classifyLiteral := func(s string) (canonical string, isV6 bool, ok bool) {
+		addr, err := netip.ParseAddr(s)
+		if err != nil {
+			return "", false, false
 		}
-		return nil
+		// netip preserves the textual form: an IPv4-mapped IPv6
+		// literal stays Is6() and Is4In6(); only a plain IPv4 literal
+		// is purely Is4().
+		return addr.String(), addr.Is6(), true
+	}
+	if canonical, isV6, ok := classifyLiteral(m.targetHost); ok {
+		if isV6 {
+			return nil, []string{canonical}
+		}
+		return []string{canonical}, nil
 	}
 	if m.resolver == nil {
-		return nil
+		return nil, nil
 	}
 	parent := m.ctx
 	if parent == nil {
@@ -712,17 +1042,20 @@ func (m *ObjectIDMapper) resolveTargetIPv4s() []string {
 	addrs, err := m.resolver.LookupHost(ctx, m.targetHost)
 	if err != nil {
 		m.logger.Debug("target host DNS lookup failed", "target", m.targetHost, "error", err)
-		return nil
+		return nil, nil
 	}
-	out := make([]string, 0, len(addrs))
 	for _, a := range addrs {
-		if ip := net.ParseIP(a); ip != nil {
-			if v4 := ip.To4(); v4 != nil {
-				out = append(out, v4.String())
-			}
+		canonical, isV6, ok := classifyLiteral(a)
+		if !ok {
+			continue
 		}
+		if isV6 {
+			v6 = append(v6, canonical)
+			continue
+		}
+		v4 = append(v4, canonical)
 	}
-	return out
+	return v4, v6
 }
 
 // stripPrefix removes a "/prefix" suffix from an IP/CIDR string.
@@ -731,6 +1064,90 @@ func stripPrefix(addr string) string {
 		return addr[:i]
 	}
 	return addr
+}
+
+// hasVerifiedInterface reports whether the IPAddress entity is bound
+// to an interface that was actually discovered during the walk (as
+// opposed to the placeholder Interface that GetOrCreateEntity
+// fabricates whenever ipAddressIfIndex references an ifIndex whose
+// ifTable row never came back).
+//
+// The signal is the registry's verified set, populated by
+// InterfaceMapper.Map. Checking only Name != DefaultInterfaceName
+// would also reject legitimately-walked interfaces whose ifDescr and
+// ifName happened to be empty (the existing
+// "both name sources empty leaves default unknown" path in
+// InterfaceMapper); the registry-backed check accepts those because
+// the Interface DID receive a Map() call.
+func (r *EntityRegistry) hasVerifiedInterface(ip *diode.IPAddress) bool {
+	if ip == nil {
+		return false
+	}
+	iface, ok := ip.AssignedObject.(*diode.Interface)
+	if !ok || iface == nil {
+		return false
+	}
+	return r.IsInterfaceVerified(iface)
+}
+
+// dedupIPAddresses resolves cross-table overlap for *diode.IPAddress
+// entities that share the same canonical address (prefix-stripped).
+// When both a legacy (ipAddrTable) and modern (ipAddressTable) entry
+// exist for the same address, the modern entry wins by default — it
+// carries the authoritative RFC 4293 metadata and is IPv6-capable.
+//
+// The interface binding (AssignedObject) takes priority over source:
+// if the modern row is missing AssignedObject (e.g. an ACL hid
+// ipAddressIfIndex during the walk, or the row was a partial response)
+// but the legacy row carries one, we keep the legacy row instead.
+// Otherwise pickPrimaryIPHit (which requires an Interface assignment)
+// would drop both candidates and primary-IP selection would regress.
+//
+// Same-source duplicates are not collapsed here; the upstream grouping
+// prevents them within a single table.
+func (m *ObjectIDMapper) dedupIPAddresses(entities map[diode.Entity]bool) {
+	type bucket struct {
+		modern *diode.IPAddress
+		legacy *diode.IPAddress
+	}
+	groups := make(map[string]*bucket)
+	for entity := range entities {
+		ip, ok := entity.(*diode.IPAddress)
+		if !ok || ip.Address == nil {
+			continue
+		}
+		key := stripPrefix(*ip.Address)
+		if groups[key] == nil {
+			groups[key] = &bucket{}
+		}
+		switch m.registry.IPSource(ip) {
+		case "modern":
+			groups[key].modern = ip
+		default:
+			groups[key].legacy = ip
+		}
+	}
+	hasAssignedInterface := m.registry.hasVerifiedInterface
+	for _, b := range groups {
+		if b.modern == nil || b.legacy == nil {
+			continue
+		}
+		// Prefer the entry with an interface binding when only one of
+		// them has it; otherwise default to modern.
+		modernAssigned := hasAssignedInterface(b.modern)
+		legacyAssigned := hasAssignedInterface(b.legacy)
+		drop := b.legacy
+		kept := "modern"
+		if !modernAssigned && legacyAssigned {
+			drop = b.modern
+			kept = "legacy"
+		}
+		// entities is keyed by the entity pointer itself; drop is that
+		// pointer, so delete directly without a second scan.
+		delete(entities, drop)
+		m.logger.Debug("deduped overlapping ipAddress",
+			"address", *drop.Address, "kept", kept)
+	}
 }
 
 func (m *ObjectIDMapper) filterExcludedEntities(entities map[diode.Entity]bool) {
@@ -812,9 +1229,43 @@ func (m *ObjectIDMapper) resolveMappingEntry(details *ObjectIDIndexDetails) (*En
 func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[ObjectIDIndex]*ObjectIDIndexDetails {
 	objectIDIndexMap := make(map[ObjectIDIndex]*ObjectIDIndexDetails)
 	for objectID, value := range objectIDs {
-		objectIDValue, err := newObjectIDValue(objectID, value)
+		// Skip PDUs that belong to a post-pass-only entity (vlan,
+		// interface_vlan). Their entries are walked but not row-mapped:
+		// VlanMapper.PostMap reads directly from the full
+		// ObjectIDValueMap and consumes them itself.
+		//
+		// Without this skip, a VLAN VID and an ifIndex with the same
+		// numeric value (e.g., VID 10 + GigabitEthernet0/10 → ifIndex 10)
+		// would collide in this index-keyed map, and Go map iteration
+		// would nondeterministically pick one parent's entry to dispatch,
+		// silently dropping the other table's data.
+		//
+		// Uses the pre-computed postPassPrefixes slice — typically 5-7
+		// short prefixes — so this stays O(k) per PDU and preserves
+		// the inet_address fast-path below (no getMappingEntry call).
+		if m.mappingConfig.isPostPassOIDPrefix(objectID) {
+			continue
+		}
+		// Fast path: only inet_address-indexed tables need an Entry to
+		// switch on IndexKind during parsing. The legacy fixed-size
+		// path uses value.IdentifierSize and ignores entry. Skipping
+		// the per-PDU getMappingEntry call (an O(depth) prefix walk)
+		// avoids a noticeable CPU hit on large walks where 99% of PDUs
+		// belong to fixed-index tables.
+		entry := m.mappingConfig.inetAddressEntryFor(objectID)
+		objectIDValue, err := newObjectIDValueForEntry(objectID, value, entry)
 		if err != nil {
-			m.logger.Warn("error creating object ID value", "error", err, "object_id", objectID)
+			// errMalformedInetAddress covers the expected skip cases —
+			// scoped IPv6 (ipv4z/ipv6z), dns-form rows, and otherwise
+			// malformed inet_address indices. Anything else (e.g., a
+			// legacy fixed-index parse failure from an unexpected
+			// IdentifierSize / OID-depth mismatch) likely indicates a
+			// real walk or config problem and should remain visible.
+			if errors.Is(err, errMalformedInetAddress) {
+				m.logger.Debug("skipping inet_address row with unparseable index", "object_id", objectID, "error", err)
+			} else {
+				m.logger.Warn("error creating object ID value", "object_id", objectID, "error", err)
+			}
 			continue
 		}
 
@@ -826,19 +1277,86 @@ func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[Ob
 	return objectIDIndexMap
 }
 
-func newObjectIDValue(objectID string, value Value) (*ObjectIDValue, error) {
+// isPostPassOIDPrefix reports whether the given OID belongs to an
+// entity type that is consumed exclusively by a postPassMapper (today:
+// vlan and interface_vlan, both routed through VlanMapper).
+//
+// Uses the pre-computed postPassPrefixes slice (populated in NewConfig)
+// instead of resolving the parent entry via getMappingEntry, which
+// would be an O(depth) prefix walk per PDU on the hot path. Today the
+// slice has ~5-7 short prefixes, so the linear scan stays cheaper than
+// a single map lookup against the full mapping. Nil receiver / empty
+// slice short-circuits to false.
+func (m *Config) isPostPassOIDPrefix(objectID string) bool {
+	if m == nil || len(m.postPassPrefixes) == 0 {
+		return false
+	}
+	for _, p := range m.postPassPrefixes {
+		if strings.HasPrefix(objectID, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// newObjectIDValueForEntry parses an OID and its value into an ObjectIDValue.
+// When entry.IndexKind == "inet_address", the trailing sub-OIDs are decoded
+// per RFC 4001 (variable length); otherwise the legacy fixed-size slicing
+// applies, identical to historical behavior.
+//
+// IMPORTANT: index_kind="inet_address" only handles tables whose row
+// index is a *pure* InetAddress: the suffix immediately after the
+// column sub-OID must be exactly <addrType>.<addrLen>.<addrBytes...>.
+// Tables with composite indices that include other components before
+// or after the InetAddress (e.g. ifIndex + InetAddress, or
+// InetAddress + something) will have all rows skipped as malformed.
+// Today this knob is wired up only for ipAddressTable, which has a
+// pure InetAddress index. Reusing it for a composite-index table
+// requires extending the parser; reviewers and contributors should
+// validate the table shape before adding new entries.
+//
+// For inet_address entries, the column boundary is computed from
+// entry.OID rather than guessed from the suffix length. Suffix-based
+// guessing is unsound: an IPv6 row whose final 6 sub-OIDs happen to
+// look like a valid IPv4 InetAddress (`1.4.x.x.x.x`) would be silently
+// misclassified as IPv4. Using the entry OID's depth as the anchor
+// removes the ambiguity.
+func newObjectIDValueForEntry(objectID string, value Value, entry *Entry) (*ObjectIDValue, error) {
 	parts := strings.Split(objectID, ".")
+	if entry != nil && entry.IndexKind == "inet_address" {
+		entryParts := strings.Split(entry.OID, ".")
+		// Resolved entry's OID is the table-row prefix
+		// (e.g. ".1.3.6.1.2.1.4.34.1"). The column sub-OID immediately
+		// follows, then the InetAddress index.
+		columnDepth := len(entryParts) + 1
+		if len(parts) <= columnDepth {
+			return nil, errMalformedInetAddress
+		}
+		suffix := parts[columnDepth:]
+		canonical, ok := decodeInetAddressIndex(suffix)
+		if !ok {
+			return nil, errMalformedInetAddress
+		}
+		parent := strings.Join(parts[:columnDepth], ".")
+		return &ObjectIDValue{
+			OID:    objectID,
+			Index:  ObjectIDIndex(canonical),
+			Parent: parent,
+			Value:  value.Value,
+			Type:   value.Type,
+		}, nil
+	}
+
 	if len(parts) <= value.IdentifierSize {
 		return nil, fmt.Errorf("invalid ObjectID length for type")
 	}
-	objectIDValue := ObjectIDValue{
+	return &ObjectIDValue{
 		OID:    objectID,
 		Index:  ObjectIDIndex(strings.Join(parts[len(parts)-value.IdentifierSize:], ".")),
 		Parent: strings.Join(parts[:len(parts)-value.IdentifierSize], "."),
 		Value:  value.Value,
 		Type:   value.Type,
-	}
-	return &objectIDValue, nil
+	}, nil
 }
 
 // Gets the mapper for the closest parent objectID
@@ -855,6 +1373,38 @@ func (m *Config) getMappingEntry(objectID string) (*Entry, error) {
 		objectID = objectID[:lastDotIndex]
 	}
 	return nil, fmt.Errorf("no mapping entry found")
+}
+
+// inetAddressEntryFor returns the inet_address-indexed Entry whose OID
+// is the longest prefix of the given objectID, or nil when no such
+// entry exists. It walks `inetAddressEntries` (which contains ONLY the
+// top-level table OIDs, not their column children — caching children
+// would let a column OID win the longest-prefix scan and miscompute
+// columnDepth in newObjectIDValueForEntry; see NewConfig) instead of
+// the full `mapping`, so the common case where no inet_address table
+// is configured is a single map-len check. Returning the longest match
+// matches getMappingEntry's most-specific-wins semantics, which
+// matters when two distinct inet_address tables are registered.
+//
+// Nil receiver is treated as "no inet_address tables configured" so
+// that an ObjectIDMapper constructed without a Config (used in some
+// internal tests) doesn't panic on the hot path.
+func (m *Config) inetAddressEntryFor(objectID string) *Entry {
+	if m == nil || len(m.inetAddressEntries) == 0 {
+		return nil
+	}
+	var best *Entry
+	bestLen := -1
+	for prefix, entry := range m.inetAddressEntries {
+		if objectID != prefix && !strings.HasPrefix(objectID, prefix+".") {
+			continue
+		}
+		if len(prefix) > bestLen {
+			best = entry
+			bestLen = len(prefix)
+		}
+	}
+	return best
 }
 
 // ObjectIDs returns the ObjectIDs that the ObjectIDMapper can map
@@ -881,4 +1431,56 @@ func (m *Config) ObjectIDs() map[string]int {
 		}
 	}
 	return objectIDs
+}
+
+// GenericObjectIDs returns the OIDs to walk on every host (entries with
+// empty Vendor field). It applies the same child-expansion logic as
+// ObjectIDs: when an entry has child MappingEntries, the child OIDs are
+// emitted rather than the parent OID.
+func (m *Config) GenericObjectIDs() map[string]int {
+	return m.objectIDsForVendor("", true)
+}
+
+// VendorObjectIDs returns the OIDs to walk for a specific vendor key.
+// Returns an empty map when no entries are scoped to the vendor.
+func (m *Config) VendorObjectIDs(vendor string) map[string]int {
+	if vendor == "" {
+		return make(map[string]int)
+	}
+	return m.objectIDsForVendor(vendor, false)
+}
+
+// objectIDsForVendor is the shared implementation behind GenericObjectIDs
+// and VendorObjectIDs. When generic==true it selects entries with an empty
+// Vendor field; otherwise it selects entries matching the given vendor string.
+// Child-expansion follows the same rules as ObjectIDs.
+func (m *Config) objectIDsForVendor(vendor string, generic bool) map[string]int {
+	out := make(map[string]int)
+	for _, entry := range m.mapping {
+		if generic {
+			if entry.Vendor != "" {
+				continue
+			}
+		} else {
+			if entry.Vendor != vendor {
+				continue
+			}
+		}
+		if len(entry.MappingEntries) > 0 {
+			for _, childEntry := range entry.MappingEntries {
+				if childEntry.IdentifierSize == 0 {
+					out[childEntry.OID] = 1
+				} else {
+					out[childEntry.OID] = childEntry.IdentifierSize
+				}
+			}
+		} else {
+			if entry.IdentifierSize == 0 {
+				out[entry.OID] = 1
+			} else {
+				out[entry.OID] = entry.IdentifierSize
+			}
+		}
+	}
+	return out
 }

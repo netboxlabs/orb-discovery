@@ -250,8 +250,11 @@ func TestIPAddressMapper_Map(t *testing.T) {
 				Entity: "ipAddress",
 				Field:  "_id",
 			},
-			expectedEntity: &diode.IPAddress{},
-			expectError:    false,
+			// IPAddressMapper now drops the row (returns nil) when no
+			// PDU populated the address, instead of emitting an
+			// empty &diode.IPAddress{}. expectError=true triggers the
+			// runner's assert.Nil branch.
+			expectError: true,
 		},
 		{
 			name: "mapping with tenant default and entity-specific defaults",
@@ -2689,6 +2692,325 @@ func TestDeviceMapper_Map(t *testing.T) {
 	}
 }
 
+func TestDeviceMapper_Map_SerialNumber(t *testing.T) {
+	logger := slog.Default()
+	mapper := mapping.NewDeviceMapper(&MockManufacturerDataRetriever{}, &MockDeviceLookup{}, logger)
+
+	serialMappingEntry := &mapping.Entry{
+		OID:    "1.3.6.1.2.1.47.1.1.1.1.11",
+		Entity: "device",
+		Field:  "_id",
+		MappingEntries: []mapping.Entry{
+			{
+				OID:    "1.3.6.1.2.1.47.1.1.1.1.11",
+				Entity: "device",
+				Field:  "serialNumber",
+			},
+		},
+	}
+
+	tests := []struct {
+		name           string
+		values         map[mapping.ObjectIDIndex]*mapping.ObjectIDValue
+		mappingEntry   *mapping.Entry
+		expectedSerial *string
+	}{
+		{
+			name: "single chassis serial maps to Serial field",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.47.1.1.1.1.11.1": {
+					OID:    "1.3.6.1.2.1.47.1.1.1.1.11.1",
+					Index:  "1",
+					Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+					Value:  "FTX1234ABCD",
+					Type:   mapping.OctetString,
+				},
+			},
+			mappingEntry:   serialMappingEntry,
+			expectedSerial: mapping.StringPtr("FTX1234ABCD"),
+		},
+		{
+			name: "empty value is skipped and Serial remains nil",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.47.1.1.1.1.11.1": {
+					OID:    "1.3.6.1.2.1.47.1.1.1.1.11.1",
+					Index:  "1",
+					Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+					Value:  "",
+					Type:   mapping.OctetString,
+				},
+			},
+			mappingEntry:   serialMappingEntry,
+			expectedSerial: nil,
+		},
+		{
+			name: "whitespace-only value is skipped",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.47.1.1.1.1.11.1": {
+					OID:    "1.3.6.1.2.1.47.1.1.1.1.11.1",
+					Index:  "1",
+					Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+					Value:  "   \t\n",
+					Type:   mapping.OctetString,
+				},
+			},
+			mappingEntry:   serialMappingEntry,
+			expectedSerial: nil,
+		},
+		{
+			name: "leading and trailing whitespace is trimmed from valid value",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.47.1.1.1.1.11.1": {
+					OID:    "1.3.6.1.2.1.47.1.1.1.1.11.1",
+					Index:  "1",
+					Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+					Value:  "  FTX1234ABCD\t\n",
+					Type:   mapping.OctetString,
+				},
+			},
+			mappingEntry:   serialMappingEntry,
+			expectedSerial: mapping.StringPtr("FTX1234ABCD"),
+		},
+		{
+			name: "empty entry skipped, non-empty entry recorded",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.47.1.1.1.1.11.1": {
+					OID:    "1.3.6.1.2.1.47.1.1.1.1.11.1",
+					Index:  "1",
+					Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+					Value:  "",
+					Type:   mapping.OctetString,
+				},
+				"1.3.6.1.2.1.47.1.1.1.1.11.2": {
+					OID:    "1.3.6.1.2.1.47.1.1.1.1.11.2",
+					Index:  "2",
+					Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+					Value:  "MOD-SERIAL-7777",
+					Type:   mapping.OctetString,
+				},
+			},
+			mappingEntry:   serialMappingEntry,
+			expectedSerial: mapping.StringPtr("MOD-SERIAL-7777"),
+		},
+		{
+			name:           "empty values map leaves Serial nil",
+			values:         map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{},
+			mappingEntry:   serialMappingEntry,
+			expectedSerial: nil,
+		},
+		{
+			name: "NUL-padded serial is trimmed to valid value",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.47.1.1.1.1.11.1": {
+					OID:    "1.3.6.1.2.1.47.1.1.1.1.11.1",
+					Index:  "1",
+					Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+					Value:  "SER123\x00",
+					Type:   mapping.OctetString,
+				},
+			},
+			mappingEntry:   serialMappingEntry,
+			expectedSerial: mapping.StringPtr("SER123"),
+		},
+		{
+			name: "NUL-only value is skipped and does not block later valid row",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.47.1.1.1.1.11.1": {
+					OID:    "1.3.6.1.2.1.47.1.1.1.1.11.1",
+					Index:  "1",
+					Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+					Value:  "\x00\x00",
+					Type:   mapping.OctetString,
+				},
+				"1.3.6.1.2.1.47.1.1.1.1.11.2": {
+					OID:    "1.3.6.1.2.1.47.1.1.1.1.11.2",
+					Index:  "2",
+					Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+					Value:  "VALID-SERIAL",
+					Type:   mapping.OctetString,
+				},
+			},
+			mappingEntry:   serialMappingEntry,
+			expectedSerial: mapping.StringPtr("VALID-SERIAL"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := mapping.NewEntityRegistry(logger)
+			entity := mapper.Map(tt.values, tt.mappingEntry, registry, nil)
+
+			assert.NotNil(t, entity)
+			device, ok := entity.(*diode.Device)
+			assert.True(t, ok)
+			assert.Equal(t, tt.expectedSerial, device.Serial)
+		})
+	}
+}
+
+// TestDeviceMapper_Map_SerialNumber_LowestIndexWins verifies that when the
+// entPhysicalSerialNum walk returns multiple non-empty values, the mapper
+// deterministically picks the lowest-indexed row (typically the chassis at
+// entPhysicalIndex .1) regardless of Go's randomized map iteration order.
+// The mapper sorts value keys ascending before iterating so this is stable.
+func TestDeviceMapper_Map_SerialNumber_LowestIndexWins(t *testing.T) {
+	logger := slog.Default()
+	mapper := mapping.NewDeviceMapper(&MockManufacturerDataRetriever{}, &MockDeviceLookup{}, logger)
+
+	values := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"1.3.6.1.2.1.47.1.1.1.1.11.1": {
+			OID:    "1.3.6.1.2.1.47.1.1.1.1.11.1",
+			Index:  "1",
+			Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+			Value:  "CHASSIS-SERIAL-001",
+			Type:   mapping.OctetString,
+		},
+		"1.3.6.1.2.1.47.1.1.1.1.11.2": {
+			OID:    "1.3.6.1.2.1.47.1.1.1.1.11.2",
+			Index:  "2",
+			Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+			Value:  "MODULE-SERIAL-002",
+			Type:   mapping.OctetString,
+		},
+		"1.3.6.1.2.1.47.1.1.1.1.11.3": {
+			OID:    "1.3.6.1.2.1.47.1.1.1.1.11.3",
+			Index:  "3",
+			Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+			Value:  "SFP-SERIAL-003",
+			Type:   mapping.OctetString,
+		},
+	}
+	mappingEntry := &mapping.Entry{
+		OID:    "1.3.6.1.2.1.47.1.1.1.1.11",
+		Entity: "device",
+		Field:  "_id",
+		MappingEntries: []mapping.Entry{
+			{
+				OID:    "1.3.6.1.2.1.47.1.1.1.1.11",
+				Entity: "device",
+				Field:  "serialNumber",
+			},
+		},
+	}
+
+	// Run multiple times to flush out any reliance on map iteration order.
+	for i := 0; i < 50; i++ {
+		registry := mapping.NewEntityRegistry(logger)
+		entity := mapper.Map(values, mappingEntry, registry, nil)
+		device, ok := entity.(*diode.Device)
+		assert.True(t, ok)
+		assert.Equal(t, mapping.StringPtr("CHASSIS-SERIAL-001"), device.Serial)
+	}
+}
+
+// TestDeviceMapper_Map_SerialNumber_LowestIndexEmpty verifies that when the
+// chassis row (lowest index) is empty, the mapper falls through to the next
+// non-empty row deterministically.
+func TestDeviceMapper_Map_SerialNumber_LowestIndexEmpty(t *testing.T) {
+	logger := slog.Default()
+	mapper := mapping.NewDeviceMapper(&MockManufacturerDataRetriever{}, &MockDeviceLookup{}, logger)
+
+	values := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"1.3.6.1.2.1.47.1.1.1.1.11.1": {
+			OID:    "1.3.6.1.2.1.47.1.1.1.1.11.1",
+			Index:  "1",
+			Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+			Value:  "",
+			Type:   mapping.OctetString,
+		},
+		"1.3.6.1.2.1.47.1.1.1.1.11.2": {
+			OID:    "1.3.6.1.2.1.47.1.1.1.1.11.2",
+			Index:  "2",
+			Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+			Value:  "MODULE-SERIAL-002",
+			Type:   mapping.OctetString,
+		},
+		"1.3.6.1.2.1.47.1.1.1.1.11.3": {
+			OID:    "1.3.6.1.2.1.47.1.1.1.1.11.3",
+			Index:  "3",
+			Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+			Value:  "SFP-SERIAL-003",
+			Type:   mapping.OctetString,
+		},
+	}
+	mappingEntry := &mapping.Entry{
+		OID:    "1.3.6.1.2.1.47.1.1.1.1.11",
+		Entity: "device",
+		Field:  "_id",
+		MappingEntries: []mapping.Entry{
+			{
+				OID:    "1.3.6.1.2.1.47.1.1.1.1.11",
+				Entity: "device",
+				Field:  "serialNumber",
+			},
+		},
+	}
+
+	for i := 0; i < 50; i++ {
+		registry := mapping.NewEntityRegistry(logger)
+		entity := mapper.Map(values, mappingEntry, registry, nil)
+		device, ok := entity.(*diode.Device)
+		assert.True(t, ok)
+		assert.Equal(t, mapping.StringPtr("MODULE-SERIAL-002"), device.Serial)
+	}
+}
+
+// TestDeviceMapper_Map_SerialNumber_NumericSortOrder verifies that OID suffixes
+// are sorted numerically, not lexicographically. Lexicographic order would visit
+// .11.10 before .11.2, causing a module serial to win over the chassis serial.
+func TestDeviceMapper_Map_SerialNumber_NumericSortOrder(t *testing.T) {
+	logger := slog.Default()
+	mapper := mapping.NewDeviceMapper(&MockManufacturerDataRetriever{}, &MockDeviceLookup{}, logger)
+
+	values := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"1.3.6.1.2.1.47.1.1.1.1.11.2": {
+			OID:    "1.3.6.1.2.1.47.1.1.1.1.11.2",
+			Index:  "2",
+			Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+			Value:  "CHASSIS-SERIAL-002",
+			Type:   mapping.OctetString,
+		},
+		"1.3.6.1.2.1.47.1.1.1.1.11.10": {
+			OID:    "1.3.6.1.2.1.47.1.1.1.1.11.10",
+			Index:  "10",
+			Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+			Value:  "MODULE-SERIAL-010",
+			Type:   mapping.OctetString,
+		},
+		"1.3.6.1.2.1.47.1.1.1.1.11.11": {
+			OID:    "1.3.6.1.2.1.47.1.1.1.1.11.11",
+			Index:  "11",
+			Parent: "1.3.6.1.2.1.47.1.1.1.1.11",
+			Value:  "SFP-SERIAL-011",
+			Type:   mapping.OctetString,
+		},
+	}
+	mappingEntry := &mapping.Entry{
+		OID:    "1.3.6.1.2.1.47.1.1.1.1.11",
+		Entity: "device",
+		Field:  "_id",
+		MappingEntries: []mapping.Entry{
+			{
+				OID:    "1.3.6.1.2.1.47.1.1.1.1.11",
+				Entity: "device",
+				Field:  "serialNumber",
+			},
+		},
+	}
+
+	// Run multiple times to eliminate any map iteration luck.
+	for i := 0; i < 50; i++ {
+		registry := mapping.NewEntityRegistry(logger)
+		entity := mapper.Map(values, mappingEntry, registry, nil)
+		device, ok := entity.(*diode.Device)
+		assert.True(t, ok)
+		// Numeric sort: .2 < .10 < .11 → chassis serial at .2 wins.
+		// Lexicographic sort would give .10 < .11 < .2 → MODULE-SERIAL-010 incorrectly wins.
+		assert.Equal(t, mapping.StringPtr("CHASSIS-SERIAL-002"), device.Serial,
+			"iteration %d: expected lowest numeric index (.2) to win over .10 and .11", i)
+	}
+}
+
 // MockManufacturerDataRetriever is a mock implementation of ManufacturerDataRetriever
 type MockManufacturerDataRetriever struct {
 	mock.Mock
@@ -2893,13 +3215,13 @@ func TestMaskToPrefixSize(t *testing.T) {
 			entityRegistry := mapping.NewEntityRegistry(slog.Default())
 			result := mapper.Map(values, mappingEntry, entityRegistry, nil)
 
-			// All cases with prefix-only (no IP address) should result in nil address
-			// because validation now requires a complete IP/CIDR format
-			assert.NotNil(t, result)
-			ipAddress, ok := result.(*diode.IPAddress)
-			assert.True(t, ok)
-			// The address should be nil since prefix-only is not a valid IP/CIDR
-			assert.Nil(t, ipAddress.Address)
+			// Both branches now drop the row by returning nil:
+			//  - valid mask + no IP builds "/24", validation rejects.
+			//  - invalid mask fails maskToPrefixSize, fieldFound stays
+			//    false, the post-loop guard catches the empty address.
+			// Either way the mapper no longer leaks an empty entity.
+			assert.Nil(t, result)
+			_ = tt.expectError // Both paths now produce the same result.
 		})
 	}
 }
@@ -3561,14 +3883,25 @@ func TestIPAddressMapper_Map_InvalidCases(t *testing.T) {
 
 			result := mapper.Map(tt.values, tt.mappingEntry, entityRegistry, nil)
 
+			if tt.expectEmpty {
+				// The mapper now drops empty/invalid rows by
+				// returning nil instead of emitting an entity with
+				// no address. Either nil or an entity with no
+				// Address satisfies the contract for these cases.
+				if result == nil {
+					return
+				}
+				ipAddress, ok := result.(*diode.IPAddress)
+				assert.True(t, ok)
+				assert.True(t, ipAddress.Address == nil || *ipAddress.Address == "")
+				return
+			}
+
 			assert.NotNil(t, result)
 			ipAddress, ok := result.(*diode.IPAddress)
 			assert.True(t, ok)
 
-			if tt.expectEmpty {
-				// Empty entity should have nil or empty address
-				assert.True(t, ipAddress.Address == nil || *ipAddress.Address == "")
-			} else if tt.expectedAddress != nil {
+			if tt.expectedAddress != nil {
 				// Check the expected address
 				if ipAddress.Address != nil {
 					t.Logf("Expected: %s, Got: %s", *tt.expectedAddress, *ipAddress.Address)
@@ -3725,4 +4058,460 @@ func TestDeviceMapper_Map_DynamicModelRefResolvedFromWalked(t *testing.T) {
 	entity := mapper.Map(values, entry, registry, nil)
 	device := entity.(*diode.Device)
 	assert.Equal(t, "RouterOS CCR2004-16G-2S+", *device.DeviceType.Model)
+}
+
+// --- RFC 4293 ipAddressTable tests (OBS-2798) ---
+
+// inetAddrTableEntry builds a synthetic ipAddressTable mapping.Entry that
+// recognizes addressPrefix and the filter columns (used by Tasks 5/6).
+func inetAddrTableEntry() *mapping.Entry {
+	return &mapping.Entry{
+		OID: ".1.3.6.1.2.1.4.34.1", Entity: "ipAddress", Field: "_id",
+		IndexKind: "inet_address",
+		MappingEntries: []mapping.Entry{
+			{OID: ".1.3.6.1.2.1.4.34.1.4", Entity: "ipAddress", Field: "addressType"},
+			{OID: ".1.3.6.1.2.1.4.34.1.5", Entity: "ipAddress", Field: "addressPrefix"},
+			{OID: ".1.3.6.1.2.1.4.34.1.7", Entity: "ipAddress", Field: "addressStatus"},
+			{OID: ".1.3.6.1.2.1.4.34.1.10", Entity: "ipAddress", Field: "addressRowStatus"},
+		},
+	}
+}
+
+func TestIPAddressMapper_IPv4FromInetAddressIndex(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1": {
+			OID:    ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1",
+			Index:  "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.1.4.10.0.0.0.24",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip, ok := got.(*diode.IPAddress)
+	if !ok || ip == nil || ip.Address == nil {
+		t.Fatalf("expected non-nil *diode.IPAddress with Address, got %#v", got)
+	}
+	assert.Equal(t, "10.0.0.1/24", *ip.Address)
+}
+
+func TestIPAddressMapper_IPv6FromInetAddressIndex(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		".1.3.6.1.2.1.4.34.1.5.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1": {
+			OID:    ".1.3.6.1.2.1.4.34.1.5.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1",
+			Index:  "ipv6:2001:db8::1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.0.64",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	if ip.Address == nil {
+		t.Fatalf("expected Address to be set")
+	}
+	assert.Equal(t, "2001:db8::1/64", *ip.Address)
+}
+
+func TestIPAddressMapper_RowPointer_ZeroDotZero_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5", Value: ".0.0",
+			Type: mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address)
+}
+
+func TestIPAddressMapper_RowPointer_OversizedPrefix_Clamped(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID:    ".1.3.6.1.2.1.4.34.1.5.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1",
+			Index:  "ipv6:2001:db8::1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.0.200",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "2001:db8::1/128", *ip.Address)
+}
+
+func TestIPAddressMapper_RowPointer_NotPrefixTable_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5", Value: ".1.2.3.4.5.24",
+			Type: mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address)
+}
+
+// TestIPAddressMapper_RowPointer_AddrLenMismatch_FallsBackToHostRoute
+// covers the strict-shape case Copilot flagged: a pointer that declares
+// addrLen=99 but carries fewer (or different-count) address bytes is
+// structurally invalid. Pre-fix this would have parsed the trailing
+// numeric component as the prefix length; post-fix the row falls back
+// to the host-route default.
+func TestIPAddressMapper_RowPointer_AddrLenMismatch_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	// .1.3.6.1.2.1.4.32.1.5.<ifIndex=1>.<addrType=2>.<addrLen=99>.1.2.3.4.24
+	// addrType=2 implies addrLen=16, not 99; suffixParts = 8, expected 20.
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.2.99.1.2.3.4.24",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	// Host-route default rather than a fabricated /24.
+	assert.Equal(t, "10.0.0.1/32", *ip.Address)
+}
+
+// TestIPAddressMapper_RowPointer_IfIndexMismatch_FallsBackToHostRoute
+// covers the cross-interface prefix-row case Copilot flagged: a
+// modern row whose ipAddressIfIndex is 1 must NOT silently accept a
+// prefix entry that lives under a different ifIndex. On devices with
+// overlapping subnets, the row would otherwise pick up another
+// interface's prefix length.
+func TestIPAddressMapper_RowPointer_IfIndexMismatch_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	entry := &mapping.Entry{
+		OID: ".1.3.6.1.2.1.4.34.1", Entity: "ipAddress", Field: "_id",
+		IndexKind: "inet_address",
+		MappingEntries: []mapping.Entry{
+			{
+				OID: ".1.3.6.1.2.1.4.34.1.3", Entity: "ipAddress", Field: "assignedObject",
+				Relationship: config.Relationship{Type: "interface"},
+			},
+			{OID: ".1.3.6.1.2.1.4.34.1.5", Entity: "ipAddress", Field: "addressPrefix"},
+		},
+	}
+	// Row with ifIndex=1, but the RowPointer claims ifIndex=2 (a
+	// different interface). Both addrBytes describe a prefix that
+	// would contain 10.0.0.1 if accepted.
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		".1.3.6.1.2.1.4.34.1.3.1.4.10.0.0.1": {
+			OID: ".1.3.6.1.2.1.4.34.1.3.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.3", Value: "1", Type: mapping.Integer,
+		},
+		".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			// Pointer's first component is ifIndex=2, not 1.
+			Value: ".1.3.6.1.2.1.4.32.1.5.2.1.4.10.0.0.0.24",
+			Type:  mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, entry, registry, nil)
+	if got == nil {
+		t.Fatalf("expected entity, got nil")
+	}
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address,
+		"RowPointer with ifIndex differing from row's ipAddressIfIndex must fall back to host route")
+}
+
+// TestIPAddressMapper_AssignedObject_IfIndexZero_LeavesUnassigned
+// covers the InterfaceIndexOrZero=0 case: per RFC 4293,
+// ipAddressIfIndex=0 means the address is not bound to any
+// interface. The mapper must NOT fabricate a placeholder Interface
+// for ifIndex 0.
+func TestIPAddressMapper_AssignedObject_IfIndexZero_LeavesUnassigned(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	entry := &mapping.Entry{
+		OID: ".1.3.6.1.2.1.4.34.1", Entity: "ipAddress", Field: "_id",
+		IndexKind: "inet_address",
+		MappingEntries: []mapping.Entry{
+			{
+				OID: ".1.3.6.1.2.1.4.34.1.3", Entity: "ipAddress", Field: "assignedObject",
+				Relationship: config.Relationship{Type: "interface"},
+			},
+			{OID: ".1.3.6.1.2.1.4.34.1.5", Entity: "ipAddress", Field: "addressPrefix"},
+		},
+	}
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		".1.3.6.1.2.1.4.34.1.3.1.4.10.0.0.1": {
+			OID: ".1.3.6.1.2.1.4.34.1.3.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.3", Value: "0", Type: mapping.Integer,
+		},
+		".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.1.4.10.0.0.0.24",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, entry, registry, nil)
+	if !assert.NotNil(t, got) {
+		return
+	}
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/24", *ip.Address)
+	assert.Nil(t, ip.AssignedObject,
+		"ipAddressIfIndex=0 (InterfaceIndexOrZero) must not produce a placeholder Interface")
+}
+
+// TestIPAddressMapper_RowPointer_HostBitsNotZeroed_FallsBackToHostRoute
+// covers the strict prefix-row index check: a pointer whose addrBytes
+// still carry host bits (e.g. addrBytes=10.0.0.1 with prefixLen=24
+// instead of the proper addrBytes=10.0.0.0) is structurally not a
+// valid ipAddressPrefixTable row index per RFC 4293, even though the
+// row's address would fall inside the masked prefix.
+func TestIPAddressMapper_RowPointer_HostBitsNotZeroed_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			// Bytes 10.0.0.1 with prefixLen 24 — host bits not zeroed.
+			Value: ".1.3.6.1.2.1.4.32.1.5.1.1.4.10.0.0.1.24",
+			Type:  mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address,
+		"RowPointer with host bits set in addrBytes must fall back to host route")
+}
+
+// TestIPAddressMapper_RowPointer_AddressOutsidePrefix_FallsBackToHostRoute
+// covers the unrelated-prefix-row case Copilot flagged: the pointer
+// is structurally valid for the row's family but its network bytes
+// describe a prefix that doesn't contain the row's address (e.g. a
+// 10.0.0.1 row pointing at 192.168.0.0/16). Pre-fix the mapper would
+// have emitted "10.0.0.1/16"; post-fix it falls back to host route.
+func TestIPAddressMapper_RowPointer_AddressOutsidePrefix_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID:    ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1",
+			Index:  "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			// Pointer to ipAddressPrefixTable for 192.168.0.0/16 —
+			// a different network than the row's 10.0.0.1.
+			Value: ".1.3.6.1.2.1.4.32.1.5.1.1.4.192.168.0.0.16",
+			Type:  mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address,
+		"row whose address is outside the pointed-to prefix must fall back to host route")
+}
+
+// TestIPAddressMapper_RowPointer_FamilyMismatch_FallsBackToHostRoute
+// covers Copilot's family-cross concern: an IPv6 row that points at a
+// well-formed IPv4 prefix entry must NOT silently borrow the v4
+// prefix length. Pre-fix this would emit "2001:db8::1/24"; post-fix
+// the row keeps its host-route default.
+func TestIPAddressMapper_RowPointer_FamilyMismatch_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	// IPv6 row (Index = "ipv6:..."). Pointer is structurally valid for
+	// IPv4 (addrType=1, addrLen=4, ifIndex=1, addrBytes=10.0.0.0,
+	// prefixLen=24) but its family doesn't match the row.
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID:    ".1.3.6.1.2.1.4.34.1.5.2.16.32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1",
+			Index:  "ipv6:2001:db8::1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.1.4.10.0.0.0.24",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	// Host-route fallback for the IPv6 row.
+	assert.Equal(t, "2001:db8::1/128", *ip.Address)
+}
+
+// TestIPAddressMapper_RowPointer_BadAddrType_FallsBackToHostRoute
+// rejects addrType values outside the {1, 2} set we support
+// (e.g. ipv4z=3, ipv6z=4, dns=16) regardless of byte count.
+func TestIPAddressMapper_RowPointer_BadAddrType_FallsBackToHostRoute(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	// addrType=3 (ipv4z) — even with otherwise plausible shape, reject.
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"k": {
+			OID: ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1", Index: "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.3.4.10.0.0.0.24",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	got := mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address)
+}
+
+// runIPAddressTableMap builds a synthetic ipAddressTable PDU set with
+// the given column overrides (parent OID → string value) for index
+// "ipv4:10.0.0.1" and runs the mapper. Always includes a /24 prefix
+// RowPointer so the address gets set; tests can override columns 4/7/10.
+func runIPAddressTableMap(t *testing.T, columns map[string]string) diode.Entity {
+	t.Helper()
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1": {
+			OID:    ".1.3.6.1.2.1.4.34.1.5.1.4.10.0.0.1",
+			Index:  "ipv4:10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.34.1.5",
+			Value:  ".1.3.6.1.2.1.4.32.1.5.1.1.4.10.0.0.0.24",
+			Type:   mapping.ObjectIdentifier,
+		},
+	}
+	for parent, val := range columns {
+		oid := parent + ".1.4.10.0.0.1"
+		pdus[mapping.ObjectIDIndex(oid)] = &mapping.ObjectIDValue{
+			OID:    oid,
+			Index:  "ipv4:10.0.0.1",
+			Parent: parent,
+			Value:  val,
+			Type:   mapping.Integer,
+		}
+	}
+	return mapper.Map(pdus, inetAddrTableEntry(), registry, nil)
+}
+
+func TestIPAddressMapper_FilterAnycast_Dropped(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.4": "2", // anycast
+	})
+	assert.Nil(t, got, "anycast row must be dropped (nil)")
+}
+
+func TestIPAddressMapper_FilterBroadcast_Dropped(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.4": "3", // broadcast
+	})
+	assert.Nil(t, got)
+}
+
+func TestIPAddressMapper_FilterTentative_Dropped(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.7": "6", // tentative
+	})
+	assert.Nil(t, got)
+}
+
+func TestIPAddressMapper_FilterRowStatusInactive_Dropped(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.10": "2", // notInService
+	})
+	assert.Nil(t, got)
+}
+
+func TestIPAddressMapper_FilterPreferredUnicastActive_Kept(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.4":  "1", // unicast
+		".1.3.6.1.2.1.4.34.1.7":  "1", // preferred
+		".1.3.6.1.2.1.4.34.1.10": "1", // active
+	})
+	if got == nil {
+		t.Fatalf("expected entity, got nil")
+	}
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/24", *ip.Address)
+}
+
+func TestIPAddressMapper_FilterDeprecated_Kept(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.7": "2", // deprecated
+	})
+	if got == nil {
+		t.Fatalf("expected entity, got nil")
+	}
+}
+
+func TestIPAddressMapper_FilterOptimistic_Kept(t *testing.T) {
+	got := runIPAddressTableMap(t, map[string]string{
+		".1.3.6.1.2.1.4.34.1.7": "8", // optimistic
+	})
+	if got == nil {
+		t.Fatalf("optimistic addresses should be kept (RFC 4862 says usable with caveats), got nil")
+	}
+}
+
+func TestIPAddressMapper_FilterColumnsMissing_Lenient(t *testing.T) {
+	got := runIPAddressTableMap(t, nil)
+	if got == nil {
+		t.Fatalf("missing filter columns must be lenient (kept), got nil")
+	}
+}
+
+func TestIPAddressMapper_LegacyTable_StillIPv4Only(t *testing.T) {
+	logger := slog.Default()
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	entry := &mapping.Entry{
+		OID: ".1.3.6.1.2.1.4.20.1", Entity: "ipAddress", Field: "_id",
+		IdentifierSize: 4,
+		MappingEntries: []mapping.Entry{
+			{OID: ".1.3.6.1.2.1.4.20.1.1", Entity: "ipAddress", Field: "address"},
+		},
+	}
+	pdus := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		".1.3.6.1.2.1.4.20.1.1.10.0.0.1": {
+			OID: ".1.3.6.1.2.1.4.20.1.1.10.0.0.1", Index: "10.0.0.1",
+			Parent: ".1.3.6.1.2.1.4.20.1.1", Value: "10.0.0.1",
+			Type: mapping.IPAddress,
+		},
+	}
+	got := mapper.Map(pdus, entry, registry, nil)
+	ip := got.(*diode.IPAddress)
+	assert.Equal(t, "10.0.0.1/32", *ip.Address)
 }
