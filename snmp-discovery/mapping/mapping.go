@@ -1211,6 +1211,19 @@ func (m *ObjectIDMapper) resolveMappingEntry(details *ObjectIDIndexDetails) (*En
 func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[ObjectIDIndex]*ObjectIDIndexDetails {
 	objectIDIndexMap := make(map[ObjectIDIndex]*ObjectIDIndexDetails)
 	for objectID, value := range objectIDs {
+		// Skip PDUs that belong to a post-pass-only entity (vlan,
+		// interface_vlan). Their entries are walked but not row-mapped:
+		// VlanMapper.PostMap reads directly from the full
+		// ObjectIDValueMap and consumes them itself.
+		//
+		// Without this skip, a VLAN VID and an ifIndex with the same
+		// numeric value (e.g., VID 10 + GigabitEthernet0/10 → ifIndex 10)
+		// would collide in this index-keyed map, and Go map iteration
+		// would nondeterministically pick one parent's entry to dispatch,
+		// silently dropping the other table's data.
+		if isPostPassOnlyOID(objectID, m.mappingConfig) {
+			continue
+		}
 		// Fast path: only inet_address-indexed tables need an Entry to
 		// switch on IndexKind during parsing. The legacy fixed-size
 		// path uses value.IdentifierSize and ignores entry. Skipping
@@ -1240,6 +1253,21 @@ func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[Ob
 		objectIDIndexMap[objectIDValue.Index].Values[ObjectIDIndex(objectID)] = objectIDValue
 	}
 	return objectIDIndexMap
+}
+
+// isPostPassOnlyOID reports whether the given OID belongs to an entity
+// type that is consumed exclusively by a postPassMapper (today: vlan and
+// interface_vlan, both routed through VlanMapper). Returns false when no
+// matching entry exists.
+func isPostPassOnlyOID(objectID string, cfg *Config) bool {
+	if cfg == nil {
+		return false
+	}
+	entry, err := cfg.getMappingEntry(objectID)
+	if err != nil {
+		return false
+	}
+	return entry.Entity == string(VLANEntityType) || entry.Entity == string(InterfaceVLANEntityType)
 }
 
 // newObjectIDValueForEntry parses an OID and its value into an ObjectIDValue.

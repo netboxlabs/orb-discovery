@@ -2097,3 +2097,63 @@ func TestMappingYAML_CiscoOverlayEntriesPresent(t *testing.T) {
 		}
 	}
 }
+
+// TestMapObjectIDsToEntity_VLANIndexCollision is a regression test for the
+// case where an ifIndex value and a VLAN VID share the same numeric form
+// (e.g., ifIndex=10 + dot1qVlanStaticName.10). The pre-fix
+// groupByObjectIDIndex bucketed by bare index, which let the two tables
+// collide and silently drop one of them depending on Go map iteration
+// order. The fix skips post-pass-only OIDs (vlan / interface_vlan) from
+// the bucketing so VlanMapper.PostMap can consume them via the full
+// ObjectIDValueMap while InterfaceMapper still sees the ifTable bucket
+// for the same numeric index.
+func TestMapObjectIDsToEntity_VLANIndexCollision(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	mappings := []config.MappingEntry{
+		{
+			OID: ".1.3.6.1.2.1.2.2.1", Entity: "interface", Field: "_id", IdentifierSize: 1,
+			MappingEntries: []config.MappingEntry{
+				{OID: ".1.3.6.1.2.1.2.2.1.2", Entity: "interface", Field: "name"},
+				{OID: ".1.3.6.1.2.1.2.2.1.7", Entity: "interface", Field: "adminStatus"},
+				{OID: ".1.3.6.1.2.1.2.2.1.3", Entity: "interface", Field: "type"},
+			},
+		},
+		{
+			OID: ".1.3.6.1.2.1.17.7.1.4.3", Entity: "vlan", Field: "_id", IdentifierSize: 1,
+			MappingEntries: []config.MappingEntry{
+				{OID: ".1.3.6.1.2.1.17.7.1.4.3.1.1", Entity: "vlan", Field: "name"},
+				{OID: ".1.3.6.1.2.1.17.7.1.4.3.1.5", Entity: "vlan", Field: "rowStatus"},
+			},
+		},
+	}
+	cfg, err := mapping.NewConfig(mappings, logger, &FakeManufacturers{}, &FakeDeviceLookup{}, nil, config.Options{})
+	assert.NoError(t, err)
+	mapper := mapping.NewObjectIDMapper(cfg, logger, &config.Defaults{Interface: config.InterfaceDefaults{Type: "other"}}, "")
+	// Both ifIndex=10 (in ifTable) AND vid=10 (in dot1qVlanStaticTable)
+	// — same numeric index in two different tables.
+	oids := mapping.ObjectIDValueMap{
+		// ifTable row for ifIndex 10
+		".1.3.6.1.2.1.2.2.1.2.10": mapping.Value{Value: "GigabitEthernet1/0/10", Type: mapping.OctetString, IdentifierSize: 1},
+		".1.3.6.1.2.1.2.2.1.7.10": mapping.Value{Value: "1", Type: mapping.Integer, IdentifierSize: 1},
+		".1.3.6.1.2.1.2.2.1.3.10": mapping.Value{Value: "6", Type: mapping.Integer, IdentifierSize: 1},
+		// dot1qVlanStaticTable row for vid 10 (collision)
+		".1.3.6.1.2.1.17.7.1.4.3.1.1.10": mapping.Value{Value: "Engineering", Type: mapping.OctetString, IdentifierSize: 1},
+		".1.3.6.1.2.1.17.7.1.4.3.1.5.10": mapping.Value{Value: "1", Type: mapping.Integer, IdentifierSize: 1},
+	}
+	entities := mapper.MapObjectIDsToEntity(oids)
+	var sawIface, sawVLAN bool
+	for _, e := range entities {
+		if iface, ok := e.(*diode.Interface); ok && iface.Name != nil && *iface.Name == "GigabitEthernet1/0/10" {
+			sawIface = true
+		}
+		if v, ok := e.(*diode.VLAN); ok && v.Vid != nil && *v.Vid == 10 && v.Name != nil && *v.Name == "Engineering" {
+			sawVLAN = true
+		}
+	}
+	if !sawIface {
+		t.Errorf("expected Interface entity for ifIndex 10 (GigabitEthernet1/0/10); got entities=%+v", entities)
+	}
+	if !sawVLAN {
+		t.Errorf("expected VLAN entity for vid 10 (Engineering); got entities=%+v", entities)
+	}
+}

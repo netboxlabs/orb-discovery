@@ -154,6 +154,14 @@ func (m *VlanMapper) PostMap(
 		if !ok || iface == nil {
 			continue
 		}
+		// Skip placeholder interfaces fabricated by GetOrCreateEntity
+		// for ipAddressIfIndex references that no interface PDUs ever
+		// populated. Mutating those would leak VLAN/mode fields into
+		// nested IPAddress.AssignedObject payloads and ingest
+		// incomplete interface data.
+		if !registry.IsInterfaceVerified(iface) {
+			continue
+		}
 		c := qbridge.Classify(*info)
 		applyClassification(iface, c, ensureVLAN)
 	}

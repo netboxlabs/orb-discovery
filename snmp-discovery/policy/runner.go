@@ -491,6 +491,21 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 			}()
 			select {
 			case <-ctx.Done():
+				// Mirror the phase-1 ctx.Done() handling so timeouts
+				// that occur after phase 1 still record failure +
+				// latency in the discovery metrics.
+				if rMetric := metrics.GetDiscoveryFailure(); rMetric != nil {
+					rMetric.Add(r.ctx, 1,
+						metric.WithAttributes(
+							attribute.String("policy", policyName),
+							attribute.String("error", ctx.Err().Error()),
+						))
+				}
+				if rMetric := metrics.GetDiscoveryLatency(); rMetric != nil {
+					rMetric.Record(r.ctx, time.Since(startTime).Seconds(),
+						metric.WithAttributes(
+							attribute.String("policy", policyName)))
+				}
 				return nil, ctx.Err()
 			case res := <-vendorCh:
 				if res.err != nil {
