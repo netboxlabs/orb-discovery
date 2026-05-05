@@ -127,3 +127,46 @@ func TestExtractGeneric_PvidOnlyClassifiesAsAccess(t *testing.T) {
 		t.Errorf("AccessVlan: got %v, want 10", info.AccessVlan)
 	}
 }
+
+// TestExtractGeneric_MultipleBridgePortsPerIfIndex regression-tests the
+// case where BRIDGE-MIB returns multiple bridge ports for the same
+// ifIndex (rare but permitted, e.g. on switches where the same logical
+// interface participates in multiple bridges or LAG sub-port mappings).
+// The pre-fix reverse map was 1:1 and overwrote earlier bridge ports
+// in random map-iteration order; only the last-seen port's membership
+// was checked. The fix aggregates all bridge ports per ifIndex and
+// unions membership across them.
+func TestExtractGeneric_MultipleBridgePortsPerIfIndex(t *testing.T) {
+	// Bridge ports 1 AND 2 both map to ifIndex 101.
+	// VLAN 50 has port 1 in egress (untagged); port 2 is NOT.
+	// VLAN 60 has port 2 in egress (tagged); port 1 is NOT.
+	// Expected: ifIndex 101's allowed VIDs cover both 50 and 60
+	// regardless of which bridge port survives map iteration.
+	rows := GenericRows{
+		BasePortToIfIndex: map[int]int{1: 101, 2: 101},
+		PortPvid:          map[int]int{101: 50},
+		VlanEgressPorts: map[int][]byte{
+			50: {0x80}, // bit 7 set — bridge port 1
+			60: {0x40}, // bit 6 set — bridge port 2
+		},
+		VlanUntaggedPorts: map[int][]byte{
+			50: {0x80}, // bridge port 1 untagged on VLAN 50
+		},
+		IfTypes:       map[int]string{101: "ethernetCsmacd"},
+		IfAdminStatus: map[int]int{101: 1},
+	}
+	got, err := ExtractGeneric(rows)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	info := got[101]
+	if info == nil {
+		t.Fatal("ifIndex 101 missing")
+	}
+	if len(info.AllowedVlans.Vids) != 2 {
+		t.Errorf("AllowedVlans.Vids: got %v, want [50 60]", info.AllowedVlans.Vids)
+	}
+	if info.NativeVlan == nil || *info.NativeVlan != 50 {
+		t.Errorf("NativeVlan: got %v, want 50", info.NativeVlan)
+	}
+}

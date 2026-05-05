@@ -42,10 +42,15 @@ func ExtractGeneric(rows GenericRows) (map[int]*SwitchportInfo, error) {
 		return nil, ErrMissingTranslation
 	}
 
-	// Reverse map: ifIndex -> bridgePort, for membership lookup.
-	ifIndexToBridge := make(map[int]int, len(rows.BasePortToIfIndex))
+	// Reverse map: ifIndex -> []bridgePort, for membership lookup.
+	// BRIDGE-MIB allows multiple bridge ports to reference the same
+	// ifIndex (e.g., a member of multiple bridges, or LAG sub-ports
+	// on some platforms). Aggregating preserves all mappings; the
+	// later membership check unions across them so VLAN data set on
+	// any bridge port for the ifIndex is preserved.
+	ifIndexToBridge := make(map[int][]int, len(rows.BasePortToIfIndex))
 	for bp, ifx := range rows.BasePortToIfIndex {
-		ifIndexToBridge[ifx] = bp
+		ifIndexToBridge[ifx] = append(ifIndexToBridge[ifx], bp)
 	}
 
 	out := make(map[int]*SwitchportInfo, len(rows.BasePortToIfIndex))
@@ -102,14 +107,19 @@ func ExtractGeneric(rows GenericRows) (map[int]*SwitchportInfo, error) {
 // membershipFromMasks scans every VlanEgressPorts/VlanUntaggedPorts mask
 // and returns (egress VIDs for this port, wildcard?, untagged VID).
 //
-// "wildcard" is set when the egress set covers all 4094 VIDs.
+// When the same ifIndex maps to multiple bridge ports (rare but
+// permitted by BRIDGE-MIB), membership for the ifIndex is the union of
+// per-bridge-port memberships: a VID counts as egress if any bridge
+// port for that ifIndex is in its egress mask, and as untagged if any
+// bridge port is in the untagged mask. "wildcard" is set when the
+// resulting egress set covers all 4094 VIDs.
 func membershipFromMasks(
 	ifIndex int,
-	ifIndexToBridge map[int]int,
+	ifIndexToBridge map[int][]int,
 	egress, untagged map[int][]byte,
 ) ([]int, bool, *int, error) {
-	bridgePort, ok := ifIndexToBridge[ifIndex]
-	if !ok {
+	bridgePorts, ok := ifIndexToBridge[ifIndex]
+	if !ok || len(bridgePorts) == 0 {
 		return nil, false, nil, nil
 	}
 	allowed := make([]int, 0)
@@ -119,11 +129,11 @@ func membershipFromMasks(
 		if !ok {
 			continue
 		}
-		if !bridgePortInMask(mask, bridgePort) {
+		if !anyBridgePortInMask(mask, bridgePorts) {
 			continue
 		}
 		allowed = append(allowed, vid)
-		if utg, ok := untagged[vid]; ok && bridgePortInMask(utg, bridgePort) {
+		if utg, ok := untagged[vid]; ok && anyBridgePortInMask(utg, bridgePorts) {
 			v := vid
 			nativeVid = &v
 		}
@@ -133,6 +143,17 @@ func membershipFromMasks(
 		return nil, true, nativeVid, nil
 	}
 	return allowed, false, nativeVid, nil
+}
+
+// anyBridgePortInMask reports whether any of the given bridge ports has
+// its bit set in mask.
+func anyBridgePortInMask(mask []byte, bridgePorts []int) bool {
+	for _, bp := range bridgePorts {
+		if bridgePortInMask(mask, bp) {
+			return true
+		}
+	}
+	return false
 }
 
 // bridgePortInMask reports whether bit (port-1) is set MSB-first in mask.

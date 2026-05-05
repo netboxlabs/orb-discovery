@@ -356,8 +356,16 @@ type Config struct {
 	// per-PDU getMappingEntry call (an O(depth) prefix walk) when the
 	// OID falls outside any inet_address-using table.
 	inetAddressEntries map[string]*Entry
-	postPassMappers    []postPassMapper
-	options            config.Options
+	// postPassPrefixes is the pre-computed list of OID prefixes that
+	// belong to post-pass-only entity types (vlan, interface_vlan).
+	// groupByObjectIDIndex consults this slice via HasPrefix per PDU
+	// instead of resolving the parent entry for every walked OID
+	// (which would defeat the inet_address fast-path optimization).
+	// Each prefix ends with a literal "." so a parent OID does not
+	// accidentally match a sibling sharing a numeric prefix.
+	postPassPrefixes []string
+	postPassMappers  []postPassMapper
+	options          config.Options
 }
 
 // NewConfig creates a new Config
@@ -400,6 +408,7 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 
 	mapping := make(map[string]*Entry)
 	inetAddressEntries := make(map[string]*Entry)
+	var postPassPrefixes []string
 	for _, m := range mappings {
 		logger.Debug("adding mapping", "oid", m.OID, "entity", m.Entity, "field", m.Field, "relationship", m.Relationship)
 		Entry := newMappingEntry(m, logger, entityMappers)
@@ -416,10 +425,19 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 		if Entry.IndexKind == "inet_address" {
 			inetAddressEntries[m.OID] = Entry
 		}
+		// Cache top-level OID prefixes for post-pass-only entity types
+		// so groupByObjectIDIndex can skip these PDUs without doing a
+		// per-PDU getMappingEntry walk. Adding the trailing "." prevents
+		// a parent OID from accidentally matching a sibling whose OID
+		// starts with the same numeric prefix.
+		if Entry.Entity == string(VLANEntityType) || Entry.Entity == string(InterfaceVLANEntityType) {
+			postPassPrefixes = append(postPassPrefixes, m.OID+".")
+		}
 	}
 	return &Config{
 		mapping:            mapping,
 		inetAddressEntries: inetAddressEntries,
+		postPassPrefixes:   postPassPrefixes,
 		postPassMappers:    postPassMappers,
 		options:            options,
 	}, nil
@@ -1221,7 +1239,11 @@ func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[Ob
 		// would collide in this index-keyed map, and Go map iteration
 		// would nondeterministically pick one parent's entry to dispatch,
 		// silently dropping the other table's data.
-		if isPostPassOnlyOID(objectID, m.mappingConfig) {
+		//
+		// Uses the pre-computed postPassPrefixes slice — typically 5-7
+		// short prefixes — so this stays O(k) per PDU and preserves
+		// the inet_address fast-path below (no getMappingEntry call).
+		if m.mappingConfig.isPostPassOIDPrefix(objectID) {
 			continue
 		}
 		// Fast path: only inet_address-indexed tables need an Entry to
@@ -1255,19 +1277,26 @@ func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[Ob
 	return objectIDIndexMap
 }
 
-// isPostPassOnlyOID reports whether the given OID belongs to an entity
-// type that is consumed exclusively by a postPassMapper (today: vlan and
-// interface_vlan, both routed through VlanMapper). Returns false when no
-// matching entry exists.
-func isPostPassOnlyOID(objectID string, cfg *Config) bool {
-	if cfg == nil {
+// isPostPassOIDPrefix reports whether the given OID belongs to an
+// entity type that is consumed exclusively by a postPassMapper (today:
+// vlan and interface_vlan, both routed through VlanMapper).
+//
+// Uses the pre-computed postPassPrefixes slice (populated in NewConfig)
+// instead of resolving the parent entry via getMappingEntry, which
+// would be an O(depth) prefix walk per PDU on the hot path. Today the
+// slice has ~5-7 short prefixes, so the linear scan stays cheaper than
+// a single map lookup against the full mapping. Nil receiver / empty
+// slice short-circuits to false.
+func (m *Config) isPostPassOIDPrefix(objectID string) bool {
+	if m == nil || len(m.postPassPrefixes) == 0 {
 		return false
 	}
-	entry, err := cfg.getMappingEntry(objectID)
-	if err != nil {
-		return false
+	for _, p := range m.postPassPrefixes {
+		if strings.HasPrefix(objectID, p) {
+			return true
+		}
 	}
-	return entry.Entity == string(VLANEntityType) || entry.Entity == string(InterfaceVLANEntityType)
+	return false
 }
 
 // newObjectIDValueForEntry parses an OID and its value into an ObjectIDValue.
