@@ -75,8 +75,20 @@ func (m *VlanMapper) PostMap(
 		// No bridge port table — refuse Interface mutation. Still emit
 		// VLAN entities below from the static table; they don't need
 		// per-port translation.
-		m.logger.Warn("vlan: missing dot1dBasePortIfIndex; skipping interface mutations",
-			"reason", "bridge-port-translation-unavailable")
+		//
+		// Log level depends on whether the device looks like it should
+		// have had VLAN data: if any Q-BRIDGE / Cisco-overlay rows are
+		// present, the missing bridge table is a real partial-data
+		// condition (warn). Otherwise this is a routine non-switch
+		// target (router, WLC, host, …) and the message is just noise
+		// at debug.
+		if hasVLANSignal(allObjectIDs) {
+			m.logger.Warn("vlan: missing dot1dBasePortIfIndex; skipping interface mutations",
+				"reason", "bridge-port-translation-unavailable")
+		} else {
+			m.logger.Debug("vlan: no bridge port table and no VLAN OIDs walked; nothing to do",
+				"reason", "non-switch-target")
+		}
 		return m.emitVLANs(allObjectIDs, defaults)
 	}
 
@@ -189,9 +201,14 @@ func classificationToNetboxMode(m qbridge.Mode) string {
 }
 
 // applyVLANDefaults applies the defaults.VLAN fields (Description, Tags,
-// Tenant, Group) to v. It does NOT touch Status — callers that derive status
-// from RowStatus handle that themselves; stubs produced by ensureVLAN only
-// inherit defaults.VLAN.Status when it is explicitly set.
+// Tenant, Group, Status) to v. Status is only written when
+// defaults.VLAN.Status is explicitly set; callers that already derived
+// a status from dot1qVlanStaticRowStatus rely on that earlier write
+// taking precedence (emitVLANs sets v.Status from row status before
+// reaching this helper for named VLANs; stubs from ensureVLAN have no
+// row status and pick up defaults.VLAN.Status here when configured).
+// Tags merge defaults.VLAN.Tags + top-level defaults.Tags, mirroring
+// the IPAddress/Interface/Device mapper convention.
 func applyVLANDefaults(v *diode.VLAN, defaults *config.Defaults) {
 	if defaults == nil {
 		return
@@ -324,16 +341,13 @@ func (m *VlanMapper) buildCiscoRows(all ObjectIDValueMap) qbridge.CiscoRows {
 // from defaults.VLAN.Status; if empty, derived from RowStatus
 // (active(1)->active, notInService(2)->reserved, else unset).
 //
-// When m.options.CreateUnknownVlans is false, VIDs whose
-// dot1qVlanStaticName row is absent (or empty) are skipped — only VLANs
-// with a real name from the device are emitted. The default v1 behavior
-// (CreateUnknownVlans zero-value = false in Go) preserves the original
-// emit-all path because the YAML default is true (see config.Options).
-// Note: the zero-value in Go for bool is false, but the YAML field uses
-// yaml:"create_unknown_vlans" and callers that do not set the option
-// explicitly get false — matching the original behavior of always
-// emitting. When a policy explicitly sets create_unknown_vlans: false,
-// unknown VLANs are suppressed.
+// CreateUnknownVlans gating: the option is *bool. nil is treated as
+// true (matches device-discovery PR #378's _ensure_vlan default and is
+// the value Manager.applyDefaults installs when the policy YAML omits
+// the options block). When the option is explicitly set to false, VIDs
+// whose dot1qVlanStaticName row is absent (or empty) are skipped here
+// — only VLANs with a real name from the device are emitted. The same
+// gate also suppresses stub creation in ensureVLAN (see below).
 func (m *VlanMapper) emitVLANs(all ObjectIDValueMap, defaults *config.Defaults) []diode.Entity {
 	type pending struct {
 		name      string
@@ -419,6 +433,31 @@ func atoi(s string) (int, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// hasVLANSignal reports whether any VLAN-related OID was walked for the
+// host — Q-BRIDGE static catalog / per-port PVID, or Cisco-overlay
+// vmMembership / vmVoiceVlanId. Used by PostMap to decide whether a
+// missing dot1dBasePortIfIndex is a real partial-data condition (warn)
+// or just a routine non-switch target (debug).
+func hasVLANSignal(all ObjectIDValueMap) bool {
+	prefixes := [...]string{
+		oidDot1qVlanStaticName,
+		oidDot1qVlanStaticEgressPorts,
+		oidDot1qVlanStaticUntaggedPorts,
+		oidDot1qVlanStaticRowStatus,
+		oidDot1qPvid,
+		oidCiscoVMVlan,
+		oidCiscoVMVoiceVlanID,
+	}
+	for oid := range all {
+		for _, p := range prefixes {
+			if strings.HasPrefix(oid, p) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // int64Ptr is a local helper for *int64 values (diode.VLAN.Vid is *int64).
