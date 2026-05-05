@@ -176,9 +176,72 @@ func TestVlanMapper_PostMap_MissingBridgeTable_EmitsVLANsOnly(t *testing.T) {
 	}
 }
 
+// TestVlanMapper_PostMap_AutoStubsForUnnamedAccessVlan verifies that when
+// CreateUnknownVlans is true (the default), a port whose PVID references a
+// VID with NO dot1qVlanStaticName row still gets a *diode.VLAN stub emitted
+// and iface.UntaggedVlan linked to it. This mirrors classic Cisco IOS
+// behaviour where vmVlan/dot1qPvid exposes VIDs never advertised via the
+// Q-BRIDGE static table.
+func TestVlanMapper_PostMap_AutoStubsForUnnamedAccessVlan(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	registry := NewEntityRegistry(logger)
+
+	iface := &diode.Interface{Name: StringPtr("GigabitEthernet0/1")}
+	if registry.entities[InterfaceEntityType] == nil {
+		registry.entities[InterfaceEntityType] = map[ObjectIDIndex]diode.Entity{}
+	}
+	registry.entities[InterfaceEntityType]["101"] = iface
+	registry.MarkInterfaceVerified(iface)
+
+	// VID 525: PVID set (via bridge-port mapping) but NO dot1qVlanStaticName
+	// row — mimics Cisco IOS where classic IOS doesn't populate Q-BRIDGE static.
+	rows := ObjectIDValueMap{
+		// dot1dBasePortIfIndex: bridge port 1 -> ifIndex 101
+		".1.3.6.1.2.1.17.1.4.1.2.1": Value{Value: "101", Type: Integer},
+		// dot1qPvid keyed by bridge port 1 -> VID 525
+		".1.3.6.1.2.1.17.7.1.4.5.1.1.1": Value{Value: "525", Type: Integer},
+		// Egress + untagged masks for VID 525: bit 0 (port 1) set
+		".1.3.6.1.2.1.17.7.1.4.3.1.2.525": Value{Value: "\x80", Type: OctetString},
+		".1.3.6.1.2.1.17.7.1.4.3.1.4.525": Value{Value: "\x80", Type: OctetString},
+		// ifAdminStatus + ifType for ifIndex 101
+		".1.3.6.1.2.1.2.2.1.7.101": Value{Value: "1", Type: Integer},
+		".1.3.6.1.2.1.2.2.1.3.101": Value{Value: "6", Type: Integer},
+		// NOTE: dot1qVlanStaticName.525 is intentionally absent.
+	}
+
+	vm := NewVlanMapper(logger, config.Options{CreateUnknownVlans: true})
+	emitted := vm.PostMap(rows, registry, &config.Defaults{})
+
+	// Interface must classify as access.
+	if iface.Mode == nil || *iface.Mode != "access" {
+		t.Errorf("Interface.Mode: got %v, want access", iface.Mode)
+	}
+	// UntaggedVlan must be linked (stub was created).
+	if iface.UntaggedVlan == nil || iface.UntaggedVlan.Vid == nil || *iface.UntaggedVlan.Vid != 525 {
+		t.Errorf("Interface.UntaggedVlan: got %+v, want Vid=525", iface.UntaggedVlan)
+	}
+
+	// A *diode.VLAN stub for VID 525 must appear in emitted entities.
+	var stub *diode.VLAN
+	for _, e := range emitted {
+		if v, ok := e.(*diode.VLAN); ok && v.Vid != nil && *v.Vid == 525 {
+			stub = v
+			break
+		}
+	}
+	if stub == nil {
+		t.Fatal("expected a *diode.VLAN stub for VID 525 in emitted entities, got none")
+	}
+	if stub.Name == nil || *stub.Name != "VLAN525" {
+		t.Errorf("stub Name: got %v, want \"VLAN525\"", stub.Name)
+	}
+}
+
 // TestVlanMapper_PostMap_CreateUnknownVlans_False verifies that when
-// CreateUnknownVlans is false, VIDs with no dot1qVlanStaticName row are
-// not emitted as VLAN entities.
+// CreateUnknownVlans is false:
+//   - VIDs with no dot1qVlanStaticName row are not emitted as VLAN entities.
+//   - The interface still classifies (iface.Mode is set).
+//   - iface.UntaggedVlan remains nil — operator opted out of stub creation.
 func TestVlanMapper_PostMap_CreateUnknownVlans_False(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	registry := NewEntityRegistry(logger)
@@ -213,13 +276,22 @@ func TestVlanMapper_PostMap_CreateUnknownVlans_False(t *testing.T) {
 	vm := NewVlanMapper(logger, config.Options{CreateUnknownVlans: false})
 	emitted := vm.PostMap(rows, registry, &config.Defaults{})
 
-	// No VLAN entity should be emitted for VID 100 (no name row).
+	// No VLAN entity should be emitted for VID 100 (no name row, stubs disabled).
 	for _, e := range emitted {
 		if v, ok := e.(*diode.VLAN); ok {
 			if v.Vid != nil && *v.Vid == 100 {
 				t.Errorf("unexpected VLAN entity emitted for VID 100 when create_unknown_vlans=false")
 			}
 		}
+	}
+
+	// Port still classifies as access even though no stub was created.
+	if iface.Mode == nil || *iface.Mode != "access" {
+		t.Errorf("Interface.Mode: got %v, want access (port still classifies)", iface.Mode)
+	}
+	// UntaggedVlan must remain nil — operator opted out of stub creation.
+	if iface.UntaggedVlan != nil {
+		t.Errorf("Interface.UntaggedVlan: got %+v, want nil (create_unknown_vlans=false)", iface.UntaggedVlan)
 	}
 }
 

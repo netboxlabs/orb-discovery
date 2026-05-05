@@ -29,10 +29,11 @@ const (
 // to the strings qbridge.isL3Capable understands.
 //
 // IANAifType correspondences (RFC 2863 / IANA registry):
-//   6   ethernetCsmacd  — standard Ethernet / Fast Ethernet
-//   62  fastEther       — 100Base-TX (distinct from ethernetCsmacd on older gear)
-//   117 gigabitEthernet — 1000Base-X / GbE interfaces
-//   161 ieee8023adLag   — 802.3ad link aggregation group (LAG / LACP)
+//
+//	6   ethernetCsmacd  — standard Ethernet / Fast Ethernet
+//	62  fastEther       — 100Base-TX (distinct from ethernetCsmacd on older gear)
+//	117 gigabitEthernet — 1000Base-X / GbE interfaces
+//	161 ieee8023adLag   — 802.3ad link aggregation group (LAG / LACP)
 var ifTypeNumericToString = map[int]string{
 	6:   "ethernetCsmacd",
 	62:  "fastEther",
@@ -105,6 +106,31 @@ func (m *VlanMapper) PostMap(
 		vlanByVid[int(*v.Vid)] = v
 	}
 
+	// ensureVLAN returns the *diode.VLAN for vid, creating a stub when:
+	//   - no static-name entry exists for vid, AND
+	//   - options.CreateUnknownVlans is true.
+	// This mirrors device-discovery PR #378's translate._ensure_vlan behavior:
+	// classic Cisco IOS exposes vmVlan/dot1qPvid VIDs without advertising them
+	// via dot1qVlanStaticName, so ports classify as access but vlanByVid is
+	// empty — the stub ensures NetBox never receives mode=access with a nil
+	// untagged_vlan reference.
+	ensureVLAN := func(vid int) *diode.VLAN {
+		if existing, ok := vlanByVid[vid]; ok {
+			return existing
+		}
+		if !m.options.CreateUnknownVlans {
+			return nil
+		}
+		stub := &diode.VLAN{
+			Vid:  int64Ptr(int64(vid)),
+			Name: StringPtr("VLAN" + strconv.Itoa(vid)),
+		}
+		applyVLANDefaults(stub, defaults)
+		vlanByVid[vid] = stub
+		vlanEntities = append(vlanEntities, stub)
+		return stub
+	}
+
 	// Mutate interfaces in place. The registry holds *diode.Interface
 	// instances InterfaceMapper produced; we look them up by ifIndex
 	// using string-form ifIndex as ObjectIDIndex.
@@ -116,32 +142,36 @@ func (m *VlanMapper) PostMap(
 			continue
 		}
 		c := qbridge.Classify(*info)
-		applyClassification(iface, c, vlanByVid)
+		applyClassification(iface, c, ensureVLAN)
 	}
 	return vlanEntities
 }
 
 // applyClassification mutates iface to carry the classified VLAN refs.
 // Modes ModeRouted and ModeUnknown are no-ops (matches PR #378).
-func applyClassification(iface *diode.Interface, c qbridge.Classification, vlanByVid map[int]*diode.VLAN) {
+// ensureVLAN is called for every referenced VID; it may return nil when
+// options.CreateUnknownVlans is false and the VID has no static name entry.
+func applyClassification(iface *diode.Interface, c qbridge.Classification, ensureVLAN func(int) *diode.VLAN) {
 	mode := classificationToNetboxMode(c.Mode)
 	if mode == "" {
 		return
 	}
 	iface.Mode = StringPtr(mode)
 	if c.Untagged != nil {
-		if v, ok := vlanByVid[*c.Untagged]; ok {
+		if v := ensureVLAN(*c.Untagged); v != nil {
 			iface.UntaggedVlan = v
 		}
 	}
 	if len(c.Tagged) > 0 {
 		tagged := make([]*diode.VLAN, 0, len(c.Tagged))
 		for _, vid := range c.Tagged {
-			if v, ok := vlanByVid[vid]; ok {
+			if v := ensureVLAN(vid); v != nil {
 				tagged = append(tagged, v)
 			}
 		}
-		iface.TaggedVlans = tagged
+		if len(tagged) > 0 {
+			iface.TaggedVlans = tagged
+		}
 	}
 }
 
@@ -155,6 +185,37 @@ func classificationToNetboxMode(m qbridge.Mode) string {
 		return "tagged-all"
 	}
 	return ""
+}
+
+// applyVLANDefaults applies the defaults.VLAN fields (Description, Tags,
+// Tenant, Group) to v. It does NOT touch Status — callers that derive status
+// from RowStatus handle that themselves; stubs produced by ensureVLAN only
+// inherit defaults.VLAN.Status when it is explicitly set.
+func applyVLANDefaults(v *diode.VLAN, defaults *config.Defaults) {
+	if defaults == nil {
+		return
+	}
+	vd := defaults.VLAN
+	if vd.Description != "" {
+		v.Description = StringPtr(vd.Description)
+	}
+	if len(vd.Tags) > 0 {
+		tags := make([]*diode.Tag, 0, len(vd.Tags))
+		for _, t := range vd.Tags {
+			t := t // capture loop variable
+			tags = append(tags, &diode.Tag{Name: &t})
+		}
+		v.Tags = tags
+	}
+	if vd.Tenant != "" {
+		v.Tenant = &diode.Tenant{Name: StringPtr(vd.Tenant)}
+	}
+	if vd.Group != "" {
+		v.Group = &diode.VLANGroup{Name: StringPtr(vd.Group)}
+	}
+	if vd.Status != "" {
+		v.Status = StringPtr(vd.Status)
+	}
 }
 
 // buildGenericRows extracts Q-BRIDGE + BRIDGE-MIB rows from the host's
@@ -321,27 +382,7 @@ func (m *VlanMapper) emitVLANs(all ObjectIDValueMap, defaults *config.Defaults) 
 		if status := resolveVLANStatus(p.rowStatus, defaults); status != "" {
 			v.Status = StringPtr(status)
 		}
-		// Apply VLANDefaults fields when set.
-		if defaults != nil {
-			vd := defaults.VLAN
-			if vd.Description != "" {
-				v.Description = StringPtr(vd.Description)
-			}
-			if len(vd.Tags) > 0 {
-				tags := make([]*diode.Tag, 0, len(vd.Tags))
-				for _, t := range vd.Tags {
-					t := t // capture loop variable
-					tags = append(tags, &diode.Tag{Name: &t})
-				}
-				v.Tags = tags
-			}
-			if vd.Tenant != "" {
-				v.Tenant = &diode.Tenant{Name: StringPtr(vd.Tenant)}
-			}
-			if vd.Group != "" {
-				v.Group = &diode.VLANGroup{Name: StringPtr(vd.Group)}
-			}
-		}
+		applyVLANDefaults(v, defaults)
 		out = append(out, v)
 	}
 	return out
