@@ -1,6 +1,9 @@
 package qbridge
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // GenericRows is the per-host bundle of raw SNMP rows VlanMapper builds
 // from Q-BRIDGE + BRIDGE-MIB OIDs and hands to ExtractGeneric. Keeping the
@@ -109,8 +112,15 @@ func ExtractGeneric(rows GenericRows) (map[int]*SwitchportInfo, error) {
 	return out, nil
 }
 
-// membershipFromMasks scans every VlanEgressPorts/VlanUntaggedPorts mask
+// membershipFromMasks scans the VlanEgressPorts/VlanUntaggedPorts maps
 // and returns (egress VIDs for this port, wildcard?, untagged VID).
+//
+// Iterates the egress map keys (the VIDs that actually exist in the
+// device's dot1qVlanStaticEgressPorts) rather than walking 1..4094 —
+// this keeps work proportional to the discovered VLAN count instead of
+// the full 12-bit VID space, which matters on switches with thousands
+// of ports and only a handful of VLANs configured. Results are sorted
+// for deterministic output (Go map iteration is randomized).
 //
 // When the same ifIndex maps to multiple bridge ports (rare but
 // permitted by BRIDGE-MIB), membership for the ifIndex is the union of
@@ -127,24 +137,25 @@ func membershipFromMasks(
 	if !ok || len(bridgePorts) == 0 {
 		return nil, false, nil, nil
 	}
-	allowed := make([]int, 0)
-	var nativeVid *int
-	for vid := 1; vid <= 4094; vid++ {
-		mask, ok := egress[vid]
-		if !ok {
+	allowed := make([]int, 0, len(egress))
+	for vid, mask := range egress {
+		if vid < 1 || vid > 4094 {
 			continue
 		}
 		if !anyBridgePortInMask(mask, bridgePorts) {
 			continue
 		}
 		allowed = append(allowed, vid)
+	}
+	sort.Ints(allowed)
+	var nativeVid *int
+	for _, vid := range allowed {
 		if utg, ok := untagged[vid]; ok && anyBridgePortInMask(utg, bridgePorts) {
 			v := vid
 			nativeVid = &v
 		}
 	}
-	wildcard := len(allowed) == 4094
-	if wildcard {
+	if len(allowed) == 4094 {
 		return nil, true, nativeVid, nil
 	}
 	return allowed, false, nativeVid, nil
