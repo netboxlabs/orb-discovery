@@ -199,7 +199,7 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 
 // Options represents per-policy global behavior toggles peer to Defaults.
 type Options struct {
-	CreateUnknownVlans bool `yaml:"create_unknown_vlans"`
+	CreateUnknownVlans *bool `yaml:"create_unknown_vlans,omitempty"`
 }
 
 // PolicyConfig represents the configuration of a policy

@@ -118,7 +118,8 @@ func (m *VlanMapper) PostMap(
 		if existing, ok := vlanByVid[vid]; ok {
 			return existing
 		}
-		if !m.options.CreateUnknownVlans {
+		createUnknown := m.options.CreateUnknownVlans == nil || *m.options.CreateUnknownVlans
+		if !createUnknown {
 			return nil
 		}
 		stub := &diode.VLAN{
@@ -199,14 +200,23 @@ func applyVLANDefaults(v *diode.VLAN, defaults *config.Defaults) {
 	if vd.Description != "" {
 		v.Description = StringPtr(vd.Description)
 	}
-	if len(vd.Tags) > 0 {
-		tags := make([]*diode.Tag, 0, len(vd.Tags))
-		for _, t := range vd.Tags {
-			t := t // capture loop variable
-			tags = append(tags, &diode.Tag{Name: &t})
-		}
+
+	// Collect tags from both entity-specific (defaults.VLAN.Tags) and
+	// top-level (defaults.Tags) defaults — mirrors the pattern used by
+	// IPAddressMapper, InterfaceMapper, and DeviceMapper (mappers.go).
+	var tags []*diode.Tag
+	for _, t := range vd.Tags {
+		t := t // capture loop variable
+		tags = append(tags, &diode.Tag{Name: &t})
+	}
+	for _, t := range defaults.Tags {
+		t := t // capture loop variable
+		tags = append(tags, &diode.Tag{Name: &t})
+	}
+	if len(tags) > 0 {
 		v.Tags = tags
 	}
+
 	if vd.Tenant != "" {
 		v.Tenant = &diode.Tenant{Name: StringPtr(vd.Tenant)}
 	}
@@ -368,7 +378,8 @@ func (m *VlanMapper) emitVLANs(all ObjectIDValueMap, defaults *config.Defaults) 
 		// When create_unknown_vlans is false, skip VIDs that have no
 		// dot1qVlanStaticName row (name == ""). A status-only row with
 		// no name is treated as "unknown" and suppressed.
-		if !m.options.CreateUnknownVlans && p.name == "" {
+		createUnknown := m.options.CreateUnknownVlans == nil || *m.options.CreateUnknownVlans
+		if !createUnknown && p.name == "" {
 			continue
 		}
 		name := p.name

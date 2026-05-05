@@ -53,7 +53,9 @@ func ResolveVendor(sysObjectID, sysDescr string, matchers []VendorMatcher) strin
 }
 
 func sysObjectIDMatches(sysObjectID string, prefixes []string) bool {
+	sysObjectID = strings.TrimPrefix(sysObjectID, ".")
 	for _, p := range prefixes {
+		p = strings.TrimPrefix(p, ".")
 		if strings.HasPrefix(sysObjectID, p) {
 			return true
 		}

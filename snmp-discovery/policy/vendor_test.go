@@ -17,6 +17,8 @@ func TestResolveVendor(t *testing.T) {
 		{"cisco meraki", ".1.3.6.1.4.1.29671.5.1", "Meraki MS220", "cisco"},
 		{"unknown enterprise", ".1.3.6.1.4.1.9999.1", "Unknown", ""},
 		{"empty sysObjectID", "", "", ""},
+		{"cisco no-dot prefix", "1.3.6.1.4.1.9.1.1234", "Cisco IOS Software", "cisco"},
+		{"cisco no-dot meraki", "1.3.6.1.4.1.29671.5.1", "Meraki MS220", "cisco"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

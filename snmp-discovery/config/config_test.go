@@ -273,8 +273,8 @@ options:
 	if err := yaml.Unmarshal(yamlBody, &pc); err != nil {
 		t.Fatalf("yaml: %v", err)
 	}
-	if !pc.Options.CreateUnknownVlans {
-		t.Error("CreateUnknownVlans: got false, want true")
+	if pc.Options.CreateUnknownVlans == nil || !*pc.Options.CreateUnknownVlans {
+		t.Error("CreateUnknownVlans: got nil or false, want *true")
 	}
 }
 
@@ -288,8 +288,8 @@ timeout: 300
 	if err := yaml.Unmarshal(yamlBody, &pc); err != nil {
 		t.Fatalf("yaml: %v", err)
 	}
-	if pc.Options.CreateUnknownVlans {
-		t.Error("CreateUnknownVlans: got true, want zero-valued (false)")
+	if pc.Options.CreateUnknownVlans != nil {
+		t.Errorf("CreateUnknownVlans: got %v, want nil (omitted)", pc.Options.CreateUnknownVlans)
 	}
 }
 

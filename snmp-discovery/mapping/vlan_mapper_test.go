@@ -10,6 +10,8 @@ import (
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 )
 
+func ptrBool(b bool) *bool { return &b }
+
 func TestVlanMapper_MapIsNoop(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	vm := NewVlanMapper(logger, config.Options{})
@@ -209,7 +211,7 @@ func TestVlanMapper_PostMap_AutoStubsForUnnamedAccessVlan(t *testing.T) {
 		// NOTE: dot1qVlanStaticName.525 is intentionally absent.
 	}
 
-	vm := NewVlanMapper(logger, config.Options{CreateUnknownVlans: true})
+	vm := NewVlanMapper(logger, config.Options{CreateUnknownVlans: ptrBool(true)})
 	emitted := vm.PostMap(rows, registry, &config.Defaults{})
 
 	// Interface must classify as access.
@@ -273,7 +275,7 @@ func TestVlanMapper_PostMap_CreateUnknownVlans_False(t *testing.T) {
 		// NOTE: dot1qVlanStaticName.100 is intentionally absent.
 	}
 
-	vm := NewVlanMapper(logger, config.Options{CreateUnknownVlans: false})
+	vm := NewVlanMapper(logger, config.Options{CreateUnknownVlans: ptrBool(false)})
 	emitted := vm.PostMap(rows, registry, &config.Defaults{})
 
 	// No VLAN entity should be emitted for VID 100 (no name row, stubs disabled).
@@ -309,15 +311,16 @@ func TestVlanMapper_EmitVLANs_AppliesDefaults(t *testing.T) {
 	}
 
 	defaults := &config.Defaults{
+		Tags: []string{"policy-tag"},
 		VLAN: config.VLANDefaults{
 			Description: "auto-discovered",
-			Tags:        []string{"snmp", "auto"},
+			Tags:        []string{"vlan-tag"},
 			Tenant:      "NetOps",
 			Group:       "campus-vlans",
 		},
 	}
 
-	vm := NewVlanMapper(logger, config.Options{CreateUnknownVlans: true})
+	vm := NewVlanMapper(logger, config.Options{CreateUnknownVlans: ptrBool(true)})
 	emitted := vm.PostMap(rows, registry, defaults)
 
 	var got *diode.VLAN
@@ -333,14 +336,16 @@ func TestVlanMapper_EmitVLANs_AppliesDefaults(t *testing.T) {
 	if got.Description == nil || *got.Description != "auto-discovered" {
 		t.Errorf("Description: got %v, want \"auto-discovered\"", got.Description)
 	}
+	// Both defaults.VLAN.Tags and defaults.Tags must appear (entity-specific first,
+	// then top-level — matches the sibling mapper pattern in mappers.go).
 	if len(got.Tags) != 2 {
-		t.Errorf("Tags: got %d tags, want 2", len(got.Tags))
+		t.Errorf("Tags: got %d tags, want 2 (vlan-tag + policy-tag)", len(got.Tags))
 	} else {
-		if got.Tags[0].Name == nil || *got.Tags[0].Name != "snmp" {
-			t.Errorf("Tags[0].Name: got %v, want \"snmp\"", got.Tags[0].Name)
+		if got.Tags[0].Name == nil || *got.Tags[0].Name != "vlan-tag" {
+			t.Errorf("Tags[0].Name: got %v, want \"vlan-tag\"", got.Tags[0].Name)
 		}
-		if got.Tags[1].Name == nil || *got.Tags[1].Name != "auto" {
-			t.Errorf("Tags[1].Name: got %v, want \"auto\"", got.Tags[1].Name)
+		if got.Tags[1].Name == nil || *got.Tags[1].Name != "policy-tag" {
+			t.Errorf("Tags[1].Name: got %v, want \"policy-tag\"", got.Tags[1].Name)
 		}
 	}
 	if got.Tenant == nil || got.Tenant.Name == nil || *got.Tenant.Name != "NetOps" {
