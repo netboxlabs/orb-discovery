@@ -1380,26 +1380,26 @@ func (m *Config) ObjectIDs() map[string]int {
 // empty Vendor field). It applies the same child-expansion logic as
 // ObjectIDs: when an entry has child MappingEntries, the child OIDs are
 // emitted rather than the parent OID.
-func (c *Config) GenericObjectIDs() map[string]int {
-	return c.objectIDsForVendor("", true)
+func (m *Config) GenericObjectIDs() map[string]int {
+	return m.objectIDsForVendor("", true)
 }
 
 // VendorObjectIDs returns the OIDs to walk for a specific vendor key.
 // Returns an empty map when no entries are scoped to the vendor.
-func (c *Config) VendorObjectIDs(vendor string) map[string]int {
+func (m *Config) VendorObjectIDs(vendor string) map[string]int {
 	if vendor == "" {
 		return make(map[string]int)
 	}
-	return c.objectIDsForVendor(vendor, false)
+	return m.objectIDsForVendor(vendor, false)
 }
 
 // objectIDsForVendor is the shared implementation behind GenericObjectIDs
 // and VendorObjectIDs. When generic==true it selects entries with an empty
 // Vendor field; otherwise it selects entries matching the given vendor string.
 // Child-expansion follows the same rules as ObjectIDs.
-func (c *Config) objectIDsForVendor(vendor string, generic bool) map[string]int {
+func (m *Config) objectIDsForVendor(vendor string, generic bool) map[string]int {
 	out := make(map[string]int)
-	for _, entry := range c.mapping {
+	for _, entry := range m.mapping {
 		if generic {
 			if entry.Vendor != "" {
 				continue

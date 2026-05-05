@@ -21,8 +21,8 @@ const (
 	oidIfAdminStatus                = ".1.3.6.1.2.1.2.2.1.7."
 	oidIfType                       = ".1.3.6.1.2.1.2.2.1.3."
 	// Cisco overlay
-	oidCiscoVmVlan        = ".1.3.6.1.4.1.9.9.68.1.2.2.1.2."
-	oidCiscoVmVoiceVlanID = ".1.3.6.1.4.1.9.9.68.1.5.1.1."
+	oidCiscoVMVlan        = ".1.3.6.1.4.1.9.9.68.1.2.2.1.2."
+	oidCiscoVMVoiceVlanID = ".1.3.6.1.4.1.9.9.68.1.5.1.1."
 )
 
 // ifTypeNumericToString maps a small subset of IANAifType numeric values
@@ -301,14 +301,14 @@ func (m *VlanMapper) buildCiscoRows(all ObjectIDValueMap) qbridge.CiscoRows {
 	}
 	for oid, v := range all {
 		switch {
-		case strings.HasPrefix(oid, oidCiscoVmVlan):
-			ifx, ok1 := atoi(strings.TrimPrefix(oid, oidCiscoVmVlan))
+		case strings.HasPrefix(oid, oidCiscoVMVlan):
+			ifx, ok1 := atoi(strings.TrimPrefix(oid, oidCiscoVMVlan))
 			vid, ok2 := atoi(v.Value)
 			if ok1 && ok2 {
 				rows.MembershipAccessVlan[ifx] = vid
 			}
-		case strings.HasPrefix(oid, oidCiscoVmVoiceVlanID):
-			ifx, ok1 := atoi(strings.TrimPrefix(oid, oidCiscoVmVoiceVlanID))
+		case strings.HasPrefix(oid, oidCiscoVMVoiceVlanID):
+			ifx, ok1 := atoi(strings.TrimPrefix(oid, oidCiscoVMVoiceVlanID))
 			vid, ok2 := atoi(v.Value)
 			if ok1 && ok2 {
 				rows.VoiceVlanByIfIndex[ifx] = vid

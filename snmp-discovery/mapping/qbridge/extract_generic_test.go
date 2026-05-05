@@ -74,7 +74,7 @@ func TestExtractGeneric_TrunkAllWildcard(t *testing.T) {
 func TestExtractGeneric_RoutedPort(t *testing.T) {
 	rows := GenericRows{
 		BasePortToIfIndex: map[int]int{1: 201}, // 201 IS in bridge table
-		PortPvid:          map[int]int{},        // but has no PVID -> not bridged
+		PortPvid:          map[int]int{},       // but has no PVID -> not bridged
 		VlanEgressPorts:   map[int][]byte{},
 		VlanUntaggedPorts: map[int][]byte{},
 		IfAdminStatus:     map[int]int{201: 1},

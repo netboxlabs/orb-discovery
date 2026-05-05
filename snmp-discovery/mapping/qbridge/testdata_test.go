@@ -34,9 +34,9 @@ func loadFixture(t *testing.T, name string) map[string]struct {
 func TestFixture_AristaEOS_LoadsAndContainsExpectedOIDs(t *testing.T) {
 	rows := loadFixture(t, "arista_eos.yaml")
 	for _, oid := range []string{
-		".1.3.6.1.2.1.1.2.0",                 // sysObjectID
-		".1.3.6.1.2.1.17.1.4.1.2.1",          // dot1dBasePortIfIndex
-		".1.3.6.1.2.1.17.7.1.4.3.1.1.10",     // dot1qVlanStaticName for VID 10
+		".1.3.6.1.2.1.1.2.0",             // sysObjectID
+		".1.3.6.1.2.1.17.1.4.1.2.1",      // dot1dBasePortIfIndex
+		".1.3.6.1.2.1.17.7.1.4.3.1.1.10", // dot1qVlanStaticName for VID 10
 	} {
 		if _, ok := rows[oid]; !ok {
 			t.Errorf("fixture missing %s", oid)
@@ -47,9 +47,9 @@ func TestFixture_AristaEOS_LoadsAndContainsExpectedOIDs(t *testing.T) {
 func TestFixture_CiscoIOSXE_LoadsAndHasOverlayOIDs(t *testing.T) {
 	rows := loadFixture(t, "cisco_iosxe.yaml")
 	for _, oid := range []string{
-		".1.3.6.1.2.1.1.2.0",                  // sysObjectID (Cisco)
-		".1.3.6.1.4.1.9.9.68.1.5.1.1.1",       // vmVoiceVlanId for ifIndex 1
-		".1.3.6.1.2.1.17.7.1.4.3.1.1.20",      // dot1qVlanStaticName for VID 20
+		".1.3.6.1.2.1.1.2.0",             // sysObjectID (Cisco)
+		".1.3.6.1.4.1.9.9.68.1.5.1.1.1",  // vmVoiceVlanId for ifIndex 1
+		".1.3.6.1.2.1.17.7.1.4.3.1.1.20", // dot1qVlanStaticName for VID 20
 	} {
 		if _, ok := rows[oid]; !ok {
 			t.Errorf("fixture missing %s", oid)

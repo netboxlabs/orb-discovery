@@ -47,6 +47,9 @@ func (m Mode) String() string {
 // could not determine intent.
 type AdminMode int
 
+// Admin modes — extractor-supplied intent. AdminUnknown means the
+// extractor couldn't determine intent and the classifier falls back
+// to OperMode.
 const (
 	AdminUnknown AdminMode = iota
 	AdminAccess
@@ -58,6 +61,8 @@ const (
 // non-DTP vendors this typically mirrors AdminMode.
 type OperMode int
 
+// Operational modes — observed/negotiated state from the device.
+// OperUnknown means the device didn't report an operational mode.
 const (
 	OperUnknown OperMode = iota
 	OperAccess
