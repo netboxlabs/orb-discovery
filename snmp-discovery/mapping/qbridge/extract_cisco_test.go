@@ -76,3 +76,31 @@ func TestApplyCisco_DoesNotTouchTrunkPorts(t *testing.T) {
 		t.Errorf("trunk port should not have AccessVlan set, got %v", infos[101].AccessVlan)
 	}
 }
+
+func TestApplyCisco_PromotesUnknownToAccess(t *testing.T) {
+	// Simulates classic Cisco IOS (e.g. 2960X): extract_generic saw no PVID
+	// and an L3-capable ifType, so it set OperRouted / AdminUnknown.
+	// vmVlan from CISCO-VLAN-MEMBERSHIP-MIB should override both.
+	infos := map[int]*SwitchportInfo{
+		201: {
+			Enabled:           true,
+			BridgePortPresent: true,
+			AdminMode:         AdminUnknown,
+			OperMode:          OperRouted,
+		},
+	}
+	rows := CiscoRows{
+		MembershipAccessVlan: map[int]int{201: 30},
+	}
+	ApplyCisco(infos, rows)
+	info := infos[201]
+	if info.AdminMode != AdminAccess {
+		t.Errorf("AdminMode: got %v, want AdminAccess", info.AdminMode)
+	}
+	if info.OperMode != OperAccess {
+		t.Errorf("OperMode: got %v, want OperAccess", info.OperMode)
+	}
+	if info.AccessVlan == nil || *info.AccessVlan != 30 {
+		t.Errorf("AccessVlan: got %v, want 30", info.AccessVlan)
+	}
+}

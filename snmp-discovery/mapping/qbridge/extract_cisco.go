@@ -24,7 +24,10 @@ type CiscoRows struct {
 // overlaying Cisco-specific intent.
 //
 // Rules:
-//   - On AdminAccess ports only: vmVlan overrides AccessVlan.
+//   - vmVlan (MembershipAccessVlan) is a positive "this IS an access port"
+//     signal. It overrides AdminMode==AdminUnknown and OperMode==OperRouted
+//     (which extract_generic infers when no Q-BRIDGE PVID/masks are present).
+//     Trunk ports are left untouched — vmMembership is non-trunk-only by spec.
 //   - VoiceVlan: parsed via CoerceVid so sentinels (0/4095/4096) drop out.
 //     Promotion logic lives in Classify, not here.
 //
@@ -36,11 +39,31 @@ func ApplyCisco(infos map[int]*SwitchportInfo, rows CiscoRows) {
 		if !ok {
 			continue
 		}
-		if info.AdminMode != AdminAccess {
+		if info.AdminMode == AdminTrunk {
+			// vmMembership is non-trunk-only by spec; if extract_generic
+			// already classified this as trunk from membership masks, that
+			// wins over the Cisco overlay.
 			continue
 		}
-		if vid := CoerceVid(vlan); vid != nil {
-			info.AccessVlan = vid
+		vid := CoerceVid(vlan)
+		if vid == nil {
+			continue
+		}
+		// vmVlan is a positive "this IS an access port on VID X" signal from
+		// CISCO-VLAN-MEMBERSHIP-MIB. It overrides:
+		//   - AdminMode == AdminUnknown (extract_generic couldn't infer mode
+		//     because the device lacks Q-BRIDGE membership masks)
+		//   - OperMode == OperRouted (extract_generic inferred routed from
+		//     "no PVID + L3-able ifType", but vmMembership trumps that)
+		// Trunk ports remain untouched: vmMembership is non-trunk-only by spec
+		// (CISCO-VLAN-MEMBERSHIP-MIB documentation), so seeing a row implies
+		// access regardless of what extract_generic guessed.
+		info.AccessVlan = vid
+		if info.AdminMode == AdminUnknown {
+			info.AdminMode = AdminAccess
+		}
+		if info.OperMode == OperRouted {
+			info.OperMode = OperAccess
 		}
 	}
 	for ifIndex, vlan := range rows.VoiceVlanByIfIndex {

@@ -87,6 +87,12 @@ func ExtractGeneric(rows GenericRows) (map[int]*SwitchportInfo, error) {
 			info.AdminMode = AdminTrunk
 		case len(allowed) == 1 && info.OperMode != OperRouted:
 			info.AdminMode = AdminAccess
+		case len(allowed) == 0 && info.AccessVlan != nil && info.OperMode != OperRouted:
+			// PVID-only signal: switches like Arista EOS expose dot1qPvid but
+			// omit dot1qVlanStaticEgressPorts/UntaggedPorts. The PVID alone is
+			// sufficient — a port with a PVID participates in bridging, and the
+			// safe default is "access on PVID" when membership masks are absent.
+			info.AdminMode = AdminAccess
 		}
 		out[ifIndex] = info
 	}

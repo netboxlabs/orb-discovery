@@ -99,3 +99,31 @@ func TestExtractGeneric_MissingTranslationTable(t *testing.T) {
 		t.Fatal("want error, got nil")
 	}
 }
+
+func TestExtractGeneric_PvidOnlyClassifiesAsAccess(t *testing.T) {
+	// Simulates Arista EOS: dot1qPvid is populated but
+	// dot1qVlanStaticEgressPorts/UntaggedPorts are absent entirely.
+	// The PVID alone is sufficient signal to classify as access.
+	rows := GenericRows{
+		BasePortToIfIndex: map[int]int{1: 101},
+		PortPvid:          map[int]int{101: 10},
+		VlanEgressPorts:   map[int][]byte{}, // no membership masks
+		VlanUntaggedPorts: map[int][]byte{},
+		IfAdminStatus:     map[int]int{101: 1},
+		IfTypes:           map[int]string{101: "ethernetCsmacd"},
+	}
+	got, err := ExtractGeneric(rows)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	info, ok := got[101]
+	if !ok {
+		t.Fatal("ifIndex 101 missing from result")
+	}
+	if info.AdminMode != AdminAccess {
+		t.Errorf("AdminMode: got %v, want AdminAccess", info.AdminMode)
+	}
+	if info.AccessVlan == nil || *info.AccessVlan != 10 {
+		t.Errorf("AccessVlan: got %v, want 10", info.AccessVlan)
+	}
+}
