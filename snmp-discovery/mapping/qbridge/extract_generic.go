@@ -53,8 +53,13 @@ func ExtractGeneric(rows GenericRows) (map[int]*SwitchportInfo, error) {
 		ifIndexToBridge[ifx] = append(ifIndexToBridge[ifx], bp)
 	}
 
-	out := make(map[int]*SwitchportInfo, len(rows.BasePortToIfIndex))
-	for _, ifIndex := range rows.BasePortToIfIndex {
+	// Iterate ifIndexToBridge so each ifIndex is processed once, even
+	// when multiple bridge ports map to the same ifIndex. Iterating
+	// rows.BasePortToIfIndex directly would visit such ifIndices
+	// repeatedly with identical results (since membershipFromMasks
+	// unions all bridge ports for the ifIndex anyway), wasting work.
+	out := make(map[int]*SwitchportInfo, len(ifIndexToBridge))
+	for ifIndex := range ifIndexToBridge {
 		info := &SwitchportInfo{
 			Enabled:           rows.IfAdminStatus[ifIndex] == 1,
 			BridgePortPresent: true,
