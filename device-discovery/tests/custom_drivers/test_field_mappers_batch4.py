@@ -71,6 +71,19 @@ def test_fastiron_expand_port_range():
     ]
 
 
+def test_fastiron_expand_single_component_range():
+    """
+    Bare-digit ranges (CES/CER format) expand without a leading slash.
+
+    Older FastIron CES/CER hardware uses single-component port IDs in
+    ``show running-config vlan`` (e.g. ``ethe 1 to 4``). The expansion
+    used to emit ``["/1", "/2", ...]`` because the prefix-builder
+    unconditionally appended a slash; the fix preserves bare digits.
+    """
+    assert _expand_fastiron_ports("ethe 1 to 4") == ["1", "2", "3", "4"]
+    assert _expand_fastiron_ports("ethe 2 ethe 11") == ["2", "11"]
+
+
 def test_fastiron_expand_mixed_lag_and_ethe():
     """Mixed `ethe` + `lag` tokens are normalised; `lag N` becomes `lagN`."""
     assert _expand_fastiron_ports("ethe 1/1/1 lag 5 ethe 1/2/4:1") == [

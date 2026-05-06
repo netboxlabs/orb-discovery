@@ -138,10 +138,10 @@ def _expand_port_range(start: str, end: str) -> list[str]:
     """
     Expand a FastIron port range into individual port IDs.
 
-    Only expands same-prefix ranges where just the last component varies
-    (e.g. "1/1/1 to 1/1/4" → ["1/1/1", "1/1/2", "1/1/3", "1/1/4"]).
-    Cross-module or cross-unit ranges fall back to returning only the
-    two endpoints.
+    Handles both stacked ports (``1/1/1 to 1/1/4``) and the single-component
+    form used by older CES/CER hardware (``11 to 14`` → ``["11", "12",
+    "13", "14"]``). Cross-module or cross-unit ranges fall back to
+    returning only the two endpoints.
     """
     s_parts = start.split("/")
     e_parts = end.split("/")
@@ -151,7 +151,8 @@ def _expand_port_range(start: str, end: str) -> list[str]:
         s_num, e_num = int(s_parts[-1]), int(e_parts[-1])
     except ValueError:
         return [start, end]
-    prefix = "/".join(s_parts[:-1]) + "/"
+    head = s_parts[:-1]
+    prefix = "/".join(head) + "/" if head else ""
     return [f"{prefix}{p}" for p in range(s_num, e_num + 1)]
 
 
