@@ -2,6 +2,7 @@
 
 from custom_napalm.avaya_ers import (
     _ers_aggregate_to_switchport,
+    _expand_ers_port_list,
     _parse_ers_show_vlan_interface_info,
 )
 from custom_napalm.brocade_netiron import (
@@ -184,6 +185,32 @@ def test_ers_hybrid_yields_trunk_with_native():
     assert info.admin_mode == "trunk"
     assert info.native_vlan == 10
     assert info.allowed_vlans == [20, 30]
+
+
+def test_ers_expand_port_list_wildcards():
+    """
+    ``ALL`` / ``<unit>/ALL`` expand against the known-ports catalog.
+
+    Pins the Codex P1 fix from PR #391 round-7 review: the previous
+    expander treated ``1/ALL`` as a literal port name, so VLANs whose
+    membership is reported via the unit-wide wildcard never got
+    associated with the actual ports in that unit, and those ports
+    fell back to routed in the trunk-mode aggregator.
+    """
+    known = {"1/1", "1/2", "1/24", "2/1", "2/2"}
+
+    # No catalog → wildcards return empty (back-compat for direct callers).
+    assert _expand_ers_port_list("ALL") == []
+    assert _expand_ers_port_list("1/ALL") == []
+
+    # With catalog → chassis-wide ALL expands to every known port.
+    assert _expand_ers_port_list("ALL", known) == sorted(known)
+
+    # With catalog → unit-wide <unit>/ALL expands to known ports in that unit.
+    assert _expand_ers_port_list("1/ALL", known) == ["1/1", "1/2", "1/24"]
+    assert _expand_ers_port_list("2/ALL", known) == ["2/1", "2/2"]
+    # Unit not in catalog → empty.
+    assert _expand_ers_port_list("9/ALL", known) == []
 
 
 def test_ers_tag_pvid_only_yields_trunk_no_native():
@@ -437,6 +464,42 @@ def test_edgesw_cisco_trunk_allowed_vlan_all_yields_tagged_all():
     assert info.admin_mode == "trunk"
     assert info.allowed_vlans == "all"
     assert info.native_vlan == 1
+
+
+def test_edgesw_normalise_dedupes_repeated_vids():
+    """
+    Duplicate VIDs in participation/tagging are removed before classification.
+
+    Pins the Copilot P1 fix from PR #391 round-8 review: when an interface
+    block mixes native-syntax and Cisco-style directives (or repeats a
+    VID across multiple include lines), duplicates leak into the
+    derived ``untagged_members`` and the access-path check
+    ``len(untagged_members) != 1`` would incorrectly flip a valid
+    access-on-100 port to routed.
+    """
+    from custom_napalm.ubiquiti_edgeswitch import _normalise_edgesw_membership
+
+    membership = {
+        "participation": [100, 100, 100],  # repeated
+        "tagging": [],
+        "pvid": 100,
+    }
+    participation, tagging, untagged_members = _normalise_edgesw_membership(membership)
+    assert participation == [100]
+    assert tagging == []
+    assert untagged_members == [100]
+
+    # Mixed native + Cisco directives both adding VLAN 100 to participation
+    # plus repeated tagging entries — must dedupe both sides.
+    membership = {
+        "participation": [1, 10, 1, 20, 10],
+        "tagging": [10, 20, 10],
+        "pvid": 1,
+    }
+    participation, tagging, untagged_members = _normalise_edgesw_membership(membership)
+    assert participation == [1, 10, 20]
+    assert tagging == [10, 20]  # PVID 1 stripped + dedupe
+    assert untagged_members == [1]
 
 
 def test_edgesw_cisco_trunk_native_vlan_excluded_from_tagged():

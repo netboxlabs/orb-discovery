@@ -214,10 +214,19 @@ def _ers_aggregate_to_switchport(
     Tagging interpretation (ERS):
       - ``UntagAll``      → access on PVID (port carries only PVID, untagged)
       - ``UntagPvidOnly`` → trunk with native=PVID, tagged=members minus PVID
-      - ``TagAll``        → trunk, no native; tagged=members minus PVID
-                            (PVID is sent tagged, but in NetBox semantics there
-                            is no "untagged" → treat as trunk-no-native; PVID
-                            stays in the tagged list when membership reports it)
+      - ``Hybrid``        → same NetBox-aligned semantics as ``UntagPvidOnly``
+                            (PVID untagged native, others tagged egress)
+      - ``TagAll``        → trunk, no native; tagged=full membership list
+                            (every egress frame is tagged, PVID included —
+                            so PVID stays in the tagged list when reported)
+      - ``TagPvidOnly``   → same NetBox shape as ``TagAll`` (trunk-no-native,
+                            members tagged). ERS allows multiple untagged-egress
+                            VLANs in this mode which 802.1Q forbids and NetBox
+                            can't represent; trunk-no-native is the safest
+                            mapping (Codex P1 #391 round-6).
+      - ``UntagPvidOnly``/``TagAll``/``TagPvidOnly``/``Hybrid`` with empty
+                            membership data → routed (defensive; avoids
+                            clobbering NetBox tagged_vlans via PATCH)
       - anything else (``Disable``, etc.) → routed
     """
     tagging = (port_info.get("tagging") or "").lower()
@@ -314,15 +323,27 @@ def _ers_row_port_tokens(row: dict) -> list[str]:
     return tokens
 
 
-def _expand_ers_port_chunk(part: str) -> list[str]:
-    """Expand a single comma-separated chunk of an ERS port-list."""
-    if not part or part.upper() in ("NONE", "ALL"):
-        return []
-    if "-" not in part:
-        return [part]
+def _expand_ers_wildcard(token: str, known_ports: set[str] | None) -> list[str] | None:
+    """
+    Resolve ``ALL`` / ``<unit>/ALL`` wildcards. Returns None on no match.
+
+    Without ``known_ports`` wildcards always return ``[]`` (back-compat).
+    """
+    upper = token.strip().upper()
+    if upper == "ALL":
+        return sorted(known_ports) if known_ports else []
+    if upper.endswith("/ALL"):
+        if not known_ports:
+            return []
+        prefix = f"{upper[: -len('/ALL')]}/"
+        return sorted(p for p in known_ports if p.startswith(prefix))
+    return None
+
+
+def _expand_ers_dashed_range(part: str) -> list[str]:
+    """Expand a ``lo-hi`` range chunk; returns ``[part]`` on parse failure."""
     lo, _, hi = part.partition("-")
     if "/" in part:
-        # "1/1-1/4" or "1/2-8" — preserve unit prefix from the lo side
         u_lo, _, p_lo = lo.partition("/")
         if "/" in hi:
             u_hi, _, p_hi = hi.partition("/")
@@ -335,33 +356,61 @@ def _expand_ers_port_chunk(part: str) -> list[str]:
             return [f"{u_lo}/{p}" for p in range(int(p_lo), int(hi_port_str) + 1)]
         except ValueError:
             return [part]
-    # bare "2-4"
     try:
         return [str(i) for i in range(int(lo), int(hi) + 1)]
     except ValueError:
         return [part]
 
 
-def _expand_ers_port_list(token: str) -> list[str]:
+def _expand_ers_port_chunk(part: str, known_ports: set[str] | None = None) -> list[str]:
+    """
+    Expand a single comma-separated chunk of an ERS port-list.
+
+    ``known_ports`` is the set of canonical port keys discovered from
+    ``show vlan interface info``. When provided, the chassis-wide ``ALL``
+    keyword expands to every known port and the unit-wide ``<unit>/ALL``
+    form expands to every known port whose token starts with ``<unit>/``.
+    Without it (e.g. unit tests calling the helper directly) wildcards
+    return an empty list, preserving back-compat (Codex P1 #391 round-7).
+    """
+    if not part or part.upper() == "NONE":
+        return []
+    wildcard = _expand_ers_wildcard(part, known_ports)
+    if wildcard is not None:
+        return wildcard
+    if "-" not in part:
+        return [part]
+    return _expand_ers_dashed_range(part)
+
+
+def _expand_ers_port_list(
+    token: str, known_ports: set[str] | None = None,
+) -> list[str]:
     """
     Expand the ``PortMembers`` / ``PID`` value of ``show vlan`` into port tokens.
 
     Accepts comma-separated lists, ``unit/start-unit/end`` ranges (``1/1-1/4``),
-    same-unit ``unit/start-end`` ranges (``1/2-8``), bare-digit ranges, and the
-    literal ``ALL``/``NONE`` keywords.
+    same-unit ``unit/start-end`` ranges (``1/2-8``), bare-digit ranges, the
+    literal ``ALL``/``NONE`` keywords, and the unit-wide ``<unit>/ALL`` form.
 
-    ``ALL`` is intentionally returned as an empty list — emitting an entry per
-    possible port without enumeration would be misleading; the per-port pass via
-    ``show vlan interface info`` already covers PVIDs for those ports.
+    ``ALL`` and ``<unit>/ALL`` resolve against ``known_ports`` (the set of
+    ports discovered by ``show vlan interface info``) when provided —
+    that's the source of truth for what the device actually has, so we
+    never invent fake ports. Without ``known_ports`` (back-compat for
+    direct-call unit tests) wildcards return an empty list.
     """
     if not token:
         return []
     upper = token.strip().upper()
-    if upper in ("NONE", "ALL"):
+    if upper == "NONE":
         return []
+    if upper == "ALL":
+        return sorted(known_ports) if known_ports else []
+    if upper.endswith("/ALL") and "," not in token:
+        return _expand_ers_port_chunk(token.strip(), known_ports)
     ports: list[str] = []
     for part in token.split(","):
-        ports.extend(_expand_ers_port_chunk(part.strip()))
+        ports.extend(_expand_ers_port_chunk(part.strip(), known_ports))
     return ports
 
 
@@ -612,7 +661,7 @@ class ERSDriver(_napalm_base.NetworkDriver):
         if not per_port_info:
             return {}
 
-        per_port_members = self._collect_ers_per_port_membership()
+        per_port_members = self._collect_ers_per_port_membership(set(per_port_info))
 
         result: dict[str, dict] = {}
         for port, info in per_port_info.items():
@@ -621,8 +670,17 @@ class ERSDriver(_napalm_base.NetworkDriver):
             result[port] = classify_switchport(sw)
         return result
 
-    def _collect_ers_per_port_membership(self) -> dict[str, list[int]]:
-        """Invert ``show vlan`` to produce ``{port: [vid, ...]}`` membership."""
+    def _collect_ers_per_port_membership(
+        self, known_ports: set[str],
+    ) -> dict[str, list[int]]:
+        """
+        Invert ``show vlan`` to produce ``{port: [vid, ...]}`` membership.
+
+        ``known_ports`` is the set of ports discovered from
+        ``show vlan interface info`` and acts as the catalog used to
+        expand chassis-wide (``ALL``) and unit-wide (``<unit>/ALL``)
+        wildcards into concrete port keys (Codex P1 #391 round-7).
+        """
         try:
             vlan_raw = self.device.send_command("show vlan")
             parsed = parse_output(
@@ -638,7 +696,7 @@ class ERSDriver(_napalm_base.NetworkDriver):
             if vid is None:
                 continue
             for token in _ers_row_port_tokens(row):
-                for port in _expand_ers_port_list(token):
+                for port in _expand_ers_port_list(token, known_ports):
                     members = per_port_members.setdefault(port, [])
                     if vid not in members:
                         members.append(vid)

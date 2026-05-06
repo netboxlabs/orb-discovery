@@ -439,30 +439,52 @@ def _parse_edgesw_port_membership(config: str) -> dict[str, dict]:
 # Switchport row → SwitchportInfo
 # ---------------------------------------------------------------------------
 
+def _dedupe_keep_order(seq: list[int]) -> list[int]:
+    """Return ``seq`` with duplicates removed while preserving first-seen order."""
+    seen: set[int] = set()
+    out: list[int] = []
+    for v in seq:
+        if v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
+
+
 def _normalise_edgesw_membership(
     membership: dict,
 ) -> tuple[list[int], list[int], list[int]]:
     """
     Normalise a parsed membership dict into ``(participation, tagging, untagged_members)``.
 
-    Cisco-style configs commonly list the native VLAN inside
-    ``switchport trunk allowed vlan ...`` alongside the tagged VLANs. The
-    native is the untagged-egress VLAN by definition, not tagged — so
-    strip the PVID from ``tagging`` before deriving untagged_members.
-    Without this, a config like::
+    Two corrections happen here:
 
-        switchport trunk native vlan 1
-        switchport trunk allowed vlan 1,10,20
+    1. Duplicates in ``participation``/``tagging`` are removed (preserving
+       first-seen order). When both native ``vlan participation include ...``
+       and Cisco-style ``switchport ...`` directives appear in the same
+       interface block — or when multiple include lines repeat a VID —
+       duplicates leak into untagged_members and the access-path check
+       ``len(untagged_members) != 1`` would incorrectly flip a valid
+       access port to routed (Copilot P1 #391 round-8).
+    2. The PVID is stripped from ``tagging`` before deriving
+       ``untagged_members``. Cisco-style configs commonly list the native
+       VLAN inside ``switchport trunk allowed vlan ...`` alongside the
+       tagged VLANs. The native is the untagged-egress VLAN by definition,
+       not tagged — without this, a config like::
 
-    would mark VLAN 1 as tagged, the native lookup would find no untagged
-    member, and the port would misclassify as trunk-no-native (Codex P1
-    #391 round-7).
+           switchport trunk native vlan 1
+           switchport trunk allowed vlan 1,10,20
+
+       would mark VLAN 1 as tagged, the native lookup would find no
+       untagged member, and the port would misclassify as trunk-no-native
+       (Codex P1 #391 round-7).
     """
     pvid = coerce_vid(membership.get("pvid"))
-    participation = [
-        v for v in membership.get("participation", []) if coerce_vid(v) is not None
-    ]
-    tagging = [v for v in membership.get("tagging", []) if coerce_vid(v) is not None]
+    participation = _dedupe_keep_order(
+        [v for v in membership.get("participation", []) if coerce_vid(v) is not None]
+    )
+    tagging = _dedupe_keep_order(
+        [v for v in membership.get("tagging", []) if coerce_vid(v) is not None]
+    )
     if pvid is not None:
         tagging = [v for v in tagging if v != pvid]
     untagged_members = [v for v in participation if v not in tagging]
@@ -494,14 +516,23 @@ def _edgesw_row_to_switchport_info(
       behaviour: don't guess and clobber NetBox via PATCH).
     * ``Trunk``   – tagged VIDs from ``vlan tagging``; native VID is the
       untagged VID present in the membership list (typically VLAN 1 by
-      default), or None when no untagged member exists.
+      default), or None when no untagged member exists. Empty membership
+      data → routed (defensive; avoids clobbering NetBox tagged_vlans).
     * ``General`` – collapsed to trunk: tagged from ``vlan tagging``, native
-      from the (single) untagged VID in the membership list.
+      from the (single) untagged VID in the membership list. Empty
+      participation AND empty tagging → routed.
+    * ``switchport trunk allowed vlan all`` (Cisco-style wildcard) →
+      tagged-all, with native from the untagged member when present.
+    * ``switchport trunk allowed vlan except <vlist>`` → routed
+      (NetBox can't represent "all VLANs except these" without
+      enumerating the chassis).
     * ``Routed`` or anything else → routed.
 
     When membership data is missing (no running-config block for the port),
-    falls back to the PVID from the summary as a best-effort native/access
-    VID. Trunk with no membership data degrades to trunk no native.
+    every mode falls back to routed rather than guessing — apply_interface_vlans()
+    would otherwise PATCH NetBox with a guessed VID and clobber the
+    existing untagged_vlan / tagged_vlans. Mirrors the dell_powerconnect
+    batch-4 tightening from #390.
     """
     del port  # unused; kept for parity with PowerConnect signature
     mode_raw = (summary.get("mode") or "").lower()
