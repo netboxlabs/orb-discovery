@@ -234,6 +234,13 @@ def _make_interface_entry(link_state: str, speed_raw: str, description: str) -> 
 # because it has no colon after ``Port``.
 _PC_PORT_HEADER_RE = re.compile(r"^\s*Port\s*:\s*(\S+)\s*$", re.MULTILINE)
 
+# Membership block reference line, e.g. ``Port gi1/0/1 is member in:``.
+# Matched and skipped explicitly because for port names without slashes
+# (e.g. stacked aliases like ``Te1`` or port-channels like ``Po10``) the
+# generic ``Field: Value`` regex would otherwise match it and pollute
+# the section dict with a spurious key.
+_PC_MEMBERSHIP_REF_RE = re.compile(r"^\s*Port\s+\S+\s+is\s+member\s+in\s*:\s*$")
+
 # ``Field: Value`` lines inside a port section. Restrict the key to start
 # with a letter so VLAN-row lines (``1   default ...``) and the dashes
 # separator do not match.
@@ -272,6 +279,11 @@ def _parse_pc_show_interfaces_switchport(text: str) -> list[dict]:
             }
             continue
         if current is None:
+            continue
+        # Skip the membership block reference line before falling through
+        # to the generic Field: Value regex (which would otherwise match
+        # it for port names without slashes).
+        if _PC_MEMBERSHIP_REF_RE.match(line):
             continue
         # Field: Value lines (Port Mode, Default VLAN, Protected, etc.).
         # Match before the VLAN row regex because both can share leading

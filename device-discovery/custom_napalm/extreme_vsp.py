@@ -519,18 +519,22 @@ class VSPDriver(_napalm_base.NetworkDriver):
         """
         Return per-interface VLAN config from ``show interfaces ... vlan``.
 
-        VOSS splits per-port VLAN config across four speed-specific commands
-        (gigabitethernet, tengigabitethernet, fortygigabitethernet,
-        hundredgigabitethernet); we issue all four and combine the rows.
-        Commands for speeds the device doesn't have return empty/error and
-        are skipped silently.
+        VOSS splits per-port VLAN config across speed-specific commands
+        (gigabitethernet, tengigabitethernet, etc.); this driver issues
+        the same two that ``get_interfaces()`` and ``get_facts()`` use,
+        so VLAN entries always line up with discovered Interface entities.
+        ``apply_interface_vlans()`` skips VLAN data for interfaces that
+        weren't emitted, so the 40/100G variants would be silently
+        dropped — collecting them here would just waste a CLI roundtrip.
+        Extending coverage requires extending interface discovery first.
+
+        Commands for speeds the device doesn't have return empty/error
+        and are skipped silently.
         """
         rows: list[dict] = []
         for cmd in (
             "show interfaces gigabitethernet vlan",
             "show interfaces tengigabitethernet vlan",
-            "show interfaces fortygigabitethernet vlan",
-            "show interfaces hundredgigabitethernet vlan",
         ):
             try:
                 raw = self.device.send_command(cmd)

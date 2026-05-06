@@ -228,6 +228,31 @@ def test_pc_access_with_tagged_falls_back_to_routed():
     assert info.admin_mode is None
 
 
+def test_pc_membership_ref_line_does_not_pollute_row():
+    """
+    Membership reference line must not become a generic Field key.
+
+    For port names without slashes (Te1, Po10, etc.) the generic
+    ``Field: Value`` regex used to match this line and add a spurious
+    ``port_te1_is_member_in`` key to the row dict.
+    """
+    text = (
+        "Port  : Te1\n"
+        "Port Mode: Access\n"
+        "Default VLAN: enabled\n"
+        "\n"
+        "Port Te1 is member in:\n"
+        "Vlan       Name             Egress rule    Type\n"
+        "----     -------------    -----------    ----\n"
+        "100      USERS            Untagged       Static\n"
+    )
+    rows = _parse_pc_show_interfaces_switchport(text)
+    assert rows[0]["interface"] == "Te1"
+    assert rows[0]["untagged"] == [100]
+    # The membership reference line must not have produced a stray key.
+    assert "port_te1_is_member_in" not in rows[0]
+
+
 def test_pc_unnamed_vlan_row_is_captured():
     """Membership rows with a blank Name column still produce a VID."""
     text = (
