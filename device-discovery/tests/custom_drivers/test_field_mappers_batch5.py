@@ -186,6 +186,22 @@ def test_ers_hybrid_yields_trunk_with_native():
     assert info.allowed_vlans == [20, 30]
 
 
+def test_ers_tag_pvid_only_yields_trunk_no_native():
+    """
+    ERS ``TagPvidOnly`` → trunk, no native, all members tagged (same as TagAll).
+
+    Pins the Codex P1 fix from PR #391 round-6 review: ``TagPvidOnly``
+    was recognised by the regex but never handled by the mapper, so
+    valid switchports fell through to routed and were silently dropped.
+    """
+    info = _ers_aggregate_to_switchport(
+        {"pvid": 10, "tagging": "TagPvidOnly"}, [10, 100, 200]
+    )
+    assert info.admin_mode == "trunk"
+    assert info.native_vlan is None
+    assert info.allowed_vlans == [10, 100, 200]
+
+
 def test_ers_intf_info_parser_handles_no_stg_layout():
     """
     Parser handles ``Port FilterUF FilterUR PVID PRI Tagging Name`` layout.

@@ -257,10 +257,16 @@ def _ers_aggregate_to_switchport(
             native_vlan=pvid,
             allowed_vlans=tagged if tagged else None,
         )
-    if tagging == "tagall":
-        # All frames egress tagged including the PVID — no untagged native.
-        # PVID itself remains tagged when the port is a member of that VLAN.
-        # Same membership requirement as UntagPvidOnly: no members → routed.
+    if tagging in ("tagall", "tagpvidonly"):
+        # tagall: every egress frame is tagged, PVID included.
+        # tagpvidonly: PVID frames are tagged on egress, other VLANs egress
+        #   untagged. ERS allows multiple untagged-egress VLANs in this
+        #   mode, which IEEE 802.1Q forbids and NetBox can't represent —
+        #   the safest NetBox-aligned mapping is the same as TagAll
+        #   (trunk, no untagged native, every member VLAN in the tagged
+        #   list). Operators using TagPvidOnly for QinQ-style edge cases
+        #   should expect a trunk-no-native NetBox shape, not access.
+        # Both modes need membership data; without it → routed.
         if not members:
             return SwitchportInfo(
                 enabled=False,
