@@ -309,18 +309,15 @@ def _ers_row_port_tokens(row: dict) -> list[str]:
     """
     Return the raw port-list tokens from a parsed ``show vlan`` row.
 
-    Newer firmware emits a ``PID`` column inline (``vlan_pid``); older firmware
-    emits a ``Port Members:`` continuation line captured into the List value
-    ``vlan_port_members``. We process both — duplicates are de-duplicated by the
-    caller's per-VLAN membership-set.
+    The ntc-template's ``vlan_port_members`` (List) field holds the
+    actual port-member tokens, captured from the ``Port Members:``
+    continuation line. The ``vlan_pid`` field is the **Protocol ID**
+    column (a hex value like ``0x0000``) — explicitly NOT a port
+    identifier despite the misleading name. (Copilot review #391
+    round-10: the previous implementation treated ``vlan_pid`` as a
+    port token, polluting the per-port aggregate with bogus entries.)
     """
-    tokens: list[str] = []
-    pid = row.get("vlan_pid", "")
-    if pid:
-        tokens.append(str(pid))
-    for member in row.get("vlan_port_members", []) or []:
-        tokens.append(str(member))
-    return tokens
+    return [str(member) for member in (row.get("vlan_port_members", []) or [])]
 
 
 def _expand_ers_wildcard(token: str, known_ports: set[str] | None) -> list[str] | None:

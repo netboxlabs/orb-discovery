@@ -693,8 +693,13 @@ class NetIronDriver(_napalm_base.NetworkDriver):
             logger.debug("NetIron show interfaces failed for canonical map", exc_info=True)
             return {}
         # Speed-prefixed Ethernet: prefix may start with digits (10/40/100/400),
-        # so allow optional leading digits.
-        ethernet_re = re.compile(r"^(\d*[A-Za-z]+Ethernet)(\d+/\d+(?::\d+)?)$")
+        # so allow optional leading digits. Suffix is either ``slot/port[:N]``
+        # (chassis platforms) OR a bare numeric ID (CES form, e.g.
+        # ``GigabitEthernet1`` — paired with the bare-digit support in
+        # ``_netiron_split_port_list`` for CES running-config output).
+        ethernet_re = re.compile(
+            r"^(\d*[A-Za-z]+Ethernet)(\d+(?:/\d+(?::\d+)?)?)$"
+        )
         # Named non-Ethernet: alpha-prefixed name with a single numeric suffix
         # (e.g. Ve2, Lag5, Loopback1, Tunnel10).
         named_re = re.compile(r"^([A-Za-z]+)(\d+)$")

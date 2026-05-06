@@ -328,13 +328,27 @@ def _apply_sp_trunk_allowed(entry: dict, op: str, spec: str) -> None:
       an ``allowed_except`` flag that the row mapper translates to a
       conservative routed fallback (don't guess and clobber NetBox).
     * ``all`` keyword (in spec, no op) → wildcard → mode=tagged-all.
+
+    When ``all`` has previously been set on the same port AND a subsequent
+    ``add`` / ``remove`` directive arrives, the effective allowed set is
+    "all VLANs ± some" — unrepresentable in NetBox's allowed-VLAN list
+    without enumerating the chassis. Promote to the same ``allowed_except``
+    routed fallback the explicit ``except`` keyword takes (Copilot
+    review #391 round-10).
     """
     op = (op or "").strip().lower()
     if op == "except":
         entry["allowed_except"] = True
+        entry["allowed_all"] = False
         return
     if spec.strip().lower() == "all":
         entry["allowed_all"] = True
+        return
+    if entry.get("allowed_all"):
+        # Earlier directive set the wildcard; this add/remove makes the
+        # final set unrepresentable. Fall back to the "except" routed path.
+        entry["allowed_except"] = True
+        entry["allowed_all"] = False
         return
     if op == "remove":
         _trunk_allowed_remove(entry, spec)

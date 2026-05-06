@@ -119,6 +119,42 @@ def test_netiron_canonical_map_handles_digit_leading_prefix_and_named_types():
     assert cmap.get("loopback1") == "Loopback1"
 
 
+def test_netiron_canonical_map_handles_bare_digit_ces_form():
+    r"""
+    Bare-digit Ethernet IDs (CES form) enter the canonical map.
+
+    Pins the Codex P1 fix from PR #391 round-10 review: CES platforms
+    emit canonical names with no slot/port slash (e.g.
+    ``GigabitEthernet1`` for unit 1 port 1). The previous regex
+    required ``\d+/\d+`` and rejected bare-numeric suffixes,
+    leaving those ports in the bare-key fallback path and dropping
+    VLAN updates via apply_interface_vlans().
+    """
+    from custom_napalm.brocade_netiron import NetIronDriver
+
+    fake = type(
+        "F",
+        (),
+        {
+            "send_command": lambda self, cmd: (
+                "GigabitEthernet1 is up, line protocol is up\n"
+                "  Hardware is GigabitEthernet, address is 0024.38a5.1c00 (bia 0024.38a5.1c00)\n"
+                "GigabitEthernet11 is up, line protocol is up\n"
+                "  Hardware is GigabitEthernet, address is 0024.38a5.1c01 (bia 0024.38a5.1c01)\n"
+                "10GigabitEthernet3 is up, line protocol is up\n"
+                "  Hardware is 10GigabitEthernet, address is 0024.38a5.1c02 (bia 0024.38a5.1c02)\n"
+            ),
+        },
+    )()
+    driver = object.__new__(NetIronDriver)
+    driver.device = fake
+    cmap = driver._netiron_canonical_name_map()
+    # CES bare-digit suffixes match the ethernet branch (not the named branch).
+    assert cmap.get("1") == "GigabitEthernet1"
+    assert cmap.get("11") == "GigabitEthernet11"
+    assert cmap.get("3") == "10GigabitEthernet3"
+
+
 def test_netiron_aggregate_multiple_untagged_yields_routed():
     """Multi-untagged (anomalous; 802.1Q forbids) → routed, not access-on-last."""
     info = _netiron_aggregate_to_switchport({"untagged": [10, 20], "tagged": []})
@@ -185,6 +221,26 @@ def test_ers_hybrid_yields_trunk_with_native():
     assert info.admin_mode == "trunk"
     assert info.native_vlan == 10
     assert info.allowed_vlans == [20, 30]
+
+
+def test_ers_row_port_tokens_ignores_protocol_id():
+    """
+    ``vlan_pid`` is a Protocol-ID hex string, not a port token.
+
+    Pins the Copilot fix from PR #391 round-10 review: the ntc-template's
+    ``vlan_pid`` field captures the ``PID`` column from ``show vlan``
+    (a value like ``0x0000``), not a port identifier. The previous
+    parser appended it to the port-token list, polluting the per-port
+    aggregate. Only ``vlan_port_members`` should be returned.
+    """
+    from custom_napalm.avaya_ers import _ers_row_port_tokens
+
+    row = {
+        "vlan_id": "10",
+        "vlan_pid": "0x0000",                # NOT a port — Protocol ID
+        "vlan_port_members": ["1/1", "1/2"],  # actual ports
+    }
+    assert _ers_row_port_tokens(row) == ["1/1", "1/2"]
 
 
 def test_ers_expand_port_list_wildcards():
@@ -581,6 +637,47 @@ def test_edgesw_cisco_trunk_native_vlan_excluded_from_tagged():
     assert info.admin_mode == "trunk"
     assert info.native_vlan == 1
     assert info.allowed_vlans == [10, 20]
+
+
+def test_edgesw_allowed_all_then_remove_falls_back_to_routed():
+    """
+    ``allowed vlan all`` followed by ``allowed vlan remove`` → routed.
+
+    Pins the Copilot fix from PR #391 round-10 review: the operator's
+    intent is "all VLANs except <vlist>" — unrepresentable in NetBox's
+    allowed_vlans list without enumerating the chassis, so the row
+    mapper falls back to routed (matches the explicit ``except``
+    keyword path) rather than silently emitting tagged-all and
+    clobbering NetBox via PATCH.
+    """
+    config = (
+        "interface 0/12\n"
+        " switchport mode trunk\n"
+        " switchport trunk allowed vlan all\n"
+        " switchport trunk allowed vlan remove 10\n"
+        "!\n"
+    )
+    membership = _parse_edgesw_port_membership(config)["0/12"]
+    assert membership["allowed_all"] is False
+    assert membership["allowed_except"] is True
+    info = _edgesw_row_to_switchport_info(
+        "0/12", {"mode": "trunk", "pvid": 1}, membership,
+    )
+    assert info.enabled is False
+    assert info.admin_mode is None
+
+
+def test_edgesw_allowed_all_then_add_falls_back_to_routed():
+    """``allowed vlan all`` + add → routed (same all-±-some logic)."""
+    config = (
+        "interface 0/13\n"
+        " switchport mode trunk\n"
+        " switchport trunk allowed vlan all\n"
+        " switchport trunk allowed vlan add 50\n"
+        "!\n"
+    )
+    membership = _parse_edgesw_port_membership(config)["0/13"]
+    assert membership["allowed_except"] is True
 
 
 def test_edgesw_cisco_trunk_allowed_remove_drops_vids():
