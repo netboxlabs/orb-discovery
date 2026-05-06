@@ -234,6 +234,21 @@ def _ers_aggregate_to_switchport(
     members = [v for v in member_vids if coerce_vid(v) is not None]
 
     if tagging == "untagall":
+        # Access on PVID requires a valid PVID. ``coerce_vid`` returns None
+        # for missing or out-of-range (1..4094) values — emitting
+        # ``access_vlan=None`` would clobber the existing NetBox
+        # untagged_vlan via PATCH, so fall back to routed defensively.
+        # (Copilot P1 #391 round-11; matches the dell_powerconnect /
+        # batch-4 tightening pattern.)
+        if pvid is None:
+            return SwitchportInfo(
+                enabled=False,
+                admin_mode=None,
+                oper_mode=None,
+                access_vlan=None,
+                native_vlan=None,
+                allowed_vlans=None,
+            )
         return SwitchportInfo(
             enabled=True,
             admin_mode="access",

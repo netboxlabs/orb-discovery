@@ -321,6 +321,29 @@ def test_ers_intf_info_parser_handles_no_stg_layout():
     assert out["13"]["tagging"].lower() == "hybrid"
 
 
+def test_ers_untag_all_with_invalid_pvid_yields_routed():
+    """
+    ``UntagAll`` with missing/out-of-range PVID → routed (defensive).
+
+    Pins the Copilot P1 fix from PR #391 round-11 review: emitting
+    ``access_vlan=None`` would clobber the existing NetBox untagged_vlan
+    via PATCH. ``coerce_vid`` returns None for non-numeric values (e.g.
+    parse errors), missing values, and out-of-range VIDs (≤0 or >4094) —
+    all of which now route instead of producing a no-VID access entry.
+    """
+    info = _ers_aggregate_to_switchport(
+        {"pvid": None, "tagging": "UntagAll"}, []
+    )
+    assert info.enabled is False
+    assert info.admin_mode is None
+
+    # Out-of-range PVID also routes.
+    info = _ers_aggregate_to_switchport(
+        {"pvid": 5000, "tagging": "UntagAll"}, []
+    )
+    assert info.enabled is False
+
+
 def test_ers_trunk_modes_with_no_membership_yield_routed():
     """UntagPvidOnly / TagAll trunks need membership data; empty → routed."""
     for mode in ("UntagPvidOnly", "TagAll"):
@@ -738,16 +761,48 @@ def test_edgesw_membership_parser_normalises_single_token_lag():
     assert out["lag1"]["participation"] == [100]
 
 
-def test_edgesw_access_no_membership_yields_routed():
+def test_edgesw_access_no_membership_trusts_summary_pvid():
     """
-    Access mode with no participation/tagging data → routed (no PVID fallback).
+    Access mode with no membership block → emit access on summary PVID.
 
-    This pins the post-codex-review behaviour: the previous PVID-only fallback
-    was removed because it could clobber NetBox's existing untagged_vlan when
-    the running-config wasn't fetched.
+    EdgeSwitch's ``show running-config`` omits default-config interfaces,
+    so the summary's PVID is the only signal we have for those ports.
+    Trust it for Access mode (Codex P2 #391 round-11) — the summary is
+    authoritative for mode + PVID. This restores the round-1-removed
+    fallback only on the path where membership is unambiguously absent.
     """
     summary = {"mode": "access", "pvid": 100}
     info = _edgesw_row_to_switchport_info("0/9", summary, None)
+    assert info.admin_mode == "access"
+    assert info.access_vlan == 100
+
+
+def test_edgesw_access_no_membership_no_pvid_yields_routed():
+    """Access mode with neither membership nor a valid summary PVID → routed."""
+    info = _edgesw_row_to_switchport_info(
+        "0/9", {"mode": "access", "pvid": None}, None,
+    )
+    assert info.enabled is False
+    assert info.admin_mode is None
+
+
+def test_edgesw_trunk_multi_untagged_yields_routed():
+    """
+    Trunk with >1 untagged member → routed (anomalous; 802.1Q forbids).
+
+    Pins the Copilot P1 fix from PR #391 round-11 review: trunk previously
+    silently picked ``untagged_members[0]`` and dropped the rest, which
+    can produce a wrong native VID and clobber NetBox via PATCH. Mirrors
+    the multi-untagged routing in netiron / slx / unifiswitch /
+    dell_powerconnect.
+    """
+    summary = {"mode": "trunk", "pvid": 1}
+    membership = {
+        "participation": [10, 20, 30],
+        "tagging": [],  # nothing tagged → both 10 and 20 are untagged
+        "pvid": None,
+    }
+    info = _edgesw_row_to_switchport_info("0/15", summary, membership)
     assert info.enabled is False
     assert info.admin_mode is None
 

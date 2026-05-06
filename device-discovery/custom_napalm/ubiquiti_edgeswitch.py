@@ -548,27 +548,30 @@ def _edgesw_row_to_switchport_info(
     Mode mapping:
 
     * ``Access``  – exactly one untagged VID (PVID), no tagged. Multiple or
-      missing untagged VIDs → routed (mirrors PowerConnect's defensive
-      behaviour: don't guess and clobber NetBox via PATCH).
+      mismatched untagged VIDs in the membership block → routed. When the
+      running-config omits the port entirely (default-config ports — common
+      on EdgeSwitch since ``show running-config`` only emits configured
+      interfaces) we trust the summary PVID and emit access on that VID.
     * ``Trunk``   – tagged VIDs from ``vlan tagging``; native VID is the
-      untagged VID present in the membership list (typically VLAN 1 by
-      default), or None when no untagged member exists. Empty membership
-      data → routed (defensive; avoids clobbering NetBox tagged_vlans).
-    * ``General`` – collapsed to trunk: tagged from ``vlan tagging``, native
-      from the (single) untagged VID in the membership list. Empty
-      participation AND empty tagging → routed.
+      single untagged VID present in the membership list, or None when no
+      untagged member exists. Empty membership data → routed; multiple
+      untagged members → routed (defensive against NetBox PATCH clobber).
+    * ``General`` – collapsed to trunk: same multi-untagged-routes guard
+      as ``Trunk``. Empty participation AND empty tagging → routed.
     * ``switchport trunk allowed vlan all`` (Cisco-style wildcard) →
       tagged-all, with native from the untagged member when present.
+      A subsequent ``add``/``remove`` after ``all`` flips to the same
+      ``allowed_except`` routed fallback below.
     * ``switchport trunk allowed vlan except <vlist>`` → routed
       (NetBox can't represent "all VLANs except these" without
       enumerating the chassis).
     * ``Routed`` or anything else → routed.
 
-    When membership data is missing (no running-config block for the port),
-    every mode falls back to routed rather than guessing — apply_interface_vlans()
-    would otherwise PATCH NetBox with a guessed VID and clobber the
-    existing untagged_vlan / tagged_vlans. Mirrors the dell_powerconnect
-    batch-4 tightening from #390.
+    Defensive guards mirror the dell_powerconnect batch-4 tightening from
+    #390: when the membership shape disagrees with the declared mode,
+    ``apply_interface_vlans()`` would otherwise PATCH NetBox with a
+    guessed VID and clobber the existing untagged_vlan / tagged_vlans,
+    so we route instead.
     """
     del port  # unused; kept for parity with PowerConnect signature
     mode_raw = (summary.get("mode") or "").lower()
@@ -599,55 +602,105 @@ def _edgesw_row_to_switchport_info(
             allowed_vlans="all",
         )
 
+    pvid_summary = coerce_vid(summary.get("pvid"))
+
     if mode_raw == "access":
-        # Access ports must have exactly one untagged member with no tagging.
-        # Mirrors the dell_powerconnect batch-4 tightening (PR #390): anything
-        # else (no membership, multiple untagged, or unexpected tagging) falls
-        # back to routed so apply_interface_vlans() doesn't PATCH NetBox with
-        # a guessed VID and clobber the existing untagged_vlan.
+        return _edgesw_access(participation, tagging, untagged_members, pvid_summary)
+    if mode_raw == "trunk":
+        return _edgesw_trunk(participation, tagging, untagged_members)
+    if mode_raw == "general":
+        return _edgesw_general(tagging, untagged_members)
+    return _edgesw_routed()
+
+
+def _edgesw_access(
+    participation: list[int],
+    tagging: list[int],
+    untagged_members: list[int],
+    pvid_summary: int | None,
+) -> SwitchportInfo:
+    """
+    Map an EdgeSwitch Access-mode port to ``SwitchportInfo``.
+
+    Access classification requires unambiguous shape. Two paths:
+
+    1. Membership block present (running-config has the port): require
+       exactly one untagged VID and no tagged. Anything else → routed.
+    2. Membership block absent (default-config port — EdgeSwitch's
+       ``show running-config`` only emits configured interfaces, so
+       default ports show up in the switchport summary but have no
+       running-config block): trust the summary PVID. The summary is
+       authoritative for mode + PVID, so emitting access on PVID is
+       safer here than dropping the entry (Codex P2 #391 round-11).
+    """
+    if participation or tagging:
         if len(untagged_members) != 1 or tagging:
             return _edgesw_routed()
-        return SwitchportInfo(
-            enabled=True,
-            admin_mode="access",
-            oper_mode="access",
-            access_vlan=untagged_members[0],
-            native_vlan=None,
-            allowed_vlans=None,
-        )
+        access_vid = untagged_members[0]
+    elif pvid_summary is not None:
+        access_vid = pvid_summary
+    else:
+        return _edgesw_routed()
+    return SwitchportInfo(
+        enabled=True,
+        admin_mode="access",
+        oper_mode="access",
+        access_vlan=access_vid,
+        native_vlan=None,
+        allowed_vlans=None,
+    )
 
-    if mode_raw == "trunk":
-        # Trunk: require explicit membership data. If neither participation
-        # nor tagging directives were captured, fall back to routed rather
-        # than emit an empty trunk that would clobber NetBox's tagged_vlans.
-        if not participation and not tagging:
-            return _edgesw_routed()
-        native_vid: int | None = untagged_members[0] if untagged_members else None
-        return SwitchportInfo(
-            enabled=True,
-            admin_mode="trunk",
-            oper_mode="trunk",
-            access_vlan=None,
-            native_vlan=native_vid,
-            allowed_vlans=tagging if tagging else None,
-        )
 
-    if mode_raw == "general":
-        # General mode: collapse to trunk. Native = untagged member;
-        # tagged = explicit tagging list.
-        native_vid = untagged_members[0] if untagged_members else None
-        if native_vid is None and not tagging:
-            return _edgesw_routed()
-        return SwitchportInfo(
-            enabled=True,
-            admin_mode="trunk",
-            oper_mode="trunk",
-            access_vlan=None,
-            native_vlan=native_vid,
-            allowed_vlans=tagging if tagging else None,
-        )
+def _edgesw_trunk(
+    participation: list[int],
+    tagging: list[int],
+    untagged_members: list[int],
+) -> SwitchportInfo:
+    """
+    Trunk: require explicit membership data, single untagged native.
 
-    return _edgesw_routed()
+    Empty membership data → routed (would clobber NetBox tagged_vlans).
+    Multiple untagged VLANs is unrepresentable on a NetBox trunk → routed
+    (Copilot P1 #391 round-11; matches multi-untagged routing in
+    netiron/slx/unifiswitch/dell_powerconnect).
+    """
+    if not participation and not tagging:
+        return _edgesw_routed()
+    if len(untagged_members) > 1:
+        return _edgesw_routed()
+    native_vid = untagged_members[0] if untagged_members else None
+    return SwitchportInfo(
+        enabled=True,
+        admin_mode="trunk",
+        oper_mode="trunk",
+        access_vlan=None,
+        native_vlan=native_vid,
+        allowed_vlans=tagging if tagging else None,
+    )
+
+
+def _edgesw_general(
+    tagging: list[int], untagged_members: list[int],
+) -> SwitchportInfo:
+    """
+    General mode collapses to trunk with the same multi-untagged routing.
+
+    Native = single untagged member; tagged = explicit tagging list.
+    No untagged member AND no tagging → routed (no signal to act on).
+    """
+    if len(untagged_members) > 1:
+        return _edgesw_routed()
+    native_vid = untagged_members[0] if untagged_members else None
+    if native_vid is None and not tagging:
+        return _edgesw_routed()
+    return SwitchportInfo(
+        enabled=True,
+        admin_mode="trunk",
+        oper_mode="trunk",
+        access_vlan=None,
+        native_vlan=native_vid,
+        allowed_vlans=tagging if tagging else None,
+    )
 
 
 class EdgeSwitchDriver(_napalm_base.NetworkDriver):
