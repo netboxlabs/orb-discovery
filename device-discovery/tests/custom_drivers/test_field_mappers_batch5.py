@@ -502,6 +502,59 @@ def test_edgesw_normalise_dedupes_repeated_vids():
     assert untagged_members == [1]
 
 
+def test_edgesw_native_vlan_participation_exclude_drops_vid():
+    """
+    ``vlan participation exclude <vlist>`` removes VIDs from membership.
+
+    Pins the Copilot P1 fix from PR #391 round-9 review: native-syntax
+    EdgeSwitch configs use ``vlan participation exclude`` to remove a
+    VLAN that was implicitly or explicitly included earlier in the same
+    block. Without this directive being parsed, an access port with
+    ``include 100`` + ``exclude 1`` (where 1 was somehow added) would
+    retain VLAN 1 in participation and flip to routed via the
+    ``len(untagged_members) != 1`` access guard.
+    """
+    config = (
+        "interface 0/11\n"
+        " vlan participation include 1,100\n"
+        " vlan participation exclude 1\n"
+        " vlan tagging 100\n"
+        " vlan pvid 100\n"
+        "!\n"
+    )
+    out = _parse_edgesw_port_membership(config)
+    # VLAN 1 must be removed from participation (and from tagging if
+    # present, though this fixture only adds it to participation).
+    assert out["0/11"]["participation"] == [100]
+    assert out["0/11"]["tagging"] == [100]
+
+
+def test_edgesw_trunk_allowed_remove_purges_duplicates():
+    """
+    ``switchport trunk allowed vlan remove X`` purges every occurrence of X.
+
+    Pins the Codex P2 fix from PR #391 round-9 review: the previous
+    `list.remove(vid)` call only removed the first occurrence, so
+    duplicate entries (which can appear when native + Cisco-style
+    directives both reference the same VID) survived and falsely
+    kept the VLAN present after an explicit `remove`.
+    """
+    from custom_napalm.ubiquiti_edgeswitch import _trunk_allowed_remove
+
+    entry = {
+        "participation": [1, 10, 20, 10],  # duplicate 10
+        "tagging": [10, 20, 10],
+        "pvid": 1,
+        "allowed_all": False,
+        "allowed_except": False,
+    }
+    _trunk_allowed_remove(entry, "10")
+    assert 10 not in entry["participation"]
+    assert 10 not in entry["tagging"]
+    assert entry["participation"] == [1, 20]
+    assert entry["tagging"] == [20]
+
+
 def test_edgesw_cisco_trunk_native_vlan_excluded_from_tagged():
     """
     Native VLAN listed in ``switchport trunk allowed vlan`` stays untagged.

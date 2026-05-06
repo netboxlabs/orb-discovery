@@ -219,6 +219,7 @@ def _parse_edgesw_switchport_summary(text: str) -> dict[str, dict]:
 _ES_INTF_BLOCK_RE = re.compile(r"^interface\s+(.+?)\s*$")
 _ES_VLAN_PVID_RE = re.compile(r"^vlan\s+pvid\s+(\d+)\s*$")
 _ES_VLAN_PART_RE = re.compile(r"^vlan\s+participation\s+include\s+(.+)$")
+_ES_VLAN_PART_EXCLUDE_RE = re.compile(r"^vlan\s+participation\s+exclude\s+(.+)$")
 _ES_VLAN_TAG_RE = re.compile(r"^vlan\s+tagging\s+(.+)$")
 
 # Cisco-style ``switchport ...`` directives. EdgeSwitch (Broadcom-fastpath)
@@ -250,6 +251,16 @@ def _apply_native_vlan_directive(entry: dict, line: str) -> bool:
             int(v) for v in _expand_vlan_tokens(m.group(1))
         )
         return True
+    m = _ES_VLAN_PART_EXCLUDE_RE.match(line)
+    if m:
+        # ``vlan participation exclude <vlist>`` removes the VIDs from
+        # both participation and tagging (an excluded VLAN is by
+        # definition not a member, regardless of any earlier include
+        # or tagging directive in the same block).
+        excluded = {int(v) for v in _expand_vlan_tokens(m.group(1))}
+        entry["participation"] = [v for v in entry["participation"] if v not in excluded]
+        entry["tagging"] = [v for v in entry["tagging"] if v not in excluded]
+        return True
     m = _ES_VLAN_TAG_RE.match(line)
     if m:
         entry["tagging"].extend(
@@ -271,16 +282,27 @@ def _apply_sp_pvid_setter(entry: dict, vid_str: str) -> None:
 
 
 def _trunk_allowed_remove(entry: dict, spec: str) -> None:
-    """Drop each parsed VID from tagging + participation if present."""
+    """
+    Drop every occurrence of each parsed VID from tagging + participation.
+
+    Uses list-comprehension filtering rather than ``list.remove`` so that
+    duplicate entries (which can survive in the parsed dict when an
+    interface block mixes native and Cisco-style directives or repeats
+    a VID across includes) are all purged. ``list.remove`` would only
+    drop the first occurrence and leave the rest behind, falsely
+    keeping the VLAN present after an explicit ``remove`` directive
+    (Codex P2 #391 round-9).
+    """
+    excluded: set[int] = set()
     for v in _expand_vlan_tokens(spec):
         try:
-            vid = int(v)
+            excluded.add(int(v))
         except ValueError:
             continue
-        if vid in entry["tagging"]:
-            entry["tagging"].remove(vid)
-        if vid in entry["participation"]:
-            entry["participation"].remove(vid)
+    if not excluded:
+        return
+    entry["tagging"] = [v for v in entry["tagging"] if v not in excluded]
+    entry["participation"] = [v for v in entry["participation"] if v not in excluded]
 
 
 def _trunk_allowed_add(entry: dict, spec: str) -> None:

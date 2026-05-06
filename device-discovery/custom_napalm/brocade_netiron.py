@@ -641,7 +641,9 @@ class NetIronDriver(_napalm_base.NetworkDriver):
         Bare port IDs from the running-config (``1/1``, ``3/4``) are
         canonicalised to the same speed-prefixed form ``get_interfaces()``
         emits (``GigabitEthernet1/1``, ``10GigabitEthernet3/4``) using a
-        port→speed lookup from ``show interfaces brief`` — without this
+        bare-id → canonical lookup built from ``show interfaces`` (each
+        block is headed by a canonical name like ``GigabitEthernet1/1``)
+        in :meth:`_netiron_canonical_name_map` — without this
         ``apply_interface_vlans()`` would silently drop every entry due to
         exact-name mismatch with the discovered Interface entities.
         """
