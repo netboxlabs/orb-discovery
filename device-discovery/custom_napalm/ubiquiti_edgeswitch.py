@@ -18,6 +18,8 @@ from napalm.base import models
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
+from custom_napalm._vlan import SwitchportInfo, classify_switchport, coerce_vid
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -156,6 +158,230 @@ def _parse_vlan_members(config: str) -> dict[str, list[str]]:
                 for vid in _expand_vlan_tokens(m_vlan.group(1)):
                     result.setdefault(vid, []).append(current_intf)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Switchport summary parsing — 'show interfaces switchport'
+# ---------------------------------------------------------------------------
+
+# Summary table row from EdgeSwitch ``show interfaces switchport``::
+#
+#                                       Acceptable Ingress     Default
+#   Interface     Mode         PVID     Frame Types Filtering  Priority
+#   ------------- ------------ -------- ----------- ---------- ----------
+#   0/1           Access       100      Admit All   Disabled   0
+#   0/2           General      10       Admit All   Disabled   0
+#   0/3           Trunk        1        VLAN Only   Enabled    0
+#
+# Slot/port style is ``<unit>/<port>``; LAG/port-channel rows like ``lag1`` or
+# ``3/1`` are accepted by the broader ``\S+`` interface match. The mode column
+# anchors against ``Access|Trunk|General|Routed`` (case-insensitive) so the
+# header and dashes separator never match.
+_ES_SWITCHPORT_ROW_RE = re.compile(
+    r"^\s*(?P<intf>\S+)\s+"
+    r"(?P<mode>Access|Trunk|General|Routed)\s+"
+    r"(?P<pvid>\d+)\s+",
+    re.IGNORECASE,
+)
+
+
+def _parse_edgesw_switchport_summary(text: str) -> dict[str, dict]:
+    """
+    Parse 'show interfaces switchport' summary → ``{port: {mode, pvid}}``.
+
+    Lines that don't match the row regex (header, dashes, blanks) are
+    silently ignored so future column changes degrade gracefully.
+    """
+    out: dict[str, dict] = {}
+    for line in text.splitlines():
+        m = _ES_SWITCHPORT_ROW_RE.match(line)
+        if not m:
+            continue
+        try:
+            pvid = int(m.group("pvid"))
+        except ValueError:
+            continue
+        out[m.group("intf")] = {
+            "mode": m.group("mode").lower(),
+            "pvid": pvid,
+        }
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Per-port VLAN membership (from running-config)
+# ---------------------------------------------------------------------------
+
+# Match physical/LAG interface blocks; skip ``interface vlan <id>`` SVIs.
+_ES_INTF_BLOCK_RE = re.compile(r"^interface\s+(\S+(?:/\S+)?)\s*$")
+_ES_VLAN_PVID_RE = re.compile(r"^vlan\s+pvid\s+(\d+)\s*$")
+_ES_VLAN_PART_RE = re.compile(r"^vlan\s+participation\s+include\s+(.+)$")
+_ES_VLAN_TAG_RE = re.compile(r"^vlan\s+tagging\s+(.+)$")
+
+
+def _apply_membership_directive(entry: dict, line: str) -> None:
+    """Update ``entry`` with one ``vlan ...`` directive parsed from *line*."""
+    m = _ES_VLAN_PVID_RE.match(line)
+    if m:
+        try:
+            entry["pvid"] = int(m.group(1))
+        except ValueError:
+            pass
+        return
+    m = _ES_VLAN_PART_RE.match(line)
+    if m:
+        entry["participation"].extend(
+            int(v) for v in _expand_vlan_tokens(m.group(1))
+        )
+        return
+    m = _ES_VLAN_TAG_RE.match(line)
+    if m:
+        entry["tagging"].extend(
+            int(v) for v in _expand_vlan_tokens(m.group(1))
+        )
+
+
+def _parse_edgesw_port_membership(config: str) -> dict[str, dict]:
+    """
+    Parse running-config interface blocks for per-port VLAN membership.
+
+    Returns ``{port: {"participation": [vid,...], "tagging": [vid,...], "pvid": int|None}}``.
+
+    EdgeSwitch (Broadcom-fastpath) per-interface VLAN config::
+
+        interface 0/1
+         vlan pvid 100
+         vlan participation include 1,100
+         vlan tagging 100
+        !
+
+    ``vlan participation include`` lists every VLAN the port is a member of;
+    ``vlan tagging`` lists which of those are tagged egress (the rest are
+    untagged egress). ``vlan pvid`` overrides the default ingress PVID
+    (default 1 when absent).
+    """
+    out: dict[str, dict] = {}
+    current: str | None = None
+    for raw_line in config.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if stripped == "!":
+            current = None
+            continue
+        m = _ES_INTF_BLOCK_RE.match(stripped)
+        if m:
+            name = m.group(1).strip()
+            # Skip SVIs (``interface vlan 1``); only physical/LAG ports
+            # carry VLAN membership configuration.
+            if name.lower().startswith("vlan"):
+                current = None
+                continue
+            current = name
+            out.setdefault(current, {"participation": [], "tagging": [], "pvid": None})
+            continue
+        if current is None:
+            continue
+        _apply_membership_directive(out[current], stripped)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Switchport row → SwitchportInfo
+# ---------------------------------------------------------------------------
+
+def _edgesw_routed() -> SwitchportInfo:
+    """SwitchportInfo for a routed/unknown port."""
+    return SwitchportInfo(
+        enabled=False,
+        admin_mode=None,
+        oper_mode=None,
+        access_vlan=None,
+        native_vlan=None,
+        allowed_vlans=None,
+    )
+
+
+def _edgesw_row_to_switchport_info(
+    port: str, summary: dict, membership: dict | None
+) -> SwitchportInfo:
+    """
+    Map per-port summary + membership into a SwitchportInfo.
+
+    Mode mapping:
+
+    * ``Access``  – exactly one untagged VID (PVID), no tagged. Multiple or
+      missing untagged VIDs → routed (mirrors PowerConnect's defensive
+      behaviour: don't guess and clobber NetBox via PATCH).
+    * ``Trunk``   – tagged VIDs from ``vlan tagging``; native VID is the
+      untagged VID present in the membership list (typically VLAN 1 by
+      default), or None when no untagged member exists.
+    * ``General`` – collapsed to trunk: tagged from ``vlan tagging``, native
+      from the (single) untagged VID in the membership list.
+    * ``Routed`` or anything else → routed.
+
+    When membership data is missing (no running-config block for the port),
+    falls back to the PVID from the summary as a best-effort native/access
+    VID. Trunk with no membership data degrades to trunk no native.
+    """
+    del port  # unused; kept for parity with PowerConnect signature
+    mode_raw = (summary.get("mode") or "").lower()
+
+    if membership is None:
+        membership = {"participation": [], "tagging": [], "pvid": None}
+    participation = [v for v in membership.get("participation", []) if coerce_vid(v) is not None]
+    tagging = [v for v in membership.get("tagging", []) if coerce_vid(v) is not None]
+    untagged_members = [v for v in participation if v not in tagging]
+
+    if mode_raw == "access":
+        # Access ports must have exactly one untagged member with no tagging.
+        # Mirrors the dell_powerconnect batch-4 tightening (PR #390): anything
+        # else (no membership, multiple untagged, or unexpected tagging) falls
+        # back to routed so apply_interface_vlans() doesn't PATCH NetBox with
+        # a guessed VID and clobber the existing untagged_vlan.
+        if len(untagged_members) != 1 or tagging:
+            return _edgesw_routed()
+        return SwitchportInfo(
+            enabled=True,
+            admin_mode="access",
+            oper_mode="access",
+            access_vlan=untagged_members[0],
+            native_vlan=None,
+            allowed_vlans=None,
+        )
+
+    if mode_raw == "trunk":
+        # Trunk: require explicit membership data. If neither participation
+        # nor tagging directives were captured, fall back to routed rather
+        # than emit an empty trunk that would clobber NetBox's tagged_vlans.
+        if not participation and not tagging:
+            return _edgesw_routed()
+        native_vid: int | None = untagged_members[0] if untagged_members else None
+        return SwitchportInfo(
+            enabled=True,
+            admin_mode="trunk",
+            oper_mode="trunk",
+            access_vlan=None,
+            native_vlan=native_vid,
+            allowed_vlans=tagging if tagging else None,
+        )
+
+    if mode_raw == "general":
+        # General mode: collapse to trunk. Native = untagged member;
+        # tagged = explicit tagging list.
+        native_vid = untagged_members[0] if untagged_members else None
+        if native_vid is None and not tagging:
+            return _edgesw_routed()
+        return SwitchportInfo(
+            enabled=True,
+            admin_mode="trunk",
+            oper_mode="trunk",
+            access_vlan=None,
+            native_vlan=native_vid,
+            allowed_vlans=tagging if tagging else None,
+        )
+
+    return _edgesw_routed()
 
 
 class EdgeSwitchDriver(_napalm_base.NetworkDriver):
@@ -377,3 +603,44 @@ class EdgeSwitchDriver(_napalm_base.NetworkDriver):
                 vlans[vid] = {"name": vid, "interfaces": intfs}
 
         return vlans
+
+    def get_interfaces_vlans(self) -> dict[str, dict]:
+        """
+        Return per-interface VLAN config from ``show interfaces switchport``.
+
+        Two commands are combined:
+
+        * ``show interfaces switchport`` — summary table of {Interface, Mode,
+          PVID, ...}. Drives the per-port mode classification.
+        * ``show running-config`` — per-interface ``vlan participation``,
+          ``vlan tagging`` and ``vlan pvid`` directives. Provides the
+          tagged/untagged VID membership that is missing from both the
+          summary table and the ``ubiquiti_edgeswitch_show_vlan`` ntc-template
+          (which exposes only ``VLAN_ID``/``VLAN_NAME``/``TYPE``).
+
+        The bundled ntc-template for ``show vlan`` does NOT include port-list
+        columns, so per-port membership cannot be inverted from there. The
+        running-config view is authoritative on EdgeSwitch (Broadcom-fastpath)
+        and is already fetched by other getters.
+        """
+        try:
+            sw_raw = self.device.send_command("show interfaces switchport")
+        except Exception:
+            logger.debug("EdgeSwitch show interfaces switchport failed", exc_info=True)
+            return {}
+        summaries = _parse_edgesw_switchport_summary(sw_raw)
+        if not summaries:
+            return {}
+
+        try:
+            config_raw = self.device.send_command("show running-config")
+        except Exception:
+            logger.debug("EdgeSwitch show running-config failed", exc_info=True)
+            config_raw = ""
+        membership = _parse_edgesw_port_membership(config_raw) if config_raw else {}
+
+        result: dict[str, dict] = {}
+        for port, summary in summaries.items():
+            info = _edgesw_row_to_switchport_info(port, summary, membership.get(port))
+            result[port] = classify_switchport(info)
+        return result
