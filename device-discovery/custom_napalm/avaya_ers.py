@@ -159,25 +159,46 @@ def _mask_to_prefix(mask: str) -> int:
 # rather than fixed columns — the ``Name`` column may be blank or contain spaces.
 # ---------------------------------------------------------------------------
 _ERS_PORT_TOKEN = r"(?:\d+(?:/\d+)?|Trk\d+|MLT\d+|Lag\d+)"
+# ERS firmware variants emit different column orders:
+#   v1: Port  FilterUF FilterUR  STG  PVID  Tagging       Name  Pri
+#   v2: Port  FilterUF FilterUR  PVID PRI   Tagging       Name
+# Both layouts have exactly two numeric columns between the Filter pair
+# and the Tagging keyword. Capture both as ``i1``/``i2`` and let the
+# parser pick the right one based on whether the header carries an
+# ``STG`` column. (Codex P1 #391: anchoring on a fixed offset from
+# Tagging produced the wrong PVID on v2 outputs.)
+_ERS_TAGGING_KEYWORDS = (
+    r"UntagAll|UntagPvidOnly|TagAll|TagPvidOnly|Hybrid|Disable|None"
+)
 _ERS_VLAN_INTF_INFO_RE = re.compile(
     r"^\s*(?P<port>" + _ERS_PORT_TOKEN + r")\s+"
-    r"\S+\s+\S+\s+"            # Filter Untagged Frames, Filter Unregistered Frames (Yes/No)
-    r"\d+\s+"                   # STG
-    r"(?P<pvid>\d+)\s+"        # PVID
-    r"(?P<tagging>\S+)",       # Tagging keyword
-    re.MULTILINE,
+    r"\S+\s+\S+"                                # FilterUF FilterUR (Yes/No)
+    r"\s+(?P<i1>\d+)"                           # first int (STG in v1, PVID in v2)
+    r"\s+(?P<i2>\d+)"                           # second int (PVID in v1, PRI in v2)
+    r"\s+(?P<tagging>" + _ERS_TAGGING_KEYWORDS + r")",
+    re.IGNORECASE | re.MULTILINE,
+)
+_ERS_HEADER_HAS_STG_RE = re.compile(
+    r"^\s*Port\b.*\bSTG\b.*\bPVID\b.*\bTagging\b", re.IGNORECASE | re.MULTILINE,
 )
 
 
 def _parse_ers_show_vlan_interface_info(text: str) -> dict[str, dict]:
-    """Parse ``show vlan interface info`` into per-port ``{pvid, tagging}`` dict."""
+    """
+    Parse ``show vlan interface info`` into per-port ``{pvid, tagging}`` dict.
+
+    Detects whether the header carries an ``STG`` column. v1 layout
+    (``STG PVID Tagging``) puts PVID in the second numeric column; v2
+    layout (``PVID PRI Tagging``) puts PVID in the first.
+    """
     if not text:
         return {}
+    has_stg = bool(_ERS_HEADER_HAS_STG_RE.search(text))
     out: dict[str, dict] = {}
     for m in _ERS_VLAN_INTF_INFO_RE.finditer(text):
         port = m.group("port")
         try:
-            pvid = int(m.group("pvid"))
+            pvid = int(m.group("i2") if has_stg else m.group("i1"))
         except ValueError:
             continue
         out[port] = {"pvid": pvid, "tagging": m.group("tagging")}
@@ -212,11 +233,12 @@ def _ers_aggregate_to_switchport(
             native_vlan=None,
             allowed_vlans=None,
         )
-    if tagging == "untagpvidonly":
-        # Trunk-with-native requires membership data. If `show vlan` failed
-        # or the port has no recorded membership, fall back to routed rather
-        # than emit a no-tagged-VLAN trunk that would clobber the existing
-        # NetBox tagged_vlans via PATCH.
+    if tagging in ("untagpvidonly", "hybrid"):
+        # Trunk-with-native. ERS Hybrid is the same NetBox-aligned semantics
+        # as UntagPvidOnly: PVID is the untagged native, all other member
+        # VLANs are tagged egress. Both require membership data — without
+        # it, fall back to routed rather than emit a no-tagged-VLAN trunk
+        # that would clobber the existing NetBox tagged_vlans via PATCH.
         if not members:
             return SwitchportInfo(
                 enabled=False,

@@ -1,6 +1,9 @@
 """Unit tests for batch-5 field mappers (vendor row → SwitchportInfo)."""
 
-from custom_napalm.avaya_ers import _ers_aggregate_to_switchport
+from custom_napalm.avaya_ers import (
+    _ers_aggregate_to_switchport,
+    _parse_ers_show_vlan_interface_info,
+)
 from custom_napalm.brocade_netiron import (
     _invert_netiron_vlan_config,
     _netiron_aggregate_to_switchport,
@@ -163,6 +166,60 @@ def test_ers_disable_yields_routed():
     )
     assert info.enabled is False
     assert info.admin_mode is None
+
+
+def test_ers_hybrid_yields_trunk_with_native():
+    """
+    ERS ``Hybrid`` tagging mode → trunk with native=PVID + tagged=members-PVID.
+
+    Pins the Codex P1 fix from PR #391 round-5 review: ``Hybrid`` is the
+    same NetBox-aligned semantics as ``UntagPvidOnly`` (PVID untagged
+    native, others tagged) but the previous mapper fell through to
+    routed for any non-{UntagAll,UntagPvidOnly,TagAll} value, dropping
+    valid switchport ports as routed.
+    """
+    info = _ers_aggregate_to_switchport(
+        {"pvid": 10, "tagging": "Hybrid"}, [10, 20, 30]
+    )
+    assert info.admin_mode == "trunk"
+    assert info.native_vlan == 10
+    assert info.allowed_vlans == [20, 30]
+
+
+def test_ers_intf_info_parser_handles_no_stg_layout():
+    """
+    Parser handles ``Port FilterUF FilterUR PVID PRI Tagging Name`` layout.
+
+    Pins the Codex P1 fix from PR #391 round-5 review: ERS firmware
+    variants emit the columns in different orders. Anchoring on the
+    Tagging keyword (rather than counting fixed columns) makes the
+    parser robust across both v1 (STG before PVID) and v2 (no STG; PRI
+    after PVID) layouts.
+    """
+    # v1 layout: Port FilterUF FilterUR STG PVID Tagging Name Pri
+    v1 = (
+        "Filter Filter\n"
+        "       Untagged   Unregistered                                       PVID\n"
+        "Port   Frames     Frames     STG  PVID  Tagging       Name           Pri\n"
+        "----   ----       ----       ---  ----  -------       ----           ---\n"
+        "1/1    No         Yes        1    10    UntagAll      USER-1         0\n"
+    )
+    out = _parse_ers_show_vlan_interface_info(v1)
+    assert out["1/1"]["pvid"] == 10
+    assert out["1/1"]["tagging"].lower() == "untagall"
+
+    # v2 layout: no STG column; PRI follows PVID.
+    # Row: 13 No Yes 1011 4 Hybrid (PVID=1011, PRI=4, Tagging=Hybrid)
+    v2 = (
+        "Filter Filter\n"
+        "       Untagged   Unregistered                  PVID\n"
+        "Port   Frames     Frames     PVID  PRI  Tagging        Name\n"
+        "----   ----       ----       ----  ---  -------        ----\n"
+        "13     No         Yes        1011  4    Hybrid         UPLINK-13\n"
+    )
+    out = _parse_ers_show_vlan_interface_info(v2)
+    assert out["13"]["pvid"] == 1011
+    assert out["13"]["tagging"].lower() == "hybrid"
 
 
 def test_ers_trunk_modes_with_no_membership_yield_routed():
