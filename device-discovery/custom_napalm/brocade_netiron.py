@@ -664,13 +664,23 @@ class NetIronDriver(_napalm_base.NetworkDriver):
         """
         Build a ``{bare_port_id: canonical_name}`` map from ``show interfaces``.
 
-        Each NetIron physical interface block is headed by a speed-prefixed
-        canonical name (e.g. ``GigabitEthernet1/1 is up...``,
-        ``10GigabitEthernet3/4 is up...``). Strip the trailing port-id
-        component from each canonical name to derive the bare ID and
-        produce ``{"1/1": "GigabitEthernet1/1", "3/4":
-        "10GigabitEthernet3/4", ...}``. Returns an empty dict on parse
-        failure — callers fall back to the bare IDs.
+        Each NetIron interface block is headed by a canonical name. Two
+        families need distinct bare-key derivation:
+
+        * **Speed-prefixed Ethernet** (``GigabitEthernet1/1``,
+          ``10GigabitEthernet3/4``, ``40GigabitEthernet...``,
+          ``100GigabitEthernet...``) — bare key is the slot/port suffix
+          alone (``1/1``, ``3/4``); the speed prefix may itself begin
+          with digits (``10``, ``40``, ``100``, ``400``).
+        * **Named non-Ethernet** (``Ve2``, ``Lag5``, ``Loopback1``) —
+          bare key is the lowercase prefix + numeric suffix (``ve2``,
+          ``lag5``, ``loopback1``) since :func:`_invert_netiron_vlan_config`
+          and :func:`_split_port_list` emit those forms verbatim. Without
+          this :func:`apply_interface_vlans` would silently drop VLAN
+          mappings for VE/LAG/Loopback interfaces (Codex P1 #391).
+
+        Returns an empty dict on parse failure — callers fall back to
+        the bare IDs.
         """
         try:
             raw = self.device.send_command("show interfaces")
@@ -680,10 +690,25 @@ class NetIronDriver(_napalm_base.NetworkDriver):
         except Exception:
             logger.debug("NetIron show interfaces failed for canonical map", exc_info=True)
             return {}
+        # Speed-prefixed Ethernet: prefix may start with digits (10/40/100/400),
+        # so allow optional leading digits.
+        ethernet_re = re.compile(r"^(\d*[A-Za-z]+Ethernet)(\d+/\d+(?::\d+)?)$")
+        # Named non-Ethernet: alpha-prefixed name with a single numeric suffix
+        # (e.g. Ve2, Lag5, Loopback1, Tunnel10).
+        named_re = re.compile(r"^([A-Za-z]+)(\d+)$")
         out: dict[str, str] = {}
         for row in parsed or []:
             full = (row.get("interface") or "").strip()
-            m = re.match(r"^([A-Za-z]+)(\d+/\d+(?::\d+)?)$", full)
+            m = ethernet_re.match(full)
             if m:
                 out[m.group(2)] = full
+                continue
+            m = named_re.match(full)
+            if m:
+                # Skip "vlanN"-shaped names — those would be SVIs and the
+                # inverter never emits keys for them.
+                prefix = m.group(1)
+                if prefix.lower() == "vlan":
+                    continue
+                out[f"{prefix.lower()}{m.group(2)}"] = full
         return out

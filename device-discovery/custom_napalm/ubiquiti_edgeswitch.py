@@ -212,8 +212,11 @@ def _parse_edgesw_switchport_summary(text: str) -> dict[str, dict]:
 # Per-port VLAN membership (from running-config)
 # ---------------------------------------------------------------------------
 
-# Match physical/LAG interface blocks; skip ``interface vlan <id>`` SVIs.
-_ES_INTF_BLOCK_RE = re.compile(r"^interface\s+(\S+(?:/\S+)?)\s*$")
+# Match physical and LAG interface blocks; skip ``interface vlan <id>`` SVIs.
+# EdgeSwitch CLI accepts both single-token (``interface 0/1``, ``interface lag1``)
+# and split-token (``interface lag 1``) forms — capture the rest of the line and
+# normalise whitespace on use so both reduce to the same key (``lag1``).
+_ES_INTF_BLOCK_RE = re.compile(r"^interface\s+(.+?)\s*$")
 _ES_VLAN_PVID_RE = re.compile(r"^vlan\s+pvid\s+(\d+)\s*$")
 _ES_VLAN_PART_RE = re.compile(r"^vlan\s+participation\s+include\s+(.+)$")
 _ES_VLAN_TAG_RE = re.compile(r"^vlan\s+tagging\s+(.+)$")
@@ -271,7 +274,10 @@ def _parse_edgesw_port_membership(config: str) -> dict[str, dict]:
             continue
         m = _ES_INTF_BLOCK_RE.match(stripped)
         if m:
-            name = m.group(1).strip()
+            # Normalise whitespace so ``lag 1`` and ``lag1`` both reduce to
+            # ``lag1`` — matches the form ``show interfaces switchport``
+            # summary emits and the ``apply_interface_vlans`` lookup key.
+            name = re.sub(r"\s+", "", m.group(1).strip())
             # Skip SVIs (``interface vlan 1``); only physical/LAG ports
             # carry VLAN membership configuration.
             if name.lower().startswith("vlan"):

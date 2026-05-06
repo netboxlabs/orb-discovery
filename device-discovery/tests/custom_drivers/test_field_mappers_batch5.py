@@ -71,6 +71,50 @@ def test_netiron_invert_lag_membership():
     assert per_port["1/3"] == {"untagged": [100], "tagged": []}
 
 
+def test_netiron_canonical_map_handles_digit_leading_prefix_and_named_types():
+    """
+    Canonical map handles digit-leading Ethernet prefixes and Ve/Lag/Loopback.
+
+    Pins both Codex P1 fixes from PR #391 review:
+    - ``10GigabitEthernet3/4`` and ``40GigabitEthernet5/1`` must enter the
+      map (the original ``[A-Za-z]+`` prefix regex rejected leading digits).
+    - ``Ve2``, ``Lag5``, ``Loopback1`` map back to lowercase keys
+      (``ve2``, ``lag5``, ``loopback1``) so VLAN entries for VE/LAG/Loopback
+      survive ``apply_interface_vlans()`` exact-match.
+    """
+    from custom_napalm.brocade_netiron import NetIronDriver
+
+    fake = type(
+        "F",
+        (),
+        {
+            "send_command": lambda self, cmd: (
+                "GigabitEthernet1/1 is up, line protocol is up\n"
+                "  Hardware is GigabitEthernet, address is 0024.38a5.1c00 (bia 0024.38a5.1c00)\n"
+                "10GigabitEthernet3/4 is up, line protocol is up\n"
+                "  Hardware is 10GigabitEthernet, address is 0024.38a5.1c01 (bia 0024.38a5.1c01)\n"
+                "40GigabitEthernet5/1 is up, line protocol is up\n"
+                "  Hardware is 40GigabitEthernet, address is 0024.38a5.1c02 (bia 0024.38a5.1c02)\n"
+                "Ve2 is up, line protocol is up\n"
+                "  Hardware is Virtual, address is 0024.38a5.1c03 (bia 0024.38a5.1c03)\n"
+                "Lag5 is up, line protocol is up\n"
+                "  Hardware is Lag, address is 0024.38a5.1c04 (bia 0024.38a5.1c04)\n"
+                "Loopback1 is up, line protocol is up\n"
+                "  Hardware is Loopback\n"
+            ),
+        },
+    )()
+    driver = object.__new__(NetIronDriver)
+    driver.device = fake
+    cmap = driver._netiron_canonical_name_map()
+    assert cmap.get("1/1") == "GigabitEthernet1/1"
+    assert cmap.get("3/4") == "10GigabitEthernet3/4"
+    assert cmap.get("5/1") == "40GigabitEthernet5/1"
+    assert cmap.get("ve2") == "Ve2"
+    assert cmap.get("lag5") == "Lag5"
+    assert cmap.get("loopback1") == "Loopback1"
+
+
 def test_netiron_aggregate_multiple_untagged_yields_routed():
     """Multi-untagged (anomalous; 802.1Q forbids) → routed, not access-on-last."""
     info = _netiron_aggregate_to_switchport({"untagged": [10, 20], "tagged": []})
@@ -231,6 +275,52 @@ def test_edgesw_general_mode_collapses_to_trunk():
     assert info.admin_mode == "trunk"
     assert info.native_vlan == 100
     assert info.allowed_vlans == [200]
+
+
+def test_edgesw_membership_parser_captures_lag_blocks():
+    r"""
+    `interface lag <N>` blocks must be parsed from running-config.
+
+    Pins the Codex P1 fix from PR #391 review: the original block regex
+    ``\S+(?:/\S+)?`` only matched single tokens, dropping LAG sections
+    (which use the multi-token ``interface lag 1`` form on EdgeSwitch CLI).
+    Without this, LAG VLAN mappings were silently classified as routed.
+    """
+    config = (
+        "interface 0/1\n"
+        " vlan pvid 100\n"
+        " vlan participation include 1,100\n"
+        "!\n"
+        "interface lag 1\n"
+        " vlan pvid 1\n"
+        " vlan participation include 1,10,20\n"
+        " vlan tagging 10,20\n"
+        "!\n"
+        "interface vlan 1\n"
+        " name DEFAULT_VLAN\n"
+        "!\n"
+    )
+    out = _parse_edgesw_port_membership(config)
+    assert "0/1" in out
+    # ``interface lag 1`` (split-token) reduces to the same key as ``lag1``.
+    assert "lag1" in out
+    assert sorted(out["lag1"]["participation"]) == [1, 10, 20]
+    assert sorted(out["lag1"]["tagging"]) == [10, 20]
+    # SVI must NOT have been captured.
+    assert "vlan1" not in out
+
+
+def test_edgesw_membership_parser_normalises_single_token_lag():
+    """``interface lag1`` (single token) yields the same key as ``interface lag 1``."""
+    config = (
+        "interface lag1\n"
+        " vlan pvid 100\n"
+        " vlan participation include 100\n"
+        "!\n"
+    )
+    out = _parse_edgesw_port_membership(config)
+    assert "lag1" in out
+    assert out["lag1"]["participation"] == [100]
 
 
 def test_edgesw_access_no_membership_yields_routed():
