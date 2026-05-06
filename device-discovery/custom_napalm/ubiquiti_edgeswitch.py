@@ -221,27 +221,124 @@ _ES_VLAN_PVID_RE = re.compile(r"^vlan\s+pvid\s+(\d+)\s*$")
 _ES_VLAN_PART_RE = re.compile(r"^vlan\s+participation\s+include\s+(.+)$")
 _ES_VLAN_TAG_RE = re.compile(r"^vlan\s+tagging\s+(.+)$")
 
+# Cisco-style ``switchport ...`` directives. EdgeSwitch (Broadcom-fastpath)
+# accepts both the native ``vlan ...`` syntax above and the Cisco-flavoured
+# ``switchport ...`` syntax below; both express the same membership data.
+_ES_SP_ACCESS_RE = re.compile(r"^switchport\s+access\s+vlan\s+(\d+)\s*$")
+_ES_SP_TRUNK_NATIVE_RE = re.compile(r"^switchport\s+trunk\s+native\s+vlan\s+(\d+)\s*$")
+_ES_SP_TRUNK_ALLOWED_RE = re.compile(
+    r"^switchport\s+trunk\s+allowed\s+vlan(?:\s+(?:add|remove|except))?\s+(.+?)\s*$"
+)
+_ES_SP_GENERAL_PVID_RE = re.compile(r"^switchport\s+general\s+pvid\s+(\d+)\s*$")
+_ES_SP_GENERAL_ALLOWED_RE = re.compile(
+    r"^switchport\s+general\s+allowed\s+vlan\s+add\s+(.+?)(?:\s+(tagged|untagged))?\s*$"
+)
 
-def _apply_membership_directive(entry: dict, line: str) -> None:
-    """Update ``entry`` with one ``vlan ...`` directive parsed from *line*."""
+
+def _apply_native_vlan_directive(entry: dict, line: str) -> bool:
+    """Native ``vlan ...`` directives. Returns True if the line matched."""
     m = _ES_VLAN_PVID_RE.match(line)
     if m:
         try:
             entry["pvid"] = int(m.group(1))
         except ValueError:
             pass
-        return
+        return True
     m = _ES_VLAN_PART_RE.match(line)
     if m:
         entry["participation"].extend(
             int(v) for v in _expand_vlan_tokens(m.group(1))
         )
-        return
+        return True
     m = _ES_VLAN_TAG_RE.match(line)
     if m:
         entry["tagging"].extend(
             int(v) for v in _expand_vlan_tokens(m.group(1))
         )
+        return True
+    return False
+
+
+def _apply_sp_pvid_setter(entry: dict, vid_str: str) -> None:
+    """Set entry["pvid"] and append the same VID to participation."""
+    try:
+        vid = int(vid_str)
+    except ValueError:
+        return
+    entry["pvid"] = vid
+    if vid not in entry["participation"]:
+        entry["participation"].append(vid)
+
+
+def _apply_sp_trunk_allowed(entry: dict, spec: str) -> None:
+    """Apply ``switchport trunk allowed vlan <spec>`` (handles ``all`` keyword)."""
+    if spec.strip().lower() == "all":
+        entry["allowed_all"] = True
+        return
+    for v in _expand_vlan_tokens(spec):
+        vid = int(v)
+        if vid not in entry["tagging"]:
+            entry["tagging"].append(vid)
+        if vid not in entry["participation"]:
+            entry["participation"].append(vid)
+
+
+def _apply_sp_general_allowed(entry: dict, vlist: str, flag: str) -> None:
+    """Apply ``switchport general allowed vlan add <vlist> [tagged|untagged]``."""
+    for v in _expand_vlan_tokens(vlist):
+        vid = int(v)
+        if vid not in entry["participation"]:
+            entry["participation"].append(vid)
+        if flag.lower() == "tagged" and vid not in entry["tagging"]:
+            entry["tagging"].append(vid)
+
+
+def _apply_switchport_directive(entry: dict, line: str) -> bool:
+    """
+    Cisco-style ``switchport ...`` directives. Returns True if matched.
+
+    Maps each directive to the same ``participation``/``tagging``/``pvid``
+    aggregate the native ``vlan ...`` syntax populates, so the downstream
+    classifier doesn't care which CLI form the operator used:
+
+    * ``switchport access vlan X`` → participation += [X]; pvid := X
+    * ``switchport trunk native vlan X`` → participation += [X]; pvid := X
+      (X is the untagged native — explicitly NOT added to tagging)
+    * ``switchport trunk allowed vlan X,Y,Z[ add]`` → tagging += [X,Y,Z];
+      participation += [X,Y,Z]
+    * ``switchport trunk allowed vlan all`` → entry["allowed_all"] = True
+      (the row mapper promotes this to ``tagged-all`` via the classifier)
+    * ``switchport general pvid X`` → pvid := X
+    * ``switchport general allowed vlan add X[,Y] tagged|untagged`` →
+      participation += [X[,Y]]; tagging += [X[,Y]] when ``tagged``
+    """
+    m = _ES_SP_ACCESS_RE.match(line) or _ES_SP_TRUNK_NATIVE_RE.match(line)
+    if m:
+        _apply_sp_pvid_setter(entry, m.group(1))
+        return True
+    m = _ES_SP_TRUNK_ALLOWED_RE.match(line)
+    if m:
+        _apply_sp_trunk_allowed(entry, m.group(1))
+        return True
+    m = _ES_SP_GENERAL_PVID_RE.match(line)
+    if m:
+        try:
+            entry["pvid"] = int(m.group(1))
+        except ValueError:
+            pass
+        return True
+    m = _ES_SP_GENERAL_ALLOWED_RE.match(line)
+    if m:
+        _apply_sp_general_allowed(entry, m.group(1), m.group(2) or "")
+        return True
+    return False
+
+
+def _apply_membership_directive(entry: dict, line: str) -> None:
+    """Update ``entry`` with one membership directive parsed from *line*."""
+    if _apply_native_vlan_directive(entry, line):
+        return
+    _apply_switchport_directive(entry, line)
 
 
 def _parse_edgesw_port_membership(config: str) -> dict[str, dict]:
@@ -284,7 +381,10 @@ def _parse_edgesw_port_membership(config: str) -> dict[str, dict]:
                 current = None
                 continue
             current = name
-            out.setdefault(current, {"participation": [], "tagging": [], "pvid": None})
+            out.setdefault(
+                current,
+                {"participation": [], "tagging": [], "pvid": None, "allowed_all": False},
+            )
             continue
         if current is None:
             continue
@@ -338,6 +438,20 @@ def _edgesw_row_to_switchport_info(
     participation = [v for v in membership.get("participation", []) if coerce_vid(v) is not None]
     tagging = [v for v in membership.get("tagging", []) if coerce_vid(v) is not None]
     untagged_members = [v for v in participation if v not in tagging]
+    allowed_all = bool(membership.get("allowed_all"))
+
+    # Cisco-style ``switchport trunk allowed vlan all`` is the only path that
+    # produces a real wildcard on EdgeSwitch — promote to ``tagged-all``.
+    if allowed_all and mode_raw in ("trunk", "general"):
+        native_vid = untagged_members[0] if untagged_members else None
+        return SwitchportInfo(
+            enabled=True,
+            admin_mode="trunk",
+            oper_mode="trunk",
+            access_vlan=None,
+            native_vlan=native_vid,
+            allowed_vlans="all",
+        )
 
     if mode_raw == "access":
         # Access ports must have exactly one untagged member with no tagging.

@@ -310,6 +310,62 @@ def test_edgesw_membership_parser_captures_lag_blocks():
     assert "vlan1" not in out
 
 
+def test_edgesw_membership_parser_handles_cisco_style_access():
+    """
+    ``switchport access vlan X`` is captured as participation + PVID.
+
+    Pins the Codex P1 fix from PR #391 round-3 review: EdgeSwitch accepts
+    both the native ``vlan ...`` syntax and the Cisco-flavoured
+    ``switchport ...`` syntax. The previous parser only handled the
+    native form, so Cisco-style configs produced empty membership →
+    every interface classified as routed.
+    """
+    config = (
+        "interface 0/5\n"
+        " switchport mode access\n"
+        " switchport access vlan 100\n"
+        "!\n"
+    )
+    out = _parse_edgesw_port_membership(config)
+    assert out["0/5"]["participation"] == [100]
+    assert out["0/5"]["tagging"] == []
+    assert out["0/5"]["pvid"] == 100
+
+
+def test_edgesw_membership_parser_handles_cisco_style_trunk():
+    """``switchport trunk native vlan X`` + ``switchport trunk allowed vlan ...``."""
+    config = (
+        "interface 0/6\n"
+        " switchport mode trunk\n"
+        " switchport trunk native vlan 1\n"
+        " switchport trunk allowed vlan 10,20,30\n"
+        "!\n"
+    )
+    out = _parse_edgesw_port_membership(config)
+    assert out["0/6"]["pvid"] == 1
+    assert sorted(out["0/6"]["participation"]) == [1, 10, 20, 30]
+    assert sorted(out["0/6"]["tagging"]) == [10, 20, 30]
+
+
+def test_edgesw_cisco_trunk_allowed_vlan_all_yields_tagged_all():
+    """``switchport trunk allowed vlan all`` promotes to mode=tagged-all."""
+    config = (
+        "interface 0/7\n"
+        " switchport mode trunk\n"
+        " switchport trunk native vlan 1\n"
+        " switchport trunk allowed vlan all\n"
+        "!\n"
+    )
+    membership = _parse_edgesw_port_membership(config)["0/7"]
+    assert membership["allowed_all"] is True
+    info = _edgesw_row_to_switchport_info(
+        "0/7", {"mode": "trunk", "pvid": 1}, membership,
+    )
+    assert info.admin_mode == "trunk"
+    assert info.allowed_vlans == "all"
+    assert info.native_vlan == 1
+
+
 def test_edgesw_membership_parser_normalises_single_token_lag():
     """``interface lag1`` (single token) yields the same key as ``interface lag 1``."""
     config = (
