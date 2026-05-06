@@ -202,6 +202,32 @@ def test_pc_unknown_mode_yields_routed():
     assert info.enabled is False
 
 
+def test_pc_access_without_untagged_falls_back_to_routed():
+    """Access mode + missing Untagged row → routed (avoid clobbering NetBox)."""
+    info = _pc_row_to_switchport_info({
+        "interface": "gi1/0/1",
+        "port_mode": "Access",
+        "default_vlan": "enabled",
+        "untagged": [],
+        "tagged": [],
+    })
+    assert info.enabled is False
+    assert info.admin_mode is None
+
+
+def test_pc_access_with_tagged_falls_back_to_routed():
+    """Access mode + unexpected Tagged rows → routed (membership shape mismatch)."""
+    info = _pc_row_to_switchport_info({
+        "interface": "gi1/0/1",
+        "port_mode": "Access",
+        "default_vlan": "enabled",
+        "untagged": [10],
+        "tagged": [20],
+    })
+    assert info.enabled is False
+    assert info.admin_mode is None
+
+
 def test_pc_unnamed_vlan_row_is_captured():
     """Membership rows with a blank Name column still produce a VID."""
     text = (
