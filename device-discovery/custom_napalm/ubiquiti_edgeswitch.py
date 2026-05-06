@@ -439,6 +439,36 @@ def _parse_edgesw_port_membership(config: str) -> dict[str, dict]:
 # Switchport row → SwitchportInfo
 # ---------------------------------------------------------------------------
 
+def _normalise_edgesw_membership(
+    membership: dict,
+) -> tuple[list[int], list[int], list[int]]:
+    """
+    Normalise a parsed membership dict into ``(participation, tagging, untagged_members)``.
+
+    Cisco-style configs commonly list the native VLAN inside
+    ``switchport trunk allowed vlan ...`` alongside the tagged VLANs. The
+    native is the untagged-egress VLAN by definition, not tagged — so
+    strip the PVID from ``tagging`` before deriving untagged_members.
+    Without this, a config like::
+
+        switchport trunk native vlan 1
+        switchport trunk allowed vlan 1,10,20
+
+    would mark VLAN 1 as tagged, the native lookup would find no untagged
+    member, and the port would misclassify as trunk-no-native (Codex P1
+    #391 round-7).
+    """
+    pvid = coerce_vid(membership.get("pvid"))
+    participation = [
+        v for v in membership.get("participation", []) if coerce_vid(v) is not None
+    ]
+    tagging = [v for v in membership.get("tagging", []) if coerce_vid(v) is not None]
+    if pvid is not None:
+        tagging = [v for v in tagging if v != pvid]
+    untagged_members = [v for v in participation if v not in tagging]
+    return participation, tagging, untagged_members
+
+
 def _edgesw_routed() -> SwitchportInfo:
     """SwitchportInfo for a routed/unknown port."""
     return SwitchportInfo(
@@ -478,9 +508,7 @@ def _edgesw_row_to_switchport_info(
 
     if membership is None:
         membership = {"participation": [], "tagging": [], "pvid": None}
-    participation = [v for v in membership.get("participation", []) if coerce_vid(v) is not None]
-    tagging = [v for v in membership.get("tagging", []) if coerce_vid(v) is not None]
-    untagged_members = [v for v in participation if v not in tagging]
+    participation, tagging, untagged_members = _normalise_edgesw_membership(membership)
     allowed_all = bool(membership.get("allowed_all"))
     allowed_except = bool(membership.get("allowed_except"))
 

@@ -439,6 +439,34 @@ def test_edgesw_cisco_trunk_allowed_vlan_all_yields_tagged_all():
     assert info.native_vlan == 1
 
 
+def test_edgesw_cisco_trunk_native_vlan_excluded_from_tagged():
+    """
+    Native VLAN listed in ``switchport trunk allowed vlan`` stays untagged.
+
+    Pins the Codex P1 fix from PR #391 round-7 review: a common Cisco-style
+    config sets ``switchport trunk native vlan 1`` AND lists VLAN 1 inside
+    ``switchport trunk allowed vlan 1,10,20``. The previous mapper added
+    VLAN 1 to ``tagging`` (matching the allowed list), then derived
+    ``untagged_members = participation - tagging`` and got ``[]``,
+    misclassifying as trunk-no-native. The fix strips PVID from tagging
+    before that derivation so the native VLAN ends up in the right bucket.
+    """
+    config = (
+        "interface 0/10\n"
+        " switchport mode trunk\n"
+        " switchport trunk native vlan 1\n"
+        " switchport trunk allowed vlan 1,10,20\n"
+        "!\n"
+    )
+    membership = _parse_edgesw_port_membership(config)["0/10"]
+    info = _edgesw_row_to_switchport_info(
+        "0/10", {"mode": "trunk", "pvid": 1}, membership,
+    )
+    assert info.admin_mode == "trunk"
+    assert info.native_vlan == 1
+    assert info.allowed_vlans == [10, 20]
+
+
 def test_edgesw_cisco_trunk_allowed_remove_drops_vids():
     """
     ``switchport trunk allowed vlan remove X`` removes X from membership.
