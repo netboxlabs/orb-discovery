@@ -227,7 +227,7 @@ _ES_VLAN_TAG_RE = re.compile(r"^vlan\s+tagging\s+(.+)$")
 _ES_SP_ACCESS_RE = re.compile(r"^switchport\s+access\s+vlan\s+(\d+)\s*$")
 _ES_SP_TRUNK_NATIVE_RE = re.compile(r"^switchport\s+trunk\s+native\s+vlan\s+(\d+)\s*$")
 _ES_SP_TRUNK_ALLOWED_RE = re.compile(
-    r"^switchport\s+trunk\s+allowed\s+vlan(?:\s+(?:add|remove|except))?\s+(.+?)\s*$"
+    r"^switchport\s+trunk\s+allowed\s+vlan(?:\s+(add|remove|except))?\s+(.+?)\s*$"
 )
 _ES_SP_GENERAL_PVID_RE = re.compile(r"^switchport\s+general\s+pvid\s+(\d+)\s*$")
 _ES_SP_GENERAL_ALLOWED_RE = re.compile(
@@ -270,17 +270,54 @@ def _apply_sp_pvid_setter(entry: dict, vid_str: str) -> None:
         entry["participation"].append(vid)
 
 
-def _apply_sp_trunk_allowed(entry: dict, spec: str) -> None:
-    """Apply ``switchport trunk allowed vlan <spec>`` (handles ``all`` keyword)."""
-    if spec.strip().lower() == "all":
-        entry["allowed_all"] = True
-        return
+def _trunk_allowed_remove(entry: dict, spec: str) -> None:
+    """Drop each parsed VID from tagging + participation if present."""
+    for v in _expand_vlan_tokens(spec):
+        try:
+            vid = int(v)
+        except ValueError:
+            continue
+        if vid in entry["tagging"]:
+            entry["tagging"].remove(vid)
+        if vid in entry["participation"]:
+            entry["participation"].remove(vid)
+
+
+def _trunk_allowed_add(entry: dict, spec: str) -> None:
+    """Append each parsed VID to tagging + participation (deduplicated)."""
     for v in _expand_vlan_tokens(spec):
         vid = int(v)
         if vid not in entry["tagging"]:
             entry["tagging"].append(vid)
         if vid not in entry["participation"]:
             entry["participation"].append(vid)
+
+
+def _apply_sp_trunk_allowed(entry: dict, op: str, spec: str) -> None:
+    """
+    Apply ``switchport trunk allowed vlan [add|remove|except] <spec>``.
+
+    EdgeSwitch supports four operations:
+
+    * default / ``add`` → append the VIDs to tagging + participation (additive).
+    * ``remove`` → drop the VIDs from tagging + participation if present.
+    * ``except`` → "all VLANs except these"; we can't faithfully represent
+      that with NetBox's allowed-VLAN list without enumerating, so we set
+      an ``allowed_except`` flag that the row mapper translates to a
+      conservative routed fallback (don't guess and clobber NetBox).
+    * ``all`` keyword (in spec, no op) → wildcard → mode=tagged-all.
+    """
+    op = (op or "").strip().lower()
+    if op == "except":
+        entry["allowed_except"] = True
+        return
+    if spec.strip().lower() == "all":
+        entry["allowed_all"] = True
+        return
+    if op == "remove":
+        _trunk_allowed_remove(entry, spec)
+    else:
+        _trunk_allowed_add(entry, spec)
 
 
 def _apply_sp_general_allowed(entry: dict, vlist: str, flag: str) -> None:
@@ -318,7 +355,7 @@ def _apply_switchport_directive(entry: dict, line: str) -> bool:
         return True
     m = _ES_SP_TRUNK_ALLOWED_RE.match(line)
     if m:
-        _apply_sp_trunk_allowed(entry, m.group(1))
+        _apply_sp_trunk_allowed(entry, m.group(1), m.group(2))
         return True
     m = _ES_SP_GENERAL_PVID_RE.match(line)
     if m:
@@ -383,7 +420,13 @@ def _parse_edgesw_port_membership(config: str) -> dict[str, dict]:
             current = name
             out.setdefault(
                 current,
-                {"participation": [], "tagging": [], "pvid": None, "allowed_all": False},
+                {
+                    "participation": [],
+                    "tagging": [],
+                    "pvid": None,
+                    "allowed_all": False,
+                    "allowed_except": False,
+                },
             )
             continue
         if current is None:
@@ -439,6 +482,14 @@ def _edgesw_row_to_switchport_info(
     tagging = [v for v in membership.get("tagging", []) if coerce_vid(v) is not None]
     untagged_members = [v for v in participation if v not in tagging]
     allowed_all = bool(membership.get("allowed_all"))
+    allowed_except = bool(membership.get("allowed_except"))
+
+    # ``switchport trunk allowed vlan except <vlist>`` means "all VLANs
+    # except these" — we can't represent that with NetBox's allowed-VLAN
+    # list without enumerating the chassis, so fall back to routed
+    # defensively (avoids silently emitting wrong tagged_vlans via PATCH).
+    if allowed_except and mode_raw in ("trunk", "general"):
+        return _edgesw_routed()
 
     # Cisco-style ``switchport trunk allowed vlan all`` is the only path that
     # produces a real wildcard on EdgeSwitch — promote to ``tagged-all``.

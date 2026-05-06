@@ -366,6 +366,51 @@ def test_edgesw_cisco_trunk_allowed_vlan_all_yields_tagged_all():
     assert info.native_vlan == 1
 
 
+def test_edgesw_cisco_trunk_allowed_remove_drops_vids():
+    """
+    ``switchport trunk allowed vlan remove X`` removes X from membership.
+
+    Pins the Codex P1 fix from PR #391 round-4 review: the previous regex
+    captured but discarded the operation token, so ``remove`` and
+    ``except`` were silently treated as additive — the inverse of the
+    intended semantics.
+    """
+    config = (
+        "interface 0/8\n"
+        " switchport mode trunk\n"
+        " switchport trunk native vlan 1\n"
+        " switchport trunk allowed vlan add 10,20,30\n"
+        " switchport trunk allowed vlan remove 20\n"
+        "!\n"
+    )
+    out = _parse_edgesw_port_membership(config)
+    assert sorted(out["0/8"]["participation"]) == [1, 10, 30]
+    assert sorted(out["0/8"]["tagging"]) == [10, 30]
+
+
+def test_edgesw_cisco_trunk_allowed_except_yields_routed():
+    """
+    ``switchport trunk allowed vlan except X`` → routed (defensive).
+
+    NetBox's allowed_vlans list cannot faithfully represent "all except
+    these" without enumerating the chassis; falling back to routed
+    avoids silently emitting wrong tagged_vlans via PATCH.
+    """
+    config = (
+        "interface 0/9\n"
+        " switchport mode trunk\n"
+        " switchport trunk allowed vlan except 100\n"
+        "!\n"
+    )
+    membership = _parse_edgesw_port_membership(config)["0/9"]
+    assert membership["allowed_except"] is True
+    info = _edgesw_row_to_switchport_info(
+        "0/9", {"mode": "trunk", "pvid": 1}, membership,
+    )
+    assert info.enabled is False
+    assert info.admin_mode is None
+
+
 def test_edgesw_membership_parser_normalises_single_token_lag():
     """``interface lag1`` (single token) yields the same key as ``interface lag 1``."""
     config = (
