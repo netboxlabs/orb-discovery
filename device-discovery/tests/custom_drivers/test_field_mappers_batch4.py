@@ -215,6 +215,19 @@ def test_pc_access_without_untagged_falls_back_to_routed():
     assert info.admin_mode is None
 
 
+def test_pc_access_with_multiple_untagged_falls_back_to_routed():
+    """Access mode + >1 Untagged row → routed (ambiguous; don't guess)."""
+    info = _pc_row_to_switchport_info({
+        "interface": "gi1/0/1",
+        "port_mode": "Access",
+        "default_vlan": "enabled",
+        "untagged": [10, 20],
+        "tagged": [],
+    })
+    assert info.enabled is False
+    assert info.admin_mode is None
+
+
 def test_pc_access_with_tagged_falls_back_to_routed():
     """Access mode + unexpected Tagged rows → routed (membership shape mismatch)."""
     info = _pc_row_to_switchport_info({

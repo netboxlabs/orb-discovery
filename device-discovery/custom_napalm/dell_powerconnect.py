@@ -342,12 +342,13 @@ def _pc_row_to_switchport_info(row: dict) -> SwitchportInfo:
     ]
 
     if mode_raw == "access":
-        if not untagged or tagged:
+        if len(untagged) != 1 or tagged:
             # Mode declared as Access but the membership shape disagrees
-            # (no Untagged row captured, or unexpected Tagged rows present).
-            # Fall back to routed rather than emit an access entry with a
-            # missing/ambiguous VID — apply_interface_vlans() would
-            # otherwise clobber the existing NetBox untagged_vlan via PATCH.
+            # (no Untagged row, multiple Untagged rows, or unexpected
+            # Tagged rows). Fall back to routed rather than guess —
+            # apply_interface_vlans() would otherwise clobber the
+            # existing NetBox untagged_vlan via PATCH with whichever VID
+            # we happened to pick first.
             return _pc_routed()
         return SwitchportInfo(
             enabled=True,
