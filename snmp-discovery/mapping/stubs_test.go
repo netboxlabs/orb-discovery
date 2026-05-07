@@ -154,3 +154,105 @@ func TestNewInterfaceStub_KeepsNameDeviceMACDropsRest(t *testing.T) {
 	assert.Nil(t, stub.Bridge)
 	assert.Nil(t, stub.Lag)
 }
+
+func TestCurrentDeviceFrom_FindsFirstDevice(t *testing.T) {
+	d := &diode.Device{Name: strPtr("sw1")}
+	iface := &diode.Interface{Name: strPtr("eth0")}
+	assert.Same(t, d, CurrentDeviceFrom([]diode.Entity{iface, d}))
+}
+
+func TestCurrentDeviceFrom_NoDeviceReturnsNil(t *testing.T) {
+	iface := &diode.Interface{Name: strPtr("eth0")}
+	assert.Nil(t, CurrentDeviceFrom([]diode.Entity{iface}))
+}
+
+func TestCurrentDeviceFrom_EmptyReturnsNil(t *testing.T) {
+	assert.Nil(t, CurrentDeviceFrom(nil))
+}
+
+func TestPruneNestedRefs_RewritesAllNestedDeviceRefs(t *testing.T) {
+	v4 := "192.0.2.10/24"
+	site := &diode.Site{Name: strPtr("dc1")}
+	currentDevice := &diode.Device{
+		Name:       strPtr("sw1"),
+		Site:       site,
+		PrimaryIp4: &diode.IPAddress{Address: &v4},
+		Serial:     strPtr("FCW123"),
+		Status:     strPtr("active"),
+	}
+
+	parent := &diode.Interface{Name: strPtr("Po1"), Device: currentDevice}
+	bridge := &diode.Interface{Name: strPtr("br0"), Device: currentDevice}
+	lag := &diode.Interface{Name: strPtr("Po1"), Device: currentDevice}
+
+	iface := &diode.Interface{
+		Name:   strPtr("Gi1/0/1"),
+		Device: currentDevice,
+		Parent: parent,
+		Bridge: bridge,
+		Lag:    lag,
+	}
+
+	ipIface := &diode.Interface{Name: strPtr("Gi1/0/2"), Device: currentDevice}
+	addr := "10.0.0.1/24"
+	ip := &diode.IPAddress{Address: &addr, AssignedObject: ipIface}
+
+	macIface := &diode.Interface{Name: strPtr("Gi1/0/3"), Device: currentDevice}
+	mac := "aa:bb:cc:dd:ee:ff"
+	macEntity := &diode.MACAddress{MacAddress: &mac, AssignedObject: macIface}
+
+	module := &diode.Module{Device: currentDevice}
+
+	entities := []diode.Entity{currentDevice, iface, parent, bridge, lag, ip, macEntity, module}
+
+	PruneNestedRefs(entities, currentDevice)
+
+	// Top-level Device unchanged — still rich.
+	assert.Equal(t, strPtr("FCW123"), currentDevice.Serial)
+	assert.Equal(t, strPtr("active"), currentDevice.Status)
+
+	// Top-level Interfaces: Device replaced with stub (not currentDevice).
+	assert.NotSame(t, currentDevice, iface.Device)
+	assert.Equal(t, strPtr("sw1"), iface.Device.Name)
+	assert.Nil(t, iface.Device.Serial, "stub must not carry rich fields")
+
+	// Same stub pointer should be reused across entities visited in this sweep.
+	assert.Same(t, iface.Device, parent.Device)
+	assert.Same(t, iface.Device, bridge.Device)
+	assert.Same(t, iface.Device, lag.Device)
+	assert.Same(t, iface.Device, module.Device)
+
+	// Parent/Bridge/Lag on the top-level Interface are stub copies, not
+	// the original top-level pointers.
+	assert.NotSame(t, parent, iface.Parent)
+	assert.NotSame(t, bridge, iface.Bridge)
+	assert.NotSame(t, lag, iface.Lag)
+	assert.Equal(t, strPtr("Po1"), iface.Parent.Name)
+	assert.Same(t, iface.Device, iface.Parent.Device)
+
+	// IPAddress.AssignedObject replaced with a stub.
+	assignedIface, ok := ip.AssignedObject.(*diode.Interface)
+	assert.True(t, ok)
+	assert.NotSame(t, ipIface, assignedIface)
+	assert.Equal(t, strPtr("Gi1/0/2"), assignedIface.Name)
+	assert.Same(t, iface.Device, assignedIface.Device)
+
+	// MACAddress.AssignedObject replaced with a stub.
+	assignedMacIface, ok := macEntity.AssignedObject.(*diode.Interface)
+	assert.True(t, ok)
+	assert.NotSame(t, macIface, assignedMacIface)
+	assert.Same(t, iface.Device, assignedMacIface.Device)
+}
+
+func TestPruneNestedRefs_NilCurrentDeviceIsNoOp(t *testing.T) {
+	iface := &diode.Interface{Name: strPtr("eth0")}
+	entities := []diode.Entity{iface}
+	PruneNestedRefs(entities, nil)
+	assert.Nil(t, iface.Device)
+}
+
+func TestPruneNestedRefs_EmptySliceIsNoOp(t *testing.T) {
+	dev := &diode.Device{Name: strPtr("sw1")}
+	PruneNestedRefs(nil, dev)
+	assert.Equal(t, strPtr("sw1"), dev.Name)
+}

@@ -78,3 +78,67 @@ func newInterfaceStub(iface *diode.Interface, deviceStub *diode.Device) *diode.I
 		PrimaryMacAddress: newMACMatchStub(iface.PrimaryMacAddress),
 	}
 }
+
+// CurrentDeviceFrom returns the first *diode.Device in the slice, or
+// nil. In normal operation the snmp-discovery mapper emits exactly one
+// top-level Device per walk (the registry's CurrentDeviceIndex), so
+// this is a cheap O(N) lookup and avoids threading the pointer through
+// the runner separately.
+func CurrentDeviceFrom(entities []diode.Entity) *diode.Device {
+	for _, e := range entities {
+		if d, ok := e.(*diode.Device); ok {
+			return d
+		}
+	}
+	return nil
+}
+
+// PruneNestedRefs walks entities once and replaces nested Device and
+// Interface references with matcher-only stubs. The top-level rich
+// Device entity (the same pointer as currentDevice) is left unchanged
+// — only nested references *to* it on other entities are rewritten.
+//
+// Call from the runner AFTER annotateDeviceWithSourceMatch and
+// annotateEntitiesWithRunID, BEFORE Ingest. Running before annotation
+// would either (a) cause annotators to skip the rich Device because
+// they would only see stubs, or (b) bloat every stub with run_id
+// metadata, defeating the savings.
+//
+// No-op if currentDevice is nil or entities is empty.
+func PruneNestedRefs(entities []diode.Entity, currentDevice *diode.Device) {
+	if currentDevice == nil || len(entities) == 0 {
+		return
+	}
+	deviceStub := newDeviceStub(currentDevice)
+
+	for _, entity := range entities {
+		switch e := entity.(type) {
+		case *diode.Device:
+			// Top-level Device is the rich one; leave it alone.
+			if e == currentDevice {
+				continue
+			}
+		case *diode.Interface:
+			e.Device = deviceStub
+			if e.Parent != nil {
+				e.Parent = newInterfaceStub(e.Parent, deviceStub)
+			}
+			if e.Bridge != nil {
+				e.Bridge = newInterfaceStub(e.Bridge, deviceStub)
+			}
+			if e.Lag != nil {
+				e.Lag = newInterfaceStub(e.Lag, deviceStub)
+			}
+		case *diode.IPAddress:
+			if iface, ok := e.AssignedObject.(*diode.Interface); ok && iface != nil {
+				e.AssignedObject = newInterfaceStub(iface, deviceStub)
+			}
+		case *diode.MACAddress:
+			if iface, ok := e.AssignedObject.(*diode.Interface); ok && iface != nil {
+				e.AssignedObject = newInterfaceStub(iface, deviceStub)
+			}
+		case *diode.Module:
+			e.Device = deviceStub
+		}
+	}
+}
