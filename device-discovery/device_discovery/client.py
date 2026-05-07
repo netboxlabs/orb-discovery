@@ -147,9 +147,11 @@ class Client:
 
             # Trim nested Device/Interface refs to matcher-only stubs to
             # shrink the wire payload. Runs after run_id annotation so
-            # the annotation walk traverses the rich shared graph; runs
-            # before estimate_message_size so chunking decisions see the
-            # trimmed size.
+            # the annotation (which only writes to top-level entities)
+            # has already finished — stubs cherry-pick source_match and
+            # are otherwise free of copied annotation. Runs before
+            # estimate_message_size so chunking decisions see the
+            # trimmed payload size.
             prune_nested_refs(entities_list)
 
             request_metadata = dict(metadata or {})

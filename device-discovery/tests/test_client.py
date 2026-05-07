@@ -292,7 +292,9 @@ def test_ingest_prunes_nested_refs_after_run_id_annotation(
         # Nested Device on Interface is a stub: no serial, no metadata.
         assert iface.HasField("device")
         assert iface.device.name == "router1"
-        assert iface.device.serial == "", \
+        assert iface.device.serial == "", (
             "nested Device must be stubbed — no rich fields"
-        assert "run_id" not in iface.device.metadata, \
+        )
+        assert "run_id" not in iface.device.metadata, (
             "nested Device stub must not carry annotation metadata"
+        )
