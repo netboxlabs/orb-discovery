@@ -615,10 +615,6 @@ def translate_data(data: dict) -> Iterable[Entity]:
             if len(device_info["platform"]) > 100:
                 device_info["platform"] = device_info.get("os_version")[:100]
         device = translate_device(device_info, defaults, config_info, options, netbox_id=netbox_id)
-        # Strip config from the Device passed into build_interface_entities so we
-        # don't duplicate (potentially large) config bytes across every nested
-        # Interface/IP during translation. Wire-payload trim is centralized at
-        # prune_nested_refs in Client.ingest; this is a transient-memory only.
         device_for_interfaces = copy.deepcopy(device)
         device_for_interfaces.ClearField("config")
         interface_related_entities = build_interface_entities(
