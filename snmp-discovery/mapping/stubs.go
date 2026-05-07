@@ -60,3 +60,21 @@ func newDeviceStub(d *diode.Device) *diode.Device {
 		PrimaryIp6: newIPMatchStub(d.PrimaryIp6),
 	}
 }
+
+// newInterfaceStub returns an Interface populated with matcher-only
+// fields: Name, Device (caller-supplied stub), and PrimaryMacAddress
+// (run through newMACMatchStub). Used wherever an Interface appears as
+// a nested reference: Parent, Bridge, Lag, IPAddress.AssignedObject,
+// MACAddress.AssignedObject. Including PrimaryMacAddress preserves the
+// dcim.interface unique_primary_mac_address matcher precedence so the
+// stub resolves to the same interface as the rich top-level entity.
+func newInterfaceStub(iface *diode.Interface, deviceStub *diode.Device) *diode.Interface {
+	if iface == nil {
+		return nil
+	}
+	return &diode.Interface{
+		Name:              iface.Name,
+		Device:            deviceStub,
+		PrimaryMacAddress: newMACMatchStub(iface.PrimaryMacAddress),
+	}
+}

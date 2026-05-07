@@ -114,3 +114,43 @@ func TestNewDeviceStub_NilPrimaryIPs(t *testing.T) {
 	assert.Nil(t, stub.PrimaryIp4)
 	assert.Nil(t, stub.PrimaryIp6)
 }
+
+func TestNewInterfaceStub_Nil(t *testing.T) {
+	assert.Nil(t, newInterfaceStub(nil, nil))
+}
+
+func TestNewInterfaceStub_KeepsNameDeviceMACDropsRest(t *testing.T) {
+	mac := "aa:bb:cc:dd:ee:ff"
+	deviceStub := &diode.Device{Name: strPtr("sw1")}
+	rich := &diode.Interface{
+		Name:              strPtr("Gi1/0/1"),
+		Device:            &diode.Device{Name: strPtr("sw1"), Serial: strPtr("FCW123")},
+		PrimaryMacAddress: &diode.MACAddress{MacAddress: &mac, Description: strPtr("primary")},
+		Type:              strPtr("1000base-t"),
+		Mtu:               int64Ptr(1500),
+		Description:       strPtr("uplink"),
+		Parent:            &diode.Interface{Name: strPtr("Po1")},
+		Bridge:            &diode.Interface{Name: strPtr("br0")},
+		Lag:               &diode.Interface{Name: strPtr("Po1")},
+	}
+
+	stub := newInterfaceStub(rich, deviceStub)
+
+	assert.NotNil(t, stub)
+	assert.NotSame(t, rich, stub)
+	assert.Equal(t, strPtr("Gi1/0/1"), stub.Name)
+	assert.Same(t, deviceStub, stub.Device, "must use the supplied device stub, not rich.Device")
+
+	assert.NotNil(t, stub.PrimaryMacAddress)
+	assert.NotSame(t, rich.PrimaryMacAddress, stub.PrimaryMacAddress)
+	assert.Equal(t, &mac, stub.PrimaryMacAddress.MacAddress)
+	assert.Nil(t, stub.PrimaryMacAddress.Description)
+
+	// Other fields cleared.
+	assert.Nil(t, stub.Type)
+	assert.Nil(t, stub.Mtu)
+	assert.Nil(t, stub.Description)
+	assert.Nil(t, stub.Parent)
+	assert.Nil(t, stub.Bridge)
+	assert.Nil(t, stub.Lag)
+}
