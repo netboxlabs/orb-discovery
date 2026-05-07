@@ -253,10 +253,11 @@ def test_ingest_returns_entity_count(mock_diode_client_class, sample_data, sampl
 def test_ingest_prunes_nested_refs_after_run_id_annotation(
     mock_diode_client_class, sample_data, sample_metadata
 ):
-    """Verify that after annotation + prune, the top-level Device
-    keeps run_id metadata and full payload, while nested Device refs
-    on Interface entities are matcher-only stubs with no rich fields
-    and no metadata."""
+    """
+    Verify that after annotation + prune, the top-level Device keeps run_id metadata and full payload.
+
+    Nested Device refs on Interface entities must be matcher-only stubs with no rich fields and no metadata.
+    """
     client = Client()
     client.init_client(
         prefix="", target="https://example.com", client_id="abc", client_secret="def"

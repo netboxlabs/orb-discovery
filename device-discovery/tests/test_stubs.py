@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2024 NetBox Labs Inc
+# Copyright 2026 NetBox Labs Inc
 """NetBox Labs - Stubs Unit Tests."""
 
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
@@ -15,6 +15,7 @@ from device_discovery.stubs import (
 
 
 def test_ip_match_stub_keeps_address_and_vrf_drops_assigned_object():
+    """Stub keeps address+vrf, drops assigned_object_interface and other rich fields."""
     rich = pb.IPAddress(address="192.0.2.1/24")
     rich.vrf.CopyFrom(pb.VRF(name="mgmt"))
     rich.assigned_object_interface.CopyFrom(pb.Interface(name="eth0"))
@@ -32,6 +33,7 @@ def test_ip_match_stub_keeps_address_and_vrf_drops_assigned_object():
 
 
 def test_ip_match_stub_no_vrf():
+    """Stub has no vrf when the rich IPAddress has none."""
     rich = pb.IPAddress(address="10.0.0.1/24")
     stub = _ip_match_stub(rich)
     assert stub.address == "10.0.0.1/24"
@@ -39,6 +41,7 @@ def test_ip_match_stub_no_vrf():
 
 
 def test_current_device_from_finds_device():
+    """Returns the first *diode.Device proto found in the entity list."""
     device_entity = Entity(device=pb.Device(name="sw1"))
     iface_entity = Entity(interface=pb.Interface(name="eth0"))
     result = _current_device_from([iface_entity, device_entity])
@@ -47,15 +50,18 @@ def test_current_device_from_finds_device():
 
 
 def test_current_device_from_no_device_returns_none():
+    """Returns None when no Device entity is present."""
     iface_entity = Entity(interface=pb.Interface(name="eth0"))
     assert _current_device_from([iface_entity]) is None
 
 
 def test_current_device_from_empty_returns_none():
+    """Returns None for an empty entity list."""
     assert _current_device_from([]) is None
 
 
 def test_device_match_stub_keeps_required_fields_drops_rest():
+    """Stub keeps matcher and validation-required fields; drops rich-only fields and breaks IP cycles."""
     rich = pb.Device(
         name="sw1",
         serial="FCW1234X5YZ",
@@ -99,6 +105,7 @@ def test_device_match_stub_keeps_required_fields_drops_rest():
 
 
 def test_device_match_stub_minimal_rich():
+    """Stub from a minimal rich Device only carries the populated matcher fields."""
     rich = pb.Device(name="sw1")
     rich.site.CopyFrom(pb.Site(name="dc1"))
     stub = _device_match_stub(rich)
@@ -110,12 +117,14 @@ def test_device_match_stub_minimal_rich():
 
 
 def test_device_match_stub_no_asset_tag():
+    """Stub has empty asset_tag when the rich Device has none."""
     rich = pb.Device(name="sw1")
     stub = _device_match_stub(rich)
     assert stub.asset_tag == ""
 
 
 def test_interface_match_stub_keeps_required_fields_drops_rest():
+    """Stub keeps name+type+device(stub)+primary_mac (mac only); drops parent/bridge/lag/mtu/description."""
     dev_stub = pb.Device(name="sw1")
     rich = pb.Interface(
         name="Gi1/0/1",
@@ -155,6 +164,7 @@ def test_interface_match_stub_keeps_required_fields_drops_rest():
 
 
 def test_interface_match_stub_no_mac():
+    """Stub has no primary_mac_address when the rich Interface has none."""
     dev_stub = pb.Device(name="sw1")
     rich = pb.Interface(name="eth0", type="virtual")
     stub = _interface_match_stub(rich, dev_stub)
@@ -192,6 +202,7 @@ def _build_rich_entities():
 
 
 def test_prune_nested_refs_rewrites_nested_device_and_interface_refs():
+    """Sweep replaces nested Device refs and Interface refs (parent, IP.assigned_object_interface) with stubs."""
     entities = _build_rich_entities()
 
     prune_nested_refs(entities)
@@ -229,12 +240,14 @@ def test_prune_nested_refs_rewrites_nested_device_and_interface_refs():
 
 
 def test_prune_nested_refs_empty_is_noop():
+    """Sweep is a no-op on an empty entity list."""
     entities: list[Entity] = []
     prune_nested_refs(entities)
     assert entities == []
 
 
 def test_prune_nested_refs_no_top_device_is_noop():
+    """Sweep is a no-op when no top-level Device is present (nothing to derive a stub from)."""
     iface = pb.Interface(name="eth0", type="virtual")
     iface.device.CopyFrom(pb.Device(name="orphan", serial="XYZ"))
     entities = [Entity(interface=iface)]
