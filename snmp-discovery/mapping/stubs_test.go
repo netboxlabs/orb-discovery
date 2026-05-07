@@ -125,14 +125,15 @@ func TestNewInterfaceStub_Nil(t *testing.T) {
 	assert.Nil(t, newInterfaceStub(nil, nil))
 }
 
-func TestNewInterfaceStub_KeepsNameDeviceMACDropsRest(t *testing.T) {
+func TestNewInterfaceStub_KeepsNameDeviceMACTypeDropsRest(t *testing.T) {
 	mac := "aa:bb:cc:dd:ee:ff"
+	ifType := strPtr("1000base-t")
 	deviceStub := &diode.Device{Name: strPtr("sw1")}
 	rich := &diode.Interface{
 		Name:              strPtr("Gi1/0/1"),
 		Device:            &diode.Device{Name: strPtr("sw1"), Serial: strPtr("FCW123")},
 		PrimaryMacAddress: &diode.MACAddress{MacAddress: &mac, Description: strPtr("primary")},
-		Type:              strPtr("1000base-t"),
+		Type:              ifType,
 		Mtu:               int64Ptr(1500),
 		Description:       strPtr("uplink"),
 		Parent:            &diode.Interface{Name: strPtr("Po1")},
@@ -147,13 +148,17 @@ func TestNewInterfaceStub_KeepsNameDeviceMACDropsRest(t *testing.T) {
 	assert.Equal(t, strPtr("Gi1/0/1"), stub.Name)
 	assert.Same(t, deviceStub, stub.Device, "must use the supplied device stub, not rich.Device")
 
+	// Type pointer-shared so NetBox create-validation succeeds when the
+	// stub is the only wire representation of an interface (see
+	// newInterfaceStub doc-comment).
+	assert.Same(t, ifType, stub.Type)
+
 	assert.NotNil(t, stub.PrimaryMacAddress)
 	assert.NotSame(t, rich.PrimaryMacAddress, stub.PrimaryMacAddress)
 	assert.Equal(t, &mac, stub.PrimaryMacAddress.MacAddress)
 	assert.Nil(t, stub.PrimaryMacAddress.Description)
 
 	// Other fields cleared.
-	assert.Nil(t, stub.Type)
 	assert.Nil(t, stub.Mtu)
 	assert.Nil(t, stub.Description)
 	assert.Nil(t, stub.Parent)

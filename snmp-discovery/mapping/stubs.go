@@ -76,13 +76,21 @@ func newDeviceStub(d *diode.Device) *diode.Device {
 	}
 }
 
-// newInterfaceStub returns an Interface populated with matcher-only
-// fields: Name, Device (caller-supplied stub), and PrimaryMacAddress
-// (run through newMACMatchStub). Used wherever an Interface appears as
-// a nested reference: Parent, Bridge, Lag, IPAddress.AssignedObject,
-// MACAddress.AssignedObject. Including PrimaryMacAddress preserves the
-// dcim.interface unique_primary_mac_address matcher precedence so the
-// stub resolves to the same interface as the rich top-level entity.
+// newInterfaceStub returns an Interface populated with matcher fields
+// plus the validation-required `Type` field. Used wherever an
+// Interface appears as a nested reference: Parent, Bridge, Lag,
+// IPAddress.AssignedObject, MACAddress.AssignedObject. PrimaryMacAddress
+// is preserved (via newMACMatchStub) so the stub keeps the
+// unique_primary_mac_address matcher precedence and resolves to the
+// same interface as the rich top-level entity.
+//
+// Why Type: snmp-discovery filters interfaces that are referenced as
+// IPAddress.AssignedObject from top-level emission to avoid emitting
+// them twice (mapping.go:716-718). For those interfaces, the nested
+// stub is the *only* wire payload representing them. If first-time
+// discovery needs to create the interface row, NetBox rejects creation
+// without `type`. Pointer-sharing iface.Type costs negligible bytes
+// and prevents the lossy first-discovery path.
 func newInterfaceStub(iface *diode.Interface, deviceStub *diode.Device) *diode.Interface {
 	if iface == nil {
 		return nil
@@ -90,6 +98,7 @@ func newInterfaceStub(iface *diode.Interface, deviceStub *diode.Device) *diode.I
 	return &diode.Interface{
 		Name:              iface.Name,
 		Device:            deviceStub,
+		Type:              iface.Type,
 		PrimaryMacAddress: newMACMatchStub(iface.PrimaryMacAddress),
 	}
 }
