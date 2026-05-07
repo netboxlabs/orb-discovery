@@ -738,17 +738,27 @@ func TestRunnerAnnotateThenPrune(t *testing.T) {
 			},
 		},
 		{
-			OID: "1.3.6.1.2.1.2.2.1", Entity: "interface", Field: "_id", IdentifierSize: 1,
+			OID:            "1.3.6.1.2.1.2.2.1",
+			Entity:         "interface",
+			Field:          "_id",
+			IdentifierSize: 1,
 			MappingEntries: []config.MappingEntry{
 				{OID: "1.3.6.1.2.1.2.2.1.2", Entity: "interface", Field: "name"},
 			},
 		},
 		{
-			OID: "1.3.6.1.2.1.4.20.1", Entity: "ipAddress", Field: "_id", IdentifierSize: 4,
+			OID:            "1.3.6.1.2.1.4.20.1",
+			Entity:         "ipAddress",
+			Field:          "_id",
+			IdentifierSize: 4,
 			MappingEntries: []config.MappingEntry{
 				{OID: "1.3.6.1.2.1.4.20.1.1", Entity: "ipAddress", Field: "address"},
-				{OID: "1.3.6.1.2.1.4.20.1.2", Entity: "ipAddress", Field: "assignedObject",
-					Relationship: config.Relationship{Type: "interface"}},
+				{
+					OID:          "1.3.6.1.2.1.4.20.1.2",
+					Entity:       "ipAddress",
+					Field:        "assignedObject",
+					Relationship: config.Relationship{Type: "interface"},
+				},
 			},
 		},
 	}
@@ -781,28 +791,12 @@ func TestRunnerAnnotateThenPrune(t *testing.T) {
 	require.True(t, ok, "source_match should be a nested Metadata map")
 	assert.Equal(t, netboxID, sourceMatch["netbox_id"])
 
-	// Find an Interface entity and confirm its Device is a stub.
-	var iface *diode.Interface
-	for _, e := range entities {
-		if i, ok := e.(*diode.Interface); ok {
-			iface = i
-			break
-		}
-	}
-	if iface != nil {
-		require.NotNil(t, iface.Device, "Interface must keep a Device reference for matching")
-		assert.NotSame(t, richDevice, iface.Device, "nested Device must be a stub, not the rich pointer")
-		assert.Nil(t, iface.Device.Metadata, "stub Device must not carry annotation Metadata")
-		assert.Nil(t, iface.Device.Serial, "stub Device must not carry rich fields")
-
-		// Cycle break: stub Device's PrimaryIp4 has no AssignedObject.
-		if iface.Device.PrimaryIp4 != nil {
-			assert.Nil(t, iface.Device.PrimaryIp4.AssignedObject,
-				"stub Device's PrimaryIp4 must have AssignedObject == nil")
-		}
-	}
-
 	// Find the IPAddress and confirm AssignedObject is a stub Interface.
+	// This is the primary way Interfaces reach the entities list — via the
+	// ipAddress.assignedObject relationship. The mapper groups interfaces
+	// by their SNMP index (ifIndex) and only emits top-level Interface
+	// entities when they appear independently of IP assignments; in this
+	// fixture, the interface is only discovered via the IP's relationship.
 	var ip *diode.IPAddress
 	for _, e := range entities {
 		if a, ok := e.(*diode.IPAddress); ok && a.Address != nil && *a.Address == "10.0.0.1/32" {
@@ -812,10 +806,23 @@ func TestRunnerAnnotateThenPrune(t *testing.T) {
 	}
 	require.NotNil(t, ip, "expected IPAddress 10.0.0.1/32 in entities")
 	stubIface, ok := ip.AssignedObject.(*diode.Interface)
-	require.True(t, ok)
+	require.True(t, ok, "IPAddress.AssignedObject must be a *diode.Interface stub after prune")
+
+	// Confirm the stub Interface has no annotation and its Device is a stub.
 	assert.Nil(t, stubIface.Metadata, "stub Interface must not carry annotation Metadata")
-	require.NotNil(t, stubIface.Device)
-	assert.Nil(t, stubIface.Device.Metadata, "stub Device under stub Interface must not carry Metadata")
+	require.NotNil(t, stubIface.Device, "Interface stub must keep a Device reference for matching")
+	assert.NotSame(t, richDevice, stubIface.Device, "nested Device must be a stub, not the rich pointer")
+	assert.Nil(t, stubIface.Device.Metadata, "stub Device must not carry annotation Metadata")
+	assert.Nil(t, stubIface.Device.Serial, "stub Device must not carry rich fields")
+
+	// PrimaryIp4 cycle-break: only exercised if the rich Device's PrimaryIp4 was set
+	// by mappers. This walker doesn't populate it (no SNMP target IP / interface match
+	// in this fixture), so the inner block is a no-op here. The stubs_test.go golden
+	// covers the cycle-break property directly.
+	if stubIface.Device.PrimaryIp4 != nil {
+		assert.Nil(t, stubIface.Device.PrimaryIp4.AssignedObject,
+			"stub Device's PrimaryIp4 must have AssignedObject == nil")
+	}
 }
 
 func TestNewRunner_RangeScheduledWithCron(t *testing.T) {
