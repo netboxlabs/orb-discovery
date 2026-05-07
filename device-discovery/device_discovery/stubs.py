@@ -97,3 +97,49 @@ def _interface_match_stub(iface: pb.Interface, dev_stub: pb.Device) -> pb.Interf
             pb.MACAddress(mac_address=iface.primary_mac_address.mac_address)
         )
     return stub
+
+
+def prune_nested_refs(entities: list[Entity]) -> None:
+    """Walk entities once and replace nested Device and Interface
+    references with matcher-only stubs.
+
+    Call from Client.ingest AFTER apply_run_id_to_entities and BEFORE
+    estimate_message_size / diode_client.ingest. Running before
+    annotation would either skip the rich Device or bloat every stub
+    with run_id metadata. Running before estimate_message_size means
+    chunking sees the trimmed payload size.
+
+    No-op if entities is empty or no top-level Device is present.
+    """
+    if not entities:
+        return
+    rich_device = _current_device_from(entities)
+    if rich_device is None:
+        return
+    dev_stub = _device_match_stub(rich_device)
+
+    for e in entities:
+        if e.HasField("device"):
+            continue  # top-level Device — leave it rich
+        if e.HasField("interface"):
+            iface = e.interface
+            iface.device.Clear()
+            iface.device.CopyFrom(dev_stub)
+            if iface.HasField("parent"):
+                stub = _interface_match_stub(iface.parent, dev_stub)
+                iface.parent.Clear()
+                iface.parent.CopyFrom(stub)
+            if iface.HasField("bridge"):
+                stub = _interface_match_stub(iface.bridge, dev_stub)
+                iface.bridge.Clear()
+                iface.bridge.CopyFrom(stub)
+            if iface.HasField("lag"):
+                stub = _interface_match_stub(iface.lag, dev_stub)
+                iface.lag.Clear()
+                iface.lag.CopyFrom(stub)
+        elif e.HasField("ip_address"):
+            ip = e.ip_address
+            if ip.HasField("assigned_object_interface"):
+                stub = _interface_match_stub(ip.assigned_object_interface, dev_stub)
+                ip.assigned_object_interface.Clear()
+                ip.assigned_object_interface.CopyFrom(stub)

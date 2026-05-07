@@ -10,6 +10,7 @@ from device_discovery.stubs import (
     _device_match_stub,
     _interface_match_stub,
     _ip_match_stub,
+    prune_nested_refs,
 )
 
 
@@ -160,3 +161,83 @@ def test_interface_match_stub_no_mac():
     assert stub.name == "eth0"
     assert stub.type == "virtual"
     assert not stub.HasField("primary_mac_address")
+
+
+def _build_rich_entities():
+    """Construct a rich entity list approximating translate_data output."""
+    rich_dev = pb.Device(name="sw1", serial="FCW123", status="active")
+    rich_dev.site.CopyFrom(pb.Site(name="lab"))
+    rich_dev.role.CopyFrom(pb.DeviceRole(name="access-switch"))
+    rich_dev.device_type.CopyFrom(pb.DeviceType(model="ISR4451"))
+
+    parent_iface = pb.Interface(name="Po1", type="lag")
+    parent_iface.device.CopyFrom(rich_dev)
+
+    rich_iface = pb.Interface(name="Gi1/0/1", type="1000base-t", mtu=1500)
+    rich_iface.device.CopyFrom(rich_dev)
+    rich_iface.parent.CopyFrom(parent_iface)
+    rich_iface.primary_mac_address.CopyFrom(pb.MACAddress(mac_address="aa:bb:cc:dd:ee:01"))
+
+    nested_iface_for_ip = pb.Interface(name="Gi1/0/2", type="1000base-t")
+    nested_iface_for_ip.device.CopyFrom(rich_dev)
+
+    rich_ip = pb.IPAddress(address="10.0.0.1/24")
+    rich_ip.assigned_object_interface.CopyFrom(nested_iface_for_ip)
+
+    return [
+        Entity(device=rich_dev),
+        Entity(interface=rich_iface),
+        Entity(ip_address=rich_ip),
+    ]
+
+
+def test_prune_nested_refs_rewrites_nested_device_and_interface_refs():
+    entities = _build_rich_entities()
+
+    prune_nested_refs(entities)
+
+    # Top-level Device unchanged — still rich.
+    top_device = entities[0].device
+    assert top_device.serial == "FCW123"
+    assert top_device.status == "active"
+
+    # Interface entity: device replaced with stub (no rich fields).
+    iface = entities[1].interface
+    assert iface.name == "Gi1/0/1"
+    assert iface.type == "1000base-t"
+    assert iface.mtu == 1500  # rich Interface fields unchanged
+    assert iface.device.name == "sw1"
+    assert iface.device.serial == ""  # stub Device has no rich fields
+    assert iface.device.HasField("device_type")
+    assert iface.device.HasField("role")
+
+    # Parent on interface is also stubbed.
+    assert iface.HasField("parent")
+    assert iface.parent.name == "Po1"
+    assert iface.parent.type == "lag"
+    assert iface.parent.device.name == "sw1"
+    assert iface.parent.device.serial == ""
+
+    # IPAddress.assigned_object_interface replaced with a stub.
+    ip = entities[2].ip_address
+    assert ip.HasField("assigned_object_interface")
+    assigned = ip.assigned_object_interface
+    assert assigned.name == "Gi1/0/2"
+    assert assigned.type == "1000base-t"
+    assert assigned.device.name == "sw1"
+    assert assigned.device.serial == ""
+
+
+def test_prune_nested_refs_empty_is_noop():
+    entities: list[Entity] = []
+    prune_nested_refs(entities)
+    assert entities == []
+
+
+def test_prune_nested_refs_no_top_device_is_noop():
+    iface = pb.Interface(name="eth0", type="virtual")
+    iface.device.CopyFrom(pb.Device(name="orphan", serial="XYZ"))
+    entities = [Entity(interface=iface)]
+    prune_nested_refs(entities)
+    # No rich Device → no-op; rich nested device preserved.
+    assert entities[0].interface.device.serial == "XYZ"
