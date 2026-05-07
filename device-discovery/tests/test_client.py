@@ -256,7 +256,9 @@ def test_ingest_prunes_nested_refs_after_run_id_annotation(
     """
     Verify that after annotation + prune, the top-level Device keeps run_id metadata and full payload.
 
-    Nested Device refs on Interface entities must be matcher-only stubs with no rich fields and no metadata.
+    Nested Device refs on Interface entities must be matcher-only stubs with no rich fields
+    and no annotation metadata (run_id). The stub may still carry source_match (e.g.,
+    netbox_id) — that is a matcher field and is intentionally preserved.
     """
     client = Client()
     client.init_client(
