@@ -71,15 +71,9 @@ def _device_match_stub(d: pb.Device) -> pb.Device:
     if d.HasField("site"):
         stub.site.CopyFrom(pb.Site(name=d.site.name))
     if d.HasField("tenant"):
-        tenant_stub = pb.Tenant(name=d.tenant.name)
-        if d.tenant.HasField("group"):
-            tenant_stub.group.CopyFrom(pb.TenantGroup(name=d.tenant.group.name))
-        stub.tenant.CopyFrom(tenant_stub)
+        stub.tenant.CopyFrom(_tenant_match_stub(d.tenant))
     if d.HasField("device_type"):
-        dt_stub = pb.DeviceType(model=d.device_type.model)
-        if d.device_type.HasField("manufacturer"):
-            dt_stub.manufacturer.CopyFrom(pb.Manufacturer(name=d.device_type.manufacturer.name))
-        stub.device_type.CopyFrom(dt_stub)
+        stub.device_type.CopyFrom(_device_type_match_stub(d.device_type))
     if d.HasField("role"):
         stub.role.CopyFrom(pb.DeviceRole(name=d.role.name))
     if d.HasField("primary_ip4"):
@@ -88,6 +82,27 @@ def _device_match_stub(d: pb.Device) -> pb.Device:
         stub.primary_ip6.CopyFrom(_ip_match_stub(d.primary_ip6))
     if d.asset_tag:
         stub.asset_tag = d.asset_tag
+    # Carry source_match (e.g., netbox_id) — that is the plugin's PK-based
+    # match path and must not diverge between rich and stub. Annotation
+    # metadata such as run_id is intentionally not copied.
+    if "source_match" in d.metadata:
+        stub.metadata["source_match"] = d.metadata["source_match"]
+    return stub
+
+
+def _tenant_match_stub(tenant: pb.Tenant) -> pb.Tenant:
+    """Return a Tenant carrying only name (and group name, if set)."""
+    stub = pb.Tenant(name=tenant.name)
+    if tenant.HasField("group"):
+        stub.group.CopyFrom(pb.TenantGroup(name=tenant.group.name))
+    return stub
+
+
+def _device_type_match_stub(dt: pb.DeviceType) -> pb.DeviceType:
+    """Return a DeviceType carrying only model (and manufacturer name, if set)."""
+    stub = pb.DeviceType(model=dt.model)
+    if dt.HasField("manufacturer"):
+        stub.manufacturer.CopyFrom(pb.Manufacturer(name=dt.manufacturer.name))
     return stub
 
 
@@ -131,6 +146,15 @@ def _prune_interface_entity(iface: pb.Interface, dev_stub: pb.Device) -> None:
     _replace_iface_field(iface, "lag", dev_stub)
 
 
+def _stub_primary_ip_iface(ip: pb.IPAddress, dev_stub: pb.Device) -> None:
+    """Replace the back-pointer Interface on a top-level Device's primary_ip with a stub."""
+    if not ip.HasField("assigned_object_interface"):
+        return
+    ip.assigned_object_interface.CopyFrom(
+        _interface_match_stub(ip.assigned_object_interface, dev_stub)
+    )
+
+
 def prune_nested_refs(entities: list[Entity]) -> None:
     """
     Walk entities once and replace nested Device and Interface references with stubs.
@@ -151,7 +175,15 @@ def prune_nested_refs(entities: list[Entity]) -> None:
 
     for e in entities:
         if e.HasField("device"):
-            continue  # top-level Device — leave it rich
+            # Rich Device kept as-is, but trim the back-pointer Interface that
+            # assign_primary_ip nested under primary_ip4/6.assigned_object_interface
+            # — that nested Interface is only used to resolve the primary-IP's
+            # interface row, so a matcher-only stub is sufficient and avoids
+            # carrying the rich device.config (and other non-matcher fields)
+            # along the back-pointer.
+            _stub_primary_ip_iface(e.device.primary_ip4, dev_stub)
+            _stub_primary_ip_iface(e.device.primary_ip6, dev_stub)
+            continue
         if e.HasField("interface"):
             _prune_interface_entity(e.interface, dev_stub)
         elif e.HasField("ip_address"):

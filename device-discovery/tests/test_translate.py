@@ -1066,14 +1066,19 @@ def test_translate_data_device_config_only_on_top_level_device(
     sample_device_info, sample_interface_info, sample_interfaces_ip, sample_defaults
 ):
     """
-    Config lives only on the top-level Device entity.
+    Config lives only on the top-level Device entity after the boundary prune.
 
-    ``translate_data`` deep-copies the Device for the interface entities and
-    clears ``config`` on the copy (``device_for_interfaces.ClearField("config")``),
-    so the Device reference embedded in each Interface must carry no config
-    even when the top-level Device does. Guards against regressions in the
-    ordering of deep-copy / ClearField / assign_primary_ip / Entity wrap.
+    ``translate_data`` produces a rich entity graph where the Device reference
+    nested on each Interface still carries config (config_info populates the
+    rich Device's config field). The ``prune_nested_refs`` sweep at the
+    Client.ingest boundary trims those nested Device refs to matcher-only
+    stubs which do not carry config. This test guards the contract that, post
+    boundary, only the top-level Device entity carries the captured config —
+    catching regressions in the prune sweep or in the field set of the Device
+    stub.
     """
+    from device_discovery.stubs import prune_nested_refs
+
     config_info = {
         "running": "hostname router1\n",
         "startup": "hostname router1\n",
@@ -1090,6 +1095,7 @@ def test_translate_data_device_config_only_on_top_level_device(
         "target_hostname": "192.0.2.1",
     }
     entities = list(translate_data(data))
+    prune_nested_refs(entities)
 
     device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
     assert device_entity.device.HasField("config"), (
@@ -1100,18 +1106,17 @@ def test_translate_data_device_config_only_on_top_level_device(
     assert interface_entities, "expected at least one Interface in the output"
     for e in interface_entities:
         assert not e.interface.device.HasField("config"), (
-            f"Interface {e.interface.name!r} must not carry device.config; "
-            "ClearField('config') on device_for_interfaces was skipped"
+            f"Interface {e.interface.name!r} must not carry device.config post-prune"
         )
 
     # primary_ip4 also references a Device (via assigned_object_interface ->
-    # device). That Device is the interface-scoped copy, so it must also be
-    # config-free.
+    # device). The boundary prune replaces that nested Device with a stub, so
+    # it must also be config-free.
     assert device_entity.device.HasField("primary_ip4")
     primary_ip4 = device_entity.device.primary_ip4
     assert primary_ip4.HasField("assigned_object_interface")
     assert not primary_ip4.assigned_object_interface.device.HasField("config"), (
-        "primary_ip4's assigned interface must not carry device.config"
+        "primary_ip4's assigned interface must not carry device.config post-prune"
     )
 
 

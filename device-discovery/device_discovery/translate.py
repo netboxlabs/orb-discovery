@@ -2,7 +2,6 @@
 # Copyright 2024 NetBox Labs Inc
 """Translate from NAPALM output format to Diode SDK entities."""
 
-import copy
 import ipaddress
 import logging
 from collections.abc import Iterable, Mapping
@@ -615,10 +614,8 @@ def translate_data(data: dict) -> Iterable[Entity]:
             if len(device_info["platform"]) > 100:
                 device_info["platform"] = device_info.get("os_version")[:100]
         device = translate_device(device_info, defaults, config_info, options, netbox_id=netbox_id)
-        device_for_interfaces = copy.deepcopy(device)
-        device_for_interfaces.ClearField("config")
         interface_related_entities = build_interface_entities(
-            device_for_interfaces, interfaces, interfaces_ip, defaults
+            device, interfaces, interfaces_ip, defaults
         )
         # assign_primary_ip must run before the Device is wrapped into Entity
         # because Entity(device=...) copies the message; subsequent mutations
