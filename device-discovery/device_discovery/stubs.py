@@ -12,6 +12,20 @@ from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
 from netboxlabs.diode.sdk.ingester import Entity
 
 
+def _vrf_match_stub(vrf: pb.VRF) -> pb.VRF:
+    """
+    Return a VRF carrying only matcher identifiers (name, rd).
+
+    The ipam.vrf matchers key on `name` and (when set) `rd`; tags/comments/description on
+    the rich VRF would just bloat the wire and could leak into create-time attributes if
+    the plugin's match-then-create fallback fires.
+    """
+    stub = pb.VRF(name=vrf.name)
+    if vrf.rd:
+        stub.rd = vrf.rd
+    return stub
+
+
 def _ip_match_stub(ip: pb.IPAddress) -> pb.IPAddress:
     """
     Return an IPAddress carrying only matcher fields.
@@ -21,7 +35,7 @@ def _ip_match_stub(ip: pb.IPAddress) -> pb.IPAddress:
     """
     stub = pb.IPAddress(address=ip.address)
     if ip.HasField("vrf"):
-        stub.vrf.CopyFrom(ip.vrf)
+        stub.vrf.CopyFrom(_vrf_match_stub(ip.vrf))
     return stub
 
 
@@ -55,13 +69,19 @@ def _device_match_stub(d: pb.Device) -> pb.Device:
     """
     stub = pb.Device(name=d.name)
     if d.HasField("site"):
-        stub.site.CopyFrom(d.site)
+        stub.site.CopyFrom(pb.Site(name=d.site.name))
     if d.HasField("tenant"):
-        stub.tenant.CopyFrom(d.tenant)
+        tenant_stub = pb.Tenant(name=d.tenant.name)
+        if d.tenant.HasField("group"):
+            tenant_stub.group.CopyFrom(pb.TenantGroup(name=d.tenant.group.name))
+        stub.tenant.CopyFrom(tenant_stub)
     if d.HasField("device_type"):
-        stub.device_type.CopyFrom(d.device_type)
+        dt_stub = pb.DeviceType(model=d.device_type.model)
+        if d.device_type.HasField("manufacturer"):
+            dt_stub.manufacturer.CopyFrom(pb.Manufacturer(name=d.device_type.manufacturer.name))
+        stub.device_type.CopyFrom(dt_stub)
     if d.HasField("role"):
-        stub.role.CopyFrom(d.role)
+        stub.role.CopyFrom(pb.DeviceRole(name=d.role.name))
     if d.HasField("primary_ip4"):
         stub.primary_ip4.CopyFrom(_ip_match_stub(d.primary_ip4))
     if d.HasField("primary_ip6"):
@@ -100,14 +120,11 @@ def _replace_iface_field(parent: pb.Interface, field: str, dev_stub: pb.Device) 
     if not parent.HasField(field):
         return
     nested = getattr(parent, field)
-    stub = _interface_match_stub(nested, dev_stub)
-    nested.Clear()
-    nested.CopyFrom(stub)
+    nested.CopyFrom(_interface_match_stub(nested, dev_stub))
 
 
 def _prune_interface_entity(iface: pb.Interface, dev_stub: pb.Device) -> None:
     """Replace ``iface.device`` and any nested parent/bridge/lag with stubs in place."""
-    iface.device.Clear()
     iface.device.CopyFrom(dev_stub)
     _replace_iface_field(iface, "parent", dev_stub)
     _replace_iface_field(iface, "bridge", dev_stub)
@@ -140,6 +157,6 @@ def prune_nested_refs(entities: list[Entity]) -> None:
         elif e.HasField("ip_address"):
             ip = e.ip_address
             if ip.HasField("assigned_object_interface"):
-                stub = _interface_match_stub(ip.assigned_object_interface, dev_stub)
-                ip.assigned_object_interface.Clear()
-                ip.assigned_object_interface.CopyFrom(stub)
+                ip.assigned_object_interface.CopyFrom(
+                    _interface_match_stub(ip.assigned_object_interface, dev_stub)
+                )
