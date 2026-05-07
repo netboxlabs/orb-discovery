@@ -1066,26 +1066,14 @@ def test_translate_data_device_config_only_on_top_level_device(
     sample_device_info, sample_interface_info, sample_interfaces_ip, sample_defaults
 ):
     """
-    Config lives only on the top-level Device entity after the full pipeline.
+    Config lives only on the top-level Device entity.
 
-    The contract is enforced by two cooperating layers, and this test guards
-    both:
-
-    1. ``translate_data`` deep-copies the Device for ``build_interface_entities``
-       and ``ClearField('config')`` on the copy — a transient-memory
-       optimization that prevents config bytes from being duplicated across
-       every nested Interface/IP during translation.
-    2. ``prune_nested_refs`` at the ``Client.ingest`` boundary replaces nested
-       Device refs with matcher-only stubs, dropping every non-matcher field
-       (including config, serial, status, description, …).
-
-    The ``serial`` assertion below is what specifically guards the
-    boundary-prune contribution: ``translate_data`` does NOT clear serial on
-    the interface-scoped Device copy, so seeing ``serial == ""`` post-pipeline
-    is proof that ``prune_nested_refs`` actually ran.
+    ``translate_data`` deep-copies the Device for the interface entities and
+    clears ``config`` on the copy (``device_for_interfaces.ClearField("config")``),
+    so the Device reference embedded in each Interface must carry no config
+    even when the top-level Device does. Guards against regressions in the
+    ordering of deep-copy / ClearField / assign_primary_ip / Entity wrap.
     """
-    from device_discovery.stubs import prune_nested_refs
-
     config_info = {
         "running": "hostname router1\n",
         "startup": "hostname router1\n",
@@ -1102,41 +1090,28 @@ def test_translate_data_device_config_only_on_top_level_device(
         "target_hostname": "192.0.2.1",
     }
     entities = list(translate_data(data))
-    prune_nested_refs(entities)
 
     device_entity = next(e for e in entities if e.WhichOneof("entity") == "device")
     assert device_entity.device.HasField("config"), (
         "top-level Device must carry the captured config"
     )
-    # Top-level rich Device keeps serial (sanity check: rich != stub).
-    assert device_entity.device.serial == sample_device_info["serial_number"]
 
     interface_entities = [e for e in entities if e.WhichOneof("entity") == "interface"]
     assert interface_entities, "expected at least one Interface in the output"
     for e in interface_entities:
         assert not e.interface.device.HasField("config"), (
-            f"Interface {e.interface.name!r} must not carry device.config post-pipeline"
-        )
-        # Boundary-prune contract: ``translate_data`` does not clear serial
-        # on the interface-scoped Device, so this assertion specifically
-        # exercises ``prune_nested_refs``. If pruning regresses, this fails.
-        assert e.interface.device.serial == "", (
-            f"Interface {e.interface.name!r} nested Device must be stubbed "
-            "(no rich fields like serial) — prune_nested_refs is the source of truth"
+            f"Interface {e.interface.name!r} must not carry device.config; "
+            "ClearField('config') on device_for_interfaces was skipped"
         )
 
     # primary_ip4 also references a Device (via assigned_object_interface ->
-    # device). The boundary prune replaces that nested Device with a stub, so
-    # it must also be config-free and serial-free.
+    # device). That Device is the interface-scoped copy, so it must also be
+    # config-free.
     assert device_entity.device.HasField("primary_ip4")
     primary_ip4 = device_entity.device.primary_ip4
     assert primary_ip4.HasField("assigned_object_interface")
-    nested_device = primary_ip4.assigned_object_interface.device
-    assert not nested_device.HasField("config"), (
-        "primary_ip4's assigned interface must not carry device.config post-pipeline"
-    )
-    assert nested_device.serial == "", (
-        "primary_ip4's assigned interface nested Device must be a stub (boundary prune)"
+    assert not primary_ip4.assigned_object_interface.device.HasField("config"), (
+        "primary_ip4's assigned interface must not carry device.config"
     )
 
 
