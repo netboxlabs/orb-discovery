@@ -60,9 +60,11 @@ func TestNewDeviceStub_Nil(t *testing.T) {
 	assert.Nil(t, newDeviceStub(nil))
 }
 
-func TestNewDeviceStub_KeepsMatcherFieldsDropsRest(t *testing.T) {
+func TestNewDeviceStub_KeepsMatcherAndRequiredFieldsDropsRest(t *testing.T) {
 	site := &diode.Site{Name: strPtr("dc1")}
 	tenant := &diode.Tenant{Name: strPtr("acme")}
+	role := &diode.DeviceRole{Name: strPtr("access-switch")}
+	deviceType := &diode.DeviceType{Model: strPtr("Catalyst 9300")}
 	v4 := "192.0.2.10/24"
 	v6 := "2001:db8::1/64"
 	rich := &diode.Device{
@@ -71,8 +73,8 @@ func TestNewDeviceStub_KeepsMatcherFieldsDropsRest(t *testing.T) {
 		Tenant:      tenant,
 		PrimaryIp4:  &diode.IPAddress{Address: &v4, AssignedObject: &diode.Interface{Name: strPtr("eth0")}},
 		PrimaryIp6:  &diode.IPAddress{Address: &v6},
-		Role:        &diode.DeviceRole{Name: strPtr("access-switch")},
-		DeviceType:  &diode.DeviceType{Model: strPtr("Catalyst 9300")},
+		Role:        role,
+		DeviceType:  deviceType,
 		Platform:    &diode.Platform{Name: strPtr("ios-xe")},
 		Serial:      strPtr("FCW1234X5YZ"),
 		AssetTag:    strPtr("ASSET-001"),
@@ -88,6 +90,12 @@ func TestNewDeviceStub_KeepsMatcherFieldsDropsRest(t *testing.T) {
 	assert.Same(t, site, stub.Site)
 	assert.Same(t, tenant, stub.Tenant)
 
+	// DeviceType and Role are pointer-shared so the diode-netbox-plugin
+	// can satisfy NetBox's create-time validation if a nested stub
+	// resolves before the rich top-level Device has been upserted.
+	assert.Same(t, role, stub.Role)
+	assert.Same(t, deviceType, stub.DeviceType)
+
 	// PrimaryIp4 stubbed (no AssignedObject) — cycle break.
 	assert.NotNil(t, stub.PrimaryIp4)
 	assert.NotSame(t, rich.PrimaryIp4, stub.PrimaryIp4)
@@ -97,9 +105,7 @@ func TestNewDeviceStub_KeepsMatcherFieldsDropsRest(t *testing.T) {
 	assert.NotNil(t, stub.PrimaryIp6)
 	assert.Equal(t, &v6, stub.PrimaryIp6.Address)
 
-	// All non-matcher fields cleared.
-	assert.Nil(t, stub.Role)
-	assert.Nil(t, stub.DeviceType)
+	// All non-matcher / non-required fields cleared.
 	assert.Nil(t, stub.Platform)
 	assert.Nil(t, stub.Serial)
 	assert.Nil(t, stub.AssetTag)

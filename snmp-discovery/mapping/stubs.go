@@ -33,21 +33,34 @@ func newMACMatchStub(mac *diode.MACAddress) *diode.MACAddress {
 	}
 }
 
-// newDeviceStub returns a Device populated with matcher-only fields.
-// Site and Tenant are pointer-shared from the source — already minimal
-// in snmp-discovery, no transitive bloat. PrimaryIp4 and PrimaryIp6 go
-// through newIPMatchStub so AssignedObject is cleared, breaking any
-// cycle into the rich top-level Device.
+// newDeviceStub returns a Device populated with matcher-only fields
+// plus the validation-required fields the diode-netbox-plugin checks
+// when CREATING a dcim.device row from a nested reference. Site,
+// Tenant, DeviceType, and Role are pointer-shared from the source —
+// already minimal in snmp-discovery, no transitive bloat. PrimaryIp4
+// and PrimaryIp6 go through newIPMatchStub so AssignedObject is
+// cleared, breaking any cycle into the rich top-level Device.
 //
-// INVARIANT: the fields here must be a superset of every dcim.device
-// matcher field that snmp-discovery currently populates on the rich
-// Device. As of the spec date, snmp-discovery does NOT populate
-// AssetTag, OobIp, Rack, Position, Face, VirtualChassis, or
-// VcPosition. If a new mapper starts setting any of those, this stub
-// must grow to include them — otherwise the rich entity and the stub
-// will resolve via different matcher precedence paths and may match
-// different NetBox devices. See
-// docs/superpowers/specs/2026-05-07-snmp-payload-stub-nested-refs-design.md.
+// Why DeviceType and Role: when the reconciler processes an Interface
+// (or other entity) whose nested Device reference does not yet match
+// an existing NetBox device — i.e. on the first discovery cycle,
+// before the rich top-level Device has been upserted — the plugin
+// falls back to creating the device from the nested data. NetBox
+// rejects creation if device_type or role are missing, even when the
+// stub would have eventually matched the rich Device. Carrying these
+// references on the stub eliminates the cold-start race observed
+// during E2E.
+//
+// INVARIANT: the fields here must be a superset of (a) every
+// dcim.device matcher field that snmp-discovery currently populates
+// on the rich Device, and (b) every dcim.device field NetBox treats
+// as required for create. As of the spec date, snmp-discovery does
+// NOT populate AssetTag, OobIp, Rack, Position, Face, VirtualChassis,
+// or VcPosition (matcher fields not used today). If a new mapper
+// starts setting any of those, or if NetBox adds new required fields
+// for dcim.device, this stub must grow to match — otherwise the rich
+// entity and the stub will resolve via different matcher precedence
+// paths or fail validation on the first cycle.
 func newDeviceStub(d *diode.Device) *diode.Device {
 	if d == nil {
 		return nil
@@ -56,6 +69,8 @@ func newDeviceStub(d *diode.Device) *diode.Device {
 		Name:       d.Name,
 		Site:       d.Site,
 		Tenant:     d.Tenant,
+		DeviceType: d.DeviceType,
+		Role:       d.Role,
 		PrimaryIp4: newIPMatchStub(d.PrimaryIp4),
 		PrimaryIp6: newIPMatchStub(d.PrimaryIp6),
 	}
