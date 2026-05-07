@@ -8,6 +8,7 @@ from netboxlabs.diode.sdk.ingester import Entity
 from device_discovery.stubs import (
     _current_device_from,
     _device_match_stub,
+    _interface_match_stub,
     _ip_match_stub,
 )
 
@@ -111,3 +112,51 @@ def test_device_match_stub_no_asset_tag():
     rich = pb.Device(name="sw1")
     stub = _device_match_stub(rich)
     assert stub.asset_tag == ""
+
+
+def test_interface_match_stub_keeps_required_fields_drops_rest():
+    dev_stub = pb.Device(name="sw1")
+    rich = pb.Interface(
+        name="Gi1/0/1",
+        type="1000base-t",
+        mtu=1500,
+        description="uplink",
+        enabled=True,
+    )
+    rich.device.CopyFrom(pb.Device(name="sw1", serial="FCW123"))
+    rich.primary_mac_address.CopyFrom(
+        pb.MACAddress(mac_address="aa:bb:cc:dd:ee:ff", description="primary")
+    )
+    rich.parent.CopyFrom(pb.Interface(name="Po1"))
+    rich.bridge.CopyFrom(pb.Interface(name="br0"))
+    rich.lag.CopyFrom(pb.Interface(name="Po1"))
+
+    stub = _interface_match_stub(rich, dev_stub)
+
+    # Matcher / required fields kept.
+    assert stub.name == "Gi1/0/1"
+    assert stub.type == "1000base-t"
+    assert stub.HasField("device")
+    assert stub.device.name == "sw1"
+    assert stub.device.serial == ""  # confirms dev_stub was used, not rich.device
+
+    # primary_mac_address stubbed to mac-only (no description).
+    assert stub.HasField("primary_mac_address")
+    assert stub.primary_mac_address.mac_address == "aa:bb:cc:dd:ee:ff"
+    assert stub.primary_mac_address.description == ""
+
+    # Other fields cleared.
+    assert stub.mtu == 0
+    assert stub.description == ""
+    assert not stub.HasField("parent")
+    assert not stub.HasField("bridge")
+    assert not stub.HasField("lag")
+
+
+def test_interface_match_stub_no_mac():
+    dev_stub = pb.Device(name="sw1")
+    rich = pb.Interface(name="eth0", type="virtual")
+    stub = _interface_match_stub(rich, dev_stub)
+    assert stub.name == "eth0"
+    assert stub.type == "virtual"
+    assert not stub.HasField("primary_mac_address")

@@ -72,3 +72,28 @@ def _device_match_stub(d: pb.Device) -> pb.Device:
     if d.asset_tag:
         stub.asset_tag = d.asset_tag
     return stub
+
+
+def _interface_match_stub(iface: pb.Interface, dev_stub: pb.Device) -> pb.Interface:
+    """Return an Interface carrying matcher fields plus the
+    validation-required `type` field.
+
+    Used wherever an Interface appears as a nested reference: parent,
+    bridge, lag, IPAddress.assigned_object_interface.
+
+    Why type: interfaces referenced as IPAddress.assigned_object_interface
+    are filtered from top-level emission in some translator paths, so
+    the nested stub can be the only wire payload representing them.
+    NetBox rejects dcim.interface creation when type is empty.
+
+    primary_mac_address is preserved (stubbed to mac-only) so the
+    stub keeps the unique_primary_mac_address matcher precedence and
+    resolves to the same interface as the rich top-level entity.
+    """
+    stub = pb.Interface(name=iface.name, type=iface.type)
+    stub.device.CopyFrom(dev_stub)
+    if iface.HasField("primary_mac_address"):
+        stub.primary_mac_address.CopyFrom(
+            pb.MACAddress(mac_address=iface.primary_mac_address.mac_address)
+        )
+    return stub
