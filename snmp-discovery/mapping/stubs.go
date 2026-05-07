@@ -2,7 +2,7 @@
 // entities. These are used to shrink nested references in the wire
 // payload: only fields the diode-netbox-plugin needs to *match* the
 // existing object are kept; full data still rides on the top-level
-// entity. See docs/superpowers/specs/2026-05-07-snmp-payload-stub-nested-refs-design.md.
+// entity.
 package mapping
 
 import "github.com/netboxlabs/diode-sdk-go/diode"
