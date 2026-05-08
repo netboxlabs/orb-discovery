@@ -358,7 +358,9 @@ def test_validation_drops_duplicate_ids_and_serials(caplog):
         "domain": None,
     })
 
-    with caplog.at_level(logging.WARNING, logger="device_discovery.translate"):
+    # Warnings come from validate_chassis_payload, which lives in
+    # device_discovery.translate_chassis (not device_discovery.translate).
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate_chassis"):
         entities = list(translate_data(data))
 
     devices = [e.device for e in entities if e.HasField("device")]
