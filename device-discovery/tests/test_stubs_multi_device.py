@@ -84,6 +84,41 @@ def test_unresolvable_device_ref_passes_through_with_warning(caplog):
     assert entities[1].interface.device.name == "core-sw-9"
 
 
+def test_unresolvable_ip_address_device_ref_passes_through_with_warning(caplog):
+    """IPAddress nested device-refs that don't match any top-level Device are logged and left untouched."""
+    dev_a = _make_device("core-sw-1", "FOC1")
+    ip = pb.IPAddress(address="10.0.0.99/32")
+    ip.assigned_object_interface.CopyFrom(
+        _make_interface("GigabitEthernet9/0/1", "core-sw-9", "FOC9")
+    )
+
+    entities = [Entity(device=dev_a), Entity(ip_address=ip)]
+
+    with caplog.at_level("WARNING", logger="device_discovery.stubs"):
+        prune_nested_refs(entities)
+
+    assert any("could not resolve nested device" in rec.message.lower() for rec in caplog.records)
+    # Entity is preserved; nested device-ref is left untouched, not silently rewritten to dev_a.
+    assert entities[1].ip_address.assigned_object_interface.device.name == "core-sw-9"
+
+
+def test_resolve_falls_back_to_serial_when_name_does_not_match():
+    """Resolve via serial fallback when nested ref's name doesn't match any top-level Device."""
+    dev_a = _make_device("core-sw-1", "FOC1")
+    dev_b = _make_device("core-sw-2", "FOC2")
+
+    iface = pb.Interface(name="GigabitEthernet2/0/1", type="1000base-t")
+    # Nested device-ref has an unmatched name but the right serial.
+    iface.device.name = "stale-or-wrong-name"
+    iface.device.serial = "FOC2"
+
+    entities = [Entity(device=dev_a), Entity(device=dev_b), Entity(interface=iface)]
+    prune_nested_refs(entities)
+
+    # Resolved via serial fallback to dev_b — and rewritten to dev_b's stub.
+    assert entities[2].interface.device.name == "core-sw-2"
+
+
 def test_source_match_only_on_master_does_not_leak_to_member_stubs():
     """Master device's source_match metadata never leaks onto a member device's stub."""
     master = _make_device("core-sw-1", "FOC1", source_match="netbox_id:42")

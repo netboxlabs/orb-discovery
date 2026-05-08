@@ -58,6 +58,13 @@ def _index_top_level_devices(entities: list[Entity]) -> dict[str, pb.Device]:
     index: dict[str, pb.Device] = {}
     for e in entities:
         if e.HasField("device"):
+            if e.device.name in index:
+                logger.warning(
+                    "prune_nested_refs: duplicate top-level Device name %r — "
+                    "second occurrence overwrites first; "
+                    "this indicates an upstream translator bug",
+                    e.device.name,
+                )
             index[e.device.name] = e.device
     return index
 
@@ -69,9 +76,16 @@ def _resolve_device(
     if nested.name and nested.name in index:
         return index[nested.name]
     if nested.serial:
-        for d in index.values():
-            if d.serial == nested.serial:
-                return d
+        matches = [d for d in index.values() if d.serial == nested.serial]
+        if matches:
+            if len(matches) > 1:
+                logger.warning(
+                    "prune_nested_refs: duplicate serial %r across %d top-level Devices — picking %r; resolution is non-deterministic",
+                    nested.serial,
+                    len(matches),
+                    matches[0].name,
+                )
+            return matches[0]
     return None
 
 
