@@ -89,22 +89,8 @@ def _resolve_device(
     return None
 
 
-def _device_match_stub(d: pb.Device) -> pb.Device:
-    """
-    Return a Device carrying matcher-only fields plus NetBox-required-for-create fields.
-
-    INVARIANT: this set must be a superset of (a) every dcim.device matcher field
-    device-discovery currently populates, and (b) every field NetBox treats as required for
-    create. As of the spec date, device-discovery does NOT populate oob_ip, position, face,
-    virtual_chassis, or vc_position. If a new translator path starts setting any of those,
-    this stub must grow to include them — otherwise the rich entity and the stub will
-    resolve via different matcher precedence paths or fail validation on the first cycle.
-
-    `asset_tag` is the highest-precedence matcher and is populated when the policy sets
-    defaults.device.asset_tag — kept on the stub so the rich entity and stub never resolve
-    via different matchers.
-    """
-    stub = pb.Device(name=d.name)
+def _copy_device_relations(stub: pb.Device, d: pb.Device) -> None:
+    """Copy site/tenant/device_type/role/primary_ip4/primary_ip6 onto ``stub``."""
     if d.HasField("site"):
         stub.site.CopyFrom(pb.Site(name=d.site.name))
     if d.HasField("tenant"):
@@ -117,8 +103,34 @@ def _device_match_stub(d: pb.Device) -> pb.Device:
         stub.primary_ip4.CopyFrom(_ip_match_stub(d.primary_ip4))
     if d.HasField("primary_ip6"):
         stub.primary_ip6.CopyFrom(_ip_match_stub(d.primary_ip6))
+
+
+def _device_match_stub(d: pb.Device) -> pb.Device:
+    """
+    Return a Device carrying matcher-only fields plus NetBox-required-for-create fields.
+
+    INVARIANT: this set must be a superset of (a) every dcim.device matcher field
+    device-discovery currently populates, and (b) every field NetBox treats as required for
+    create. ``virtual_chassis`` and ``vc_position`` are populated by the switch-stack
+    translator and are part of NetBox's per-VC uniqueness constraints, so the stub must
+    carry them through pruning — otherwise a member interface's nested device ref could
+    resolve to a non-VC device of the same name.
+
+    `asset_tag` is the highest-precedence matcher and is populated when the policy sets
+    defaults.device.asset_tag — kept on the stub so the rich entity and stub never resolve
+    via different matchers.
+    """
+    stub = pb.Device(name=d.name)
+    _copy_device_relations(stub, d)
     if d.asset_tag:
         stub.asset_tag = d.asset_tag
+    # VC linkage is part of NetBox's effective uniqueness for member devices.
+    # The translator emits virtual_chassis with a non-recursive master, so a
+    # direct CopyFrom is safe (no further recursion needed).
+    if d.HasField("virtual_chassis"):
+        stub.virtual_chassis.CopyFrom(d.virtual_chassis)
+    if d.vc_position:
+        stub.vc_position = d.vc_position
     # Carry source_match (e.g., netbox_id) — that is the plugin's PK-based
     # match path and must not diverge between rich and stub. Annotation
     # metadata such as run_id is intentionally not copied.

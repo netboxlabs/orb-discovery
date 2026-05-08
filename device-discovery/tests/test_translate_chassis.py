@@ -354,6 +354,40 @@ def test_validation_drops_duplicate_ids_and_serials(caplog):
     assert "duplicate serial" in msgs
 
 
+def test_vc_master_ref_carries_master_primary_ip():
+    """
+    primary_ip4 must propagate to master AND to the inline VC master ref.
+
+    Failure mode: vc_master_ref derived BEFORE assign_primary_ip → primary_ip4 unset on the
+    VC ref while the rich master Device has it. Matcher divergence on tenant-scoped VCs.
+    """
+    data = _base_data(_two_member_payload())
+    data["interface_ip"]["GigabitEthernet1/0/1"] = {
+        "ipv4": {"10.0.0.1": {"prefix_length": 24}},
+    }
+    data["target_hostname"] = "10.0.0.1"
+
+    entities = list(translate_data(data))
+    master = next(e.device for e in entities
+                  if e.HasField("device") and not e.device.HasField("virtual_chassis"))
+    vc = next(e.virtual_chassis for e in entities if e.HasField("virtual_chassis"))
+    member = next(e.device for e in entities
+                  if e.HasField("device") and e.device.HasField("virtual_chassis"))
+
+    assert master.HasField("primary_ip4")
+    assert master.primary_ip4.address == "10.0.0.1/24"
+
+    assert vc.master.HasField("primary_ip4"), (
+        "VC master inline ref is missing primary_ip4 — "
+        "vc_master_ref must be derived AFTER assign_primary_ip"
+    )
+    assert vc.master.primary_ip4.address == "10.0.0.1/24"
+
+    # Member's nested virtual_chassis.master must carry primary_ip4 too.
+    assert member.virtual_chassis.master.HasField("primary_ip4")
+    assert member.virtual_chassis.master.primary_ip4.address == "10.0.0.1/24"
+
+
 def test_master_primary_ip_propagates_to_emitted_entity():
     """assign_primary_ip must mutate master_dev BEFORE it is wrapped into Entity (proto copy)."""
     data = _base_data(_two_member_payload())

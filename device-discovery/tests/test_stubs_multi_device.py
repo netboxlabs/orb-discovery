@@ -210,3 +210,31 @@ def test_primary_ip4_back_pointer_pruned_per_device():
     assert b_back.device.name == "core-sw-2"
     # Sanity: the two stubs are not the same instance (per-device cache, not a single shared stub).
     assert a_back.device is not b_back.device
+
+
+def test_member_device_stub_carries_virtual_chassis_and_vc_position():
+    """Member Device stubs must keep virtual_chassis + vc_position so they match the rich entity (NetBox per-VC uniqueness)."""
+    master = _make_device("core-sw-1", "FOC1")
+    member = _make_device("core-sw-2", "FOC2")
+    member.vc_position = 2
+    member.virtual_chassis.CopyFrom(
+        pb.VirtualChassis(
+            name="core-sw",
+            master=pb.Device(name="core-sw-1", serial="FOC1"),
+        )
+    )
+    iface = _make_interface("GigabitEthernet2/0/1", "core-sw-2", "FOC2")
+    entities = [Entity(device=master), Entity(device=member), Entity(interface=iface)]
+
+    prune_nested_refs(entities)
+
+    pruned_dev_ref = entities[2].interface.device
+    assert pruned_dev_ref.name == "core-sw-2"
+    assert pruned_dev_ref.vc_position == 2, (
+        "member Device stub lost vc_position — matcher divergence vs. rich entity"
+    )
+    assert pruned_dev_ref.HasField("virtual_chassis"), (
+        "member Device stub lost virtual_chassis — matcher divergence"
+    )
+    assert pruned_dev_ref.virtual_chassis.name == "core-sw"
+    assert pruned_dev_ref.virtual_chassis.master.name == "core-sw-1"

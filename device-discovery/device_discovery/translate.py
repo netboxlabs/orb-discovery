@@ -645,14 +645,24 @@ def _master_device_ref(master_dev: pb.Device) -> pb.Device:
     member Device's virtual_chassis.master field. The plugin resolves the existing
     VC via unique_master, so this MUST carry the same matcher fields the emitted
     master Device carries — name, serial, site, tenant, role, device_type,
-    asset_tag, and metadata.source_match — otherwise the VC ref resolves through
-    a different matcher path than the top-level master.
+    primary_ip4, primary_ip6, asset_tag, and metadata.source_match — otherwise
+    the VC ref resolves through a different matcher path than the top-level
+    master.
 
-    Strips ``virtual_chassis``, ``primary_ip4``, ``primary_ip6``, ``config``, and
-    annotation-only metadata so the inline ref does not nest another VC (circular
-    reference) or carry interface-specific back-pointers.
+    Strips ``virtual_chassis``, ``config``, and annotation-only metadata so the
+    inline ref does not nest another VC (circular reference) or carry config.
     """
     stub = pb.Device(name=master_dev.name, serial=master_dev.serial)
+    _copy_master_ref_fields(stub, master_dev)
+    if master_dev.asset_tag:
+        stub.asset_tag = master_dev.asset_tag
+    if "source_match" in master_dev.metadata:
+        stub.metadata["source_match"] = master_dev.metadata["source_match"]
+    return stub
+
+
+def _copy_master_ref_fields(stub: pb.Device, master_dev: pb.Device) -> None:
+    """Copy site/tenant/role/device_type/primary_ip4/primary_ip6 onto a master matcher stub."""
     if master_dev.HasField("site"):
         stub.site.CopyFrom(pb.Site(name=master_dev.site.name))
     if master_dev.HasField("tenant"):
@@ -669,11 +679,10 @@ def _master_device_ref(master_dev: pb.Device) -> pb.Device:
         if dt.HasField("manufacturer"):
             stub_dt.manufacturer.CopyFrom(pb.Manufacturer(name=dt.manufacturer.name))
         stub.device_type.CopyFrom(stub_dt)
-    if master_dev.asset_tag:
-        stub.asset_tag = master_dev.asset_tag
-    if "source_match" in master_dev.metadata:
-        stub.metadata["source_match"] = master_dev.metadata["source_match"]
-    return stub
+    if master_dev.HasField("primary_ip4"):
+        stub.primary_ip4.CopyFrom(master_dev.primary_ip4)
+    if master_dev.HasField("primary_ip6"):
+        stub.primary_ip6.CopyFrom(master_dev.primary_ip6)
 
 
 def _route_interfaces_by_member(
@@ -717,6 +726,64 @@ def _route_interfaces_by_member(
     return grouped_interfaces, grouped_ips
 
 
+def _build_member_devices(
+    members: list[dict],
+    master: dict,
+    vc_name: str,
+    device_info: dict,
+    defaults: Defaults,
+    options: Options,
+    config_info: dict,
+    netbox_id: int | None,
+) -> dict[int, pb.Device]:
+    """Build per-member rich Device protos. Non-master members get vc_position; virtual_chassis is filled later."""
+    def _one(m: dict, *, is_master: bool) -> pb.Device:
+        member_info = dict(device_info)
+        member_info["hostname"] = f"{vc_name}-{m['id']}"
+        member_info["serial_number"] = m["serial"]
+        if m.get("model"):
+            member_info["model"] = m["model"]
+        return translate_device(
+            member_info,
+            defaults,
+            config_info if is_master else None,
+            options if is_master else None,
+            netbox_id=netbox_id if is_master else None,
+        )
+
+    member_devices: dict[int, pb.Device] = {master["id"]: _one(master, is_master=True)}
+    for m in members[1:]:
+        member_dev = _one(m, is_master=False)
+        # asset_tag is a high-precedence matcher in Diode — copying the
+        # defaults.device.asset_tag onto every member would collide.
+        member_dev.ClearField("asset_tag")
+        member_dev.vc_position = m["id"]
+        member_devices[m["id"]] = member_dev
+    return member_devices
+
+
+def _build_per_member_interfaces(
+    valid_ids: set[int],
+    member_devices: dict[int, pb.Device],
+    grouped_interfaces: dict[int, dict],
+    grouped_ips: dict[int, dict],
+    defaults: Defaults,
+) -> dict[int, list[Entity]]:
+    """Run build_interface_entities once per member and return the per-member entity lists."""
+    out: dict[int, list[Entity]] = {mid: [] for mid in valid_ids}
+    for mid in valid_ids:
+        sub_interfaces = grouped_interfaces[mid]
+        sub_ips = grouped_ips[mid]
+        if not sub_interfaces and not sub_ips:
+            continue
+        device_for_iface = copy.deepcopy(member_devices[mid])
+        device_for_iface.ClearField("config")
+        out[mid] = build_interface_entities(
+            device_for_iface, sub_interfaces, sub_ips, defaults
+        )
+    return out
+
+
 def _translate_as_stack(
     data: dict,
     members: list[dict],
@@ -742,62 +809,41 @@ def _translate_as_stack(
     master = members[0]  # already sorted ascending by id
     master_id = master["id"]
 
-    # Build the master Device FIRST so the inline VC master ref can be derived
-    # from the same proto — guarantees matcher fields stay in sync with whatever
-    # translate_device chose (defaults.device.model/manufacturer overrides etc.).
-    def _build_member_dev(m: dict, *, is_master: bool) -> pb.Device:
-        member_info = dict(device_info)
-        member_info["hostname"] = f"{vc_name}-{m['id']}"
-        member_info["serial_number"] = m["serial"]
-        if m.get("model"):
-            member_info["model"] = m["model"]
-        return translate_device(
-            member_info,
-            defaults,
-            config_info if is_master else None,
-            options if is_master else None,
-            netbox_id=netbox_id if is_master else None,
-        )
+    # Build per-member Device protos. The master is built first so the inline
+    # VC master ref can be derived from the same proto, guaranteeing matcher
+    # fields stay in sync with whatever translate_device chose (defaults
+    # overrides, etc.). Non-master members defer virtual_chassis assignment —
+    # vc_master_ref must be derived AFTER assign_primary_ip mutates master_dev,
+    # otherwise primary_ip4/6 would be missing from the inline VC master ref.
+    member_devices = _build_member_devices(
+        members, master, vc_name, device_info, defaults, options, config_info, netbox_id,
+    )
+    master_dev = member_devices[master_id]
 
-    master_dev = _build_member_dev(master, is_master=True)
-    vc_master_ref = _master_device_ref(master_dev)
-
-    member_devices: dict[int, pb.Device] = {master_id: master_dev}
-    for m in members[1:]:
-        member_dev = _build_member_dev(m, is_master=False)
-        # asset_tag is a high-precedence matcher in Diode — copying the
-        # defaults.device.asset_tag onto every member would collide.
-        member_dev.ClearField("asset_tag")
-        member_dev.vc_position = m["id"]
-        member_dev.virtual_chassis.CopyFrom(
-            pb.VirtualChassis(name=vc_name, master=vc_master_ref)
-        )
-        member_devices[m["id"]] = member_dev
-
-    # Build interface entities first — primary-IP assignment must mutate the
-    # master Device proto BEFORE that proto is wrapped into Entity(device=...),
-    # because Entity construction copies the proto.
+    # Build interface entities — primary-IP assignment must mutate the master
+    # Device proto BEFORE that proto is wrapped into Entity(device=...) and
+    # BEFORE vc_master_ref is derived from it.
     valid_ids = {m["id"] for m in members}
     grouped_interfaces, grouped_ips = _route_interfaces_by_member(
         interfaces, interfaces_ip, valid_ids, master_id, vc_name,
     )
-    interface_entities_by_member: dict[int, list[Entity]] = {mid: [] for mid in valid_ids}
-    for mid in valid_ids:
-        sub_interfaces = grouped_interfaces[mid]
-        sub_ips = grouped_ips[mid]
-        if not sub_interfaces and not sub_ips:
-            continue
-        device_for_iface = copy.deepcopy(member_devices[mid])
-        device_for_iface.ClearField("config")
-        interface_entities_by_member[mid] = build_interface_entities(
-            device_for_iface, sub_interfaces, sub_ips, defaults
-        )
+    interface_entities_by_member = _build_per_member_interfaces(
+        valid_ids, member_devices, grouped_interfaces, grouped_ips, defaults,
+    )
 
     # Primary-IP back-pointer is only meaningful on the master (mgmt IP).
-    # Run before master_dev is wrapped into Entity.
     master_iface_entities = interface_entities_by_member[master_id]
     if master_iface_entities:
         assign_primary_ip(master_dev, master_iface_entities, target_hostname)
+
+    # NOW derive vc_master_ref — captures master's primary_ip4/6 if assigned.
+    vc_master_ref = _master_device_ref(master_dev)
+
+    # Backfill virtual_chassis on each non-master member.
+    for m in members[1:]:
+        member_devices[m["id"]].virtual_chassis.CopyFrom(
+            pb.VirtualChassis(name=vc_name, master=vc_master_ref)
+        )
 
     entities: list[Entity] = []
 
