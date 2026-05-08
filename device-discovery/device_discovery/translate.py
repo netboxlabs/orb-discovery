@@ -583,18 +583,25 @@ def assign_primary_ip(
 
 
 def _resolve_platform(data: dict, options: Options) -> None:
-    """Mutate data['device']['platform'] to the resolved platform string."""
+    """
+    Mutate data['device']['platform'] to the resolved platform string.
+
+    Format is ``"<DRIVER> <os_version>"`` (or just ``<driver>`` when
+    ``platform_omit_version`` is set). Long platform strings are truncated to 100 chars
+    while preserving the format — the previous behaviour replaced the whole string
+    with ``os_version[:100]`` on overflow, which dropped the driver prefix and
+    crashed when ``os_version`` was ``None``.
+    """
     device_info = data.get("device") or {}
     if not device_info:
         return
     if options.platform_omit_version:
         device_info["platform"] = data.get("driver")
-    else:
-        device_info["platform"] = (
-            f"{data.get('driver', '').upper()} {device_info.get('os_version')}"
-        )
-        if len(device_info["platform"]) > 100:
-            device_info["platform"] = device_info.get("os_version")[:100]
+        return
+    driver = (data.get("driver") or "").upper()
+    os_version = device_info.get("os_version") or ""
+    platform = f"{driver} {os_version}".strip()
+    device_info["platform"] = platform[:100]
 
 
 def _emit_vlans_and_stubs(
