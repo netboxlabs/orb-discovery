@@ -12,7 +12,7 @@ produce, in order:
   4. interface entities, each routed to the correct member by parse_member_id
 """
 
-from device_discovery.policy.models import Defaults, DeviceParameters
+from device_discovery.policy.models import Defaults, DeviceParameters, TenantParameters
 from device_discovery.translate import translate_data
 
 
@@ -233,6 +233,36 @@ def test_vc_master_ref_carries_master_asset_tag_and_source_match():
     # Same invariant on the member's nested virtual_chassis.master.
     assert member.virtual_chassis.master.asset_tag == "TENANT-A-DEFAULT"
     assert "source_match" in member.virtual_chassis.master.metadata
+
+
+def test_vc_master_ref_carries_master_tenant():
+    """defaults.tenant must propagate to master AND to the inline VC master ref."""
+    data = _base_data(_two_member_payload())
+    data["defaults"] = Defaults(tenant=TenantParameters(name="Tenant A", group="Group A"))
+
+    entities = list(translate_data(data))
+    master = next(e.device for e in entities
+                  if e.HasField("device") and not e.device.HasField("virtual_chassis"))
+    vc = next(e.virtual_chassis for e in entities if e.HasField("virtual_chassis"))
+    member = next(e.device for e in entities
+                  if e.HasField("device") and e.device.HasField("virtual_chassis"))
+
+    assert master.HasField("tenant")
+    assert master.tenant.name == "Tenant A"
+    assert master.tenant.group.name == "Group A"
+
+    # VC inline master MUST carry the same tenant or the unique_master matcher
+    # will resolve to a different record on re-runs in tenant-scoped policies.
+    assert vc.master.HasField("tenant"), (
+        "VC master inline ref is missing tenant — matcher divergence vs. emitted master"
+    )
+    assert vc.master.tenant.name == "Tenant A"
+    assert vc.master.tenant.group.name == "Group A"
+
+    # Member's nested virtual_chassis.master must carry tenant too.
+    nested = member.virtual_chassis.master
+    assert nested.HasField("tenant")
+    assert nested.tenant.name == "Tenant A"
 
 
 def test_vc_master_ref_picks_up_defaults_device_model_override():

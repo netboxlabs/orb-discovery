@@ -644,9 +644,9 @@ def _master_device_ref(master_dev: pb.Device) -> pb.Device:
     Used for both the top-level VirtualChassis.master field and each non-master
     member Device's virtual_chassis.master field. The plugin resolves the existing
     VC via unique_master, so this MUST carry the same matcher fields the emitted
-    master Device carries — name, serial, site, role, device_type, asset_tag, and
-    metadata.source_match — otherwise the VC ref resolves through a different
-    matcher path than the top-level master.
+    master Device carries — name, serial, site, tenant, role, device_type,
+    asset_tag, and metadata.source_match — otherwise the VC ref resolves through
+    a different matcher path than the top-level master.
 
     Strips ``virtual_chassis``, ``primary_ip4``, ``primary_ip6``, ``config``, and
     annotation-only metadata so the inline ref does not nest another VC (circular
@@ -655,6 +655,12 @@ def _master_device_ref(master_dev: pb.Device) -> pb.Device:
     stub = pb.Device(name=master_dev.name, serial=master_dev.serial)
     if master_dev.HasField("site"):
         stub.site.CopyFrom(pb.Site(name=master_dev.site.name))
+    if master_dev.HasField("tenant"):
+        t = master_dev.tenant
+        tenant_stub = pb.Tenant(name=t.name)
+        if t.HasField("group"):
+            tenant_stub.group.CopyFrom(pb.TenantGroup(name=t.group.name))
+        stub.tenant.CopyFrom(tenant_stub)
     if master_dev.HasField("role"):
         stub.role.CopyFrom(pb.DeviceRole(name=master_dev.role.name))
     if master_dev.HasField("device_type"):
