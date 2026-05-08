@@ -97,6 +97,9 @@ class PolicyRunner:
         self.policy = policy
         self.run_store = run_store
 
+        # APScheduler logs one-shot job removal at INFO; keep library chatter off default logs (OBS-2581).
+        logging.getLogger("apscheduler").setLevel(logging.WARNING)
+
         self.scheduler.start()
 
         if self.policy.config.schedule is not None:
