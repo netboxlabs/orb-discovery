@@ -47,11 +47,20 @@ def test_runner_dispatch_idiom_swallows_exceptions(caplog):
 
     logger = logging.getLogger("device_discovery.policy.runner")
     data: dict = {}
-    method = getattr(dev, "get_chassis_members", None)
-    if callable(method):
-        try:
-            data["chassis_members"] = method()
-        except Exception as e:
-            logger.warning("Error getting chassis members: %s. Continuing without chassis data.", e)
+    with caplog.at_level(logging.WARNING, logger="device_discovery.policy.runner"):
+        method = getattr(dev, "get_chassis_members", None)
+        if callable(method):
+            try:
+                data["chassis_members"] = method()
+            except Exception as e:
+                logger.warning("Error getting chassis members: %s. Continuing without chassis data.", e)
 
     assert "chassis_members" not in data
+    # Assert the warning actually fired — otherwise this test would silently
+    # pass even if a future runner refactor stopped logging on exception.
+    assert any(
+        r.levelno == logging.WARNING
+        and "Error getting chassis members" in r.message
+        and "boom" in r.message
+        for r in caplog.records
+    ), "expected runner to log a WARNING with the exception message"

@@ -63,9 +63,10 @@ def validate_chassis_payload(payload) -> list[dict] | None:
     without non-negative int ids — Junos FPC numbering starts at 0, e.g. ``et-0/0/0`` —
     and non-empty serials) falls through to the single-Device
     path. Members with duplicate ids or duplicate serials are dropped after the first
-    occurrence (with a warning). Optional fields (``model``, ``mac``, ``state``) must
-    be str or None; ``priority`` must be int or None — bad types drop the member rather
-    than crashing translate. Two or more valid members are required to emit VC.
+    occurrence (with a warning). Optional fields (``model``, ``mac``, ``state``,
+    ``role``) must be str or None; ``priority`` must be int or None — bad types drop
+    the member rather than crashing translate. Two or more valid members are required
+    to emit VC.
     """
     if not isinstance(payload, dict):
         return None
