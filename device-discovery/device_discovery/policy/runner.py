@@ -104,8 +104,10 @@ class PolicyRunner:
         self.config.defaults = self.config.defaults or Defaults()
         self.config.options = self.config.options or Options()
 
-        # APScheduler logs one-shot job removal at INFO; keep library chatter off default logs (OBS-2581).
-        logging.getLogger("apscheduler").setLevel(logging.WARNING)
+        # One-shot jobs make APScheduler emit INFO when removing the ephemeral job after run.
+        # Cron policies keep default APScheduler INFO so library scheduling detail stays visible.
+        if self.config.schedule is None:
+            logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
         self.scheduler.start()
         self._validate_discovery_drivers()
