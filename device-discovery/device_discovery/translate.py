@@ -768,6 +768,31 @@ def _translate_as_stack(
         )
         member_devices[m["id"]] = member_dev
 
+    # Build interface entities first — primary-IP assignment must mutate the
+    # master Device proto BEFORE that proto is wrapped into Entity(device=...),
+    # because Entity construction copies the proto.
+    valid_ids = {m["id"] for m in members}
+    grouped_interfaces, grouped_ips = _route_interfaces_by_member(
+        interfaces, interfaces_ip, valid_ids, master_id, vc_name,
+    )
+    interface_entities_by_member: dict[int, list[Entity]] = {mid: [] for mid in valid_ids}
+    for mid in valid_ids:
+        sub_interfaces = grouped_interfaces[mid]
+        sub_ips = grouped_ips[mid]
+        if not sub_interfaces and not sub_ips:
+            continue
+        device_for_iface = copy.deepcopy(member_devices[mid])
+        device_for_iface.ClearField("config")
+        interface_entities_by_member[mid] = build_interface_entities(
+            device_for_iface, sub_interfaces, sub_ips, defaults
+        )
+
+    # Primary-IP back-pointer is only meaningful on the master (mgmt IP).
+    # Run before master_dev is wrapped into Entity.
+    master_iface_entities = interface_entities_by_member[master_id]
+    if master_iface_entities:
+        assign_primary_ip(master_dev, master_iface_entities, target_hostname)
+
     entities: list[Entity] = []
 
     # 1) Master Device — PLAIN (no vc_position, no virtual_chassis ref).
@@ -784,35 +809,9 @@ def _translate_as_stack(
     for m in members[1:]:
         entities.append(Entity(device=member_devices[m["id"]]))
 
-    # 4) Per-member interface routing.
-    valid_ids = {m["id"] for m in members}
-    grouped_interfaces, grouped_ips = _route_interfaces_by_member(
-        interfaces, interfaces_ip, valid_ids, master_id, vc_name,
-    )
+    # 4) Interface entities, grouped per member.
     for mid in valid_ids:
-        sub_interfaces = grouped_interfaces[mid]
-        sub_ips = grouped_ips[mid]
-        if not sub_interfaces and not sub_ips:
-            continue
-        device_for_iface = copy.deepcopy(member_devices[mid])
-        device_for_iface.ClearField("config")
-        sub_entities = build_interface_entities(
-            device_for_iface, sub_interfaces, sub_ips, defaults
-        )
-        entities.extend(sub_entities)
-
-    # 5) Primary-IP back-pointer is only meaningful on the master (mgmt IP).
-    master_dev_proto = member_devices[master_id]
-    master_iface_entities = [
-        e for e in entities
-        if e.HasField("interface") and e.interface.device.name == f"{vc_name}-{master_id}"
-    ] + [
-        e for e in entities
-        if e.HasField("ip_address")
-        and e.ip_address.assigned_object_interface.device.name == f"{vc_name}-{master_id}"
-    ]
-    if master_iface_entities:
-        assign_primary_ip(master_dev_proto, master_iface_entities, target_hostname)
+        entities.extend(interface_entities_by_member[mid])
 
     return entities
 

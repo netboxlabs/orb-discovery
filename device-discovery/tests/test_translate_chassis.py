@@ -324,6 +324,27 @@ def test_validation_drops_duplicate_ids_and_serials(caplog):
     assert "duplicate serial" in msgs
 
 
+def test_master_primary_ip_propagates_to_emitted_entity():
+    """assign_primary_ip must mutate master_dev BEFORE it is wrapped into Entity (proto copy)."""
+    data = _base_data(_two_member_payload())
+    # Give the master interface an IP that resolves to the target_hostname so
+    # assign_primary_ip picks it.
+    data["interface_ip"]["GigabitEthernet1/0/1"] = {
+        "ipv4": {"10.0.0.1": {"prefix_length": 24}},
+    }
+    data["target_hostname"] = "10.0.0.1"
+
+    entities = list(translate_data(data))
+    master = next(
+        e.device for e in entities
+        if e.HasField("device") and not e.device.HasField("virtual_chassis")
+    )
+    assert master.HasField("primary_ip4"), (
+        "master Entity is missing primary_ip4 — assign_primary_ip ran AFTER Entity copy"
+    )
+    assert master.primary_ip4.address == "10.0.0.1/24"
+
+
 def test_validation_rejects_non_string_optional_field():
     """A member whose optional field has the wrong type is dropped, not allowed to crash translate."""
     data = _base_data({
