@@ -25,6 +25,7 @@ from netboxlabs.diode.sdk.ingester import (
 
 from device_discovery.interface import build_interface_entities
 from device_discovery.policy.models import Defaults, Options, TenantParameters, VrfParameters
+from device_discovery.stubs import _ip_match_stub
 
 logger = logging.getLogger(__name__)
 
@@ -679,10 +680,14 @@ def _copy_master_ref_fields(stub: pb.Device, master_dev: pb.Device) -> None:
         if dt.HasField("manufacturer"):
             stub_dt.manufacturer.CopyFrom(pb.Manufacturer(name=dt.manufacturer.name))
         stub.device_type.CopyFrom(stub_dt)
+    # Copy primary IPs as MATCHER-ONLY stubs (address-only, no
+    # assigned_object_interface back-pointer). The Diode plugin's matcher #2
+    # (unique_primary_ip4) only needs the address; copying the full rich IP
+    # would re-introduce the IP→Interface→Device cycle and bloat the payload.
     if master_dev.HasField("primary_ip4"):
-        stub.primary_ip4.CopyFrom(master_dev.primary_ip4)
+        stub.primary_ip4.CopyFrom(_ip_match_stub(master_dev.primary_ip4))
     if master_dev.HasField("primary_ip6"):
-        stub.primary_ip6.CopyFrom(master_dev.primary_ip6)
+        stub.primary_ip6.CopyFrom(_ip_match_stub(master_dev.primary_ip6))
 
 
 def _route_interfaces_by_member(

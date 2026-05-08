@@ -212,8 +212,17 @@ def test_primary_ip4_back_pointer_pruned_per_device():
     assert a_back.device is not b_back.device
 
 
-def test_member_device_stub_carries_virtual_chassis_and_vc_position():
-    """Member Device stubs must keep virtual_chassis + vc_position so they match the rich entity (NetBox per-VC uniqueness)."""
+def test_member_device_stub_drops_virtual_chassis_and_vc_position():
+    """
+    Member Device stubs intentionally drop virtual_chassis + vc_position.
+
+    The Diode plugin's dcim.device matcher cascade resolves at one of: asset_tag,
+    primary_ip4/6, oob_ip, name+site+tenant, name+site, rack+position+face — and only
+    falls through to virtual_chassis+vc_position as the last resort. In practice the
+    stub always resolves at name+site+tenant or higher, so virtual_chassis +
+    vc_position are unreachable and copying them would just bloat the wire payload
+    (the rich virtual_chassis subtree carries a nested master Device ref).
+    """
     master = _make_device("core-sw-1", "FOC1")
     member = _make_device("core-sw-2", "FOC2")
     member.vc_position = 2
@@ -229,12 +238,11 @@ def test_member_device_stub_carries_virtual_chassis_and_vc_position():
     prune_nested_refs(entities)
 
     pruned_dev_ref = entities[2].interface.device
+    # Stub resolves at higher-precedence matchers (name+site+tenant), so VC fields are dropped.
     assert pruned_dev_ref.name == "core-sw-2"
-    assert pruned_dev_ref.vc_position == 2, (
-        "member Device stub lost vc_position — matcher divergence vs. rich entity"
+    assert pruned_dev_ref.vc_position == 0, (
+        "member Device stub unexpectedly carries vc_position — wire payload bloat"
     )
-    assert pruned_dev_ref.HasField("virtual_chassis"), (
-        "member Device stub lost virtual_chassis — matcher divergence"
+    assert not pruned_dev_ref.HasField("virtual_chassis"), (
+        "member Device stub unexpectedly carries virtual_chassis subtree — wire payload bloat"
     )
-    assert pruned_dev_ref.virtual_chassis.name == "core-sw"
-    assert pruned_dev_ref.virtual_chassis.master.name == "core-sw-1"

@@ -354,12 +354,18 @@ def test_validation_drops_duplicate_ids_and_serials(caplog):
     assert "duplicate serial" in msgs
 
 
-def test_vc_master_ref_carries_master_primary_ip():
+def test_vc_master_ref_carries_master_primary_ip_as_matcher_only_stub():
     """
-    primary_ip4 must propagate to master AND to the inline VC master ref.
+    primary_ip4 must propagate to the VC master ref as a MATCHER-ONLY stub.
 
-    Failure mode: vc_master_ref derived BEFORE assign_primary_ip → primary_ip4 unset on the
-    VC ref while the rich master Device has it. Matcher divergence on tenant-scoped VCs.
+    Diode plugin matcher #2 (unique_primary_ip4) resolves on address alone, so the VC
+    master inline ref needs only the address. Copying the rich primary_ip4 (with its
+    assigned_object_interface back-pointer) would re-introduce the IP→Interface→Device
+    cycle that _ip_match_stub exists to break, and bloat the wire payload.
+
+    Also a regression guard against the ordering bug — vc_master_ref must be derived
+    AFTER assign_primary_ip mutates master_dev, otherwise primary_ip4 is unset on the
+    VC ref while the rich master has it.
     """
     data = _base_data(_two_member_payload())
     data["interface_ip"]["GigabitEthernet1/0/1"] = {
@@ -374,18 +380,21 @@ def test_vc_master_ref_carries_master_primary_ip():
     member = next(e.device for e in entities
                   if e.HasField("device") and e.device.HasField("virtual_chassis"))
 
+    # Rich master keeps the full primary_ip4 (including back-pointer interface).
     assert master.HasField("primary_ip4")
     assert master.primary_ip4.address == "10.0.0.1/24"
 
-    assert vc.master.HasField("primary_ip4"), (
-        "VC master inline ref is missing primary_ip4 — "
-        "vc_master_ref must be derived AFTER assign_primary_ip"
-    )
+    # VC master inline ref carries the address but NOT the back-pointer interface.
+    assert vc.master.HasField("primary_ip4")
     assert vc.master.primary_ip4.address == "10.0.0.1/24"
+    assert not vc.master.primary_ip4.HasField("assigned_object_interface"), (
+        "VC master primary_ip4 must be matcher-only (no IP→Interface→Device cycle)"
+    )
 
-    # Member's nested virtual_chassis.master must carry primary_ip4 too.
+    # Same shape on each member's nested virtual_chassis.master.
     assert member.virtual_chassis.master.HasField("primary_ip4")
     assert member.virtual_chassis.master.primary_ip4.address == "10.0.0.1/24"
+    assert not member.virtual_chassis.master.primary_ip4.HasField("assigned_object_interface")
 
 
 def test_master_primary_ip_propagates_to_emitted_entity():

@@ -109,12 +109,17 @@ def _device_match_stub(d: pb.Device) -> pb.Device:
     """
     Return a Device carrying matcher-only fields plus NetBox-required-for-create fields.
 
-    INVARIANT: this set must be a superset of (a) every dcim.device matcher field
-    device-discovery currently populates, and (b) every field NetBox treats as required for
-    create. ``virtual_chassis`` and ``vc_position`` are populated by the switch-stack
-    translator and are part of NetBox's per-VC uniqueness constraints, so the stub must
-    carry them through pruning — otherwise a member interface's nested device ref could
-    resolve to a non-VC device of the same name.
+    INVARIANT: this set must be a superset of every dcim.device matcher field that the
+    Diode plugin would actually use to resolve this stub. The plugin's matcher precedence
+    (highest first) is: asset_tag → primary_ip4 → primary_ip6 → oob_ip → name+site+tenant
+    → name+site → rack+position+face → virtual_chassis+vc_position. Resolution stops at
+    the first matcher that produces a hit; in practice device-discovery populates
+    asset_tag (when defaults.device.asset_tag is set), primary_ip4 (master only), and
+    name+site+tenant for every device — so resolution always succeeds at one of those
+    higher-precedence matchers. virtual_chassis + vc_position are intentionally NOT
+    copied here: they would only be consulted by matcher #8, which is never reached, and
+    including them would copy a rich virtual_chassis subtree (with a nested master Device
+    ref) into every member interface's nested device-stub, bloating the wire payload.
 
     `asset_tag` is the highest-precedence matcher and is populated when the policy sets
     defaults.device.asset_tag — kept on the stub so the rich entity and stub never resolve
@@ -124,13 +129,6 @@ def _device_match_stub(d: pb.Device) -> pb.Device:
     _copy_device_relations(stub, d)
     if d.asset_tag:
         stub.asset_tag = d.asset_tag
-    # VC linkage is part of NetBox's effective uniqueness for member devices.
-    # The translator emits virtual_chassis with a non-recursive master, so a
-    # direct CopyFrom is safe (no further recursion needed).
-    if d.HasField("virtual_chassis"):
-        stub.virtual_chassis.CopyFrom(d.virtual_chassis)
-    if d.vc_position:
-        stub.vc_position = d.vc_position
     # Carry source_match (e.g., netbox_id) — that is the plugin's PK-based
     # match path and must not diverge between rich and stub. Annotation
     # metadata such as run_id is intentionally not copied.
