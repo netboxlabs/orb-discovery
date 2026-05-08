@@ -156,34 +156,48 @@ def _route_interfaces_by_member(
     """
     Group interface and interface_ip entries by chassis member id.
 
-    Interfaces with no parseable member id (Vlan/Loopback/Port-channel/...) land on
-    the master. Interfaces present only in interface_ip (typical for loopbacks /
-    mgmt SVIs not enumerated by get_interfaces) are routed by the same rule so
-    they are not silently dropped. Parseable member ids that don't match a
-    validated member log a WARNING and fall back to master.
+    Routing rules:
+
+    - No parseable member id (``Vlan``, ``Loopback``, ``Port-channel``, etc.) → master.
+    - Parseable member id that matches a validated member → that member.
+    - Parseable member id that does NOT match any validated member → SKIPPED with a
+      WARNING. This case fires when a physical member was dropped during validation
+      (missing serial, duplicate id, etc.) but the device still reported its ports
+      via ``show interfaces``. Routing those ports to master would silently
+      misattribute member-1 interfaces to member-2 — a worse outcome than a NetBox
+      record missing the orphaned ports, which an operator can spot via the warning.
+
+    Interfaces present only in ``interface_ip`` (typical for loopbacks / mgmt SVIs
+    not enumerated by ``get_interfaces``) are routed by the same rule so they are
+    not silently dropped from valid members.
     """
     from custom_napalm._chassis import parse_member_id
 
     grouped_interfaces: dict[int, dict] = {mid: {} for mid in valid_ids}
     grouped_ips: dict[int, dict] = {mid: {} for mid in valid_ids}
 
-    def _route(if_name: str) -> int:
+    def _route(if_name: str, kind: str) -> int | None:
         mid = parse_member_id(if_name)
         if mid is None:
             return master_id
         if mid in valid_ids:
             return mid
         logger.warning(
-            "chassis stack %r: interface %r references unknown member id %d; "
-            "routing to master member %d",
-            vc_name, if_name, mid, master_id,
+            "chassis stack %r: %s %r references unknown member id %d "
+            "(member dropped during validation or absent from chassis_members); "
+            "skipping rather than misattributing to master",
+            vc_name, kind, if_name, mid,
         )
-        return master_id
+        return None
 
     for if_name, if_data in interfaces.items():
-        grouped_interfaces[_route(if_name)][if_name] = if_data
+        target = _route(if_name, "interface")
+        if target is not None:
+            grouped_interfaces[target][if_name] = if_data
     for if_name, ip_data in interfaces_ip.items():
-        grouped_ips[_route(if_name)][if_name] = ip_data
+        target = _route(if_name, "interface_ip")
+        if target is not None:
+            grouped_ips[target][if_name] = ip_data
     return grouped_interfaces, grouped_ips
 
 

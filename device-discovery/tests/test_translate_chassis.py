@@ -302,8 +302,16 @@ def test_ip_only_interface_routed_to_correct_member():
     assert by_name["GigabitEthernet2/0/9"].device.name == "core-sw-2"
 
 
-def test_unknown_member_id_logs_warning_and_routes_to_master(caplog):
-    """An interface whose parsed member id is not among the validated members logs a WARNING."""
+def test_unknown_member_id_is_skipped_with_warning(caplog):
+    """
+    An interface whose parsed member id was dropped from chassis_members is SKIPPED, not routed to master.
+
+    Routing orphaned member interfaces to master would silently misattribute them to
+    the wrong device — e.g. Gi9/0/1 (a member-9 port) showing up on member 2 just
+    because member 9 lost its serial during validation. Skipping with a warning is
+    safer: NetBox is missing the orphaned ports (operator-visible via the warning),
+    not corrupted with port→device assignments that don't match physical reality.
+    """
     import logging
 
     data = _base_data(_two_member_payload())
@@ -311,16 +319,25 @@ def test_unknown_member_id_logs_warning_and_routes_to_master(caplog):
         "is_enabled": True, "is_up": True, "speed": 1000, "mtu": 1500,
         "mac_address": "", "description": "", "last_flapped": -1.0,
     }
+    # IP-only entry on the same orphaned member must also be skipped.
+    data["interface_ip"]["GigabitEthernet9/0/1"] = {
+        "ipv4": {"10.9.9.1": {"prefix_length": 24}},
+    }
 
-    with caplog.at_level(logging.WARNING, logger="device_discovery.translate"):
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate_chassis"):
         entities = list(translate_data(data))
 
     by_name = {e.interface.name: e.interface for e in entities if e.HasField("interface")}
-    assert by_name["GigabitEthernet9/0/1"].device.name == "core-sw-1"
-    assert any(
-        "unknown member id 9" in r.message and "routing to master" in r.message
-        for r in caplog.records
+    assert "GigabitEthernet9/0/1" not in by_name, (
+        "orphaned member interface must NOT be emitted (routing to master would misattribute)"
     )
+    # No IP entity for the orphaned address either.
+    ips = [e.ip_address.address for e in entities if e.HasField("ip_address")]
+    assert "10.9.9.1/24" not in ips, "orphaned member IP must NOT be emitted"
+    assert any(
+        "unknown member id 9" in r.message and "skipping" in r.message
+        for r in caplog.records
+    ), "expected a WARNING explicitly stating the interface was skipped"
 
 
 def test_validation_drops_duplicate_ids_and_serials(caplog):
