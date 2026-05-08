@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,8 @@ _ROLE_MAP = {
 
 
 def normalize_role(raw: str | None) -> str:
-    """Map a vendor-native role string to one of {"active","standby","member"}.
+    """
+    Map a vendor-native role string to one of {"active","standby","member"}.
 
     Empty / None / unknown values default to "member" rather than raising —
     discovery should never fail because a vendor returned a role string we
@@ -72,7 +73,8 @@ class ChassisMember:
 
 
 def to_payload(members: list[ChassisMember], domain: str | None = None) -> dict | None:
-    """Wrap a list of ChassisMember into the payload shape consumed by translate.
+    """
+    Wrap a list of ChassisMember into the payload shape consumed by translate.
 
     Drops members whose ``serial`` is empty (Diode resolves member Devices via
     the serial matcher; a member without one cannot be represented). Returns
@@ -124,7 +126,8 @@ _JUNOS_RE = re.compile(r"^(?:[a-z]{2}-)?(\d+)/\d+/\d+(?:\.\d+)?$")
 
 
 def parse_member_id(if_name: str) -> int | None:
-    """Extract the stack member id from an interface name. Return None when there is none.
+    """
+    Extract the stack member id from an interface name. Return None when there is none.
 
     Supported (positive matches):
       - Cisco IOS canonical and short forms: GigabitEthernet1/0/1 -> 1, Gi2/0/1 -> 2

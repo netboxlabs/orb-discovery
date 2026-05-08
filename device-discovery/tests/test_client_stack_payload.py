@@ -1,4 +1,5 @@
-"""End-to-end pruning test for stack graphs.
+"""
+End-to-end pruning test for stack graphs.
 
 The most likely production failure path: translate emits master + VC + N
 member Devices + per-member interfaces, then Client.ingest's pipeline runs
@@ -93,6 +94,7 @@ def test_stack_payload_after_run_id_and_prune_preserves_member_attribution(
 
 
 def test_stack_payload_emission_order_preserved_through_pipeline(mock_diode_client_class):
+    """Through the full ingest pipeline, master Device → VC → member Device order is preserved."""
     client = Client()
     client.init_client(prefix="", target="t", client_id="x", client_secret="y")
     mock_diode = mock_diode_client_class.return_value

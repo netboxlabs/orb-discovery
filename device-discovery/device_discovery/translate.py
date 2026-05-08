@@ -579,7 +579,8 @@ def assign_primary_ip(
 
 
 def _validate_chassis_payload(payload) -> list[dict] | None:
-    """Confirm chassis_members payload is usable. Returns sorted-by-id member list or None.
+    """
+    Confirm chassis_members payload is usable. Returns sorted-by-id member list or None.
 
     Defensive — a malformed payload (non-dict, missing/empty members list, or members
     without positive int ids and non-empty serials) falls through to the single-Device
@@ -610,7 +611,8 @@ def _validate_chassis_payload(payload) -> list[dict] | None:
 def _master_device_ref(
     master: dict, vc_name: str, manufacturer: str, defaults: Defaults
 ) -> pb.Device:
-    """Inline master Device matcher block — NO nested virtual_chassis.
+    """
+    Inline master Device matcher block — NO nested virtual_chassis.
 
     Used for both the top-level VirtualChassis.master field and each
     non-master member Device's virtual_chassis.master field. The plugin
@@ -638,7 +640,8 @@ def _translate_as_stack(
     defaults: Defaults,
     options: Options,
 ) -> list[Entity]:
-    """Emit master Device + top-level VirtualChassis + non-master member Devices.
+    """
+    Emit master Device + top-level VirtualChassis + non-master member Devices.
 
     Routes every interface / interface_ip entity to the correct member by
     parse_member_id. Mirrors the three-rule emission shape required by the
@@ -743,6 +746,41 @@ def _translate_as_stack(
     return entities
 
 
+def _resolve_platform(data: dict, options: Options) -> None:
+    """Mutate data['device']['platform'] to the resolved platform string."""
+    device_info = data.get("device") or {}
+    if not device_info:
+        return
+    if options.platform_omit_version:
+        device_info["platform"] = data.get("driver")
+    else:
+        device_info["platform"] = (
+            f"{data.get('driver', '').upper()} {device_info.get('os_version')}"
+        )
+        if len(device_info["platform"]) > 100:
+            device_info["platform"] = device_info.get("os_version")[:100]
+
+
+def _emit_vlans_and_stubs(
+    entities: list[Entity],
+    raw_vlans: dict | None,
+    defaults: Defaults,
+    new_stubs: list[pb.VLAN],
+) -> None:
+    """Append VLAN entities (from get_vlans()) plus any auto-stubbed VLANs not already emitted."""
+    if raw_vlans:
+        for vid, vlan_info in raw_vlans.items():
+            vlan = translate_vlan(vid, vlan_info.get("name"), defaults)
+            if vlan:
+                entities.append(Entity(vlan=vlan))
+    if new_stubs:
+        already_emitted = {e.vlan.vid for e in entities if e.HasField("vlan")}
+        for stub in new_stubs:
+            if stub.vid not in already_emitted:
+                entities.append(Entity(vlan=stub))
+                already_emitted.add(stub.vid)
+
+
 def translate_data(data: dict) -> Iterable[Entity]:
     """
     Translate data from NAPALM format to Diode SDK entities.
@@ -756,7 +794,7 @@ def translate_data(data: dict) -> Iterable[Entity]:
         Iterable[Entity]: Iterable of translated Diode SDK entities.
 
     """
-    entities = []
+    entities: list[Entity] = []
     new_stubs: list[pb.VLAN] = []
 
     defaults = data.get("defaults") or Defaults()
@@ -771,35 +809,15 @@ def translate_data(data: dict) -> Iterable[Entity]:
     # not be conflated.
     target_hostname = data.get("target_hostname")
 
-    if device_info:
-        if options.platform_omit_version:
-            device_info["platform"] = data.get("driver")
-        else:
-            device_info["platform"] = (
-                f"{data.get('driver', '').upper()} {device_info.get('os_version')}"
-            )
-            if len(device_info["platform"]) > 100:
-                device_info["platform"] = device_info.get("os_version")[:100]
+    _resolve_platform(data, options)
 
     chassis_members = _validate_chassis_payload(data.get("chassis_members"))
     if device_info and chassis_members is not None:
-        # Stack path: emit master Device + VC + N member Devices + per-member interface entities.
         entities.extend(_translate_as_stack(data, chassis_members, defaults, options))
-        # VLAN entities still emit globally — VC members share VLAN space.
         _apply_interface_vlan_associations(
             data, [e for e in entities if e.HasField("interface")], defaults, options, new_stubs,
         )
-        if data.get("vlan"):
-            for vid, vlan_info in data.get("vlan").items():
-                vlan = translate_vlan(vid, vlan_info.get("name"), defaults)
-                if vlan:
-                    entities.append(Entity(vlan=vlan))
-        if new_stubs:
-            already_emitted = {e.vlan.vid for e in entities if e.HasField("vlan")}
-            for stub in new_stubs:
-                if stub.vid not in already_emitted:
-                    entities.append(Entity(vlan=stub))
-                    already_emitted.add(stub.vid)
+        _emit_vlans_and_stubs(entities, data.get("vlan"), defaults, new_stubs)
         return entities
 
     if device_info:
@@ -819,19 +837,5 @@ def translate_data(data: dict) -> Iterable[Entity]:
         entities.append(Entity(device=device))
         entities.extend(interface_related_entities)
 
-    if data.get("vlan"):
-        for vid, vlan_info in data.get("vlan").items():
-            vlan = translate_vlan(vid, vlan_info.get("name"), defaults)
-            if vlan:
-                entities.append(Entity(vlan=vlan))
-
-    # Emit any auto-stubbed VLANs (referenced on interfaces but absent from
-    # get_vlans()). De-dup against VIDs already emitted above.
-    if new_stubs:
-        already_emitted = {e.vlan.vid for e in entities if e.HasField("vlan")}
-        for stub in new_stubs:
-            if stub.vid not in already_emitted:
-                entities.append(Entity(vlan=stub))
-                already_emitted.add(stub.vid)
-
+    _emit_vlans_and_stubs(entities, data.get("vlan"), defaults, new_stubs)
     return entities

@@ -170,7 +170,8 @@ class IOSDriver(NapalmIOSDriver):
         return result
 
     def get_chassis_members(self) -> dict | None:
-        """Return stack-member info for Cisco StackWise (Catalyst 3850/9300/2960X/...).
+        """
+        Return stack-member info for Cisco StackWise (Catalyst 3850/9300/2960X/...).
 
         Standalone IOS returns None (no stack rows, or a single populated slot).
         Stack of N populated members returns the payload shape consumed by
@@ -183,7 +184,8 @@ _INVENTORY_NAME_RE = re.compile(r"^Switch\s+(\d+)$", re.IGNORECASE)
 
 
 def _index_inventory_by_switch(rows: list[dict]) -> tuple[dict[int, str], dict[int, str]]:
-    """Return (serial_by_switch_id, model_by_switch_id) parsed from `show inventory`.
+    """
+    Return (serial_by_switch_id, model_by_switch_id) parsed from `show inventory`.
 
     Only matches NAME values of the exact form 'Switch N' (case-insensitive). On
     standalone IOS the NAME is 'Chassis' and yields empty dicts — caller treats

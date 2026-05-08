@@ -24,10 +24,12 @@ from custom_napalm._chassis import ChassisMember, normalize_role, parse_member_i
     ],
 )
 def test_normalize_role(raw, expected):
+    """Vendor role strings normalize to {active, standby, member}; unknowns default to member."""
     assert normalize_role(raw) == expected
 
 
 def test_chassis_member_to_dict_minimal():
+    """ChassisMember.to_dict round-trips a minimal dataclass instance."""
     m = ChassisMember(id=1, serial="FOC1234")
     assert m.to_dict() == {
         "id": 1,
@@ -41,6 +43,7 @@ def test_chassis_member_to_dict_minimal():
 
 
 def test_chassis_member_to_dict_full():
+    """ChassisMember.to_dict serializes every field including optional ones."""
     m = ChassisMember(
         id=2, serial="FOC5678", model="WS-C3850-12XS",
         role="active", priority=15, mac="aa:bb:cc:dd:ee:ff", state="ready",
@@ -52,6 +55,7 @@ def test_chassis_member_to_dict_full():
 
 
 def test_to_payload_drops_members_without_serial(caplog):
+    """Members without a serial are dropped (and a warning logged) before payload is built."""
     members = [
         ChassisMember(id=1, serial="FOC1"),
         ChassisMember(id=2, serial=""),    # dropped
@@ -64,11 +68,13 @@ def test_to_payload_drops_members_without_serial(caplog):
 
 
 def test_to_payload_returns_none_when_no_valid_members():
+    """Returns None when no member has a serial — translate falls through to single-Device path."""
     assert to_payload([ChassisMember(id=1, serial="")]) is None
     assert to_payload([]) is None
 
 
 def test_to_payload_preserves_domain():
+    """The optional domain field round-trips into the payload dict."""
     members = [ChassisMember(id=1, serial="FOC1"), ChassisMember(id=2, serial="FOC2")]
     payload = to_payload(members, domain="vc-1")
     assert payload["domain"] == "vc-1"
@@ -134,4 +140,5 @@ def test_to_payload_preserves_domain():
     ],
 )
 def test_parse_member_id(ifname, expected):
+    """parse_member_id extracts the leading switch id for stack-style names; None otherwise."""
     assert parse_member_id(ifname) == expected

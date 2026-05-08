@@ -1,4 +1,5 @@
-"""Tests for the VC emission branch in translate.translate_data.
+"""
+Tests for the VC emission branch in translate.translate_data.
 
 The branch fires when data['chassis_members'] has 2+ valid members. It must
 produce, in order:
@@ -80,6 +81,7 @@ def test_single_member_no_vc_emitted():
 
 
 def test_two_members_emits_master_plain_then_vc_then_member():
+    """A 2-member payload emits master Device, then VC, then non-master member with vc ref."""
     data = _base_data(_two_member_payload())
     entities = list(translate_data(data))
 
@@ -122,6 +124,7 @@ def test_two_members_emits_master_plain_then_vc_then_member():
 
 
 def test_interface_routed_to_correct_member():
+    """An interface name with a parseable member id routes to that member's Device."""
     data = _base_data(_two_member_payload())
     entities = list(translate_data(data))
     by_name = {e.interface.name: e.interface for e in entities if e.HasField("interface")}
@@ -150,9 +153,7 @@ def test_master_failover_doesnt_change_vc_identity():
 
 
 def test_member_with_missing_serial_dropped_in_validation():
-    """A payload that included a serialless member should be dropped at validation time;
-    if the result has < 2 valid members, falls through to single-Device path.
-    """
+    """A serialless member is dropped at validation time; <2 valid members falls through to single-Device."""
     data = _base_data({"members": [
         {"id": 1, "serial": "FOC2401L0AB", "model": "X", "role": "active",
          "priority": 15, "mac": None, "state": "ready"},
@@ -179,6 +180,7 @@ def test_malformed_chassis_payload_falls_through():
 
 
 def test_subinterface_lands_on_same_member_as_parent():
+    """Subinterface (Gi2/0/1.100) attributes to member 2, like its parent Gi2/0/1."""
     data = _base_data(_two_member_payload())
     data["interface"]["GigabitEthernet2/0/1.100"] = {
         "is_enabled": True, "is_up": True, "speed": 1000, "mtu": 1500,
@@ -191,9 +193,7 @@ def test_subinterface_lands_on_same_member_as_parent():
 
 
 def test_member_devices_have_no_asset_tag():
-    """defaults.device.asset_tag (if set) must NOT be copied to non-master members —
-    that would collide on Diode's high-precedence asset_tag matcher.
-    """
+    """Non-master members must NOT inherit defaults.device.asset_tag (high-precedence matcher collision)."""
     data = _base_data(_two_member_payload())
     data["defaults"] = Defaults(device=DeviceParameters(asset_tag="TENANT-A-DEFAULT"))
 
