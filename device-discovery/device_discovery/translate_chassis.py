@@ -60,7 +60,8 @@ def validate_chassis_payload(payload) -> list[dict] | None:
     Confirm chassis_members payload is usable. Returns sorted-by-id member list or None.
 
     Defensive — a malformed payload (non-dict, missing/empty members list, or members
-    without positive int ids and non-empty serials) falls through to the single-Device
+    without non-negative int ids — Junos FPC numbering starts at 0, e.g. ``et-0/0/0`` —
+    and non-empty serials) falls through to the single-Device
     path. Members with duplicate ids or duplicate serials are dropped after the first
     occurrence (with a warning). Optional fields (``model``, ``mac``, ``state``) must
     be str or None; ``priority`` must be int or None — bad types drop the member rather
@@ -242,15 +243,20 @@ def _build_member_devices(
 
 
 def _build_per_member_interfaces(
-    valid_ids: set[int],
+    member_ids: list[int],
     member_devices: dict[int, pb.Device],
     grouped_interfaces: dict[int, dict],
     grouped_ips: dict[int, dict],
     defaults: Defaults,
 ) -> dict[int, list[Entity]]:
-    """Run build_interface_entities once per member and return the per-member entity lists."""
-    out: dict[int, list[Entity]] = {mid: [] for mid in valid_ids}
-    for mid in valid_ids:
+    """
+    Run build_interface_entities once per member and return the per-member entity lists.
+
+    Iterates ``member_ids`` in the caller-provided order (already sorted ascending in
+    validate_chassis_payload) so per-member emission is deterministic across runs.
+    """
+    out: dict[int, list[Entity]] = {mid: [] for mid in member_ids}
+    for mid in member_ids:
         sub_interfaces = grouped_interfaces[mid]
         sub_ips = grouped_ips[mid]
         if not sub_interfaces and not sub_ips:
@@ -304,12 +310,15 @@ def translate_as_stack(
     # Build interface entities — primary-IP assignment must mutate the master
     # Device proto BEFORE that proto is wrapped into Entity(device=...) and
     # BEFORE vc_master_ref is derived from it.
-    valid_ids = {m["id"] for m in members}
+    # member_ids is a list (not a set) so per-member iteration order is stable
+    # and emission is deterministic across runs. members is already sorted
+    # ascending by id in validate_chassis_payload.
+    member_ids = [m["id"] for m in members]
     grouped_interfaces, grouped_ips = _route_interfaces_by_member(
-        interfaces, interfaces_ip, valid_ids, master_id, vc_name,
+        interfaces, interfaces_ip, set(member_ids), master_id, vc_name,
     )
     interface_entities_by_member = _build_per_member_interfaces(
-        valid_ids, member_devices, grouped_interfaces, grouped_ips, defaults,
+        member_ids, member_devices, grouped_interfaces, grouped_ips, defaults,
     )
 
     # Primary-IP back-pointer is only meaningful on the master (mgmt IP).
@@ -342,8 +351,8 @@ def translate_as_stack(
     for m in members[1:]:
         entities.append(Entity(device=member_devices[m["id"]]))
 
-    # 4) Interface entities, grouped per member.
-    for mid in valid_ids:
+    # 4) Interface entities, grouped per member, in ascending member-id order.
+    for mid in member_ids:
         entities.extend(interface_entities_by_member[mid])
 
     return entities

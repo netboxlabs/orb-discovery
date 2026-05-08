@@ -200,7 +200,12 @@ class BaseDriverTest:
             assert "members" in result and isinstance(result["members"], list)
             for m in result["members"]:
                 assert isinstance(m, dict)
-                assert isinstance(m.get("id"), int)
+                # bool is a subclass of int in Python — exclude explicitly so True/False
+                # are not accepted as member ids (matches translate-side validation).
+                mid = m.get("id")
+                assert isinstance(mid, int) and not isinstance(mid, bool), (
+                    f"member id must be a real int, got {mid!r}"
+                )
                 assert isinstance(m.get("serial"), str) and m["serial"], (
                     f"member without serial leaked through: {m}"
                 )

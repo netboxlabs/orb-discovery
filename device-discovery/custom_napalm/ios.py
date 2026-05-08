@@ -180,14 +180,20 @@ class IOSDriver(NapalmIOSDriver):
         return _ios_get_chassis_members_impl(self)
 
 
-_INVENTORY_NAME_RE = re.compile(r"^Switch\s+(\d+)$", re.IGNORECASE)
+# Two NAME formats are seen in the wild for stack members:
+#   "Switch 1"   — Catalyst 3850/9300/2960X StackWise (most common)
+#   "1"          — Some IOS / IOS-XE versions emit just the slot number
+# Anything else (e.g. "Chassis", "GigabitEthernet1/0/1") is ignored — the caller
+# treats an empty index as "no per-member inventory available" and the affected
+# members are dropped by to_payload().
+_INVENTORY_NAME_RE = re.compile(r"^(?:Switch\s+)?(\d+)$", re.IGNORECASE)
 
 
 def _index_inventory_by_switch(rows: list[dict]) -> tuple[dict[int, str], dict[int, str]]:
     """
     Return (serial_by_switch_id, model_by_switch_id) parsed from `show inventory`.
 
-    Only matches NAME values of the exact form 'Switch N' (case-insensitive). On
+    Matches NAME values of the form 'Switch N' or bare 'N' (case-insensitive). On
     standalone IOS the NAME is 'Chassis' and yields empty dicts — caller treats
     that as "no per-member inventory available".
     """
