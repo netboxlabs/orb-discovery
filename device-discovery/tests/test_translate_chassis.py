@@ -1,0 +1,209 @@
+"""Tests for the VC emission branch in translate.translate_data.
+
+The branch fires when data['chassis_members'] has 2+ valid members. It must
+produce, in order:
+  1. master Device (PLAIN — no vc_position, no virtual_chassis)
+  2. top-level VirtualChassis with inline master that does NOT recurse into
+     another virtual_chassis
+  3. non-master member Devices, each with vc_position and an inline
+     virtual_chassis reference whose master is the same matcher block (and
+     also does not recurse)
+  4. interface entities, each routed to the correct member by parse_member_id
+"""
+
+from device_discovery.policy.models import Defaults, DeviceParameters
+from device_discovery.translate import translate_data
+
+
+def _base_data(chassis_members):
+    return {
+        "driver": "ios",
+        "device": {
+            "hostname": "core-sw",
+            "vendor": "Cisco",
+            "model": "WS-C3850-12XS",
+            "os_version": "17.6.4",
+            "serial_number": "FOC2401L0AB",
+            "uptime": 12345.0,
+            "fqdn": "core-sw.lab",
+            "interface_list": [],
+        },
+        "interface": {
+            "GigabitEthernet1/0/1": {
+                "is_enabled": True, "is_up": True, "speed": 1000, "mtu": 1500,
+                "mac_address": "", "description": "", "last_flapped": -1.0,
+            },
+            "GigabitEthernet2/0/1": {
+                "is_enabled": True, "is_up": True, "speed": 1000, "mtu": 1500,
+                "mac_address": "", "description": "", "last_flapped": -1.0,
+            },
+            "Vlan10": {
+                "is_enabled": True, "is_up": True, "speed": 0, "mtu": 1500,
+                "mac_address": "", "description": "", "last_flapped": -1.0,
+            },
+            "Port-channel1": {
+                "is_enabled": True, "is_up": True, "speed": 2000, "mtu": 1500,
+                "mac_address": "", "description": "", "last_flapped": -1.0,
+            },
+        },
+        "interface_ip": {},
+        "chassis_members": chassis_members,
+        "target_hostname": "core-sw",
+    }
+
+
+def _two_member_payload(active_role_on_id=1):
+    return {
+        "members": [
+            {"id": 1, "serial": "FOC2401L0AB", "model": "WS-C3850-12XS",
+             "role": "active" if active_role_on_id == 1 else "standby",
+             "priority": 15, "mac": "aabb.cc00.0001", "state": "ready"},
+            {"id": 2, "serial": "FOC2401L0CD", "model": "WS-C3850-12XS",
+             "role": "active" if active_role_on_id == 2 else "standby",
+             "priority": 14, "mac": "aabb.cc00.0002", "state": "ready"},
+        ],
+        "domain": None,
+    }
+
+
+def test_single_member_no_vc_emitted():
+    """A single-member payload behaves identically to today's single-Device path."""
+    data = _base_data({"members": [
+        {"id": 1, "serial": "FOC2401L0AB", "model": "WS-C3850-12XS",
+         "role": "active", "priority": 15, "mac": "aabb.cc00.0001", "state": "ready"},
+    ], "domain": None})
+    entities = list(translate_data(data))
+    vcs = [e for e in entities if e.HasField("virtual_chassis")]
+    devs = [e for e in entities if e.HasField("device")]
+    assert len(vcs) == 0
+    assert len(devs) == 1
+
+
+def test_two_members_emits_master_plain_then_vc_then_member():
+    data = _base_data(_two_member_payload())
+    entities = list(translate_data(data))
+
+    devs = [e for e in entities if e.HasField("device")]
+    vcs = [e for e in entities if e.HasField("virtual_chassis")]
+    assert len(devs) == 2
+    assert len(vcs) == 1
+
+    # Order: master device first, then VC, then non-master member.
+    device_indices = [i for i, e in enumerate(entities) if e.HasField("device")]
+    vc_indices = [i for i, e in enumerate(entities) if e.HasField("virtual_chassis")]
+    assert device_indices[0] < vc_indices[0] < device_indices[1]
+
+    master = entities[device_indices[0]].device
+    member = entities[device_indices[1]].device
+    vc = entities[vc_indices[0]].virtual_chassis
+
+    # Master device is PLAIN.
+    assert master.name == "core-sw-1"
+    assert master.serial == "FOC2401L0AB"
+    assert master.vc_position == 0  # protobuf default for unset int
+    assert not master.HasField("virtual_chassis")
+
+    # Top-level VC carries inline master that does NOT recurse.
+    assert vc.name == "core-sw"
+    assert vc.HasField("master")
+    assert vc.master.name == "core-sw-1"
+    assert vc.master.serial == "FOC2401L0AB"
+    assert not vc.master.HasField("virtual_chassis")
+
+    # Non-master member Device carries vc_position + virtual_chassis ref
+    # whose master also does not recurse.
+    assert member.name == "core-sw-2"
+    assert member.serial == "FOC2401L0CD"
+    assert member.vc_position == 2
+    assert member.HasField("virtual_chassis")
+    assert member.virtual_chassis.name == "core-sw"
+    assert member.virtual_chassis.HasField("master")
+    assert not member.virtual_chassis.master.HasField("virtual_chassis")
+
+
+def test_interface_routed_to_correct_member():
+    data = _base_data(_two_member_payload())
+    entities = list(translate_data(data))
+    by_name = {e.interface.name: e.interface for e in entities if e.HasField("interface")}
+    assert by_name["GigabitEthernet1/0/1"].device.name == "core-sw-1"
+    assert by_name["GigabitEthernet2/0/1"].device.name == "core-sw-2"
+
+
+def test_uplink_interface_routed_to_master():
+    """Vlan/Loopback/Port-channel have no parseable member id → routed to master."""
+    data = _base_data(_two_member_payload())
+    entities = list(translate_data(data))
+    by_name = {e.interface.name: e.interface for e in entities if e.HasField("interface")}
+    assert by_name["Vlan10"].device.name == "core-sw-1"
+    assert by_name["Port-channel1"].device.name == "core-sw-1"
+
+
+def test_master_failover_doesnt_change_vc_identity():
+    """Logical master is pinned to lowest id present, regardless of role."""
+    entities_run1 = list(translate_data(_base_data(_two_member_payload(active_role_on_id=1))))
+    entities_run2 = list(translate_data(_base_data(_two_member_payload(active_role_on_id=2))))
+
+    vc1 = next(e.virtual_chassis for e in entities_run1 if e.HasField("virtual_chassis"))
+    vc2 = next(e.virtual_chassis for e in entities_run2 if e.HasField("virtual_chassis"))
+    assert vc1.name == vc2.name == "core-sw"
+    assert vc1.master.serial == vc2.master.serial == "FOC2401L0AB"
+
+
+def test_member_with_missing_serial_dropped_in_validation():
+    """A payload that included a serialless member should be dropped at validation time;
+    if the result has < 2 valid members, falls through to single-Device path.
+    """
+    data = _base_data({"members": [
+        {"id": 1, "serial": "FOC2401L0AB", "model": "X", "role": "active",
+         "priority": 15, "mac": None, "state": "ready"},
+        {"id": 2, "serial": "", "model": "X", "role": "standby",
+         "priority": 14, "mac": None, "state": "ready"},
+    ], "domain": None})
+    entities = list(translate_data(data))
+    # Only 1 valid member → single-Device path (no VC emitted).
+    assert not any(e.HasField("virtual_chassis") for e in entities)
+
+
+def test_malformed_chassis_payload_falls_through():
+    """Non-dict, missing 'members' key, or wrong-typed members → single-Device path."""
+    for payload in [None, {}, {"members": None}, {"members": "not-a-list"}, "not-a-dict"]:
+        if payload is None:
+            data = _base_data({})
+            del data["chassis_members"]
+        else:
+            data = _base_data(payload)
+        entities = list(translate_data(data))
+        assert not any(e.HasField("virtual_chassis") for e in entities), (
+            f"unexpected VC emission for payload={payload!r}"
+        )
+
+
+def test_subinterface_lands_on_same_member_as_parent():
+    data = _base_data(_two_member_payload())
+    data["interface"]["GigabitEthernet2/0/1.100"] = {
+        "is_enabled": True, "is_up": True, "speed": 1000, "mtu": 1500,
+        "mac_address": "", "description": "", "last_flapped": -1.0,
+    }
+    entities = list(translate_data(data))
+    by_name = {e.interface.name: e.interface for e in entities if e.HasField("interface")}
+    assert by_name["GigabitEthernet2/0/1.100"].device.name == "core-sw-2"
+    assert by_name["GigabitEthernet2/0/1"].device.name == "core-sw-2"
+
+
+def test_member_devices_have_no_asset_tag():
+    """defaults.device.asset_tag (if set) must NOT be copied to non-master members —
+    that would collide on Diode's high-precedence asset_tag matcher.
+    """
+    data = _base_data(_two_member_payload())
+    data["defaults"] = Defaults(device=DeviceParameters(asset_tag="TENANT-A-DEFAULT"))
+
+    entities = list(translate_data(data))
+    member_devices = [
+        e.device for e in entities
+        if e.HasField("device") and e.device.HasField("virtual_chassis")
+    ]
+    assert member_devices, "expected at least one member Device"
+    for md in member_devices:
+        assert md.asset_tag == "", (
+            f"member Device {md.name} unexpectedly carried asset_tag {md.asset_tag!r}"
+        )
