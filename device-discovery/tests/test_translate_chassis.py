@@ -207,3 +207,137 @@ def test_member_devices_have_no_asset_tag():
         assert md.asset_tag == "", (
             f"member Device {md.name} unexpectedly carried asset_tag {md.asset_tag!r}"
         )
+
+
+def test_vc_master_ref_carries_master_asset_tag_and_source_match():
+    """VC master inline ref must repeat the emitted master's matcher fields (asset_tag + source_match)."""
+    data = _base_data(_two_member_payload())
+    data["defaults"] = Defaults(device=DeviceParameters(asset_tag="TENANT-A-DEFAULT"))
+    data["netbox_id"] = 42
+
+    entities = list(translate_data(data))
+    master = next(e.device for e in entities
+                  if e.HasField("device") and not e.device.HasField("virtual_chassis"))
+    vc = next(e.virtual_chassis for e in entities if e.HasField("virtual_chassis"))
+    member = next(e.device for e in entities
+                  if e.HasField("device") and e.device.HasField("virtual_chassis"))
+
+    # The emitted master carries both. The VC inline ref MUST carry both as well —
+    # otherwise unique_master matcher resolves to a different record on re-runs.
+    assert master.asset_tag == "TENANT-A-DEFAULT"
+    assert "source_match" in master.metadata
+
+    assert vc.master.asset_tag == "TENANT-A-DEFAULT"
+    assert "source_match" in vc.master.metadata
+
+    # Same invariant on the member's nested virtual_chassis.master.
+    assert member.virtual_chassis.master.asset_tag == "TENANT-A-DEFAULT"
+    assert "source_match" in member.virtual_chassis.master.metadata
+
+
+def test_vc_master_ref_picks_up_defaults_device_model_override():
+    """defaults.device.model override must be reflected on master AND inline VC master ref."""
+    data = _base_data(_two_member_payload())
+    data["defaults"] = Defaults(device=DeviceParameters(model="OVERRIDE-MODEL"))
+
+    entities = list(translate_data(data))
+    master = next(e.device for e in entities
+                  if e.HasField("device") and not e.device.HasField("virtual_chassis"))
+    vc = next(e.virtual_chassis for e in entities if e.HasField("virtual_chassis"))
+
+    assert master.device_type.model == "OVERRIDE-MODEL"
+    assert vc.master.device_type.model == "OVERRIDE-MODEL"
+
+
+def test_ip_only_interface_routed_to_correct_member():
+    """Interfaces present only in interface_ip (e.g. loopbacks) must NOT be silently dropped."""
+    data = _base_data(_two_member_payload())
+    # interface_ip carries an entry whose key isn't in interfaces[].
+    data["interface_ip"]["Loopback0"] = {
+        "ipv4": {"10.0.0.1": {"prefix_length": 32}},
+    }
+    # And one with a parseable member id.
+    data["interface_ip"]["GigabitEthernet2/0/9"] = {
+        "ipv4": {"10.0.2.9": {"prefix_length": 24}},
+    }
+
+    entities = list(translate_data(data))
+    by_name = {e.interface.name: e.interface for e in entities if e.HasField("interface")}
+    # IP-only interfaces become Interface entities.
+    assert "Loopback0" in by_name, "expected Loopback0 stub interface from interface_ip"
+    assert "GigabitEthernet2/0/9" in by_name
+    # Loopback0 routes to master (no parseable member id).
+    assert by_name["Loopback0"].device.name == "core-sw-1"
+    # Gi2/0/9 routes to member 2.
+    assert by_name["GigabitEthernet2/0/9"].device.name == "core-sw-2"
+
+
+def test_unknown_member_id_logs_warning_and_routes_to_master(caplog):
+    """An interface whose parsed member id is not among the validated members logs a WARNING."""
+    import logging
+
+    data = _base_data(_two_member_payload())
+    data["interface"]["GigabitEthernet9/0/1"] = {
+        "is_enabled": True, "is_up": True, "speed": 1000, "mtu": 1500,
+        "mac_address": "", "description": "", "last_flapped": -1.0,
+    }
+
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate"):
+        entities = list(translate_data(data))
+
+    by_name = {e.interface.name: e.interface for e in entities if e.HasField("interface")}
+    assert by_name["GigabitEthernet9/0/1"].device.name == "core-sw-1"
+    assert any(
+        "unknown member id 9" in r.message and "routing to master" in r.message
+        for r in caplog.records
+    )
+
+
+def test_validation_drops_duplicate_ids_and_serials(caplog):
+    """Duplicate ids/serials are dropped at validation time with a warning."""
+    import logging
+
+    data = _base_data({
+        "members": [
+            {"id": 1, "serial": "FOC-A", "model": "X", "role": "active",
+             "priority": 15, "mac": None, "state": "ready"},
+            {"id": 1, "serial": "FOC-DUP-ID", "model": "X", "role": "standby",
+             "priority": 10, "mac": None, "state": "ready"},
+            {"id": 2, "serial": "FOC-A", "model": "X", "role": "standby",
+             "priority": 14, "mac": None, "state": "ready"},
+            {"id": 3, "serial": "FOC-C", "model": "X", "role": "member",
+             "priority": 1, "mac": None, "state": "ready"},
+        ],
+        "domain": None,
+    })
+
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate"):
+        entities = list(translate_data(data))
+
+    devices = [e.device for e in entities if e.HasField("device")]
+    serials = sorted(d.serial for d in devices)
+    assert serials == ["FOC-A", "FOC-C"], (
+        "expected only the first occurrence of each id/serial to survive"
+    )
+    msgs = " ".join(r.message for r in caplog.records)
+    assert "duplicate member id" in msgs
+    assert "duplicate serial" in msgs
+
+
+def test_validation_rejects_non_string_optional_field():
+    """A member whose optional field has the wrong type is dropped, not allowed to crash translate."""
+    data = _base_data({
+        "members": [
+            {"id": 1, "serial": "FOC-A", "model": 123, "role": "active",  # bad model type
+             "priority": 15, "mac": None, "state": "ready"},
+            {"id": 2, "serial": "FOC-B", "model": "X", "role": "standby",
+             "priority": 14, "mac": None, "state": "ready"},
+            {"id": 3, "serial": "FOC-C", "model": "X", "role": "member",
+             "priority": 1, "mac": None, "state": "ready"},
+        ],
+        "domain": None,
+    })
+    entities = list(translate_data(data))
+    member_serials = sorted(e.device.serial for e in entities if e.HasField("device"))
+    # Member 1 dropped (bad model type) → only 2 valid → translate emits VC for 2 + 3.
+    assert member_serials == ["FOC-B", "FOC-C"]

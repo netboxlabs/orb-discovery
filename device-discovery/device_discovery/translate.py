@@ -578,13 +578,36 @@ def assign_primary_ip(
     device.primary_ip4.CopyFrom(hits[0][2])
 
 
+def _is_valid_chassis_member(m: object) -> bool:
+    """Return True iff ``m`` is a chassis member dict with safe types and core fields set."""
+    if not isinstance(m, dict):
+        return False
+    mid = m.get("id")
+    if not isinstance(mid, int) or isinstance(mid, bool) or mid < 0:
+        return False
+    serial = m.get("serial")
+    if not isinstance(serial, str) or not serial:
+        return False
+    if not all(isinstance(m.get(k), (str, type(None))) for k in ("model", "mac", "state", "role")):
+        logger.warning("chassis_members: dropping member %r — non-string optional field", mid)
+        return False
+    prio = m.get("priority")
+    if prio is not None and (not isinstance(prio, int) or isinstance(prio, bool)):
+        logger.warning("chassis_members: dropping member %r — non-int priority", mid)
+        return False
+    return True
+
+
 def _validate_chassis_payload(payload) -> list[dict] | None:
     """
     Confirm chassis_members payload is usable. Returns sorted-by-id member list or None.
 
     Defensive — a malformed payload (non-dict, missing/empty members list, or members
     without positive int ids and non-empty serials) falls through to the single-Device
-    path. Two or more valid members are required to emit VC.
+    path. Members with duplicate ids or duplicate serials are dropped after the first
+    occurrence (with a warning). Optional fields (``model``, ``mac``, ``state``) must
+    be str or None; ``priority`` must be int or None — bad types drop the member rather
+    than crashing translate. Two or more valid members are required to emit VC.
     """
     if not isinstance(payload, dict):
         return None
@@ -592,15 +615,21 @@ def _validate_chassis_payload(payload) -> list[dict] | None:
     if not isinstance(members_raw, list):
         return None
     valid: list[dict] = []
+    seen_ids: set[int] = set()
+    seen_serials: set[str] = set()
     for m in members_raw:
-        if not isinstance(m, dict):
+        if not _is_valid_chassis_member(m):
             continue
-        mid = m.get("id")
-        serial = m.get("serial")
-        if not isinstance(mid, int) or isinstance(mid, bool) or mid < 0:
+        mid = m["id"]
+        serial = m["serial"]
+        if mid in seen_ids:
+            logger.warning("chassis_members: dropping duplicate member id %r", mid)
             continue
-        if not isinstance(serial, str) or not serial:
+        if serial in seen_serials:
+            logger.warning("chassis_members: dropping duplicate serial %r", serial)
             continue
+        seen_ids.add(mid)
+        seen_serials.add(serial)
         valid.append(m)
     if len(valid) < 2:
         return None
@@ -608,30 +637,78 @@ def _validate_chassis_payload(payload) -> list[dict] | None:
     return valid
 
 
-def _master_device_ref(
-    master: dict, vc_name: str, manufacturer: str, defaults: Defaults
-) -> pb.Device:
+def _master_device_ref(master_dev: pb.Device) -> pb.Device:
     """
-    Inline master Device matcher block — NO nested virtual_chassis.
+    Build an inline master Device matcher block from the emitted master Device proto.
 
-    Used for both the top-level VirtualChassis.master field and each
-    non-master member Device's virtual_chassis.master field. The plugin
-    resolves the existing VC via unique_master, so this must repeat the
-    master's serial + name + site + role + device_type. It must NOT
-    nest another virtual_chassis (would trigger circular-reference).
+    Used for both the top-level VirtualChassis.master field and each non-master
+    member Device's virtual_chassis.master field. The plugin resolves the existing
+    VC via unique_master, so this MUST carry the same matcher fields the emitted
+    master Device carries — name, serial, site, role, device_type, asset_tag, and
+    metadata.source_match — otherwise the VC ref resolves through a different
+    matcher path than the top-level master.
+
+    Strips ``virtual_chassis``, ``primary_ip4``, ``primary_ip6``, ``config``, and
+    annotation-only metadata so the inline ref does not nest another VC (circular
+    reference) or carry interface-specific back-pointers.
     """
-    role_name = defaults.role or "undefined"
-    site_name = defaults.site or "undefined"
-    return pb.Device(
-        name=f"{vc_name}-{master['id']}",
-        device_type=pb.DeviceType(
-            model=master.get("model") or "",
-            manufacturer=pb.Manufacturer(name=manufacturer),
-        ),
-        role=pb.DeviceRole(name=role_name),
-        serial=master["serial"],
-        site=pb.Site(name=site_name),
-    )
+    stub = pb.Device(name=master_dev.name, serial=master_dev.serial)
+    if master_dev.HasField("site"):
+        stub.site.CopyFrom(pb.Site(name=master_dev.site.name))
+    if master_dev.HasField("role"):
+        stub.role.CopyFrom(pb.DeviceRole(name=master_dev.role.name))
+    if master_dev.HasField("device_type"):
+        dt = master_dev.device_type
+        stub_dt = pb.DeviceType(model=dt.model)
+        if dt.HasField("manufacturer"):
+            stub_dt.manufacturer.CopyFrom(pb.Manufacturer(name=dt.manufacturer.name))
+        stub.device_type.CopyFrom(stub_dt)
+    if master_dev.asset_tag:
+        stub.asset_tag = master_dev.asset_tag
+    if "source_match" in master_dev.metadata:
+        stub.metadata["source_match"] = master_dev.metadata["source_match"]
+    return stub
+
+
+def _route_interfaces_by_member(
+    interfaces: dict,
+    interfaces_ip: dict,
+    valid_ids: set[int],
+    master_id: int,
+    vc_name: str,
+) -> tuple[dict[int, dict], dict[int, dict]]:
+    """
+    Group interface and interface_ip entries by chassis member id.
+
+    Interfaces with no parseable member id (Vlan/Loopback/Port-channel/...) land on
+    the master. Interfaces present only in interface_ip (typical for loopbacks /
+    mgmt SVIs not enumerated by get_interfaces) are routed by the same rule so
+    they are not silently dropped. Parseable member ids that don't match a
+    validated member log a WARNING and fall back to master.
+    """
+    from custom_napalm._chassis import parse_member_id
+
+    grouped_interfaces: dict[int, dict] = {mid: {} for mid in valid_ids}
+    grouped_ips: dict[int, dict] = {mid: {} for mid in valid_ids}
+
+    def _route(if_name: str) -> int:
+        mid = parse_member_id(if_name)
+        if mid is None:
+            return master_id
+        if mid in valid_ids:
+            return mid
+        logger.warning(
+            "chassis stack %r: interface %r references unknown member id %d; "
+            "routing to master member %d",
+            vc_name, if_name, mid, master_id,
+        )
+        return master_id
+
+    for if_name, if_data in interfaces.items():
+        grouped_interfaces[_route(if_name)][if_name] = if_data
+    for if_name, ip_data in interfaces_ip.items():
+        grouped_ips[_route(if_name)][if_name] = ip_data
+    return grouped_interfaces, grouped_ips
 
 
 def _translate_as_stack(
@@ -647,8 +724,6 @@ def _translate_as_stack(
     parse_member_id. Mirrors the three-rule emission shape required by the
     netbox-diode-plugin for VC ingestion via the unique_master matcher.
     """
-    from custom_napalm._chassis import parse_member_id
-
     device_info = data.get("device") or {}
     interfaces = data.get("interface") or {}
     interfaces_ip = data.get("interface_ip") or {}
@@ -658,48 +733,48 @@ def _translate_as_stack(
 
     base_hostname = device_info.get("hostname") or target_hostname or "unknown"
     vc_name = base_hostname
-    manufacturer = device_info.get("vendor") or "Unknown"
     master = members[0]  # already sorted ascending by id
+    master_id = master["id"]
 
-    # Per-member rich Devices via translate_device — reuses tags/role/site/tenant.
-    member_devices: dict[int, pb.Device] = {}
-    for idx, m in enumerate(members):
-        is_master = idx == 0
+    # Build the master Device FIRST so the inline VC master ref can be derived
+    # from the same proto — guarantees matcher fields stay in sync with whatever
+    # translate_device chose (defaults.device.model/manufacturer overrides etc.).
+    def _build_member_dev(m: dict, *, is_master: bool) -> pb.Device:
         member_info = dict(device_info)
         member_info["hostname"] = f"{vc_name}-{m['id']}"
         member_info["serial_number"] = m["serial"]
         if m.get("model"):
             member_info["model"] = m["model"]
-        member_dev = translate_device(
+        return translate_device(
             member_info,
             defaults,
             config_info if is_master else None,
             options if is_master else None,
             netbox_id=netbox_id if is_master else None,
         )
-        if not is_master:
-            # asset_tag is a high-precedence matcher in Diode — copying the
-            # defaults.device.asset_tag onto every member would collide.
-            member_dev.ClearField("asset_tag")
-            member_dev.vc_position = m["id"]
-            member_dev.virtual_chassis.CopyFrom(
-                pb.VirtualChassis(
-                    name=vc_name,
-                    master=_master_device_ref(master, vc_name, manufacturer, defaults),
-                )
-            )
+
+    master_dev = _build_member_dev(master, is_master=True)
+    vc_master_ref = _master_device_ref(master_dev)
+
+    member_devices: dict[int, pb.Device] = {master_id: master_dev}
+    for m in members[1:]:
+        member_dev = _build_member_dev(m, is_master=False)
+        # asset_tag is a high-precedence matcher in Diode — copying the
+        # defaults.device.asset_tag onto every member would collide.
+        member_dev.ClearField("asset_tag")
+        member_dev.vc_position = m["id"]
+        member_dev.virtual_chassis.CopyFrom(
+            pb.VirtualChassis(name=vc_name, master=vc_master_ref)
+        )
         member_devices[m["id"]] = member_dev
 
     entities: list[Entity] = []
 
     # 1) Master Device — PLAIN (no vc_position, no virtual_chassis ref).
-    entities.append(Entity(device=member_devices[master["id"]]))
+    entities.append(Entity(device=master_dev))
 
     # 2) Top-level VirtualChassis with inline master ref.
-    vc = pb.VirtualChassis(
-        name=vc_name,
-        master=_master_device_ref(master, vc_name, manufacturer, defaults),
-    )
+    vc = pb.VirtualChassis(name=vc_name, master=vc_master_ref)
     domain = (data.get("chassis_members") or {}).get("domain")
     if domain:
         vc.domain = str(domain)
@@ -709,22 +784,18 @@ def _translate_as_stack(
     for m in members[1:]:
         entities.append(Entity(device=member_devices[m["id"]]))
 
-    # 4) Per-member interface routing — interfaces with no parseable member id
-    #    (Vlan/Loopback/Port-channel/...) land on the master.
+    # 4) Per-member interface routing.
     valid_ids = {m["id"] for m in members}
-    master_id = master["id"]
-    grouped: dict[int, dict] = {mid: {} for mid in valid_ids}
-    for if_name, if_data in interfaces.items():
-        mid = parse_member_id(if_name)
-        target_id = mid if mid in valid_ids else master_id
-        grouped[target_id][if_name] = if_data
-
-    for mid, sub_interfaces in grouped.items():
-        if not sub_interfaces:
+    grouped_interfaces, grouped_ips = _route_interfaces_by_member(
+        interfaces, interfaces_ip, valid_ids, master_id, vc_name,
+    )
+    for mid in valid_ids:
+        sub_interfaces = grouped_interfaces[mid]
+        sub_ips = grouped_ips[mid]
+        if not sub_interfaces and not sub_ips:
             continue
         device_for_iface = copy.deepcopy(member_devices[mid])
         device_for_iface.ClearField("config")
-        sub_ips = {k: v for k, v in interfaces_ip.items() if k in sub_interfaces}
         sub_entities = build_interface_entities(
             device_for_iface, sub_interfaces, sub_ips, defaults
         )

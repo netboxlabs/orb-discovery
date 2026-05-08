@@ -107,7 +107,9 @@ _CISCO_IOS_RE = re.compile(
        | Te(?:nGigabitEthernet)?            # Te or TenGigabitEthernet
        | Fo(?:rtyGigabitEthernet)?          # Fo or FortyGigabitEthernet
        | Hu(?:ndredGigE)?                   # Hu or HundredGigE
-       | TwentyFiveGigE
+       | TwentyFiveGigE | Twe               # 25G mGig
+       | TwoGigabitEthernet | Tw            # 2.5G mGig (Catalyst 9300/9400)
+       | FiveGigabitEthernet | Fi           # 5G mGig
     )
     (\d+)                                   # member id
     /\d+/\d+                                # slot/port — exactly two more
@@ -131,13 +133,15 @@ def parse_member_id(if_name: str) -> int | None:
 
     Supported (positive matches):
       - Cisco IOS canonical and short forms: GigabitEthernet1/0/1 -> 1, Gi2/0/1 -> 2
+      - mGig families on Catalyst 9300/9400: TwoGigabitEthernet, FiveGigabitEthernet,
+        TwentyFiveGigE (and Tw/Fi/Twe short aliases)
       - Subinterfaces: GigabitEthernet1/0/1.100 -> 1
       - Junos FPC-style: et-0/0/0 -> 0, ge-1/0/0 -> 1
       - Aruba CX bare digits: 1/1/1 -> 1
-      - NX-OS Ethernet1/0/1 -> 1 (rare for stacks; covered by the Cisco regex)
 
     Returns None for SVIs / loopback / tunnel / mgmt, LAG / bundle members,
-    FEX 4-tuples, ProCurve / ArubaOS-Switch port shorthand, and malformed input.
+    FEX 3/4-tuples, NX-OS ``Ethernet``/``Eth`` (out of scope for batch 1),
+    ProCurve / ArubaOS-Switch port shorthand, and malformed input.
     """
     if not if_name:
         return None

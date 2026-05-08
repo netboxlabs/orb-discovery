@@ -94,6 +94,13 @@ def test_to_payload_preserves_domain():
         ("Gi1/0/1",                  1),
         ("Te2/0/1",                  2),
 
+        # Cisco mGig families on Catalyst 9300/9400 stacks
+        ("TwoGigabitEthernet1/0/1",  1),
+        ("FiveGigabitEthernet2/0/3", 2),
+        ("Tw1/0/1",                  1),
+        ("Fi2/0/1",                  2),
+        ("Twe3/0/1",                 3),
+
         # Subinterface — strip the .NNN suffix and resolve to the parent's member id
         ("GigabitEthernet1/0/1.100", 1),
         ("TenGigabitEthernet2/0/12.4094", 2),
