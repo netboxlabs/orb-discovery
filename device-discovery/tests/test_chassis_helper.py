@@ -105,10 +105,28 @@ def test_to_payload_preserves_domain():
         ("GigabitEthernet1/0/1.100", 1),
         ("TenGigabitEthernet2/0/12.4094", 2),
 
-        # Junos FPC-style (lands in batch 2; parser must not regress)
+        # Junos FPC-style — full coverage for batch-2 Junos VirtualChassis support.
+        # The Junos canonical name format is "<media>-<fpc>/<pic>/<port>[.<unit>]" where
+        # <fpc> is the Flexible PIC Concentrator slot — the stack member id.
         ("et-0/0/0",                 0),
         ("ge-1/0/0",                 1),
         ("xe-2/1/0",                 2),
+        ("ge-1/0/0.0",               1),    # logical subinterface (default unit)
+        ("ge-1/0/0.100",             1),    # tagged subinterface
+        ("xe-2/1/0.4094",            2),    # max VLAN id
+        ("et-0/0/0.0",               0),    # member 0 with subif (Junos FPC starts at 0)
+        # Junos non-stack interfaces (must NOT be parsed as member ids):
+        ("ae0",                      None),  # aggregated Ethernet (bundle)
+        ("ae0.100",                  None),  # AE subinterface
+        ("lo0",                      None),  # loopback
+        ("lo0.0",                    None),  # loopback unit
+        ("irb",                      None),  # Integrated Routing/Bridging (no member)
+        ("irb.100",                  None),  # IRB unit (acts like SVI)
+        ("vlan",                     None),
+        ("vlan.50",                  None),
+        ("me0",                      None),  # management
+        ("me0.0",                    None),
+        ("fxp0",                     None),  # mgmt (older Junos)
 
         # Aruba CX (lands in batch 2)
         ("1/1/1",                    1),
