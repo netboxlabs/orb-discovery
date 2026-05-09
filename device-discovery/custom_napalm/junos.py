@@ -26,6 +26,7 @@ XML parsing notes
 
 import logging
 
+from jnpr.junos.exception import RpcError
 from lxml import etree
 from napalm.junos.junos import JunOSDriver as NapalmJunOSDriver
 
@@ -187,11 +188,20 @@ def _junos_get_chassis_members_impl(driver) -> dict | None:
     members; both produce ``None`` so translate falls through to the
     single-Device path. ``NotPrsnt`` slots are filtered out before
     ``to_payload`` so empty stack positions don't pollute the payload.
+
+    Logging policy: ``RpcError`` is the *expected* signal that the device
+    is not in VC mode, so it is logged at DEBUG only — otherwise every
+    standalone Junos device would emit a WARNING per discovery cycle.
+    Any other exception is unexpected and stays at WARNING so operators
+    see real driver / transport problems.
     """
     try:
         reply = driver.device.rpc.get_virtual_chassis_information()
+    except RpcError as e:
+        logger.debug("junos.get_chassis_members: RPC not supported (likely standalone, not in VC mode): %s", e)
+        return None
     except Exception as e:
-        logger.warning("junos.get_chassis_members: rpc failed: %s", e)
+        logger.warning("junos.get_chassis_members: unexpected RPC failure: %s", e)
         return None
 
     if reply is None:

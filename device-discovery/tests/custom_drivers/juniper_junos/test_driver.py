@@ -1,10 +1,13 @@
 """Tests for the JunOSDriver subclass — VLAN-association coverage only."""
 
+import logging
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+from jnpr.junos.exception import RpcError
 
-from custom_napalm.junos import JunOSDriver
+from custom_napalm.junos import JunOSDriver, _junos_get_chassis_members_impl
 from tests.custom_drivers.base_test import BaseDriverTest
 from tests.custom_drivers.mock_device import FakePyEZDevice
 
@@ -39,3 +42,43 @@ class TestJunOSDriver(BaseDriverTest):
     def test_get_vlans(self, scenario):
         """Skip: inherited from napalm.junos.junos.JunOSDriver."""
         pytest.skip("inherited from napalm.junos.junos.JunOSDriver")
+
+
+def test_chassis_members_rpc_error_logs_debug_not_warning(caplog):
+    """
+    Standalone EX/QFX (no VC) raises RpcError — must log at DEBUG, not WARNING.
+
+    Without this discipline every non-VC Junos device would emit a per-cycle
+    WARNING during discovery, drowning out signals operators actually care about.
+    """
+    driver = MagicMock()
+    driver.device.rpc.get_virtual_chassis_information.side_effect = RpcError(
+        rsp="virtual-chassis information not available"
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="custom_napalm.junos"):
+        result = _junos_get_chassis_members_impl(driver)
+
+    assert result is None
+    assert not any(
+        r.levelno >= logging.WARNING for r in caplog.records
+    ), "RpcError on standalone Junos must NOT log at WARNING level"
+    assert any(
+        r.levelno == logging.DEBUG and "RPC not supported" in r.message
+        for r in caplog.records
+    ), "expected DEBUG log explaining the standalone-Junos fallback"
+
+
+def test_chassis_members_unexpected_exception_logs_warning(caplog):
+    """Any non-RpcError exception (transport / driver bug) must still surface as WARNING."""
+    driver = MagicMock()
+    driver.device.rpc.get_virtual_chassis_information.side_effect = RuntimeError("boom")
+
+    with caplog.at_level(logging.DEBUG, logger="custom_napalm.junos"):
+        result = _junos_get_chassis_members_impl(driver)
+
+    assert result is None
+    assert any(
+        r.levelno == logging.WARNING and "unexpected RPC failure" in r.message
+        for r in caplog.records
+    ), "non-RpcError exceptions must log at WARNING so operators see real problems"
