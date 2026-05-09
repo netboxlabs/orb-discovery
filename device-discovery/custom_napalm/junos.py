@@ -29,6 +29,7 @@ import logging
 from lxml import etree
 from napalm.junos.junos import JunOSDriver as NapalmJunOSDriver
 
+from custom_napalm._chassis import ChassisMember, normalize_role, to_payload
 from custom_napalm._vlan import SwitchportInfo, classify_switchport
 
 logger = logging.getLogger(__name__)
@@ -160,8 +161,94 @@ def _interface_to_switchport_info(intf_elem) -> SwitchportInfo:
     )
 
 
+def _junos_get_chassis_members_impl(driver) -> dict | None:
+    """
+    Implementation of JunOSDriver.get_chassis_members (factored for testability).
+
+    Junos exposes Virtual Chassis topology via the
+    ``<get-virtual-chassis-information>`` RPC. The reply shape is::
+
+        <virtual-chassis-information>
+          <member-list>
+            <member>
+              <member-id>0</member-id>
+              <member-status>Prsnt</member-status>
+              <member-model>EX4300-48T</member-model>
+              <member-serial-number>PE3714410232</member-serial-number>
+              <member-mac-address>2c:6b:f5:a8:33:c0</member-mac-address>
+              <member-priority>129</member-priority>
+              <member-role>Master*</member-role>
+            </member>
+            ...
+          </member-list>
+        </virtual-chassis-information>
+
+    Standalone EX/QFX (no VC configured) raises ``RpcError`` or returns no
+    members; both produce ``None`` so translate falls through to the
+    single-Device path. ``NotPrsnt`` slots are filtered out before
+    ``to_payload`` so empty stack positions don't pollute the payload.
+    """
+    try:
+        reply = driver.device.rpc.get_virtual_chassis_information()
+    except Exception as e:
+        logger.warning("junos.get_chassis_members: rpc failed: %s", e)
+        return None
+
+    if reply is None:
+        return None
+
+    # Some Junos releases wrap members under <member-list>; older releases emit
+    # <member> directly under <virtual-chassis-information>. Try both.
+    member_list = _find_child(reply, "member-list")
+    members_xml = (
+        _find_children(member_list, "member") if member_list is not None
+        else _find_children(reply, "member")
+    )
+
+    if not members_xml:
+        return None
+
+    members: list[ChassisMember] = []
+    for m in members_xml:
+        mid = _maybe_int(_text(_find_child(m, "member-id")))
+        if mid is None:
+            continue
+
+        # Skip absent slots — Junos can list reserved member ids as NotPrsnt.
+        status = _text(_find_child(m, "member-status"))
+        if status and "notprsnt" in status.lower().replace("-", ""):
+            continue
+
+        # Role often comes with a trailing asterisk on the active master ("Master*").
+        # Strip it so normalize_role's lookup ("master" → "active") works.
+        raw_role = _text(_find_child(m, "member-role")).rstrip("*").strip()
+
+        members.append(
+            ChassisMember(
+                id=mid,
+                serial=_text(_find_child(m, "member-serial-number")),
+                model=_text(_find_child(m, "member-model")) or None,
+                role=normalize_role(raw_role),
+                priority=_maybe_int(_text(_find_child(m, "member-priority"))),
+                mac=_text(_find_child(m, "member-mac-address")) or None,
+                state=status or None,
+            )
+        )
+
+    return to_payload(members, domain=None)
+
+
 class JunOSDriver(NapalmJunOSDriver):
     """Juniper Junos NAPALM driver with VLAN-interface association support."""
+
+    def get_chassis_members(self) -> dict | None:
+        """
+        Return Junos Virtual Chassis member info (EX/QFX).
+
+        Standalone (non-VC) EX/QFX returns None; VC of N populated members
+        returns the payload shape consumed by translate's VC emission path.
+        """
+        return _junos_get_chassis_members_impl(self)
 
     def get_interfaces_vlans(self) -> dict[str, dict]:
         """
