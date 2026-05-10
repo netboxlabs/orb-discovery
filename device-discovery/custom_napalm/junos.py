@@ -1,10 +1,19 @@
 # Copyright 2026 NetBox Labs Inc
 """
-Juniper Junos NAPALM driver subclass adding ``get_interfaces_vlans()``.
+Juniper Junos NAPALM driver subclass.
 
-Fetches via PyEZ NETCONF RPC. Targets EX/QFX switching products.
-Handles both ELS and non-ELS configuration models. v1 skips voice VLAN
-(Junos voip semantics differ from the Cisco family).
+Adds two optional extension methods on top of upstream NAPALM Junos:
+
+- ``get_interfaces_vlans()``: per-interface VLAN classification from the
+  ``<get-ethernet-switching-interface-information>`` RPC, tolerating both
+  ELS and non-ELS XML wrappers. v1 skips voice VLAN (Junos voip semantics
+  differ from the Cisco family).
+- ``get_chassis_members()``: Virtual Chassis topology from the
+  ``<get-virtual-chassis-information>`` RPC, returning the vendor-neutral
+  payload consumed by ``device_discovery.translate_chassis``. Standalone
+  EX/QFX devices (no VC configured) return ``None``.
+
+Both fetch via PyEZ NETCONF RPC and target EX / QFX switching products.
 
 XML parsing notes
 -----------------
@@ -249,7 +258,18 @@ def _junos_get_chassis_members_impl(driver) -> dict | None:
 
 
 class JunOSDriver(NapalmJunOSDriver):
-    """Juniper Junos NAPALM driver with VLAN-interface association support."""
+    """
+    Juniper Junos NAPALM driver.
+
+    Adds two optional extension methods on top of the upstream NAPALM driver:
+
+    - ``get_interfaces_vlans()``: per-interface VLAN classification from the
+      ``<get-ethernet-switching-interface-information>`` RPC, tolerating
+      both ELS and non-ELS XML wrappers.
+    - ``get_chassis_members()``: Virtual Chassis topology from the
+      ``<get-virtual-chassis-information>`` RPC, returning the vendor-
+      neutral payload consumed by ``device_discovery.translate_chassis``.
+    """
 
     def get_chassis_members(self) -> dict | None:
         """

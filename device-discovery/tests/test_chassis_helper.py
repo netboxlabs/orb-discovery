@@ -141,11 +141,11 @@ def test_to_payload_preserves_domain():
         ("Management1",              None),
 
         # LAG / bundle members — explicitly NOT a stack member id
+        # (Junos `ae0` is covered in the Junos non-stack section above.)
         ("Port-channel1",            None),
         ("Port-channel99",           None),
         ("Bundle-Ether1",            None),
         ("Trk1",                     None),
-        ("ae0",                      None),
         ("lag1",                     None),
 
         # FEX / 4-tuple — must NOT extract 101 as a member id

@@ -1,4 +1,17 @@
-"""Tests for the JunOSDriver subclass — VLAN-association coverage only."""
+"""
+Tests for the JunOSDriver subclass.
+
+Covers two extension surfaces beyond the inherited NAPALM behaviour:
+
+- ``get_interfaces_vlans``: VLAN-interface associations parsed from the
+  ELS / non-ELS ``<get-ethernet-switching-interface-information>`` reply.
+  Driven by file-based scenario fixtures via ``BaseDriverTest``.
+- ``get_chassis_members``: Junos Virtual Chassis discovery via
+  ``<get-virtual-chassis-information>``. Scenario fixtures cover the
+  parsing paths; the unit-level tests below pin the log-level discipline
+  (``RpcError`` → DEBUG; other exceptions → WARNING) so standalone
+  EX/QFX devices do not produce per-cycle warning noise.
+"""
 
 import logging
 from pathlib import Path
