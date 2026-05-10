@@ -210,7 +210,12 @@ def _junos_get_chassis_members_impl(driver) -> dict | None:
         logger.debug("junos.get_chassis_members: RPC not supported (likely standalone, not in VC mode): %s", e)
         return None
     except Exception as e:
-        logger.warning("junos.get_chassis_members: unexpected RPC failure: %s", e)
+        # exc_info=True so the traceback survives — without it operators
+        # only see the exception string, which is rarely enough to root-cause
+        # transport / PyEZ failures.
+        logger.warning(
+            "junos.get_chassis_members: unexpected RPC failure: %s", e, exc_info=True,
+        )
         return None
 
     if reply is None:

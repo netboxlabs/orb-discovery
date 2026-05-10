@@ -83,7 +83,13 @@ def test_chassis_members_rpc_error_logs_debug_not_warning(caplog):
 
 
 def test_chassis_members_unexpected_exception_logs_warning(caplog):
-    """Any non-RpcError exception (transport / driver bug) must still surface as WARNING."""
+    """
+    Any non-RpcError exception (transport / driver bug) must still surface as WARNING.
+
+    The WARNING must include exception info (traceback) — without it, operators
+    only see the exception string, which is rarely enough to root-cause transport
+    or PyEZ failures.
+    """
     driver = MagicMock()
     driver.device.rpc.get_virtual_chassis_information.side_effect = RuntimeError("boom")
 
@@ -91,7 +97,13 @@ def test_chassis_members_unexpected_exception_logs_warning(caplog):
         result = _junos_get_chassis_members_impl(driver)
 
     assert result is None
-    assert any(
-        r.levelno == logging.WARNING and "unexpected RPC failure" in r.message
-        for r in caplog.records
-    ), "non-RpcError exceptions must log at WARNING so operators see real problems"
+    warning_records = [
+        r for r in caplog.records
+        if r.levelno == logging.WARNING and "unexpected RPC failure" in r.message
+    ]
+    assert warning_records, "non-RpcError exceptions must log at WARNING so operators see real problems"
+    # Traceback must be attached. Python sets r.exc_info to a 3-tuple when
+    # exc_info=True is passed (or via logger.exception); falsy otherwise.
+    assert warning_records[0].exc_info is not None and warning_records[0].exc_info[0] is RuntimeError, (
+        "WARNING record must carry the traceback (exc_info) so operators can diagnose"
+    )
