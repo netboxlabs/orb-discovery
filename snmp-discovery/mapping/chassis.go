@@ -8,6 +8,7 @@
 package mapping
 
 import (
+	"fmt"
 	"log/slog"
 	"regexp"
 	"slices"
@@ -215,6 +216,53 @@ func buildMasterRef(master *diode.Device) *diode.Device {
 		ref.Metadata = diode.Metadata{"source_match": sm}
 	}
 	return ref
+}
+
+// buildMemberDevice constructs a non-master member Device proto.
+//
+//   - Name = "{vcName}-stack-{memberID}" (entPhysicalName like
+//     "Switch 2" is intentionally not used: it would produce poor
+//     NetBox names and collide across stacks in the same site).
+//   - Serial = per-member entPhysicalSerialNum.
+//   - AssetTag = nil (CLEARED — Diode's highest-precedence matcher
+//     for dcim.device is unique on asset_tag; defaults.device.asset_tag
+//     applied to N members would collapse them onto one NetBox row).
+//   - VcPosition = member.ID; VirtualChassis = {Name: vcName, Master: masterRef}.
+//   - DeviceType from member.Model when populated, else inherit master's.
+//   - Site / Tenant / Role / Platform inherited from master.
+func buildMemberDevice(master *diode.Device, member ChassisMember, masterRef *diode.Device, vcName string) *diode.Device {
+	name := fmt.Sprintf("%s-stack-%d", vcName, member.ID)
+	pos := int64(member.ID)
+	dev := &diode.Device{
+		Name:       &name,
+		Serial:     &member.Serial,
+		Site:       master.Site,
+		Tenant:     master.Tenant,
+		Role:       master.Role,
+		Platform:   master.Platform,
+		VcPosition: &pos,
+		VirtualChassis: &diode.VirtualChassis{
+			Name:   &vcName,
+			Master: masterRef,
+		},
+	}
+	if member.Model != "" {
+		// Always honor per-member entPhysicalModelName when present,
+		// even if master.DeviceType is nil (sysObjectID lookup failed
+		// upstream). Inherit master's Manufacturer when available; else
+		// leave it nil and let NetBox / defaults take over.
+		var mfg *diode.Manufacturer
+		if master.DeviceType != nil {
+			mfg = master.DeviceType.Manufacturer
+		}
+		dev.DeviceType = &diode.DeviceType{
+			Model:        StringPtr(member.Model),
+			Manufacturer: mfg,
+		}
+	} else {
+		dev.DeviceType = master.DeviceType
+	}
+	return dev
 }
 
 func sortByID(members []ChassisMember) []ChassisMember {

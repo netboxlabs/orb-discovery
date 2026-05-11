@@ -254,3 +254,56 @@ func TestBuildMasterRef_OmitsUnsetFields(t *testing.T) {
 	assert.Nil(t, ref.PrimaryIp6)
 	assert.Nil(t, ref.Site)
 }
+
+func TestBuildMemberDevice_CarriesVcPositionAndMatcherBlock(t *testing.T) {
+	master := &diode.Device{
+		Name:     strPtr("3850-stack"),
+		Site:     &diode.Site{Name: strPtr("dc1")},
+		Tenant:   &diode.Tenant{Name: strPtr("acme")},
+		Role:     &diode.DeviceRole{Name: strPtr("access")},
+		Platform: &diode.Platform{Name: strPtr("ios-xe")},
+		AssetTag: strPtr("MASTER-ASSET"),
+		DeviceType: &diode.DeviceType{
+			Model:        strPtr("WS-C3850-48P"),
+			Manufacturer: &diode.Manufacturer{Name: strPtr("Cisco")},
+		},
+	}
+	masterRef := buildMasterRef(master)
+	member := ChassisMember{ID: 2, Serial: "FCW2147L0K4", Model: "WS-C3850-12X"}
+
+	dev := buildMemberDevice(master, member, masterRef, "3850-stack")
+
+	assert.Equal(t, "3850-stack-stack-2", *dev.Name)
+	assert.Equal(t, "FCW2147L0K4", *dev.Serial)
+	assert.Nil(t, dev.AssetTag, "AssetTag must be CLEARED on members")
+	assert.Equal(t, int64(2), *dev.VcPosition)
+	assert.NotNil(t, dev.VirtualChassis)
+	assert.Equal(t, "3850-stack", *dev.VirtualChassis.Name)
+	assert.NotNil(t, dev.VirtualChassis.Master)
+	assert.Equal(t, "3850-stack", *dev.VirtualChassis.Master.Name)
+	assert.Nil(t, dev.VirtualChassis.Master.VirtualChassis, "non-recursion")
+
+	assert.Equal(t, "dc1", *dev.Site.Name)
+	assert.Equal(t, "acme", *dev.Tenant.Name)
+	assert.Equal(t, "access", *dev.Role.Name)
+	assert.Equal(t, "ios-xe", *dev.Platform.Name)
+
+	// Per-member DeviceType from entPhysicalModelName, not master's.
+	assert.Equal(t, "WS-C3850-12X", *dev.DeviceType.Model)
+}
+
+func TestBuildMemberDevice_FallsBackToMasterDeviceTypeWhenModelEmpty(t *testing.T) {
+	master := &diode.Device{
+		Name: strPtr("stack"),
+		DeviceType: &diode.DeviceType{
+			Model:        strPtr("ModelA"),
+			Manufacturer: &diode.Manufacturer{Name: strPtr("VendorA")},
+		},
+	}
+	masterRef := buildMasterRef(master)
+	member := ChassisMember{ID: 2, Serial: "X", Model: ""}
+
+	dev := buildMemberDevice(master, member, masterRef, "stack")
+	assert.Equal(t, "ModelA", *dev.DeviceType.Model,
+		"member device_type falls back to master when entPhysicalModelName is empty")
+}
