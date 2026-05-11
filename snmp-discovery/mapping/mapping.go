@@ -255,6 +255,8 @@ func createEntity(entityType EntityType) (diode.Entity, error) {
 		return &diode.VLAN{}, nil
 	case "interface_vlan":
 		return nil, fmt.Errorf("entity type %q is post-pass only and has no row entity", entityType)
+	case "chassis_inventory":
+		return nil, fmt.Errorf("entity type %q is post-pass only and has no row entity", entityType)
 	}
 	return nil, fmt.Errorf("unimplemented entity type: %s", entityType)
 }
@@ -284,6 +286,12 @@ const (
 	// rows). createEntity returns an error for this type — there is no
 	// row-scoped entity to construct.
 	InterfaceVLANEntityType EntityType = "interface_vlan"
+	// ChassisInventoryEntityType is a pseudo-entity that flags
+	// ENTITY-MIB rows (entPhysicalTable, entAliasMappingTable) for
+	// consumption by TranslateAsStack as a post-pass. Map() on its
+	// associated mapper is a no-op; data flows via the raw oids map
+	// passed to TranslateAsStack.
+	ChassisInventoryEntityType EntityType = "chassis_inventory"
 )
 
 // ObjectIDMapper is a struct that maps ObjectIDs to entities
@@ -396,6 +404,7 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 		},
 		"vlan":           vlanMapper,
 		"interface_vlan": vlanMapper,
+		string(ChassisInventoryEntityType): &ChassisInventoryMapper{logger: logger},
 	}
 	postPassMappers := []postPassMapper{vlanMapper}
 	// Validate index_kind on every entry (top-level and nested). A typo
@@ -430,7 +439,9 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 		// per-PDU getMappingEntry walk. Adding the trailing "." prevents
 		// a parent OID from accidentally matching a sibling whose OID
 		// starts with the same numeric prefix.
-		if Entry.Entity == string(VLANEntityType) || Entry.Entity == string(InterfaceVLANEntityType) {
+		if Entry.Entity == string(VLANEntityType) ||
+			Entry.Entity == string(InterfaceVLANEntityType) ||
+			Entry.Entity == string(ChassisInventoryEntityType) {
 			postPassPrefixes = append(postPassPrefixes, m.OID+".")
 		}
 	}
@@ -1278,8 +1289,10 @@ func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[Ob
 }
 
 // isPostPassOIDPrefix reports whether the given OID belongs to an
-// entity type that is consumed exclusively by a postPassMapper (today:
-// vlan and interface_vlan, both routed through VlanMapper).
+// entity type that is consumed exclusively by a post-pass handler (today:
+// vlan and interface_vlan, both routed through VlanMapper; and
+// chassis_inventory, routed to TranslateAsStack at the runner level — it
+// does not implement the postPassMapper interface).
 //
 // Uses the pre-computed postPassPrefixes slice (populated in NewConfig)
 // instead of resolving the parent entry via getMappingEntry, which
