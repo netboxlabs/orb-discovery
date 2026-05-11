@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/stretchr/testify/assert"
 )
@@ -199,4 +200,57 @@ func TestExtractInventory_IsStack(t *testing.T) {
 		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "S"},
 	}, logger).IsStack(), "1 member -> standalone")
 	assert.True(t, extractInventory(fixtureCisco3850TwoMemberStack(), logger).IsStack())
+}
+
+func TestBuildMasterRef_CarriesAllMatcherFields(t *testing.T) {
+	master := &diode.Device{
+		Name:     strPtr("3850-stack"),
+		Serial:   strPtr("FCW2147L0K3"),
+		AssetTag: strPtr("ASSET-1"),
+		Site:     &diode.Site{Name: strPtr("dc1")},
+		Tenant:   &diode.Tenant{Name: strPtr("acme")},
+		Role:     &diode.DeviceRole{Name: strPtr("access")},
+		DeviceType: &diode.DeviceType{
+			Model:        strPtr("WS-C3850-48P"),
+			Manufacturer: &diode.Manufacturer{Name: strPtr("Cisco")},
+		},
+		PrimaryIp4: &diode.IPAddress{
+			Address: strPtr("10.0.0.1/24"),
+			// AssignedObject populated on rich master — MUST be stripped on ref.
+			AssignedObject: &diode.Interface{Name: strPtr("Vlan1")},
+		},
+		// source_match value shape matches policy.setDeviceSourceMatch:
+		// the value is a nested diode.Metadata with "netbox_id".
+		Metadata: diode.Metadata{"source_match": diode.Metadata{"netbox_id": 42}},
+	}
+
+	ref := buildMasterRef(master)
+
+	assert.Equal(t, "3850-stack", *ref.Name)
+	assert.Equal(t, "FCW2147L0K3", *ref.Serial)
+	assert.Equal(t, "ASSET-1", *ref.AssetTag)
+	assert.Equal(t, "dc1", *ref.Site.Name)
+	assert.Equal(t, "acme", *ref.Tenant.Name)
+	assert.Equal(t, "access", *ref.Role.Name)
+	assert.Equal(t, "WS-C3850-48P", *ref.DeviceType.Model)
+	assert.NotNil(t, ref.PrimaryIp4)
+	assert.Equal(t, "10.0.0.1/24", *ref.PrimaryIp4.Address)
+	assert.Nil(t, ref.PrimaryIp4.AssignedObject,
+		"primary_ip4.AssignedObject must be nil — breaks IP->Iface->Device cycle")
+	assert.Nil(t, ref.VirtualChassis, "non-recursion")
+	assert.Nil(t, ref.VcPosition, "VcPosition would only feed unreachable matcher #8")
+	assert.Equal(t, diode.Metadata{"netbox_id": 42}, ref.Metadata["source_match"])
+}
+
+func TestBuildMasterRef_NilMasterReturnsNil(t *testing.T) {
+	assert.Nil(t, buildMasterRef(nil))
+}
+
+func TestBuildMasterRef_OmitsUnsetFields(t *testing.T) {
+	master := &diode.Device{Name: strPtr("x"), Serial: strPtr("y")}
+	ref := buildMasterRef(master)
+	assert.Nil(t, ref.AssetTag)
+	assert.Nil(t, ref.PrimaryIp4)
+	assert.Nil(t, ref.PrimaryIp6)
+	assert.Nil(t, ref.Site)
 }

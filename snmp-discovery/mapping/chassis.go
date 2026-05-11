@@ -179,6 +179,44 @@ func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInvento
 	}
 }
 
+// buildMasterRef returns a non-recursive matcher-only Device for use
+// as VirtualChassis.Master on the top-level VC entity AND on each
+// non-master member Device's VirtualChassis.Master.
+//
+// MUST carry every matcher field the rich master Device carries —
+// divergence breaks the Diode plugin's matcher precedence cascade
+// (asset_tag -> primary_ip4 -> primary_ip6 -> oob_ip -> name+site+tenant
+// -> name+site -> rack+position+face -> virtual_chassis+vc_position)
+// and creates ghost VCs.
+//
+// MUST NOT carry VirtualChassis (non-recursion — dodges the plugin's
+// "Unable to resolve circular reference in entities" error) or
+// VcPosition (would only feed matcher #8 which is unreachable behind
+// the higher-precedence matchers above).
+//
+// primary_ip4/6 go through newIPMatchStub so AssignedObject is cleared,
+// breaking the IP -> Interface -> Device cycle.
+func buildMasterRef(master *diode.Device) *diode.Device {
+	if master == nil {
+		return nil
+	}
+	ref := &diode.Device{
+		Name:       master.Name,
+		Serial:     master.Serial,
+		AssetTag:   master.AssetTag,
+		Site:       master.Site,
+		Tenant:     master.Tenant,
+		Role:       master.Role,
+		DeviceType: master.DeviceType,
+		PrimaryIp4: newIPMatchStub(master.PrimaryIp4),
+		PrimaryIp6: newIPMatchStub(master.PrimaryIp6),
+	}
+	if sm, ok := master.Metadata["source_match"]; ok {
+		ref.Metadata = diode.Metadata{"source_match": sm}
+	}
+	return ref
+}
+
 func sortByID(members []ChassisMember) []ChassisMember {
 	slices.SortFunc(members, func(a, b ChassisMember) int { return a.ID - b.ID })
 	return members
