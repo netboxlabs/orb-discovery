@@ -307,3 +307,200 @@ func TestBuildMemberDevice_FallsBackToMasterDeviceTypeWhenModelEmpty(t *testing.
 	assert.Equal(t, "ModelA", *dev.DeviceType.Model,
 		"member device_type falls back to master when entPhysicalModelName is empty")
 }
+
+func TestTranslateAsStack_StandaloneSetsSerialAndReturnsUnchangedShape(t *testing.T) {
+	logger := slog.Default()
+	master := &diode.Device{Name: strPtr("standalone")}
+	iface := &diode.Interface{Name: strPtr("Gi0/0/0"), Device: master}
+	entities := []diode.Entity{master, iface}
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "FOC0001"},
+	}
+
+	out := TranslateAsStack(entities, oids, nil, &config.Defaults{}, logger)
+
+	assert.Len(t, out, 2, "shape unchanged on standalone")
+	assert.Equal(t, "FOC0001", *master.Serial)
+}
+
+func TestTranslateAsStack_TwoMemberStackEmitsVCAndMember(t *testing.T) {
+	logger := slog.Default()
+	master := &diode.Device{
+		Name: strPtr("3850-stack.example"),
+		Site: &diode.Site{Name: strPtr("dc1")},
+		DeviceType: &diode.DeviceType{
+			Model:        strPtr("WS-C3850-48P"),
+			Manufacturer: &diode.Manufacturer{Name: strPtr("Cisco")},
+		},
+	}
+	ifaceM1 := &diode.Interface{Name: strPtr("GigabitEthernet1/0/1"), Device: master}
+	ifaceM2 := &diode.Interface{Name: strPtr("GigabitEthernet2/0/1"), Device: master}
+	entities := []diode.Entity{master, ifaceM1, ifaceM2}
+	// No alias-table coverage in this fixture — ifName parsing drives routing.
+	ifIndexByIface := map[*diode.Interface]int{}
+
+	out := TranslateAsStack(entities, fixtureCisco3850TwoMemberStack(), ifIndexByIface, &config.Defaults{}, logger)
+
+	// master + VC + 1 member + 2 interfaces = 5
+	var vc *diode.VirtualChassis
+	var members []*diode.Device
+	for _, e := range out {
+		switch v := e.(type) {
+		case *diode.VirtualChassis:
+			vc = v
+		case *diode.Device:
+			if v != master {
+				members = append(members, v)
+			}
+		}
+	}
+	assert.NotNil(t, vc)
+	assert.Equal(t, "3850-stack.example", *vc.Name)
+	assert.Len(t, members, 1)
+	assert.Equal(t, "FCW2147L0K4", *members[0].Serial)
+	assert.Equal(t, int64(2), *members[0].VcPosition)
+
+	// Master remains plain (no VcPosition, no VirtualChassis).
+	assert.Nil(t, master.VcPosition)
+	assert.Nil(t, master.VirtualChassis)
+	assert.Equal(t, "FCW2147L0K3", *master.Serial,
+		"master Serial set from chassis row 1")
+
+	// Interface routing: Gi1/0/1 -> master; Gi2/0/1 -> member.
+	assert.Equal(t, master, ifaceM1.Device, "Gi1/0/1 stays on master")
+	assert.Equal(t, "3850-stack.example-stack-2", *ifaceM2.Device.Name,
+		"Gi2/0/1 routes to member 2")
+}
+
+func TestTranslateAsStack_DroppedMemberIfaceSkippedWithWarn(t *testing.T) {
+	// 3-row inventory with member 2 dropped via duplicate id; an
+	// interface named Gi2/0/1 must be EXCLUDED from the output
+	// (not silently routed to master).
+	logger := slog.Default()
+	master := &diode.Device{Name: strPtr("stack"), DeviceType: &diode.DeviceType{Model: strPtr("X")}}
+	orphan := &diode.Interface{Name: strPtr("Gi2/0/1"), Device: master}
+	memberIface := &diode.Interface{Name: strPtr("Gi3/0/1"), Device: master}
+	entities := []diode.Entity{master, orphan, memberIface}
+
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":   {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":   {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":   {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1":  {Value: "S1"},
+		// Two rows both claiming id=2 -> dropped as ambiguous.
+		".1.3.6.1.2.1.47.1.1.1.1.4.20":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.20":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.20":  {Value: "2"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.20": {Value: "S2-A"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.30":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.30":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.30":  {Value: "2"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.30": {Value: "S2-B"},
+		// Surviving member 3.
+		".1.3.6.1.2.1.47.1.1.1.1.4.40":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.40":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.40":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.40": {Value: "S3"},
+	}
+
+	out := TranslateAsStack(entities, oids, nil, &config.Defaults{}, logger)
+
+	// Orphan (Gi2/0/1) is excluded.
+	for _, e := range out {
+		if iface, ok := e.(*diode.Interface); ok {
+			assert.NotEqual(t, "Gi2/0/1", *iface.Name,
+				"orphaned member-2 port must be skipped, not routed to master")
+		}
+	}
+	// Member-3 port survives.
+	found := false
+	for _, e := range out {
+		if iface, ok := e.(*diode.Interface); ok && *iface.Name == "Gi3/0/1" {
+			found = true
+		}
+	}
+	assert.True(t, found, "member-3 port must remain in the output")
+}
+
+// TestTranslateAsStack_IPRoutedToMemberViaAssignedObject guards
+// finding #12: MapObjectIDsToEntity drops IP-assigned interfaces from
+// top-level emission, so member-owned interfaces visible only through
+// IP.AssignedObject must still be rerouted from master to member.
+func TestTranslateAsStack_IPRoutedToMemberViaAssignedObject(t *testing.T) {
+	logger := slog.Default()
+	master := &diode.Device{
+		Name: strPtr("3850-stack.example"),
+		DeviceType: &diode.DeviceType{
+			Model:        strPtr("WS-C3850-48P"),
+			Manufacturer: &diode.Manufacturer{Name: strPtr("Cisco")},
+		},
+	}
+	// Member-2 iface present only via IP.AssignedObject — NOT as a
+	// top-level Interface entity. Today's pipeline strips it from
+	// top-level when an IP references it.
+	memberIface := &diode.Interface{Name: strPtr("GigabitEthernet2/0/24"), Device: master}
+	memberIP := &diode.IPAddress{
+		Address:        strPtr("10.0.2.24/24"),
+		AssignedObject: memberIface,
+	}
+	entities := []diode.Entity{master, memberIP}
+
+	out := TranslateAsStack(entities, fixtureCisco3850TwoMemberStack(), nil, &config.Defaults{}, logger)
+
+	// The IP survived and its nested Interface.Device now points at member-2.
+	var seenIP *diode.IPAddress
+	for _, e := range out {
+		if ip, ok := e.(*diode.IPAddress); ok {
+			seenIP = ip
+		}
+	}
+	assert.NotNil(t, seenIP)
+	iface, _ := seenIP.AssignedObject.(*diode.Interface)
+	assert.Equal(t, "3850-stack.example-stack-2", *iface.Device.Name,
+		"IP.AssignedObject.Interface.Device must be re-pointed to member-2")
+}
+
+// TestTranslateAsStack_OrphanIPFiltered guards finding #12: an IP
+// assigned to an interface that was skipped (parsed to a dropped
+// member id) must NOT be ingested — otherwise NetBox sees an IP
+// with a dangling AssignedObject.
+func TestTranslateAsStack_OrphanIPFiltered(t *testing.T) {
+	logger := slog.Default()
+	master := &diode.Device{Name: strPtr("stack"), DeviceType: &diode.DeviceType{Model: strPtr("X")}}
+	orphanIface := &diode.Interface{Name: strPtr("Gi2/0/1"), Device: master}
+	orphanIP := &diode.IPAddress{
+		Address:        strPtr("10.0.0.99/24"),
+		AssignedObject: orphanIface,
+	}
+	entities := []diode.Entity{master, orphanIface, orphanIP}
+
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":   {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":   {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":   {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1":  {Value: "S1"},
+		// Member 2 duplicated -> dropped as ambiguous.
+		".1.3.6.1.2.1.47.1.1.1.1.4.20":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.20":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.20":  {Value: "2"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.20": {Value: "S2-A"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.30":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.30":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.30":  {Value: "2"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.30": {Value: "S2-B"},
+		// Real member 3.
+		".1.3.6.1.2.1.47.1.1.1.1.4.40":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.40":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.40":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.40": {Value: "S3"},
+	}
+
+	out := TranslateAsStack(entities, oids, nil, &config.Defaults{}, logger)
+
+	for _, e := range out {
+		_, isIP := e.(*diode.IPAddress)
+		assert.False(t, isIP, "IP assigned to a skipped (orphan) interface must be filtered")
+	}
+}

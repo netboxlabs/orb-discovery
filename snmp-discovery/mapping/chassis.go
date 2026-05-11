@@ -4,7 +4,7 @@
 // entAliasMappingTable. Vendor-neutral; relies on lowest-member-id
 // master pinning for stability across stack-role failovers.
 //
-// Public entry point: TranslateAsStack (to be added in a later task).
+// Public entry point: TranslateAsStack.
 package mapping
 
 import (
@@ -270,6 +270,20 @@ func sortByID(members []ChassisMember) []ChassisMember {
 	return members
 }
 
+// strPtrCopy returns a pointer to a copy of s.
+func strPtrCopy(s string) *string {
+	c := s
+	return &c
+}
+
+// strDeref dereferences p or returns "" when nil.
+func strDeref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
 var trailingIntRe = regexp.MustCompile(`(\d+)\s*$`)
 
 // deriveMemberID picks the logical member id with precedence:
@@ -291,4 +305,275 @@ func deriveMemberID(m ChassisMember, ordinalFallback int) int {
 		}
 	}
 	return ordinalFallback
+}
+
+// TranslateAsStack inspects the raw oids map for ENTITY-MIB chassis
+// inventory. Three outcomes:
+//
+//   - 0 chassis rows with non-empty serial -> entities returned
+//     unchanged (no Serial assignment possible).
+//   - 1 chassis row -> set master.Serial on the existing Device,
+//     return entities unchanged otherwise (standalone case).
+//   - >= 2 chassis rows -> emit master + top-level VirtualChassis +
+//     member Devices, re-point each Interface's Device ref to its
+//     owning member, skip interfaces whose parsed member id was
+//     dropped during validation.
+//
+// ifIndexByIface maps each Interface entity to its ifIndex (the
+// registry knows; the proto doesn't carry it). May be nil — in that
+// case alias-table routing is skipped and ifName parsing drives all
+// routing decisions.
+//
+// Must be called from the runner AFTER mapper.MapObjectIDsToEntity
+// returns and BEFORE annotate*/Ingest. See runner.go.
+func TranslateAsStack(
+	entities []diode.Entity,
+	oids ObjectIDValueMap,
+	ifIndexByIface map[*diode.Interface]int,
+	defaults *config.Defaults,
+	logger *slog.Logger,
+) []diode.Entity {
+	master := CurrentDeviceFrom(entities)
+	if master == nil {
+		return entities
+	}
+	inv := extractInventory(oids, logger)
+	if len(inv.Members) == 0 {
+		return entities
+	}
+
+	// Standalone (1 chassis row): set Serial, return unchanged shape.
+	if !inv.IsStack() {
+		s := inv.Members[0].Serial
+		master.Serial = &s
+		return entities
+	}
+
+	// Stack (>= 2 chassis rows): full emission.
+	// 1. Set Serial on master from the lowest-id chassis row.
+	lowest := inv.Members[0] // sorted ascending
+	masterSerial := lowest.Serial
+	master.Serial = &masterSerial
+	// Master also gets its per-member Model in case the rich
+	// DeviceMapper picked a top-level chassis model that diverges
+	// (or didn't resolve a DeviceType at all — sysObjectID miss).
+	if lowest.Model != "" {
+		var mfg *diode.Manufacturer
+		if master.DeviceType != nil {
+			mfg = master.DeviceType.Manufacturer
+		}
+		master.DeviceType = &diode.DeviceType{
+			Model:        strPtrCopy(lowest.Model),
+			Manufacturer: mfg,
+		}
+	}
+
+	vcName := ""
+	if master.Name != nil {
+		vcName = *master.Name
+	}
+
+	// 2. Build masterRef AFTER any primary-IP assignment on the
+	// rich master. snmp-discovery's primary-IP assignment runs
+	// inside MapObjectIDsToEntity before we get here, so master
+	// already carries PrimaryIp4/6 at this point.
+	masterRef := buildMasterRef(master)
+
+	// 3. Build per-member Device entities (skip the master row).
+	memberByID := map[int]*diode.Device{lowest.ID: master}
+	memberDevices := make([]*diode.Device, 0, len(inv.Members)-1)
+	for _, m := range inv.Members[1:] {
+		dev := buildMemberDevice(master, m, masterRef, vcName)
+		memberByID[m.ID] = dev
+		memberDevices = append(memberDevices, dev)
+	}
+
+	// 4. Re-route Interface.Device for member-owned ports.
+	//    Routing precedence: entAliasMappingTable -> ParseMemberID
+	//    fallback. Dropped-id ports are skipped (excluded from output)
+	//    along with their dependent IPs/MACs.
+	router := newChassisRouter(inv, oids, logger)
+	keptInterfaces := make(map[*diode.Interface]bool)
+	skippedInterfaces := make(map[*diode.Interface]bool)
+
+	// Route every Interface seen anywhere in the entity graph —
+	// not just top-level ones. MapObjectIDsToEntity filters out
+	// IP-assigned interfaces from top-level emission (mapping.go
+	// ~line 716); without walking IP.AssignedObject + MAC.AssignedObject
+	// here those interfaces would keep Device=master after rerouting.
+	processIface := func(iface *diode.Interface) {
+		if iface == nil || keptInterfaces[iface] || skippedInterfaces[iface] {
+			return
+		}
+		owner := routeInterface(iface, ifIndexByIface, router, inv, memberByID, logger)
+		if owner == -1 {
+			skippedInterfaces[iface] = true
+			return
+		}
+		if dev, ok := memberByID[owner]; ok {
+			iface.Device = dev
+		}
+		keptInterfaces[iface] = true
+	}
+	for _, e := range entities {
+		switch v := e.(type) {
+		case *diode.Interface:
+			processIface(v)
+		case *diode.IPAddress:
+			if iface, ok := v.AssignedObject.(*diode.Interface); ok {
+				processIface(iface)
+			}
+		case *diode.MACAddress:
+			if iface, ok := v.AssignedObject.(*diode.Interface); ok {
+				processIface(iface)
+			}
+		}
+	}
+
+	// 5. Rebuild output partitioned by type so ordering is deterministic
+	//    even though `entities` came out of Go-map iteration upstream.
+	//    Canonical order:
+	//      master, VC, member_devices (sorted by VcPosition),
+	//      interfaces (sorted by Name), IPs (sorted by Address),
+	//      MACs (sorted by MacAddress), other entities (stable order
+	//      via type then a type-specific sort key).
+	var (
+		ifaces  []*diode.Interface
+		ips     []*diode.IPAddress
+		macs    []*diode.MACAddress
+		vlans   []*diode.VLAN
+		modules []*diode.Module
+		others  []diode.Entity
+	)
+	for _, e := range entities {
+		switch v := e.(type) {
+		case *diode.Device:
+			// Master handled separately; member Devices generated by
+			// this function (never present in the input slice).
+			continue
+		case *diode.Interface:
+			if keptInterfaces[v] {
+				ifaces = append(ifaces, v)
+			}
+		case *diode.IPAddress:
+			if iface, ok := v.AssignedObject.(*diode.Interface); ok {
+				if skippedInterfaces[iface] {
+					continue // orphan: drop IP whose interface was skipped
+				}
+			}
+			ips = append(ips, v)
+		case *diode.MACAddress:
+			if iface, ok := v.AssignedObject.(*diode.Interface); ok {
+				if skippedInterfaces[iface] {
+					continue
+				}
+			}
+			macs = append(macs, v)
+		case *diode.VLAN:
+			vlans = append(vlans, v)
+		case *diode.Module:
+			modules = append(modules, v)
+		default:
+			others = append(others, v)
+		}
+	}
+
+	slices.SortFunc(ifaces, func(a, b *diode.Interface) int {
+		return strings.Compare(strDeref(a.Name), strDeref(b.Name))
+	})
+	slices.SortFunc(ips, func(a, b *diode.IPAddress) int {
+		return strings.Compare(strDeref(a.Address), strDeref(b.Address))
+	})
+	slices.SortFunc(macs, func(a, b *diode.MACAddress) int {
+		return strings.Compare(strDeref(a.MacAddress), strDeref(b.MacAddress))
+	})
+	slices.SortFunc(vlans, func(a, b *diode.VLAN) int {
+		ai := int64(0)
+		bi := int64(0)
+		if a.Vid != nil {
+			ai = *a.Vid
+		}
+		if b.Vid != nil {
+			bi = *b.Vid
+		}
+		return int(ai - bi)
+	})
+
+	out := make([]diode.Entity, 0,
+		3+len(memberDevices)+len(ifaces)+len(ips)+len(macs)+len(vlans)+len(modules)+len(others))
+	out = append(out, master)
+	out = append(out, &diode.VirtualChassis{
+		Name:   &vcName,
+		Master: masterRef,
+	})
+	for _, d := range memberDevices {
+		out = append(out, d)
+	}
+	for _, e := range ifaces {
+		out = append(out, e)
+	}
+	for _, e := range ips {
+		out = append(out, e)
+	}
+	for _, e := range macs {
+		out = append(out, e)
+	}
+	for _, e := range vlans {
+		out = append(out, e)
+	}
+	for _, e := range modules {
+		out = append(out, e)
+	}
+	out = append(out, others...)
+	return out
+}
+
+// routeInterface returns:
+//   - the owning member id (>=0) when routing succeeded
+//   - -1 when the resolved id was dropped during validation (caller skips)
+//   - master.ID (lowest member id) when no signal yields a match —
+//     route to master for LAGs, SVIs, loopbacks, mgmt ports.
+//
+// Precedence: entAliasMappingTable (when ifIndexByIface has an entry
+// for this Interface) -> ParseMemberID(ifName) fallback.
+func routeInterface(
+	iface *diode.Interface,
+	ifIndexByIface map[*diode.Interface]int,
+	router *chassisRouter,
+	inv ChassisInventory,
+	memberByID map[int]*diode.Device,
+	logger *slog.Logger,
+) int {
+	masterID := inv.Members[0].ID
+	if iface.Name == nil || *iface.Name == "" {
+		return masterID
+	}
+
+	// Alias-table path.
+	if ifIdx, ok := ifIndexByIface[iface]; ok && ifIdx > 0 {
+		if id, found := router.routeIfIndex(ifIdx); found {
+			if _, dropped := inv.DroppedIDs[id]; dropped {
+				logger.Warn("interface routed via alias table to a dropped member id; skipping",
+					"ifName", *iface.Name, "member_id", id)
+				return -1
+			}
+			return id
+		}
+	}
+
+	// ifName fallback.
+	id, ok := ParseMemberID(*iface.Name)
+	if !ok {
+		return masterID
+	}
+	if _, dropped := inv.DroppedIDs[id]; dropped {
+		logger.Warn("interface parsed to a dropped member id; skipping",
+			"ifName", *iface.Name, "member_id", id)
+		return -1
+	}
+	// Parsed id must correspond to an emitted member; else route to master.
+	if _, isMember := memberByID[id]; !isMember {
+		return masterID
+	}
+	return id
 }
