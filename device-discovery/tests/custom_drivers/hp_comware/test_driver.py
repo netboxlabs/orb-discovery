@@ -128,8 +128,8 @@ def test_chassis_members_empty_irf_output_logs_debug(caplog):
     )
 
 
-def test_chassis_members_manuinfo_failure_still_returns_irf_rows(caplog):
-    """If `display device manuinfo` errors, IRF rows are still parsed — members drop on empty serial."""
+def test_chassis_members_manuinfo_failure_drops_members_logs_warning(caplog):
+    """`display device manuinfo` error: WARNING+exc_info, members drop on empty serial, result is None."""
     driver = MagicMock()
 
     def _send(cmd):

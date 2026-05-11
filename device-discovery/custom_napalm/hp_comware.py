@@ -383,11 +383,6 @@ _IRF_LEGEND_RE = re.compile(r"^\s*[*+]\s+indicates\b", re.IGNORECASE)
 # Comware releases omit it, in which case payload domain stays None.
 _IRF_DOMAIN_RE = re.compile(r"^\s*Domain\s+ID\s*:\s*(\d+)\s*$", re.IGNORECASE | re.MULTILINE)
 
-# A CPU-Mac column of `0000-0000-0000` is the "no MAC" sentinel that Comware
-# emits for ``Down`` / not-yet-loaded members. We treat it as missing.
-_IRF_ZERO_MAC_RE = re.compile(r"^0{4}-0{4}-0{4}$")
-
-
 def _normalize_irf_mac(raw: str | None) -> str | None:
     """
     Reduce a Comware MAC token to a canonical comparable form.
@@ -457,13 +452,15 @@ def _comware_index_manuinfo_by_mac(rows: list[dict]) -> tuple[
     serial_by_mac: dict[str, str] = {}
     model_by_mac: dict[str, str] = {}
     for row in rows or []:
-        # Only top-level Slot rows carry the chassis-CPU MAC that `display irf`
-        # prints. Subslot/Fan/Power rows carry blade/component MACs that
-        # would never join successfully anyway, but filtering explicitly
-        # makes the contract obvious and forecloses on accidental joins via
-        # a future template change.
+        # Top-level Slot rows and Chassis rows both carry the chassis-CPU
+        # MAC that `display irf` prints. Subslot / Fan / Power rows carry
+        # blade/component-level MACs that would never join the IRF CPU-Mac
+        # anyway — filtering them explicitly makes the contract obvious
+        # and forecloses on accidental joins via a future template change.
+        # `get_facts()` already treats Chassis rows as authoritative for
+        # the local-device serial, including those is consistent.
         slot_type = (row.get("slot_type") or "").strip().lower()
-        if slot_type and slot_type != "slot":
+        if slot_type and slot_type not in ("slot", "chassis"):
             continue
         mac_key = _normalize_irf_mac(row.get("mac_address"))
         if not mac_key:
