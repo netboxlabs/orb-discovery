@@ -504,3 +504,33 @@ func TestTranslateAsStack_OrphanIPFiltered(t *testing.T) {
 		assert.False(t, isIP, "IP assigned to a skipped (orphan) interface must be filtered")
 	}
 }
+
+func TestTranslateAsStack_JunosQFX_4MemberVC(t *testing.T) {
+	logger := slog.Default()
+	master := &diode.Device{
+		Name: strPtr("vc-edge-01"),
+		Site: &diode.Site{Name: strPtr("dc1")},
+		DeviceType: &diode.DeviceType{
+			Model:        strPtr("EX4300-48T"),
+			Manufacturer: &diode.Manufacturer{Name: strPtr("Juniper")},
+		},
+	}
+	fpc2Iface := &diode.Interface{Name: strPtr("xe-2/0/0"), Device: master}
+	entities := []diode.Entity{master, fpc2Iface}
+
+	out := TranslateAsStack(entities, fixtureJunosQFX4MemberVC(), nil, &config.Defaults{}, logger)
+
+	var members []*diode.Device
+	for _, e := range out {
+		if d, ok := e.(*diode.Device); ok && d != master {
+			members = append(members, d)
+		}
+	}
+	assert.Len(t, members, 3, "4-member VC -> master + 3 member Devices")
+
+	// Master pinned to lowest id (FPC 0).
+	assert.Equal(t, "BR0000000001", *master.Serial)
+
+	// xe-2/0/0 routes to FPC 2 member.
+	assert.Equal(t, "vc-edge-01-stack-2", *fpc2Iface.Device.Name)
+}
