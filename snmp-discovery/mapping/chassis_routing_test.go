@@ -75,3 +75,67 @@ func TestRouteIfIndex_ChainTerminatesAtRoot_ReturnsFalse(t *testing.T) {
 	_, ok := r.routeIfIndex(42)
 	assert.False(t, ok)
 }
+
+func TestParseMemberID(t *testing.T) {
+	cases := []struct {
+		ifName string
+		wantID int
+		wantOK bool
+	}{
+		// Cisco IOS/IOS-XE stack 3-tuple.
+		{"GigabitEthernet1/0/1", 1, true},
+		{"Gi1/0/1", 1, true},
+		{"Gi2/0/24", 2, true},
+		{"TenGigE2/0/24", 2, true},
+		{"TenGigabitEthernet3/0/1", 3, true},
+		{"FortyGigabitEthernet1/1/1", 1, true},
+		{"HundredGigE1/0/1", 1, true},
+		{"mGig3/0/1", 3, true}, // multi-gig prefix
+		{"TwoGigabitEthernet1/0/2", 1, true},
+		{"FiveGigabitEthernet1/0/3", 1, true},
+
+		// Junos FPC.
+		{"xe-0/0/0", 0, true},
+		{"ge-2/0/1", 2, true},
+		{"et-3/0/0", 3, true},
+
+		// Aruba CX 1/1/1.
+		{"1/1/1", 1, true},
+		{"2/1/24", 2, true},
+
+		// HP/H3C Comware.
+		{"GigabitEthernet1/0/1", 1, true},
+		{"Ten-GigabitEthernet2/0/1", 2, true},
+
+		// No member id (route to master).
+		{"Vlan10", 0, false},
+		{"Loopback0", 0, false},
+		{"Port-channel1", 0, false},
+		{"Po1", 0, false},
+		{"mgmt0", 0, false},
+		{"Tunnel1", 0, false},
+		{"BVI100", 0, false},
+		{"Bundle-Ether1", 0, false},
+		{"Null0", 0, false},
+		{"", 0, false},
+
+		// Negative cases for non-stack 2-tuple naming conventions —
+		// must NOT false-positive into a stack member id.
+		{"Gi1/1", 0, false},              // Cisco 2-tuple (non-stack chassis)
+		{"GigabitEthernet1/1", 0, false}, // Cisco 2-tuple long form
+		{"Ethernet1/1", 0, false},        // NX-OS 2-tuple (VPC is not VC)
+		{"ether1", 0, false},             // MikroTik (no stack convention)
+		{"ether10", 0, false},
+		{"1:1", 0, false},        // Extreme EXOS (unsupported in batch 1)
+		{"sfp-sfpplus1", 0, false}, // MikroTik SFP+ port
+	}
+	for _, tc := range cases {
+		t.Run(tc.ifName, func(t *testing.T) {
+			id, ok := ParseMemberID(tc.ifName)
+			assert.Equal(t, tc.wantOK, ok, "ok mismatch")
+			if tc.wantOK {
+				assert.Equal(t, tc.wantID, id, "id mismatch")
+			}
+		})
+	}
+}

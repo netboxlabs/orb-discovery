@@ -2,6 +2,7 @@ package mapping
 
 import (
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -16,6 +17,54 @@ const (
 	// vendor / version).
 	oidIfEntryIfIndexNoDot = "1.3.6.1.2.1.2.2.1.1."
 )
+
+// Cisco IOS / IOS-XE / NX-OS stack-style names that begin with a known
+// physical-port type prefix followed by digits/0/digits (or digits/digits).
+// Captures the leading member id.
+var cisco3TupleRe = regexp.MustCompile(
+	`^(?:Gi(?:gabitEthernet)?|TenGigE|TenGigabitEthernet|TwentyFiveGigE|TwentyFiveGigabitEthernet|FortyGigabitEthernet|FortyGigE|HundredGigE|HundredGigabitEthernet|TwoGigabitEthernet|FiveGigabitEthernet|mGig|Fa(?:stEthernet)?|Et(?:hernet)?)(\d+)/\d+/\d+$`)
+
+// Junos FPC pattern (xe-X/Y/Z, ge-X/Y/Z, et-X/Y/Z, mge-X/Y/Z, ...).
+var junosFpcRe = regexp.MustCompile(`^[a-z]{2,4}-(\d+)/\d+/\d+$`)
+
+// Aruba CX / HP/H3C Comware "X/Y/Z" numeric form (no alpha prefix).
+var numeric3TupleRe = regexp.MustCompile(`^(\d+)/\d+/\d+$`)
+
+// HP/H3C dashed long form.
+var h3cDashRe = regexp.MustCompile(`^(?:Ten-GigabitEthernet|Forty-GigabitEthernet|Hundred-GigabitEthernet)(\d+)/\d+/\d+$`)
+
+// Names that must route to master regardless of trailing digits.
+var masterOnlyPrefixes = []string{
+	"Vlan", "Loopback", "Lo", "Port-channel", "Po",
+	"Tunnel", "Tu", "BVI", "Bundle-Ether", "Null",
+	"mgmt", "Management", "ManagementEthernet",
+	"FastEthernet0/0", // non-stack mgmt-only port on some routers
+}
+
+// ParseMemberID extracts the leading stack-member id from ifName per
+// the vendor conventions listed in chassis_routing.go (Cisco IOS/IOS-XE
+// stack 3-tuple incl. mGig families; Junos FPC; Aruba CX / Comware
+// numeric 3-tuple; HP/H3C dashed long form). Returns ok=false for
+// LAGs, SVIs, loopbacks, tunnels, BVIs, Bundle-Ether, Null, and mgmt
+// interfaces — callers should route those to master.
+func ParseMemberID(ifName string) (int, bool) {
+	if ifName == "" {
+		return 0, false
+	}
+	for _, p := range masterOnlyPrefixes {
+		if strings.HasPrefix(ifName, p) {
+			return 0, false
+		}
+	}
+	for _, re := range []*regexp.Regexp{cisco3TupleRe, h3cDashRe, junosFpcRe, numeric3TupleRe} {
+		if m := re.FindStringSubmatch(ifName); m != nil {
+			if id, err := strconv.Atoi(m[1]); err == nil {
+				return id, true
+			}
+		}
+	}
+	return 0, false
+}
 
 // chassisRouter answers "which member owns ifIndex N?" by combining
 // the parsed inventory with entAliasMappingTable + an entPhysical
