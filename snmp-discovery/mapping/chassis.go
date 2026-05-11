@@ -54,8 +54,9 @@ type ChassisMember struct {
 // ChassisInventory is the deduped, validated, member-id-sorted set of
 // stack members for one target. Len(Members) >= 2 means stack.
 type ChassisInventory struct {
-	Members    []ChassisMember
-	DroppedIDs map[int]struct{}
+	Members           []ChassisMember
+	DroppedIDs        map[int]struct{}
+	DroppedEntIndexes map[string]int // entPhysicalIndex -> dropped member id
 }
 
 // IsStack reports whether the inventory should trigger VC emission.
@@ -125,20 +126,23 @@ func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInvento
 		members[i].ID = deriveMemberID(members[i], i+1)
 	}
 	// Dedup pass 1: drop later-occurring duplicates of the same serial,
-	// keep the lowest-id occurrence. Track dropped ids for the routing
-	// warn-and-skip rule.
+	// keep the lowest-id occurrence. Track dropped ids and their
+	// entPhysicalIndexes for the routing warn-and-skip rule.
 	dropped := map[int]struct{}{}
+	droppedEnts := map[string]int{} // entPhysicalIndex -> dropped member id
 	bySerial := map[string]int{}
 	survivors := members[:0]
 	for _, m := range members {
 		if existing, ok := bySerial[m.Serial]; ok {
 			// Keep the lower id, drop the higher id.
 			keep, drop := existing, m.ID
+			dropEnt := m.EntPhysicalIndex
 			if m.ID < existing {
 				keep, drop = m.ID, existing
-				// rewrite the survivor we already appended
+				// Find the old survivor's entPhysicalIndex before rewriting.
 				for i := range survivors {
 					if survivors[i].Serial == m.Serial {
+						dropEnt = survivors[i].EntPhysicalIndex
 						survivors[i] = m
 						break
 					}
@@ -147,6 +151,7 @@ func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInvento
 			bySerial[m.Serial] = keep
 			if drop != keep {
 				dropped[drop] = struct{}{}
+				droppedEnts[dropEnt] = drop
 			}
 			logger.Warn("chassis row dropped: duplicate serial",
 				"serial", m.Serial, "kept_id", keep, "dropped_id", drop)
@@ -168,6 +173,9 @@ func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInvento
 		if len(group) > 1 {
 			id := group[0].ID
 			dropped[id] = struct{}{}
+			for _, row := range group {
+				droppedEnts[row.EntPhysicalIndex] = id
+			}
 			logger.Warn("chassis row dropped: ambiguous duplicate member id",
 				"id", id, "count", len(group))
 			continue
@@ -177,8 +185,9 @@ func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInvento
 	members = survivors
 
 	return ChassisInventory{
-		Members:    sortByID(members),
-		DroppedIDs: dropped,
+		Members:           sortByID(members),
+		DroppedIDs:        dropped,
+		DroppedEntIndexes: droppedEnts,
 	}
 }
 

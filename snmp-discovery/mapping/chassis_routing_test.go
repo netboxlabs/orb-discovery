@@ -76,6 +76,36 @@ func TestRouteIfIndex_ChainTerminatesAtRoot_ReturnsFalse(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestRouteIfIndex_AliasToDroppedChassisReturnsDroppedID(t *testing.T) {
+	logger := slog.Default()
+	// Build inventory with member id=2 dropped via duplicate serial.
+	// entPhysicalIndex 1 → member id 1 (survivor), index 1000 → member id 2 (dropped).
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":     {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":     {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":     {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1":    {Value: "SHARED-SERIAL"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.1000":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1000":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1000":  {Value: "2"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1000": {Value: "SHARED-SERIAL"}, // dup → id 2 dropped
+		// alias: entPhysicalIndex 1000 aliases ifIndex 99
+		".1.3.6.1.2.1.47.1.3.2.1.2.1000.0": {Value: ".1.3.6.1.2.1.2.2.1.1.99"},
+	}
+	inv := extractInventory(oids, logger)
+	r := newChassisRouter(inv, oids, logger)
+
+	// Precondition: member id=2 must be in DroppedIDs.
+	assert.Contains(t, inv.DroppedIDs, 2, "member id=2 must be dropped (dup serial)")
+
+	// routeIfIndex must return ok=true and the dropped id so the caller
+	// can trigger the skip-with-warn path rather than falling through to
+	// ParseMemberID which might mis-route to master.
+	id, ok := r.routeIfIndex(99)
+	assert.True(t, ok, "alias-table hit on dropped chassis row must return ok=true")
+	assert.Equal(t, 2, id, "must return the dropped member id so caller can skip-with-warn")
+}
+
 func TestParseMemberID(t *testing.T) {
 	cases := []struct {
 		ifName string

@@ -685,3 +685,73 @@ func TestTranslateAsStack_Idempotent_ThroughFullMapperPipeline(t *testing.T) {
 			"entity %d proto bytes differ — nondeterminism somewhere in MapObjectIDsToEntity or TranslateAsStack", i)
 	}
 }
+
+// TestTranslateAsStack_AliasTableDroppedMemberSkipsWithWarn exercises the
+// full path: entAliasMappingTable entry → dropped chassis row →
+// skip-with-warn (interface excluded from output rather than mis-routed
+// to master). Driven by the scenario from Fix 2 where a duplicate-serial
+// drop removes the chassis row from memberByEntIdx but the alias table
+// still points at its entPhysicalIndex.
+func TestTranslateAsStack_AliasTableDroppedMemberSkipsWithWarn(t *testing.T) {
+	// 3-member OID inventory: members 1 and 3 survive; member 2 is
+	// dropped via duplicate serial. An alias entry maps ifIndex 99 to
+	// the dropped entPhysicalIndex 1000 (member 2); another maps
+	// ifIndex 10 to surviving entPhysicalIndex 1 (member 1).
+	// This exercises the full path: alias-table → dropped chassis →
+	// skip-with-warn, rather than mis-routing to master.
+	master := &diode.Device{
+		Name:       strPtr("dup-serial-stack"),
+		DeviceType: &diode.DeviceType{Model: strPtr("WS-C3850-48P")},
+	}
+	droppedIface := &diode.Interface{Name: strPtr("Gi2/0/24"), Device: master}
+	survivorIface := &diode.Interface{Name: strPtr("Gi1/0/1"), Device: master}
+	entities := []diode.Entity{master, droppedIface, survivorIface}
+
+	oids := ObjectIDValueMap{
+		// Member 1 (entPhysicalIndex=1) — survivor.
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":    {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":    {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":    {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1":   {Value: "SERIAL-A"},
+		// Member 2 (entPhysicalIndex=1000) — dropped (dup serial of member 1).
+		".1.3.6.1.2.1.47.1.1.1.1.4.1000":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1000":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1000":  {Value: "2"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1000": {Value: "SERIAL-A"}, // dup → member 2 dropped
+		// Member 3 (entPhysicalIndex=2000) — survivor (distinct serial).
+		".1.3.6.1.2.1.47.1.1.1.1.4.2000":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.2000":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.2000":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.2000": {Value: "SERIAL-C"},
+		// Alias: dropped entPhysicalIndex 1000 → ifIndex 99.
+		".1.3.6.1.2.1.47.1.3.2.1.2.1000.0": {Value: ".1.3.6.1.2.1.2.2.1.1.99"},
+		// Alias: surviving entPhysicalIndex 1 → ifIndex 10.
+		".1.3.6.1.2.1.47.1.3.2.1.2.1.0": {Value: ".1.3.6.1.2.1.2.2.1.1.10"},
+	}
+
+	// Build ifIndexByIface map so alias routing is exercised.
+	ifIndexByIface := map[*diode.Interface]int{
+		droppedIface:  99,
+		survivorIface: 10,
+	}
+
+	warnLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	out := TranslateAsStack(entities, oids, ifIndexByIface, &config.Defaults{}, warnLogger)
+
+	// droppedIface (Gi2/0/24, ifIndex 99 → dropped member 2) must be absent.
+	for _, e := range out {
+		if iface, ok := e.(*diode.Interface); ok {
+			assert.NotEqual(t, "Gi2/0/24", strDeref(iface.Name),
+				"interface aliased to dropped chassis row must be skipped, not routed to master")
+		}
+	}
+
+	// survivorIface (Gi1/0/1, ifIndex 10 → surviving member 1 = master) must be present.
+	var found bool
+	for _, e := range out {
+		if iface, ok := e.(*diode.Interface); ok && strDeref(iface.Name) == "Gi1/0/1" {
+			found = true
+		}
+	}
+	assert.True(t, found, "interface aliased to surviving chassis row must remain in output")
+}

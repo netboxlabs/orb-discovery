@@ -90,6 +90,12 @@ type chassisRouter struct {
 	// memberByEntIdx[entPhysicalIndex] = logical member id, only
 	// populated for chassis rows that survived validation.
 	memberByEntIdx map[string]int
+	// droppedByEntIdx[entPhysicalIndex] = logical member id for chassis
+	// rows that were dropped during validation. Used so that an alias-table
+	// hit on a dropped chassis row returns the dropped id (triggering the
+	// caller's skip-with-warn path) rather than falling through to
+	// ParseMemberID which might mis-route the interface to master.
+	droppedByEntIdx map[string]int
 	// ifIndexToEnt[ifIndex] = entPhysicalIndex carrying that ifIndex.
 	ifIndexToEnt map[int]string
 	logger       *slog.Logger
@@ -97,14 +103,18 @@ type chassisRouter struct {
 
 func newChassisRouter(inv ChassisInventory, oids ObjectIDValueMap, logger *slog.Logger) *chassisRouter {
 	r := &chassisRouter{
-		inventory:      inv,
-		containedIn:    map[string]string{},
-		memberByEntIdx: map[string]int{},
-		ifIndexToEnt:   map[int]string{},
-		logger:         logger,
+		inventory:       inv,
+		containedIn:     map[string]string{},
+		memberByEntIdx:  map[string]int{},
+		droppedByEntIdx: map[string]int{},
+		ifIndexToEnt:    map[int]string{},
+		logger:          logger,
 	}
 	for _, m := range inv.Members {
 		r.memberByEntIdx[m.EntPhysicalIndex] = m.ID
+	}
+	for ent, id := range inv.DroppedEntIndexes {
+		r.droppedByEntIdx[ent] = id
 	}
 	for oid, v := range oids {
 		if strings.HasPrefix(oid, oidEntPhysicalContainedIn) {
@@ -146,6 +156,11 @@ func (r *chassisRouter) routeIfIndex(ifIndex int) (int, bool) {
 	// Bounded walk: at most 32 hops up the containedIn chain.
 	for hop := 0; hop < 32; hop++ {
 		if id, isMember := r.memberByEntIdx[ent]; isMember {
+			return id, true
+		}
+		// Also surface dropped chassis rows so the caller's skip-with-warn
+		// path fires instead of falling through to ParseMemberID.
+		if id, isDropped := r.droppedByEntIdx[ent]; isDropped {
 			return id, true
 		}
 		parent, has := r.containedIn[ent]
