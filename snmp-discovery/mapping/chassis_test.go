@@ -103,6 +103,56 @@ func TestExtractInventory_EmptySerialDropped(t *testing.T) {
 	assert.Equal(t, "VALID", inv.Members[0].Serial)
 }
 
+// TestExtractInventory_NULPaddedStringsTrimmed guards the regression
+// flagged by Codex/Copilot PR review: ENTITY-MIB DisplayStrings are
+// often NUL-padded by vendor agents, but strings.TrimSpace doesn't
+// strip \x00, so a NUL-padded "FOC1234\x00" would compare unequal to
+// "FOC1234" returned by another agent — breaking dedup and stable
+// matching against NetBox across runs.
+func TestExtractInventory_NULPaddedStringsTrimmed(t *testing.T) {
+	logger := slog.Default()
+	oids := ObjectIDValueMap{
+		// Two chassis rows; serial #2 is NUL-padded but identical to #1
+		// after trim — dedup must collapse them via duplicate-serial.
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":     {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":     {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":     {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.7.1":     {Value: "Switch 1\x00"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1":    {Value: "FOC1234"},
+		".1.3.6.1.2.1.47.1.1.1.1.13.1":    {Value: "WS-C3850-48P\x00"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.1000":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1000":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1000":  {Value: "2"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1000": {Value: "FOC1234\x00"},
+	}
+	inv := extractInventory(oids, logger)
+	// One survivor (dup-serial collapses two members).
+	assert.Len(t, inv.Members, 1)
+	m := inv.Members[0]
+	assert.Equal(t, "FOC1234", m.Serial, "serial must be NUL-stripped, not \"FOC1234\\x00\"")
+	assert.Equal(t, "Switch 1", m.EntName, "entName must be NUL-stripped")
+	assert.Equal(t, "WS-C3850-48P", m.Model, "model must be NUL-stripped")
+}
+
+// TestExtractInventory_NULOnlySerialDropped guards the edge case where
+// a vendor returns a serial consisting only of NUL bytes — must be
+// dropped just like an empty-string serial.
+func TestExtractInventory_NULOnlySerialDropped(t *testing.T) {
+	logger := slog.Default()
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":     {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":     {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1":    {Value: "\x00\x00\x00"}, // NUL-only
+		".1.3.6.1.2.1.47.1.1.1.1.4.1000":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1000":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1000":  {Value: "2"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1000": {Value: "VALID"},
+	}
+	inv := extractInventory(oids, logger)
+	assert.Len(t, inv.Members, 1)
+	assert.Equal(t, "VALID", inv.Members[0].Serial)
+}
+
 func TestDeriveMemberID_ParentRelPosWins(t *testing.T) {
 	m := ChassisMember{ParentRelPos: 5, EntName: "Switch 9"}
 	assert.Equal(t, 5, deriveMemberID(m, 0))

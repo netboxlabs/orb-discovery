@@ -94,22 +94,22 @@ func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInvento
 
 	members := make([]ChassisMember, 0, len(candidates))
 	for _, idx := range candidates {
-		contained := strings.TrimSpace(oids[oidEntPhysicalContainedIn+idx].Value)
+		contained := trimSNMPString(oids[oidEntPhysicalContainedIn+idx].Value)
 		if contained != "0" {
 			continue
 		}
-		serial := strings.TrimSpace(oids[oidEntPhysicalSerialNum+idx].Value)
+		serial := trimSNMPString(oids[oidEntPhysicalSerialNum+idx].Value)
 		if serial == "" {
 			logger.Warn("chassis row dropped: empty serial",
 				"entPhysicalIndex", idx)
 			continue
 		}
-		parentRel, _ := strconv.Atoi(strings.TrimSpace(oids[oidEntPhysicalParentRel+idx].Value))
+		parentRel, _ := strconv.Atoi(trimSNMPString(oids[oidEntPhysicalParentRel+idx].Value))
 		members = append(members, ChassisMember{
 			EntPhysicalIndex: idx,
 			Serial:           serial,
-			Model:            strings.TrimSpace(oids[oidEntPhysicalModelName+idx].Value),
-			EntName:          strings.TrimSpace(oids[oidEntPhysicalName+idx].Value),
+			Model:            trimSNMPString(oids[oidEntPhysicalModelName+idx].Value),
+			EntName:          trimSNMPString(oids[oidEntPhysicalName+idx].Value),
 			ParentRelPos:     parentRel,
 		})
 	}
@@ -293,6 +293,16 @@ func strDeref(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// trimSNMPString trims surrounding whitespace AND embedded NUL bytes
+// from ENTITY-MIB DisplayString-like values. Many vendor agents pad
+// short strings with trailing NUL bytes, which strings.TrimSpace leaves
+// in place — a NUL-padded "FOC1234\x00" would otherwise compare unequal
+// to "FOC1234" returned by another agent, breaking dedup and stable
+// matching against NetBox on subsequent runs.
+func trimSNMPString(s string) string {
+	return strings.Trim(s, " \t\r\n\x00")
 }
 
 var trailingIntRe = regexp.MustCompile(`(\d+)\s*$`)
