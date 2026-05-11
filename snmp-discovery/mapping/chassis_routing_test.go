@@ -129,6 +129,15 @@ func TestParseMemberID(t *testing.T) {
 		{"1:1", 0, false},          // Extreme EXOS (unsupported in batch 1)
 		{"sfp-sfpplus1", 0, false}, // MikroTik SFP+ port
 
+		// Cisco short-form prefixes (Te, Fo, Hu, Tw, Fi, Twe).
+		{"Te1/0/1", 1, true},
+		{"Te2/0/24", 2, true},
+		{"Fo1/0/1", 1, true},
+		{"Hu1/0/1", 1, true},
+		{"Tw2/0/1", 2, true},
+		{"Fi1/0/1", 1, true},
+		{"Twe1/0/1", 1, true},
+
 		// Subinterfaces — must parse the parent-port member id, not fall through.
 		{"GigabitEthernet2/0/1.100", 2, true},
 		{"Gi2/0/1.100", 2, true},

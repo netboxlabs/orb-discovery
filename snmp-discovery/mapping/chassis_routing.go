@@ -22,7 +22,7 @@ const (
 // physical-port type prefix followed by digits/0/digits (or digits/digits).
 // Captures the leading member id.
 var cisco3TupleRe = regexp.MustCompile(
-	`^(?:Gi(?:gabitEthernet)?|TenGigE|TenGigabitEthernet|TwentyFiveGigE|TwentyFiveGigabitEthernet|FortyGigabitEthernet|FortyGigE|HundredGigE|HundredGigabitEthernet|TwoGigabitEthernet|FiveGigabitEthernet|mGig|Fa(?:stEthernet)?|Et(?:hernet)?)(\d+)/\d+/\d+$`)
+	`^(?:Gi(?:gabitEthernet)?|Te(?:nGigE|nGigabitEthernet)?|Twe(?:ntyFiveGigE|ntyFiveGigabitEthernet)?|Fo(?:rtyGigE|rtyGigabitEthernet)?|Hu(?:ndredGigE|ndredGigabitEthernet)?|Tw(?:oGigabitEthernet)?|Fi(?:veGigabitEthernet)?|mGig|Fa(?:stEthernet)?|Et(?:hernet)?)(\d+)/\d+/\d+$`)
 
 // Junos FPC pattern (xe-X/Y/Z, ge-X/Y/Z, et-X/Y/Z, mge-X/Y/Z, ...).
 var junosFpcRe = regexp.MustCompile(`^[a-z]{2,4}-(\d+)/\d+/\d+$`)
