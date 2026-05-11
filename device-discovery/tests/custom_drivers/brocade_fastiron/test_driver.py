@@ -92,6 +92,26 @@ def test_parse_fastiron_version_units_empty_returns_empty_maps():
     assert _parse_fastiron_version_units("  UNIT 1\n    SW: Version 08.0\n") == ({}, {})
 
 
+def test_parse_fastiron_version_units_accepts_bare_serial_colon():
+    """Some FastIron releases drop the ``#`` and print just ``Serial:`` — must still parse."""
+    text = (
+        "UNIT 1: SL 1: ICX7450-48 48-port 100M/1GbE Module\n"
+        "  Serial: ICX7450X0001\n"
+    )
+    serial_by_id, _ = _parse_fastiron_version_units(text)
+    assert serial_by_id == {1: "ICX7450X0001"}
+
+
+def test_parse_fastiron_stack_accepts_alt_cfg_marker():
+    """Legend lists `M` (master) / `R` (reserve) markers; widen cfg to any letter so those rows parse."""
+    text = (
+        "ID    Type            Role     Mac Address     Pri State   Comment\n"
+        "1   M ICX7250-24P     active   cc4e.246b.b800 128  local   Ready\n"
+    )
+    rows = _parse_fastiron_stack(text)
+    assert [(r["id"], r["role"]) for r in rows] == [(1, "active")]
+
+
 def test_parse_fastiron_version_units_first_serial_wins_per_unit():
     """Multiple module entries under a unit only take the first Serial #: token."""
     text = (

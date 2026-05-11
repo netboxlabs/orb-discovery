@@ -443,7 +443,11 @@ _FASTIRON_STACK_ROW_RE = re.compile(
     r"""
     ^\s*
     (?P<id>\d+)\s+                          # ID
-    (?P<cfg>[DSds])\s+                      # Cfg (D=dynamic, S=static)
+    (?P<cfg>[A-Za-z])\s+                    # Cfg (canonical D/S; widened to any
+                                            # single letter to tolerate variant
+                                            # IronWare markers we haven't seen
+                                            # in the wild but which the legend
+                                            # describes (M / R / etc.))
     (?P<model>\S+)\s+                       # Type (model token)
     (?P<role>[A-Za-z]+)\s+                  # Role (active/standby/member/alone)
     (?P<mac>[0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})   # MAC (Cisco-dotted)
@@ -480,8 +484,15 @@ def _parse_fastiron_stack(text: str) -> list[dict]:
 
 _FASTIRON_UNIT_HEADER_RE = re.compile(
     r"^UNIT\s+(?P<id>\d+):\s+SL\s+\d+:\s+(?P<model>\S+)\b",
+    re.IGNORECASE,
 )
-_FASTIRON_UNIT_SERIAL_RE = re.compile(r"^\s*Serial\s+#?\s*:\s*(?P<serial>\S+)")
+# Most FastIron releases print ``Serial  #: <SN>``; some legacy outputs drop
+# the ``#``. The regex accepts both forms — ``Serial #:`` with any amount of
+# whitespace between ``Serial`` and ``#`` *or* a bare ``Serial:`` colon.
+_FASTIRON_UNIT_SERIAL_RE = re.compile(
+    r"^\s*Serial\s*#?\s*:\s*(?P<serial>\S+)",
+    re.IGNORECASE,
+)
 
 
 def _parse_fastiron_version_units(text: str) -> tuple[
@@ -569,9 +580,14 @@ def _fastiron_get_chassis_members_impl(driver) -> dict | None:
     members: list[ChassisMember] = []
     for row in rows:
         sid = row["id"]
+        # MAC is regex-validated to Cisco-dotted form before reaching here,
+        # but ``napalm.base.helpers.mac()`` delegates to ``netaddr.EUI`` whose
+        # error class (``AddrFormatError``) extends ``Exception`` directly,
+        # not ``ValueError``. Catch broadly so a future regex relaxation
+        # never crashes discovery.
         try:
             mac_canon = normalize_mac(row["mac"])
-        except (ValueError, TypeError):
+        except Exception:
             mac_canon = None
         members.append(
             ChassisMember(
