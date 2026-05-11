@@ -17,6 +17,12 @@ func annotateDeviceWithSourceMatch(entities []diode.Entity, netboxID int) {
 		switch v := e.(type) {
 		case *diode.Device:
 			setDeviceSourceMatch(v, netboxID, seen)
+			// Inline master ref inside a member's VirtualChassis.Master must
+			// also carry source_match so Diode's unique_master matcher
+			// resolves consistently with the rich master Device.
+			if v.VirtualChassis != nil {
+				setDeviceSourceMatch(v.VirtualChassis.Master, netboxID, seen)
+			}
 		case *diode.Interface:
 			if v != nil {
 				setDeviceSourceMatch(v.Device, netboxID, seen)
@@ -26,6 +32,12 @@ func annotateDeviceWithSourceMatch(entities []diode.Entity, netboxID int) {
 				if iface, ok := v.AssignedObject.(*diode.Interface); ok && iface != nil {
 					setDeviceSourceMatch(iface.Device, netboxID, seen)
 				}
+			}
+		case *diode.VirtualChassis:
+			// Top-level VC carries the master ref that needs source_match
+			// for unique_master matcher resolution.
+			if v != nil {
+				setDeviceSourceMatch(v.Master, netboxID, seen)
 			}
 		}
 	}

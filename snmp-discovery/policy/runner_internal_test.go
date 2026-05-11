@@ -1038,6 +1038,22 @@ func TestRunWithMetadata_EmitsFullStackShape(t *testing.T) {
 	_, hasSM := memberDev.Metadata["source_match"]
 	assert.False(t, hasSM, "member must NOT carry source_match")
 
+	// VirtualChassis.Master source_match assertions (Fix 1):
+	// Both the top-level VC.Master ref AND the member's inline
+	// VirtualChassis.Master ref must carry source_match so Diode's
+	// unique_master matcher resolves consistently on reruns.
+	wantSM := diode.Metadata{"netbox_id": netboxID}
+	require.NotNil(t, vcEntity.Master, "VC.Master must be set")
+	vcMasterSM, vcMasterOK := vcEntity.Master.Metadata["source_match"].(diode.Metadata)
+	require.True(t, vcMasterOK, "VC.Master must carry source_match")
+	assert.Equal(t, wantSM, vcMasterSM, "VC.Master source_match must match netboxID")
+
+	require.NotNil(t, memberDev.VirtualChassis, "member.VirtualChassis must be set")
+	require.NotNil(t, memberDev.VirtualChassis.Master, "member.VirtualChassis.Master must be set")
+	memberMasterSM, memberMasterOK := memberDev.VirtualChassis.Master.Metadata["source_match"].(diode.Metadata)
+	require.True(t, memberMasterOK, "member.VirtualChassis.Master must carry source_match")
+	assert.Equal(t, wantSM, memberMasterSM, "member.VirtualChassis.Master source_match must match netboxID")
+
 	// Interface routing: Gi1/0/1 → master, Gi2/0/1 → member.
 	var gi1, gi2 *diode.Interface
 	for _, iface := range ifaces {
