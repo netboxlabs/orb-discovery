@@ -130,7 +130,7 @@ def test_to_payload_preserves_domain():
         ("me0.0",                    None),
         ("fxp0",                     None),  # mgmt (older Junos)
 
-        # Aruba CX (lands in batch 2)
+        # Aruba CX bare 3-tuple (batch 3 — AOS-CX VSF)
         ("1/1/1",                    1),
         ("2/1/12",                   2),
 
