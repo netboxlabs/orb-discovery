@@ -56,8 +56,21 @@ func ParseMemberID(ifName string) (int, bool) {
 			return 0, false
 		}
 	}
+	// Strip subinterface suffix (e.g., "Gi2/0/1.100" -> "Gi2/0/1",
+	// "xe-2/0/0.0" -> "xe-2/0/0") so the leading member id is reachable
+	// by the parent-interface regexes below.
+	name := ifName
+	if idx := strings.LastIndexByte(name, '.'); idx > 0 {
+		unit := name[idx+1:]
+		allDigits := unit != "" && strings.IndexFunc(unit, func(r rune) bool {
+			return r < '0' || r > '9'
+		}) == -1
+		if allDigits {
+			name = name[:idx]
+		}
+	}
 	for _, re := range []*regexp.Regexp{cisco3TupleRe, h3cDashRe, junosFpcRe, numeric3TupleRe} {
-		if m := re.FindStringSubmatch(ifName); m != nil {
+		if m := re.FindStringSubmatch(name); m != nil {
 			if id, err := strconv.Atoi(m[1]); err == nil {
 				return id, true
 			}

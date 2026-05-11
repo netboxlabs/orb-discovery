@@ -126,8 +126,19 @@ func TestParseMemberID(t *testing.T) {
 		{"Ethernet1/1", 0, false},        // NX-OS 2-tuple (VPC is not VC)
 		{"ether1", 0, false},             // MikroTik (no stack convention)
 		{"ether10", 0, false},
-		{"1:1", 0, false},        // Extreme EXOS (unsupported in batch 1)
+		{"1:1", 0, false},          // Extreme EXOS (unsupported in batch 1)
 		{"sfp-sfpplus1", 0, false}, // MikroTik SFP+ port
+
+		// Subinterfaces — must parse the parent-port member id, not fall through.
+		{"GigabitEthernet2/0/1.100", 2, true},
+		{"Gi2/0/1.100", 2, true},
+		{"xe-2/0/0.0", 2, true},
+		{"ge-3/1/0.500", 3, true},
+		{"2/1/24.100", 2, true},
+		// Non-digit suffix → leave name alone, then no match (Vlan10.foo, etc.).
+		{"Vlan10.foo", 0, false},
+		// Edge: trailing dot with no digits, should not strip.
+		{"foo.", 0, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.ifName, func(t *testing.T) {
