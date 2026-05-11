@@ -1054,18 +1054,16 @@ func TestRunWithMetadata_EmitsFullStackShape(t *testing.T) {
 	require.True(t, memberMasterOK, "member.VirtualChassis.Master must carry source_match")
 	assert.Equal(t, wantSM, memberMasterSM, "member.VirtualChassis.Master source_match must match netboxID")
 
-	// Interface routing: Gi1/0/1 → master, Gi2/0/1 → member.
-	var gi1, gi2 *diode.Interface
+	// Interface routing: exactly 2 interfaces, Gi1/0/1 → master, Gi2/0/1 → member.
+	assert.Len(t, ifaces, 2, "expect exactly 2 top-level interfaces: Gi1/0/1 (master) and Gi2/0/1 (member)")
+	ifaceByName := map[string]*diode.Interface{}
 	for _, iface := range ifaces {
 		if iface.Name != nil {
-			switch *iface.Name {
-			case "Gi1/0/1":
-				gi1 = iface
-			case "Gi2/0/1":
-				gi2 = iface
-			}
+			ifaceByName[*iface.Name] = iface
 		}
 	}
+	gi1 := ifaceByName["Gi1/0/1"]
+	gi2 := ifaceByName["Gi2/0/1"]
 	require.NotNil(t, gi1, "Gi1/0/1 must be present")
 	require.NotNil(t, gi2, "Gi2/0/1 must be present")
 	require.NotNil(t, gi1.Device)
