@@ -365,7 +365,10 @@ _IRF_ROW_RE = re.compile(
     ^\s*
     [*+]{0,2}\s*                              # optional master/login markers
     (?P<id>\d+)\s+                            # MemberID
-    (?P<role>[A-Za-z]+)\s+                    # Role (Master/Standby/Loading/Down)
+    (?:\d+\s+)?                               # optional Slot column (modular IRF
+                                              #   on H3C/HPE 12500 etc. prints
+                                              #   `MemberID Slot Role ...`)
+    (?P<role>[A-Za-z]+)\s+                    # Role (Master/Standby/Slave/Loading/Down)
     (?P<priority>\d+)\s+                      # Priority
     (?P<mac>[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4})   # CPU-Mac
     """,
@@ -438,12 +441,14 @@ def _comware_index_manuinfo_by_mac(rows: list[dict]) -> tuple[
     Return ``(serial_by_mac, model_by_mac)`` keyed by normalized MAC.
 
     Joins ``display device manuinfo`` to IRF members via the chassis MAC the
-    CPU emits on each ``Slot N`` (or ``Chassis N``) block. We deliberately
-    join by MAC rather than slot id so both fixed-switch IRF (``Slot 1`` ==
-    member 1) and modular-chassis IRF (``Chassis 1`` groups multiple
-    ``Subslot`` entries) work without dispatch logic — the MAC the chassis
-    advertises in its CPU is the same value `display irf` prints in the
-    CPU-Mac column.
+    CPU emits on each top-level ``Slot N`` block. Subslot / Fan / Power rows
+    are filtered out (they carry their own blade-level MACs that do not
+    match the IRF member's CPU-Mac), so the MAC join cannot accidentally
+    pick up a blade entry instead of the chassis-level row even if
+    ``display device manuinfo`` re-orders them. Joining by MAC rather than
+    slot id keeps fixed-switch IRF (``Slot 1`` == member 1) and
+    modular-chassis IRF (``Chassis 1`` groups multiple ``Subslot`` entries
+    under a single member) working through the same code path.
 
     Rows with no MAC, an all-zeroes MAC, or an unparseable MAC are skipped:
     they cannot be joined and the IRF member ends up with empty serial,
@@ -452,15 +457,19 @@ def _comware_index_manuinfo_by_mac(rows: list[dict]) -> tuple[
     serial_by_mac: dict[str, str] = {}
     model_by_mac: dict[str, str] = {}
     for row in rows or []:
+        # Only top-level Slot rows carry the chassis-CPU MAC that `display irf`
+        # prints. Subslot/Fan/Power rows carry blade/component MACs that
+        # would never join successfully anyway, but filtering explicitly
+        # makes the contract obvious and forecloses on accidental joins via
+        # a future template change.
+        slot_type = (row.get("slot_type") or "").strip().lower()
+        if slot_type and slot_type != "slot":
+            continue
         mac_key = _normalize_irf_mac(row.get("mac_address"))
         if not mac_key:
             continue
         sn = (row.get("device_serial_number") or "").strip()
         pid = (row.get("device_name") or "").strip()
-        # First wins — manuinfo can emit multiple rows for the same chassis
-        # (Subslot blades inheriting the chassis MAC via the Filldown). The
-        # first row for a given MAC is the chassis-level entry; later rows
-        # are blade/Subslot entries we don't want to overwrite with.
         if sn and mac_key not in serial_by_mac:
             serial_by_mac[mac_key] = sn
         if pid and mac_key not in model_by_mac:
@@ -522,10 +531,14 @@ def _comware_get_chassis_members_impl(driver) -> dict | None:
         mac_key = _normalize_irf_mac(row["mac"])
         # Canonicalize MAC for the wire payload via napalm's helper so the
         # state/mac field is consistent with other drivers (uppercase
-        # colon-separated). ``normalize_mac`` accepts the Comware dashed form.
+        # colon-separated). ``normalize_mac`` accepts the Comware dashed
+        # form; we only call it on MACs that already passed
+        # ``_normalize_irf_mac`` validation, so a raise here is unexpected
+        # and worth swallowing narrowly (netaddr's AddrFormatError extends
+        # ValueError) rather than catching every Exception.
         try:
             mac_canon = normalize_mac(row["mac"]) if mac_key else None
-        except Exception:
+        except (ValueError, TypeError):
             mac_canon = None
         members.append(
             ChassisMember(

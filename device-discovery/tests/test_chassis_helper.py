@@ -15,6 +15,8 @@ from custom_napalm._chassis import ChassisMember, normalize_role, parse_member_i
         ("standby", "standby"),
         ("Standby", "standby"),
         ("backup", "standby"),
+        ("slave", "standby"),     # Comware 5 / older IRF terminology
+        ("Slave", "standby"),
         ("member", "member"),
         ("ready", "member"),
         ("provisioned", "member"),

@@ -37,6 +37,7 @@ _ROLE_MAP = {
     "master": "active",
     "standby": "standby",
     "backup": "standby",
+    "slave": "standby",      # Comware 5 / older IRF terminology
     "member": "member",
     "ready": "member",
     "provisioned": "member",

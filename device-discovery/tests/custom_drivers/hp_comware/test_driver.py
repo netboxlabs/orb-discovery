@@ -71,6 +71,24 @@ def test_parse_comware_irf_empty_input():
     assert domain is None
 
 
+def test_parse_comware_irf_tolerates_slot_column():
+    """Modular H3C/HPE platforms print `MemberID Slot Role ...` — must still parse."""
+    text = (
+        "MemberID    Slot    Role        Priority  CPU-Mac           Description\n"
+        "*+1         0       Master      32        0023-3333-aaaa    chassis-A\n"
+        "  2         0       Slave       16        0023-4444-bbbb    chassis-B\n"
+        "\n"
+        "* indicates the device is the master.\n"
+        "Domain ID                   : 7\n"
+    )
+    rows, domain = _parse_comware_irf(text)
+    assert [(r["id"], r["role"], r["priority"]) for r in rows] == [
+        (1, "Master", 32),
+        (2, "Slave", 16),
+    ]
+    assert domain == "7"
+
+
 def test_parse_comware_irf_no_domain_block():
     """Older Comware releases omit the Domain ID line — payload domain stays None."""
     text = (
