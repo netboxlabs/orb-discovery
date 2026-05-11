@@ -7,7 +7,7 @@
       "role": "active",
       "priority": null,
       "mac": "94:f1:28:22:00:00",
-      "state": "active"
+      "state": "Active"
     },
     {
       "id": 2,
@@ -16,7 +16,7 @@
       "role": "standby",
       "priority": null,
       "mac": "94:f1:28:22:00:80",
-      "state": "standby"
+      "state": "Standby"
     },
     {
       "id": 3,
@@ -25,7 +25,7 @@
       "role": "member",
       "priority": null,
       "mac": "94:f1:28:22:01:00",
-      "state": "member"
+      "state": "Member"
     },
     {
       "id": 4,
@@ -34,7 +34,7 @@
       "role": "member",
       "priority": null,
       "mac": "94:f1:28:22:01:80",
-      "state": "member"
+      "state": "Member"
     }
   ],
   "domain": null

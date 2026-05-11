@@ -7,7 +7,7 @@
       "role": "active",
       "priority": null,
       "mac": "94:f1:28:11:00:00",
-      "state": "active"
+      "state": "Active"
     },
     {
       "id": 2,
@@ -16,7 +16,7 @@
       "role": "standby",
       "priority": null,
       "mac": "94:f1:28:11:00:80",
-      "state": "standby"
+      "state": "Standby"
     }
   ],
   "domain": null

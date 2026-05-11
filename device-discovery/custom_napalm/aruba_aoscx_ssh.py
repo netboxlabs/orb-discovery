@@ -443,19 +443,22 @@ class AOSCXSSHDriver(_napalm_base.NetworkDriver):
         """
         Return Aruba CX VSF (Virtual Switching Framework) member info.
 
-        Merges two CLI outputs:
+        Parses ``show vsf detail`` via the ntc-template
+        ``aruba_aoscx_show_vsf_detail`` and uses the captured ``Status``
+        field both for absent-slot filtering and as the role string —
+        on AOS-CX, ``Status`` in detail output IS the role
+        (``Active`` / ``Standby`` / ``Member``).
 
-        - ``show vsf detail`` (parsed via the ntc-template
-          ``aruba_aoscx_show_vsf_detail``) gives mac / serial_number / status
-          per member.
-        - ``show vsf`` summary table (driver-local regex parser) gives role /
-          model / priority per member — ntc-templates does not ship a
-          summary-table template.
+        Per-member ``model`` and ``priority`` are NOT collected on this
+        transport — ``show vsf detail`` doesn't surface them and the
+        ``show vsf`` summary table requires column-position assumptions
+        that drift across firmware revisions. Use the REST transport
+        (``aruba_aoscx``) when accurate per-member model / priority
+        matters (e.g. mixed-model VSF stacks).
 
-        Standalone AOS-CX (no VSF configured) returns ``None``: both commands
-        produce no member rows and translate falls back to the single-Device
-        path. The ``show vsf`` summary fetch is best-effort — if it fails,
-        members keep their detail-side data and role defaults to "member".
+        Standalone AOS-CX (no VSF configured) returns ``None`` — empty
+        detail output, no members parsed, translate falls back to the
+        single-Device path.
         """
         return _aoscx_ssh_get_chassis_members_impl(self)
 
@@ -508,14 +511,14 @@ def _aoscx_normalize_vsf_role(raw: str | None) -> str:
     Map an AOS-CX VSF role string to {"active","standby","member"}.
 
     AOS-CX 10.10+ uses "conductor" / "commander" for what earlier firmware
-    called "master"; both pre-map to "active". Everything else falls through
-    to the vendor-neutral helper. Empty / None / unknown → "member".
+    called "master". Both are returned directly as "active" — we don't
+    detour through normalize_role's "master" → "active" lookup because the
+    AOS-CX vocabulary doesn't include "master" so there's no value in the
+    indirection. Empty / None / unknown → "member".
 
-    The role on AOS-CX comes from the ``Status`` field in both ``show vsf
-    detail`` and ``show vsf`` summary (the column is literally labeled
-    "Status" but contains the role string: ``Active`` / ``Conductor`` /
-    ``Standby`` / ``Member``). This driver only consumes ``show vsf detail``,
-    so the source is unambiguous.
+    The role on AOS-CX comes from the ``Status`` field in ``show vsf
+    detail`` (the column is literally labeled "Status" but contains the
+    role string: ``Active`` / ``Standby`` / ``Member``).
     """
     if not raw:
         return "member"
@@ -533,11 +536,14 @@ def _aoscx_ssh_member_from_detail_row(detail_row: dict) -> ChassisMember | None:
     (``Active`` / ``Standby`` / ``Member``), so role mapping uses the same
     string that drives absent-slot filtering — there's only one source of
     truth on the CLI path. Model and priority are NOT collected on the SSH
-    path: the only command that exposes them is the ``show vsf`` summary
-    table, and parsing that requires column-position assumptions that drift
-    across firmware revisions. Operators who need model/priority on member
-    devices should use the REST transport (``aruba_aoscx``), which gets
-    them from the structured ``/system/vsf_members`` JSON.
+    path: ``show vsf detail`` doesn't surface them (the ntc-template stops
+    at MAC / Status / Serial / CPU / Memory), and the ``show vsf`` summary
+    table requires column-position assumptions that drift across firmware
+    revisions. Operators who need model/priority on member devices should
+    use the REST transport (``aruba_aoscx``), which gets them from the
+    structured ``/system/vsf_members`` JSON. Mixed-model SSH stacks have
+    member ``model`` emitted as empty (see translate_chassis's defensive
+    clear of inherited chassis model) rather than misattributed.
 
     Returns None for absent slots (status in _AOSCX_ABSENT_STATUSES).
     """
@@ -546,17 +552,18 @@ def _aoscx_ssh_member_from_detail_row(detail_row: dict) -> ChassisMember | None:
         mid = int(raw_id)
     except (TypeError, ValueError):
         return None
-    status_norm = _aoscx_normalize_vsf_status(detail_row.get("status"))
+    raw_status = (detail_row.get("status") or "").strip()
+    status_norm = _aoscx_normalize_vsf_status(raw_status)
     if status_norm in _AOSCX_ABSENT_STATUSES:
         return None
     return ChassisMember(
         id=mid,
         serial=(detail_row.get("serial_number") or "").strip(),
         model=None,
-        role=_aoscx_normalize_vsf_role(detail_row.get("status")),
+        role=_aoscx_normalize_vsf_role(raw_status),
         priority=None,
         mac=(detail_row.get("mac_address") or "").strip() or None,
-        state=status_norm or None,
+        state=raw_status or None,
     )
 
 

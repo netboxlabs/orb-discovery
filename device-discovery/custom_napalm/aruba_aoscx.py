@@ -502,8 +502,11 @@ def _aoscx_normalize_vsf_role(raw: str | None) -> str:
     Map an AOS-CX VSF role string to {"active","standby","member"}.
 
     AOS-CX 10.10+ uses "conductor" / "commander" for what earlier firmware
-    called "master"; both pre-map to "master" so normalize_role's existing
-    table wins. Everything else falls through to the vendor-neutral helper.
+    called "master". Both are returned directly as "active" — we don't
+    detour through normalize_role's "master" → "active" lookup because the
+    AOS-CX vocabulary doesn't include "master" so there's no value in the
+    indirection. Everything else (active / standby / backup / member /
+    empty / unknown) falls through to the vendor-neutral helper.
     """
     if not raw:
         return "member"
@@ -525,12 +528,13 @@ def _aoscx_member_from_rest_dict(member_id: int, data: dict) -> ChassisMember | 
     """
     if not isinstance(data, dict):
         return None
-    status = (data.get("status") or "").strip().lower()
-    # Fold spaces AND hyphens to underscores so ``Not Present`` / ``Not-Present``
-    # / ``not_present`` all match the underscore canonical form in
-    # _AOSCX_ABSENT_STATUSES. The state field on the emitted ChassisMember
-    # keeps the original (un-normalized) status string for operator readability.
-    status_norm = status.replace(" ", "_").replace("-", "_")
+    raw_status = (data.get("status") or "").strip()
+    # Fold spaces AND hyphens to underscores and lowercase so ``Not Present``,
+    # ``Not-Present``, ``not_present`` all collapse to the underscore
+    # canonical form in _AOSCX_ABSENT_STATUSES. The raw (case- and space-
+    # preserving) status is kept for the emitted ChassisMember.state field
+    # so operators see the device's wire value in NetBox metadata.
+    status_norm = raw_status.lower().replace(" ", "_").replace("-", "_")
     if status_norm in _AOSCX_ABSENT_STATUSES:
         return None
 
@@ -559,7 +563,7 @@ def _aoscx_member_from_rest_dict(member_id: int, data: dict) -> ChassisMember | 
         role=_aoscx_normalize_vsf_role(data.get("role")),
         priority=priority,
         mac=mac,
-        state=status or None,
+        state=raw_status or None,
     )
 
 
