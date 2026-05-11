@@ -80,6 +80,17 @@ def test_parse_huawei_stack_skips_settings_block_and_separators():
     assert [r["id"] for r in rows] == [1]
 
 
+def test_parse_huawei_stack_strips_trailing_slot_chassis_column():
+    """VRP CX-line variants append a Slot/Chassis column (`... CX310 1/120`); strip it from model."""
+    text = (
+        "Slot   Role        Mac Address        Priority   Device Type    Slot/Chassis\n"
+        " 1     Master      00e0-fc12-3456     200        CX310          1/120\n"
+        " 2     Slave       00e0-fc12-7890     100        CX310          1/121\n"
+    )
+    rows = _parse_huawei_stack(text)
+    assert [(r["id"], r["model"]) for r in rows] == [(1, "CX310"), (2, "CX310")]
+
+
 def test_parse_huawei_stack_accepts_three_token_device_type():
     """Some VRP releases append power/hardware variant tokens after the model name."""
     text = (

@@ -202,11 +202,19 @@ _VRP_STACK_ROW_RE = re.compile(
     (?P<role>[A-Za-z]+)\s+                                           # Role
     (?P<mac>[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4})\s+          # MAC
     (?P<priority>\d+)\s+                                             # Priority
-    (?P<model>\S(?:.*\S)?)                                           # Device Type
-                                                                     #   greedy — Huawei sometimes
-                                                                     #   appends power-suffix /
-                                                                     #   hardware variant tokens
-                                                                     #   (e.g. `... PWR-AC HW`)
+    (?P<model>\S+(?:\s+\S+)*?)                                       # Device Type — non-greedy
+                                                                     #   so the optional trailing
+                                                                     #   Slot/Chassis column on some
+                                                                     #   VRP variants (CX310 etc.)
+                                                                     #   doesn't get absorbed into
+                                                                     #   the model. Multi-token
+                                                                     #   model names like
+                                                                     #   ``S5720-32X-EI-AC PWR-AC HW``
+                                                                     #   are still captured in full
+                                                                     #   because the optional
+                                                                     #   `\d+/\d+` suffix doesn't
+                                                                     #   match those trailing tokens.
+    (?:\s+\d+/\d+)?                                                  # optional Slot/Chassis suffix
     \s*$
     """,
     re.VERBOSE,
