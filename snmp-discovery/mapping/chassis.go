@@ -53,8 +53,12 @@ type ChassisMember struct {
 // ChassisInventory is the deduped, validated, member-id-sorted set of
 // stack members for one target. Len(Members) >= 2 means stack.
 type ChassisInventory struct {
-	Members []ChassisMember
+	Members    []ChassisMember
+	DroppedIDs map[int]struct{}
 }
+
+// IsStack reports whether the inventory should trigger VC emission.
+func (c ChassisInventory) IsStack() bool { return len(c.Members) >= 2 }
 
 // entPhysical column prefixes — kept as constants so the extractor and
 // future enrichers reference the same OIDs.
@@ -119,9 +123,65 @@ func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInvento
 	for i := range members {
 		members[i].ID = deriveMemberID(members[i], i+1)
 	}
-	slices.SortFunc(members, func(a, b ChassisMember) int { return a.ID - b.ID })
+	// Dedup pass 1: drop later-occurring duplicates of the same serial,
+	// keep the lowest-id occurrence. Track dropped ids for the routing
+	// warn-and-skip rule.
+	dropped := map[int]struct{}{}
+	bySerial := map[string]int{}
+	survivors := members[:0]
+	for _, m := range members {
+		if existing, ok := bySerial[m.Serial]; ok {
+			// Keep the lower id, drop the higher id.
+			keep, drop := existing, m.ID
+			if m.ID < existing {
+				keep, drop = m.ID, existing
+				// rewrite the survivor we already appended
+				for i := range survivors {
+					if survivors[i].Serial == m.Serial {
+						survivors[i] = m
+						break
+					}
+				}
+			}
+			bySerial[m.Serial] = keep
+			dropped[drop] = struct{}{}
+			logger.Warn("chassis row dropped: duplicate serial",
+				"serial", m.Serial, "kept_id", keep, "dropped_id", drop)
+			continue
+		}
+		bySerial[m.Serial] = m.ID
+		survivors = append(survivors, m)
+	}
+	members = survivors
 
-	return ChassisInventory{Members: members}
+	// Dedup pass 2: same id with different serials -> drop all
+	// occurrences of that id (ambiguous -> refuse to emit).
+	byID := map[int][]ChassisMember{}
+	for _, m := range members {
+		byID[m.ID] = append(byID[m.ID], m)
+	}
+	survivors = members[:0]
+	for _, group := range byID {
+		if len(group) > 1 {
+			id := group[0].ID
+			dropped[id] = struct{}{}
+			logger.Warn("chassis row dropped: ambiguous duplicate member id",
+				"id", id, "count", len(group))
+			continue
+		}
+		survivors = append(survivors, group[0])
+	}
+	members = survivors
+
+	return ChassisInventory{
+		Members:    sortByID(members),
+		DroppedIDs: dropped,
+	}
+}
+
+func sortByID(members []ChassisMember) []ChassisMember {
+	slices.SortFunc(members, func(a, b ChassisMember) int { return a.ID - b.ID })
+	return members
 }
 
 var trailingIntRe = regexp.MustCompile(`(\d+)\s*$`)

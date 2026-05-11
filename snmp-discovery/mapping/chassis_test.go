@@ -153,3 +153,50 @@ func TestExtractInventory_JunosFPC_TrailingIntFromName(t *testing.T) {
 	assert.Equal(t, 1, inv.Members[1].ID, "FPC 1 -> id 1")
 	assert.Equal(t, 2, inv.Members[2].ID, "FPC 2 -> id 2")
 }
+
+func TestExtractInventory_DuplicateID_DifferentSerials_RefusesEmission(t *testing.T) {
+	logger := slog.Default()
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":     {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":     {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":     {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1":    {Value: "SERIAL-A"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.1000":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1000":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1000":  {Value: "1"}, // same id, different serial
+		".1.3.6.1.2.1.47.1.1.1.1.11.1000": {Value: "SERIAL-B"},
+	}
+	inv := extractInventory(oids, logger)
+	// Ambiguous: BOTH members dropped, IDs tracked for routing warns.
+	assert.Empty(t, inv.Members)
+	assert.Contains(t, inv.DroppedIDs, 1)
+}
+
+func TestExtractInventory_DuplicateSerial_HigherIDDropped(t *testing.T) {
+	logger := slog.Default()
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":     {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":     {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":     {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1":    {Value: "DUP-SERIAL"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.1000":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1000":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1000":  {Value: "2"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1000": {Value: "DUP-SERIAL"},
+	}
+	inv := extractInventory(oids, logger)
+	assert.Len(t, inv.Members, 1)
+	assert.Equal(t, 1, inv.Members[0].ID)
+	assert.Contains(t, inv.DroppedIDs, 2)
+}
+
+func TestExtractInventory_IsStack(t *testing.T) {
+	logger := slog.Default()
+	assert.False(t, ChassisInventory{}.IsStack(), "empty -> standalone")
+	assert.False(t, extractInventory(ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "S"},
+	}, logger).IsStack(), "1 member -> standalone")
+	assert.True(t, extractInventory(fixtureCisco3850TwoMemberStack(), logger).IsStack())
+}
