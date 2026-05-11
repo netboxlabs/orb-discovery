@@ -543,7 +543,7 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 	entities := make([]diode.Entity, 0)
 	entitiesForTarget := mapper.MapObjectIDsToEntity(oids)
 	ifIndexByIface := mapper.InterfacesByIfIndex()
-	entitiesForTarget = mapping.TranslateAsStack(entitiesForTarget, oids, ifIndexByIface, targetDefaults, r.logger)
+	entitiesForTarget = mapping.TranslateAsStack(entitiesForTarget, oids, ifIndexByIface, r.logger)
 	entities = append(entities, entitiesForTarget...)
 
 	// Update discovered hosts gauge

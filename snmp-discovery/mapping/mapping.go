@@ -428,8 +428,8 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 			manufacturers: manufacturers,
 			deviceLookup:  deviceLookup,
 		},
-		"vlan":           vlanMapper,
-		"interface_vlan": vlanMapper,
+		"vlan":                             vlanMapper,
+		"interface_vlan":                   vlanMapper,
 		string(ChassisInventoryEntityType): &ChassisInventoryMapper{logger: logger},
 	}
 	postPassMappers := []postPassMapper{vlanMapper}

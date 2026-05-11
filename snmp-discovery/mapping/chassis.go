@@ -341,7 +341,6 @@ func TranslateAsStack(
 	entities []diode.Entity,
 	oids ObjectIDValueMap,
 	ifIndexByIface map[*diode.Interface]int,
-	defaults *config.Defaults,
 	logger *slog.Logger,
 ) []diode.Entity {
 	master := CurrentDeviceFrom(entities)

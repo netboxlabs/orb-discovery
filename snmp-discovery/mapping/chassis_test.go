@@ -345,7 +345,7 @@ func TestTranslateAsStack_StandaloneSetsSerialAndReturnsUnchangedShape(t *testin
 		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "FOC0001"},
 	}
 
-	out := TranslateAsStack(entities, oids, nil, &config.Defaults{}, logger)
+	out := TranslateAsStack(entities, oids, nil, logger)
 
 	assert.Len(t, out, 2, "shape unchanged on standalone")
 	assert.Equal(t, "FOC0001", *master.Serial)
@@ -367,7 +367,7 @@ func TestTranslateAsStack_TwoMemberStackEmitsVCAndMember(t *testing.T) {
 	// No alias-table coverage in this fixture — ifName parsing drives routing.
 	ifIndexByIface := map[*diode.Interface]int{}
 
-	out := TranslateAsStack(entities, fixtureCisco3850TwoMemberStack(), ifIndexByIface, &config.Defaults{}, logger)
+	out := TranslateAsStack(entities, fixtureCisco3850TwoMemberStack(), ifIndexByIface, logger)
 
 	// master + VC + 1 member + 2 interfaces = 5
 	var vc *diode.VirtualChassis
@@ -411,10 +411,10 @@ func TestTranslateAsStack_DroppedMemberIfaceSkippedWithWarn(t *testing.T) {
 	entities := []diode.Entity{master, orphan, memberIface}
 
 	oids := ObjectIDValueMap{
-		".1.3.6.1.2.1.47.1.1.1.1.4.1":   {Value: "0"},
-		".1.3.6.1.2.1.47.1.1.1.1.5.1":   {Value: "3"},
-		".1.3.6.1.2.1.47.1.1.1.1.6.1":   {Value: "1"},
-		".1.3.6.1.2.1.47.1.1.1.1.11.1":  {Value: "S1"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":  {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "S1"},
 		// Two rows both claiming id=2 -> dropped as ambiguous.
 		".1.3.6.1.2.1.47.1.1.1.1.4.20":  {Value: "0"},
 		".1.3.6.1.2.1.47.1.1.1.1.5.20":  {Value: "3"},
@@ -431,7 +431,7 @@ func TestTranslateAsStack_DroppedMemberIfaceSkippedWithWarn(t *testing.T) {
 		".1.3.6.1.2.1.47.1.1.1.1.11.40": {Value: "S3"},
 	}
 
-	out := TranslateAsStack(entities, oids, nil, &config.Defaults{}, logger)
+	out := TranslateAsStack(entities, oids, nil, logger)
 
 	// Orphan (Gi2/0/1) is excluded.
 	for _, e := range out {
@@ -473,7 +473,7 @@ func TestTranslateAsStack_IPRoutedToMemberViaAssignedObject(t *testing.T) {
 	}
 	entities := []diode.Entity{master, memberIP}
 
-	out := TranslateAsStack(entities, fixtureCisco3850TwoMemberStack(), nil, &config.Defaults{}, logger)
+	out := TranslateAsStack(entities, fixtureCisco3850TwoMemberStack(), nil, logger)
 
 	// The IP survived and its nested Interface.Device now points at member-2.
 	var seenIP *diode.IPAddress
@@ -503,10 +503,10 @@ func TestTranslateAsStack_OrphanIPFiltered(t *testing.T) {
 	entities := []diode.Entity{master, orphanIface, orphanIP}
 
 	oids := ObjectIDValueMap{
-		".1.3.6.1.2.1.47.1.1.1.1.4.1":   {Value: "0"},
-		".1.3.6.1.2.1.47.1.1.1.1.5.1":   {Value: "3"},
-		".1.3.6.1.2.1.47.1.1.1.1.6.1":   {Value: "1"},
-		".1.3.6.1.2.1.47.1.1.1.1.11.1":  {Value: "S1"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":  {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "S1"},
 		// Member 2 duplicated -> dropped as ambiguous.
 		".1.3.6.1.2.1.47.1.1.1.1.4.20":  {Value: "0"},
 		".1.3.6.1.2.1.47.1.1.1.1.5.20":  {Value: "3"},
@@ -523,7 +523,7 @@ func TestTranslateAsStack_OrphanIPFiltered(t *testing.T) {
 		".1.3.6.1.2.1.47.1.1.1.1.11.40": {Value: "S3"},
 	}
 
-	out := TranslateAsStack(entities, oids, nil, &config.Defaults{}, logger)
+	out := TranslateAsStack(entities, oids, nil, logger)
 
 	for _, e := range out {
 		_, isIP := e.(*diode.IPAddress)
@@ -544,7 +544,7 @@ func TestTranslateAsStack_ArubaCX_2MemberVSF(t *testing.T) {
 	memberIface := &diode.Interface{Name: strPtr("2/1/24"), Device: master}
 	entities := []diode.Entity{master, memberIface}
 
-	out := TranslateAsStack(entities, fixtureArubaCX2MemberVSF(), nil, &config.Defaults{}, logger)
+	out := TranslateAsStack(entities, fixtureArubaCX2MemberVSF(), nil, logger)
 
 	var members []*diode.Device
 	for _, e := range out {
@@ -570,7 +570,7 @@ func TestTranslateAsStack_JunosQFX_4MemberVC(t *testing.T) {
 	fpc2Iface := &diode.Interface{Name: strPtr("xe-2/0/0"), Device: master}
 	entities := []diode.Entity{master, fpc2Iface}
 
-	out := TranslateAsStack(entities, fixtureJunosQFX4MemberVC(), nil, &config.Defaults{}, logger)
+	out := TranslateAsStack(entities, fixtureJunosQFX4MemberVC(), nil, logger)
 
 	var members []*diode.Device
 	for _, e := range out {
@@ -597,7 +597,7 @@ func (stubManufacturers) GetManufacturer(_ string) (string, error) { return "Unk
 
 type stubDeviceLookup struct{}
 
-func (stubDeviceLookup) GetDevice(_ string) (string, error)                     { return "", nil }
+func (stubDeviceLookup) GetDevice(_ string) (string, error) { return "", nil }
 func (stubDeviceLookup) GetDeviceModel(_ string, _ map[string]string) (string, error) {
 	return "", nil
 }
@@ -659,7 +659,7 @@ func TestTranslateAsStack_Idempotent_ThroughFullMapperPipeline(t *testing.T) {
 		oids := build()
 		ents := mapper.MapObjectIDsToEntity(oids)
 		ifIdx := mapper.InterfacesByIfIndex()
-		return TranslateAsStack(ents, oids, ifIdx, &config.Defaults{}, logger)
+		return TranslateAsStack(ents, oids, ifIdx, logger)
 	}
 
 	a := run()
@@ -709,10 +709,10 @@ func TestTranslateAsStack_AliasTableDroppedMemberSkipsWithWarn(t *testing.T) {
 
 	oids := ObjectIDValueMap{
 		// Member 1 (entPhysicalIndex=1) — survivor.
-		".1.3.6.1.2.1.47.1.1.1.1.4.1":    {Value: "0"},
-		".1.3.6.1.2.1.47.1.1.1.1.5.1":    {Value: "3"},
-		".1.3.6.1.2.1.47.1.1.1.1.6.1":    {Value: "1"},
-		".1.3.6.1.2.1.47.1.1.1.1.11.1":   {Value: "SERIAL-A"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":  {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "SERIAL-A"},
 		// Member 2 (entPhysicalIndex=1000) — dropped (dup serial of member 1).
 		".1.3.6.1.2.1.47.1.1.1.1.4.1000":  {Value: "0"},
 		".1.3.6.1.2.1.47.1.1.1.1.5.1000":  {Value: "3"},
@@ -736,7 +736,7 @@ func TestTranslateAsStack_AliasTableDroppedMemberSkipsWithWarn(t *testing.T) {
 	}
 
 	warnLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	out := TranslateAsStack(entities, oids, ifIndexByIface, &config.Defaults{}, warnLogger)
+	out := TranslateAsStack(entities, oids, ifIndexByIface, warnLogger)
 
 	// droppedIface (Gi2/0/24, ifIndex 99 → dropped member 2) must be absent.
 	for _, e := range out {
