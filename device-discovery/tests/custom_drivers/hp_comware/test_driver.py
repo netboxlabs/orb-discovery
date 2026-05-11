@@ -99,6 +99,38 @@ def test_parse_comware_irf_no_domain_block():
     assert domain is None
 
 
+def test_parse_comware_irf_accepts_disabled_stack_marker():
+    """A `>` prefix marks a member with stack capability disabled — must still parse."""
+    text = (
+        "MemberID    Role        Priority  CPU-Mac           Description\n"
+        "*+1         Master      32        0023-aabb-ccdd    ---\n"
+        ">  2        Standby     16        0023-aabb-ccef    disabled\n"
+        "\n"
+        "* indicates the device is the master.\n"
+        "Domain ID                   : 12\n"
+    )
+    rows, domain = _parse_comware_irf(text)
+    assert [(r["id"], r["role"], r["priority"]) for r in rows] == [
+        (1, "Master", 32),
+        (2, "Standby", 16),
+    ]
+    assert domain == "12"
+
+
+def test_parse_comware_irf_accepts_topo_domain_label():
+    """Legacy Comware 5 outputs print ``Topo-domain ID`` instead of ``Domain ID``."""
+    text = (
+        "MemberID    Role        Priority  CPU-Mac           Description\n"
+        "*+1         Master      32        0023-aabb-ccdd    ---\n"
+        "  2         Standby     16        0023-aabb-ccef    ---\n"
+        "\n"
+        "* indicates the device is the master.\n"
+        "Topo-domain ID              : 55\n"
+    )
+    _, domain = _parse_comware_irf(text)
+    assert domain == "55"
+
+
 def test_chassis_members_irf_exception_logs_warning_with_traceback(caplog):
     """A surprise exception from `display irf` must surface at WARNING with exc_info."""
     driver = MagicMock()

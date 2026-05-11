@@ -363,7 +363,11 @@ def _parse_version_output(raw: str) -> tuple[str, str, float]:
 _IRF_ROW_RE = re.compile(
     r"""
     ^\s*
-    [*+]{0,2}\s*                              # optional master/login markers
+    [*+>]{0,3}\s*                             # optional row markers:
+                                              #   `*` master, `+` user-login-point,
+                                              #   `>` disabled-stack-capability.
+                                              #   Any combination may appear; we
+                                              #   only need to skip past them.
     (?P<id>\d+)\s+                            # MemberID
     (?:\d+\s+)?                               # optional Slot column (modular IRF
                                               #   on H3C/HPE 12500 etc. prints
@@ -381,7 +385,12 @@ _IRF_LEGEND_RE = re.compile(r"^\s*[*+]\s+indicates\b", re.IGNORECASE)
 
 # Domain ID line in the trailing block of `display irf`. Optional — older
 # Comware releases omit it, in which case payload domain stays None.
-_IRF_DOMAIN_RE = re.compile(r"^\s*Domain\s+ID\s*:\s*(\d+)\s*$", re.IGNORECASE | re.MULTILINE)
+# Comware 5 / legacy outputs print this as ``Topo-domain ID`` while Comware 7
+# prints just ``Domain ID``; the regex accepts both forms.
+_IRF_DOMAIN_RE = re.compile(
+    r"^\s*(?:Topo-)?Domain\s+ID\s*:\s*(\d+)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 def _normalize_irf_mac(raw: str | None) -> str | None:
     """
