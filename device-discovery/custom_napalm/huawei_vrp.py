@@ -202,16 +202,28 @@ _VRP_STACK_ROW_RE = re.compile(
     (?P<role>[A-Za-z]+)\s+                                           # Role
     (?P<mac>[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4})\s+          # MAC
     (?P<priority>\d+)\s+                                             # Priority
-    (?P<model>\S+(?:\s+\S+)?)                                        # Device Type
+    (?P<model>\S(?:.*\S)?)                                           # Device Type
+                                                                     #   greedy — Huawei sometimes
+                                                                     #   appends power-suffix /
+                                                                     #   hardware variant tokens
+                                                                     #   (e.g. `... PWR-AC HW`)
     \s*$
     """,
     re.VERBOSE,
 )
 
 # `display esn` formats. Stacked VRP repeats one block per slot.
+# The serial separator is either a colon (`ESN of slot N: SN`) or — on a few
+# VRP releases — `is:` (`ESN of slot N is: SN`). Anchor on an explicit
+# colon-or-`is:` separator so a missing separator can't accidentally capture
+# the literal `is:` as the serial token.
 _VRP_ESN_SLOT_RE = re.compile(
-    r"ESN\s+of\s+slot\s+(?P<slot>\d+)\s*:?\s*(?P<serial>\S+)",
-    re.IGNORECASE,
+    r"""
+    ESN\s+of\s+slot\s+(?P<slot>\d+)
+    \s*(?:is)?\s*:\s*
+    (?P<serial>\S+)
+    """,
+    re.IGNORECASE | re.VERBOSE,
 )
 
 

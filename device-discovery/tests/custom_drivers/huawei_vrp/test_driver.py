@@ -80,6 +80,17 @@ def test_parse_huawei_stack_skips_settings_block_and_separators():
     assert [r["id"] for r in rows] == [1]
 
 
+def test_parse_huawei_stack_accepts_three_token_device_type():
+    """Some VRP releases append power/hardware variant tokens after the model name."""
+    text = (
+        "Slot   Role        Mac Address        Priority   Device Type\n"
+        " 1     Master      00e0-fc12-3456     200        S5720-32X-EI-AC PWR-AC HW\n"
+    )
+    rows = _parse_huawei_stack(text)
+    assert [r["id"] for r in rows] == [1]
+    assert rows[0]["model"] == "S5720-32X-EI-AC PWR-AC HW"
+
+
 def test_parse_huawei_stack_empty_output():
     """`Error: ...` standalone banner and empty input return no rows."""
     assert _parse_huawei_stack("") == []
@@ -108,6 +119,18 @@ def test_parse_vrp_esn_by_slot_multi_line():
 def test_parse_vrp_esn_by_slot_ignores_standalone_form():
     """`ESN of device:` (standalone form) is intentionally not consumed by the slot parser."""
     text = "ESN of device: 210235FFFFFF99999999\n"
+    assert _parse_vrp_esn_by_slot(text) == {}
+
+
+def test_parse_vrp_esn_by_slot_accepts_is_separator_variant():
+    """Some VRP releases print `ESN of slot N is: SN` — the separator must not be captured as the serial."""
+    text = "ESN of slot 1 is: 210235ISVARIANT00001\n"
+    assert _parse_vrp_esn_by_slot(text) == {1: "210235ISVARIANT00001"}
+
+
+def test_parse_vrp_esn_by_slot_requires_explicit_colon():
+    """A line missing both `:` and `is:` separators must NOT match (no phantom serial like `is:`)."""
+    text = "ESN of slot 1 ABC123\n"
     assert _parse_vrp_esn_by_slot(text) == {}
 
 
