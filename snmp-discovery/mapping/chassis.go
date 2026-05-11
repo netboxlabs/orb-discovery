@@ -145,7 +145,9 @@ func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInvento
 				}
 			}
 			bySerial[m.Serial] = keep
-			dropped[drop] = struct{}{}
+			if drop != keep {
+				dropped[drop] = struct{}{}
+			}
 			logger.Warn("chassis row dropped: duplicate serial",
 				"serial", m.Serial, "kept_id", keep, "dropped_id", drop)
 			continue

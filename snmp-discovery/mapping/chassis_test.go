@@ -195,6 +195,28 @@ func TestExtractInventory_DuplicateSerial_HigherIDDropped(t *testing.T) {
 	assert.Contains(t, inv.DroppedIDs, 2)
 }
 
+func TestExtractInventory_DuplicateSerial_SameID_SurvivorNotDropped(t *testing.T) {
+	logger := slog.Default()
+	oids := ObjectIDValueMap{
+		// Two rows reporting the same serial AND the same parentRelPos.
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":     {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":     {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":     {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1":    {Value: "SAME-SERIAL"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.1000":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1000":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1000":  {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1000": {Value: "SAME-SERIAL"},
+	}
+	inv := extractInventory(oids, logger)
+	assert.Len(t, inv.Members, 1)
+	assert.Equal(t, 1, inv.Members[0].ID)
+	// The surviving member's id must NOT be in DroppedIDs — otherwise
+	// routing would silently skip its interfaces.
+	_, isDropped := inv.DroppedIDs[1]
+	assert.False(t, isDropped, "surviving member id must not be in DroppedIDs")
+}
+
 func TestExtractInventory_IsStack(t *testing.T) {
 	logger := slog.Default()
 	assert.False(t, ChassisInventory{}.IsStack(), "empty -> standalone")
