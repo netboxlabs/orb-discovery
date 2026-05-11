@@ -9,6 +9,7 @@ package mapping
 
 import (
 	"log/slog"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -70,9 +71,8 @@ const (
 
 // extractInventory scans oids for class=3 + containedIn=0 entPhysical
 // rows with non-empty serial. Returns members sorted ascending by ID.
-// Member id derivation lives in deriveMemberID (Task 3); for now we
-// honor parentRelPos when set and otherwise fall back to ordinal
-// position so the standalone case is covered.
+// Member id derivation uses the full 3-tier precedence in deriveMemberID
+// (ParentRelPos > 0 → trailing-int parse of EntName → ordinal fallback).
 func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInventory {
 	candidates := []string{}
 	for oid, v := range oids {
@@ -108,33 +108,41 @@ func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInvento
 		})
 	}
 
+	// Sort by entPhysicalIndex first so the ordinal fallback is
+	// deterministic when neither parentRelPos nor entPhysicalName
+	// provides an id signal.
+	slices.SortFunc(members, func(a, b ChassisMember) int {
+		ai, _ := strconv.Atoi(a.EntPhysicalIndex)
+		bi, _ := strconv.Atoi(b.EntPhysicalIndex)
+		return ai - bi
+	})
 	for i := range members {
-		if members[i].ParentRelPos > 0 {
-			members[i].ID = members[i].ParentRelPos
-		}
-	}
-	if len(members) > 0 {
-		fillSequentialIDs(members)
+		members[i].ID = deriveMemberID(members[i], i+1)
 	}
 	slices.SortFunc(members, func(a, b ChassisMember) int { return a.ID - b.ID })
 
 	return ChassisInventory{Members: members}
 }
 
-// fillSequentialIDs assigns 1..N to members whose ID is still zero,
-// preserving entPhysicalIndex ascending order.
-// STUB: deleted in Task 3 when deriveMemberID takes over full ID precedence.
-func fillSequentialIDs(members []ChassisMember) {
-	slices.SortFunc(members, func(a, b ChassisMember) int {
-		ai, _ := strconv.Atoi(a.EntPhysicalIndex)
-		bi, _ := strconv.Atoi(b.EntPhysicalIndex)
-		return ai - bi
-	})
-	next := 1
-	for i := range members {
-		if members[i].ID == 0 {
-			members[i].ID = next
-		}
-		next = members[i].ID + 1
+var trailingIntRe = regexp.MustCompile(`(\d+)\s*$`)
+
+// deriveMemberID picks the logical member id with precedence:
+//  1. ParentRelPos when > 0 (ENTITY-MIB standard signal)
+//  2. Trailing integer in EntName ("Switch 1", "FPC 0", "Member 7")
+//  3. ordinalFallback (the caller-supplied 1-based position after
+//     sorting by entPhysicalIndex)
+//
+// ParentRelPos == 0 deliberately defers to (2)/(3): the column is
+// often unpopulated and 0 is the "unknown / not in a relative
+// position" sentinel per RFC 6933.
+func deriveMemberID(m ChassisMember, ordinalFallback int) int {
+	if m.ParentRelPos > 0 {
+		return m.ParentRelPos
 	}
+	if match := trailingIntRe.FindString(m.EntName); match != "" {
+		if id, err := strconv.Atoi(strings.TrimSpace(match)); err == nil {
+			return id
+		}
+	}
+	return ordinalFallback
 }

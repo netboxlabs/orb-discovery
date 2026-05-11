@@ -97,3 +97,59 @@ func TestExtractInventory_EmptySerialDropped(t *testing.T) {
 	assert.Len(t, inv.Members, 1)
 	assert.Equal(t, "VALID", inv.Members[0].Serial)
 }
+
+func TestDeriveMemberID_ParentRelPosWins(t *testing.T) {
+	m := ChassisMember{ParentRelPos: 5, EntName: "Switch 9"}
+	assert.Equal(t, 5, deriveMemberID(m, 0))
+}
+
+func TestDeriveMemberID_NameTrailingIntFallback(t *testing.T) {
+	cases := []struct {
+		entName string
+		want    int
+	}{
+		{"Switch 1", 1},
+		{"Switch 2", 2},
+		{"FPC 0", 0},
+		{"Member 7", 7},
+		{"Virtual Chassis Member 3", 3},
+		{"Chassis 12", 12},
+	}
+	for _, tc := range cases {
+		t.Run(tc.entName, func(t *testing.T) {
+			m := ChassisMember{ParentRelPos: 0, EntName: tc.entName}
+			assert.Equal(t, tc.want, deriveMemberID(m, 99))
+		})
+	}
+}
+
+func TestDeriveMemberID_FinalIndexFallback(t *testing.T) {
+	// parentRelPos=0, EntName has no trailing int → use ordinal fallback.
+	m := ChassisMember{ParentRelPos: 0, EntName: "Chassis"}
+	assert.Equal(t, 4, deriveMemberID(m, 4))
+}
+
+func TestExtractInventory_JunosFPC_TrailingIntFromName(t *testing.T) {
+	logger := slog.Default()
+	oids := ObjectIDValueMap{
+		// 3 FPC members with parentRelPos=0 (Junos doesn't populate it).
+		// IDs must come from "FPC 0", "FPC 1", "FPC 2" trailing-int parse.
+		".1.3.6.1.2.1.47.1.1.1.1.4.10":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.10":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.7.10":  {Value: "FPC 0"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.10": {Value: "BR0001"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.20":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.20":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.7.20":  {Value: "FPC 1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.20": {Value: "BR0002"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.30":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.30":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.7.30":  {Value: "FPC 2"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.30": {Value: "BR0003"},
+	}
+	inv := extractInventory(oids, logger)
+	assert.Len(t, inv.Members, 3)
+	assert.Equal(t, 0, inv.Members[0].ID, "FPC 0 -> id 0")
+	assert.Equal(t, 1, inv.Members[1].ID, "FPC 1 -> id 1")
+	assert.Equal(t, 2, inv.Members[2].ID, "FPC 2 -> id 2")
+}
