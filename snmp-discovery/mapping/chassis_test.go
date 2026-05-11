@@ -2,11 +2,15 @@ package mapping
 
 import (
 	"log/slog"
+	"os"
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+	"gopkg.in/yaml.v3"
 )
 
 // TestChassisInventoryMapper_IsNoOp confirms the mapper accepts
@@ -559,4 +563,103 @@ func TestTranslateAsStack_JunosQFX_4MemberVC(t *testing.T) {
 
 	// xe-2/0/0 routes to FPC 2 member.
 	assert.Equal(t, "vc-edge-01-stack-2", *fpc2Iface.Device.Name)
+}
+
+// stubManufacturers and stubDeviceLookup satisfy the data.ManufacturerRetriever
+// and data.DeviceRetriever interfaces with harmless no-op implementations so
+// that chassis tests can run through the full DeviceMapper code path without
+// loading the real data files.
+type stubManufacturers struct{}
+
+func (stubManufacturers) GetManufacturer(_ string) (string, error) { return "Unknown", nil }
+
+type stubDeviceLookup struct{}
+
+func (stubDeviceLookup) GetDevice(_ string) (string, error)                     { return "", nil }
+func (stubDeviceLookup) GetDeviceModel(_ string, _ map[string]string) (string, error) {
+	return "", nil
+}
+
+// newTestMappingConfig reads the production mapping.yaml and builds a
+// *Config using the same call path as the runner.
+func newTestMappingConfig(t *testing.T, logger *slog.Logger) *Config {
+	t.Helper()
+	data, err := os.ReadFile("../policy/mapping.yaml")
+	require.NoError(t, err, "read ../policy/mapping.yaml")
+	var mc config.Mapping
+	require.NoError(t, yaml.Unmarshal(data, &mc), "unmarshal mapping.yaml")
+	cfg, err := NewConfig(mc.Entries, logger, stubManufacturers{}, stubDeviceLookup{}, &config.Defaults{}, config.Options{})
+	require.NoError(t, err, "NewConfig from production mapping.yaml")
+	return cfg
+}
+
+// TestTranslateAsStack_Idempotent_ThroughFullMapperPipeline runs the full
+// MapObjectIDsToEntity → TranslateAsStack pipeline twice on identical OID
+// input and asserts that both runs produce byte-equivalent proto output.
+// This catches nondeterminism in either stage (Go-map iteration,
+// pointer reuse, etc.).
+func TestTranslateAsStack_Idempotent_ThroughFullMapperPipeline(t *testing.T) {
+	logger := slog.Default()
+
+	// Build a complete OID map: chassis inventory + ifTable rows so
+	// MapObjectIDsToEntity emits Devices and Interfaces, then
+	// TranslateAsStack rewrites them.
+	//
+	// IdentifierSize must match what the real walker sets: the runner
+	// calls mappingConfig.GenericObjectIDs() which returns identifierSize=1
+	// for every OID (child entries with IdentifierSize==0 default to 1).
+	// Without this the scalar device OIDs and the ifTable OIDs all group
+	// into the same index bucket (index=""), causing nondeterministic entity
+	// count depending on which mapping entry wins the bucket.
+	build := func() ObjectIDValueMap {
+		oids := fixtureCisco3850TwoMemberStack()
+		// Patch sysName and sysObjectID (from the base fixture) to use
+		// IdentifierSize=1 so they group under index "0" (device bucket).
+		for k, v := range oids {
+			switch k {
+			case ".1.3.6.1.2.1.1.5.0", ".1.3.6.1.2.1.1.2.0":
+				v.IdentifierSize = 1
+				oids[k] = v
+			}
+		}
+		// Minimal ifTable: ifIndex 10101 = Gi1/0/1, 10201 = Gi2/0/1.
+		// IdentifierSize=1 groups each by trailing ifIndex.
+		oids[".1.3.6.1.2.1.2.2.1.2.10101"] = Value{Value: "GigabitEthernet1/0/1", IdentifierSize: 1}
+		oids[".1.3.6.1.2.1.2.2.1.3.10101"] = Value{Value: "6", IdentifierSize: 1}
+		oids[".1.3.6.1.2.1.2.2.1.2.10201"] = Value{Value: "GigabitEthernet2/0/1", IdentifierSize: 1}
+		oids[".1.3.6.1.2.1.2.2.1.3.10201"] = Value{Value: "6", IdentifierSize: 1}
+		return oids
+	}
+
+	run := func() []diode.Entity {
+		cfg := newTestMappingConfig(t, logger)
+		mapper := NewObjectIDMapper(cfg, logger, &config.Defaults{}, "10.0.0.1")
+		oids := build()
+		ents := mapper.MapObjectIDsToEntity(oids)
+		ifIdx := mapper.InterfacesByIfIndex()
+		return TranslateAsStack(ents, oids, ifIdx, &config.Defaults{}, logger)
+	}
+
+	a := run()
+	b := run()
+
+	assert.Equal(t, len(a), len(b), "entity count must be deterministic")
+	for i := range a {
+		if i >= len(b) {
+			break
+		}
+		assert.IsType(t, a[i], b[i], "entity %d type mismatch", i)
+	}
+	marshalOpts := proto.MarshalOptions{Deterministic: true}
+	for i := range a {
+		if i >= len(b) {
+			break
+		}
+		ab, err := marshalOpts.Marshal(a[i].ConvertToProtoMessage())
+		require.NoError(t, err, "marshal a[%d]", i)
+		bb, err := marshalOpts.Marshal(b[i].ConvertToProtoMessage())
+		require.NoError(t, err, "marshal b[%d]", i)
+		assert.Equal(t, ab, bb,
+			"entity %d proto bytes differ — nondeterminism somewhere in MapObjectIDsToEntity or TranslateAsStack", i)
+	}
 }
