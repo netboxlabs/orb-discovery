@@ -35,6 +35,13 @@ func setDeviceSourceMatch(d *diode.Device, netboxID int, seen map[unsafe.Pointer
 	if d == nil {
 		return
 	}
+	// Skip non-master members emitted by mapping.TranslateAsStack:
+	// each carries VcPosition. Annotating them with master's
+	// netbox_id would make Diode's source_match matcher collapse
+	// every member onto the same NetBox device row.
+	if d.VcPosition != nil {
+		return
+	}
 	p := unsafe.Pointer(d)
 	if _, ok := seen[p]; ok {
 		return
@@ -60,6 +67,8 @@ func annotateEntitiesWithRunID(entities []diode.Entity, runID string) {
 			annotateIPAddress(v, runID, seen)
 		case *diode.VLAN:
 			annotateVLAN(v, runID, seen)
+		case *diode.VirtualChassis:
+			annotateVirtualChassis(v, runID, seen)
 		}
 	}
 }
@@ -128,6 +137,25 @@ func annotateIPAddress(ip *diode.IPAddress, runID string, seen map[unsafe.Pointe
 	}
 	if ip.NatInside != nil {
 		annotateIPAddress(ip.NatInside, runID, seen)
+	}
+}
+
+func annotateVirtualChassis(vc *diode.VirtualChassis, runID string, seen map[unsafe.Pointer]struct{}) {
+	if vc == nil {
+		return
+	}
+	p := unsafe.Pointer(vc)
+	if _, ok := seen[p]; ok {
+		return
+	}
+	seen[p] = struct{}{}
+	mergeRunID(&vc.Metadata, runID)
+	// Annotate the inline Master Device stub with run_id for consistency
+	// with VLAN+Interface treatment. Does NOT recurse into a full Device
+	// annotation because Master is a matcher-only stub (non-recursion
+	// invariant: Master.VirtualChassis is nil).
+	if vc.Master != nil {
+		annotateDevice(vc.Master, runID, seen)
 	}
 }
 

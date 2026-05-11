@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -312,6 +313,31 @@ type ObjectIDMapper struct {
 // cancelled scan also aborts the lookup.
 func (m *ObjectIDMapper) SetContext(ctx context.Context) {
 	m.ctx = ctx
+}
+
+// InterfacesByIfIndex returns a map keyed by *diode.Interface entity
+// pointer with the ifIndex the registry recorded for it. Used by
+// TranslateAsStack to drive entAliasMappingTable-based stack-member
+// routing — the diode.Interface proto doesn't carry ifIndex; only
+// the registry does. Returns nil when no interfaces are registered.
+func (m *ObjectIDMapper) InterfacesByIfIndex() map[*diode.Interface]int {
+	bucket := m.registry.entities[InterfaceEntityType]
+	if len(bucket) == 0 {
+		return nil
+	}
+	out := make(map[*diode.Interface]int, len(bucket))
+	for idx, e := range bucket {
+		iface, ok := e.(*diode.Interface)
+		if !ok {
+			continue
+		}
+		ifIndex, err := strconv.Atoi(string(idx))
+		if err != nil {
+			continue
+		}
+		out[iface] = ifIndex
+	}
+	return out
 }
 
 // hostResolver is the minimal DNS lookup surface used by ObjectIDMapper.

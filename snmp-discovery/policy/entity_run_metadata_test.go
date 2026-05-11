@@ -196,6 +196,26 @@ func TestAnnotateEntitiesWithRunID_shared_vlan_visited_once(t *testing.T) {
 	assert.Equal(t, "run-shared-vlan", sharedVlan.Metadata["run_id"])
 }
 
+func TestAnnotateDeviceWithSourceMatch_SkipsMemberDevices(t *testing.T) {
+	pos := int64(2)
+	master := &diode.Device{Name: stringPtr("master")}
+	member := &diode.Device{
+		Name:       stringPtr("master-stack-2"),
+		VcPosition: &pos, // member identity signal
+	}
+	annotateDeviceWithSourceMatch([]diode.Entity{master, member}, 42)
+
+	assert.Equal(t, diode.Metadata{"netbox_id": 42}, master.Metadata["source_match"])
+	_, hasSM := member.Metadata["source_match"]
+	assert.False(t, hasSM, "member Devices (VcPosition != nil) must NOT receive master's source_match")
+}
+
+func TestAnnotateEntitiesWithRunID_StampsVirtualChassis(t *testing.T) {
+	vc := &diode.VirtualChassis{Name: stringPtr("stack")}
+	annotateEntitiesWithRunID([]diode.Entity{vc}, "run-123")
+	assert.Equal(t, "run-123", vc.Metadata["run_id"])
+}
+
 // Helper function for tests
 func int64Ptr(v int64) *int64 {
 	return &v
