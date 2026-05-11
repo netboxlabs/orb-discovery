@@ -32,6 +32,29 @@ func fixtureCisco3850TwoMemberStack() ObjectIDValueMap {
 	}
 }
 
+// fixtureArubaCX2MemberVSF returns an ObjectIDValueMap shaped like a
+// 2-member Aruba CX VSF stack:
+//   - sysName "aruba-cx-stack"
+//   - entPhysical rows at indices 1 and 2
+//   - both entPhysicalClass=3, entPhysicalContainedIn=0
+//   - parentRelPos = 1 and 2 (numeric VSF member IDs)
+//   - model "Aruba-6300M-48G" on both members
+func fixtureArubaCX2MemberVSF() ObjectIDValueMap {
+	return ObjectIDValueMap{
+		".1.3.6.1.2.1.1.5.0":           {Value: "aruba-cx-stack"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":  {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "SG12345"},
+		".1.3.6.1.2.1.47.1.1.1.1.13.1": {Value: "Aruba-6300M-48G"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.2":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.2":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.2":  {Value: "2"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.2": {Value: "SG12346"},
+		".1.3.6.1.2.1.47.1.1.1.1.13.2": {Value: "Aruba-6300M-48G"},
+	}
+}
+
 // fixtureJunosQFX4MemberVC builds a Junos QFX5100 4-member VC scenario:
 //   - sysName "vc-edge-01"
 //   - 4 entPhysical chassis rows at indices 1..4

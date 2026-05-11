@@ -505,6 +505,32 @@ func TestTranslateAsStack_OrphanIPFiltered(t *testing.T) {
 	}
 }
 
+func TestTranslateAsStack_ArubaCX_2MemberVSF(t *testing.T) {
+	logger := slog.Default()
+	master := &diode.Device{
+		Name: strPtr("aruba-cx-stack"),
+		Site: &diode.Site{Name: strPtr("dc1")},
+		DeviceType: &diode.DeviceType{
+			Model:        strPtr("Aruba-6300M-48G"),
+			Manufacturer: &diode.Manufacturer{Name: strPtr("HPE Aruba")},
+		},
+	}
+	memberIface := &diode.Interface{Name: strPtr("2/1/24"), Device: master}
+	entities := []diode.Entity{master, memberIface}
+
+	out := TranslateAsStack(entities, fixtureArubaCX2MemberVSF(), nil, &config.Defaults{}, logger)
+
+	var members []*diode.Device
+	for _, e := range out {
+		if d, ok := e.(*diode.Device); ok && d != master {
+			members = append(members, d)
+		}
+	}
+	assert.Len(t, members, 1)
+	assert.Equal(t, "SG12346", *members[0].Serial)
+	assert.Equal(t, "aruba-cx-stack-stack-2", *memberIface.Device.Name)
+}
+
 func TestTranslateAsStack_JunosQFX_4MemberVC(t *testing.T) {
 	logger := slog.Default()
 	master := &diode.Device{
