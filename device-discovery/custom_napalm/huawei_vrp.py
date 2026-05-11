@@ -227,7 +227,7 @@ _VRP_ESN_SLOT_RE = re.compile(
 )
 
 
-def _normalize_vrp_istack_role(raw: str) -> str:
+def _normalize_vrp_istack_role(raw: str | None) -> str:
     """
     Map a Huawei iStack role token to NetBox semantics.
 
