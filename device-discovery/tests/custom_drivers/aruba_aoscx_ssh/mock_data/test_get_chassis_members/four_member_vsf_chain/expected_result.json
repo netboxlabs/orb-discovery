@@ -3,36 +3,36 @@
     {
       "id": 1,
       "serial": "TW02AAA0001",
-      "model": "6300M-24SR4",
+      "model": null,
       "role": "active",
-      "priority": 200,
+      "priority": null,
       "mac": "94:f1:28:22:00:00",
       "state": "active"
     },
     {
       "id": 2,
       "serial": "TW02AAA0002",
-      "model": "6300M-24SR4",
+      "model": null,
       "role": "standby",
-      "priority": 128,
+      "priority": null,
       "mac": "94:f1:28:22:00:80",
       "state": "standby"
     },
     {
       "id": 3,
       "serial": "TW02AAA0003",
-      "model": "6300M-48G",
+      "model": null,
       "role": "member",
-      "priority": 64,
+      "priority": null,
       "mac": "94:f1:28:22:01:00",
       "state": "member"
     },
     {
       "id": 4,
       "serial": "TW02AAA0004",
-      "model": "6300M-48G",
+      "model": null,
       "role": "member",
-      "priority": 64,
+      "priority": null,
       "mac": "94:f1:28:22:01:80",
       "state": "member"
     }

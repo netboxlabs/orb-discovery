@@ -190,61 +190,6 @@ _SNMP_COMM_RE = re.compile(
 )
 
 
-# ``show vsf`` summary table parser.
-#
-# ntc-templates ships ``aruba_aoscx_show_vsf_detail`` (which we use for
-# mac/serial/status), but does NOT have a template for the plain ``show vsf``
-# output that carries role + model + priority. Sample table format on AOS-CX
-# 10.x:
-#
-#     Show VSF
-#     ...
-#     Mbr   Mac Address       Type      Model              Status      Priority
-#     ----  ----------------  --------  -----------------  ----------  --------
-#     1     94:f1:28:11:00:00 Conductor 6300M-48G-PoE+-4SF Default     128
-#     2     94:f1:28:11:00:80 Standby   6300M-48G-PoE+-4SF Default     64
-#     3     94:f1:28:11:01:00 Member    6300M-48G-PoE+-4SF Default     32
-#
-# The model column is fixed-width and can run together with the next column
-# on long product names. We capture it loosely and rstrip whitespace.
-_VSF_SUMMARY_ROW_RE = re.compile(
-    r"^\s*(?P<member_id>\d+)\s+"
-    r"(?P<mac>[0-9a-fA-F:]{17})\s+"
-    r"(?P<role>Conductor|Commander|Master|Standby|Member)\s+"
-    r"(?P<model>\S(?:.*?\S)?)\s+"
-    r"(?P<status>\S+)\s+"
-    r"(?P<priority>\d+)\s*$",
-    re.IGNORECASE,
-)
-
-
-def _parse_aoscx_show_vsf_summary(text: str) -> dict[int, dict]:
-    """
-    Parse AOS-CX ``show vsf`` summary table into a member-id-keyed dict.
-
-    Returns a map ``{member_id: {role, model, priority}}`` — the fields that
-    ``show vsf detail`` does NOT capture. Skips header / separator lines and
-    any row that doesn't match the per-member regex (defensive — output drift
-    across firmware revisions is tolerated).
-    """
-    rows: dict[int, dict] = {}
-    for line in text.splitlines():
-        m = _VSF_SUMMARY_ROW_RE.match(line)
-        if not m:
-            continue
-        try:
-            mid = int(m.group("member_id"))
-            prio = int(m.group("priority"))
-        except (TypeError, ValueError):
-            continue
-        rows[mid] = {
-            "role": m.group("role"),
-            "model": m.group("model").strip() or None,
-            "priority": prio,
-        }
-    return rows
-
-
 def _sanitize_config(text: str) -> str:
     text = _PASSWORD_RE.sub(r"\1<redacted>", text)
     text = _RADIUS_KEY_RE.sub(r"\1 <redacted>", text)
@@ -545,7 +490,17 @@ class AOSCXSSHDriver(_napalm_base.NetworkDriver):
 # ---------------------------------------------------------------------------
 
 # Member-status values that mean "slot is reserved but no hardware is present".
+# Space-separated forms (``Not Present``) get their spaces folded to underscores
+# in the normalization step below, so we only need to enumerate the underscore
+# canonical form here.
 _AOSCX_ABSENT_STATUSES = frozenset({"missing", "not_present", "notpresent", "absent"})
+
+
+def _aoscx_normalize_vsf_status(raw: str | None) -> str:
+    """Lowercase + fold spaces/hyphens to underscores. Empty input → empty string."""
+    if not raw:
+        return ""
+    return raw.strip().lower().replace(" ", "_").replace("-", "_")
 
 
 def _aoscx_normalize_vsf_role(raw: str | None) -> str:
@@ -554,7 +509,13 @@ def _aoscx_normalize_vsf_role(raw: str | None) -> str:
 
     AOS-CX 10.10+ uses "conductor" / "commander" for what earlier firmware
     called "master"; both pre-map to "active". Everything else falls through
-    to the vendor-neutral helper.
+    to the vendor-neutral helper. Empty / None / unknown → "member".
+
+    The role on AOS-CX comes from the ``Status`` field in both ``show vsf
+    detail`` and ``show vsf`` summary (the column is literally labeled
+    "Status" but contains the role string: ``Active`` / ``Conductor`` /
+    ``Standby`` / ``Member``). This driver only consumes ``show vsf detail``,
+    so the source is unambiguous.
     """
     if not raw:
         return "member"
@@ -564,33 +525,38 @@ def _aoscx_normalize_vsf_role(raw: str | None) -> str:
     return normalize_role(lower)
 
 
-def _aoscx_ssh_member_from_rows(detail_row: dict, summary_by_id: dict[int, dict]) -> ChassisMember | None:
+def _aoscx_ssh_member_from_detail_row(detail_row: dict) -> ChassisMember | None:
     """
-    Merge one ``show vsf detail`` row with the matching ``show vsf`` summary entry.
+    Build one ChassisMember from an ntc-templates ``show vsf detail`` row.
 
-    Returns None for malformed rows (no parseable member id) and for absent slots
-    (status in _AOSCX_ABSENT_STATUSES).
+    On AOS-CX, the ``Status`` field in detail output IS the member role
+    (``Active`` / ``Standby`` / ``Member``), so role mapping uses the same
+    string that drives absent-slot filtering — there's only one source of
+    truth on the CLI path. Model and priority are NOT collected on the SSH
+    path: the only command that exposes them is the ``show vsf`` summary
+    table, and parsing that requires column-position assumptions that drift
+    across firmware revisions. Operators who need model/priority on member
+    devices should use the REST transport (``aruba_aoscx``), which gets
+    them from the structured ``/system/vsf_members`` JSON.
+
+    Returns None for absent slots (status in _AOSCX_ABSENT_STATUSES).
     """
     raw_id = (detail_row.get("member_id") or "").strip()
     try:
         mid = int(raw_id)
     except (TypeError, ValueError):
         return None
-    status = (detail_row.get("status") or "").strip().lower()
-    if status.replace("-", "_") in _AOSCX_ABSENT_STATUSES:
+    status_norm = _aoscx_normalize_vsf_status(detail_row.get("status"))
+    if status_norm in _AOSCX_ABSENT_STATUSES:
         return None
-    summary = summary_by_id.get(mid, {})
-    priority = summary.get("priority")
-    if isinstance(priority, bool) or not isinstance(priority, int):
-        priority = None
     return ChassisMember(
         id=mid,
         serial=(detail_row.get("serial_number") or "").strip(),
-        model=summary.get("model"),
-        role=_aoscx_normalize_vsf_role(summary.get("role")),
-        priority=priority,
+        model=None,
+        role=_aoscx_normalize_vsf_role(detail_row.get("status")),
+        priority=None,
         mac=(detail_row.get("mac_address") or "").strip() or None,
-        state=status or None,
+        state=status_norm or None,
     )
 
 
@@ -620,22 +586,9 @@ def _aoscx_ssh_get_chassis_members_impl(driver) -> dict | None:
     if not detail_rows:
         return None
 
-    # Best-effort summary fetch — role/model/priority are nice-to-have.
-    summary_by_id: dict[int, dict] = {}
-    try:
-        summary_raw = driver._send("show vsf")
-        if summary_raw:
-            summary_by_id = _parse_aoscx_show_vsf_summary(summary_raw)
-    except Exception:
-        logger.debug(
-            "aruba_aoscx_ssh.get_chassis_members: 'show vsf' summary fetch failed; "
-            "continuing with detail-only data",
-            exc_info=True,
-        )
-
     members: list[ChassisMember] = []
     for row in detail_rows:
-        m = _aoscx_ssh_member_from_rows(row, summary_by_id)
+        m = _aoscx_ssh_member_from_detail_row(row)
         if m is not None:
             members.append(m)
     return to_payload(members, domain=None)

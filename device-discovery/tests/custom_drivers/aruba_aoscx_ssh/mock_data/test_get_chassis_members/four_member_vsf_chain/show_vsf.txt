@@ -1,8 +1,0 @@
-Show VSF Summary
-
-Mbr   Mac Address       Type      Model              Status      Priority
-----  ----------------  --------  -----------------  ----------  --------
-1     94:f1:28:22:00:00 Conductor 6300M-24SR4        Default     200
-2     94:f1:28:22:00:80 Standby   6300M-24SR4        Default     128
-3     94:f1:28:22:01:00 Member    6300M-48G          Default     64
-4     94:f1:28:22:01:80 Member    6300M-48G          Default     64

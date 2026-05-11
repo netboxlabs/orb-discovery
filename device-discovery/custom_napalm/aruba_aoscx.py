@@ -526,7 +526,12 @@ def _aoscx_member_from_rest_dict(member_id: int, data: dict) -> ChassisMember | 
     if not isinstance(data, dict):
         return None
     status = (data.get("status") or "").strip().lower()
-    if status.replace("-", "_") in _AOSCX_ABSENT_STATUSES:
+    # Fold spaces AND hyphens to underscores so ``Not Present`` / ``Not-Present``
+    # / ``not_present`` all match the underscore canonical form in
+    # _AOSCX_ABSENT_STATUSES. The state field on the emitted ChassisMember
+    # keeps the original (un-normalized) status string for operator readability.
+    status_norm = status.replace(" ", "_").replace("-", "_")
+    if status_norm in _AOSCX_ABSENT_STATUSES:
         return None
 
     serial = (data.get("serial_number") or data.get("serial") or "").strip()

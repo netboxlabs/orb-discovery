@@ -2,20 +2,20 @@
   "members": [
     {
       "id": 1,
-      "serial": "TW01ABC0001",
+      "serial": "TW04XYZ0001",
       "model": null,
       "role": "active",
       "priority": null,
-      "mac": "94:f1:28:11:00:00",
+      "mac": "94:f1:28:44:00:00",
       "state": "active"
     },
     {
-      "id": 2,
-      "serial": "TW01ABC0002",
+      "id": 3,
+      "serial": "TW04XYZ0003",
       "model": null,
       "role": "standby",
       "priority": null,
-      "mac": "94:f1:28:11:00:80",
+      "mac": "94:f1:28:44:01:00",
       "state": "standby"
     }
   ],
