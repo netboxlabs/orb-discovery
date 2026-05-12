@@ -436,7 +436,7 @@ def test_translate_data(
 
 
 def test_translate_data_truncates_platform(sample_device_info, sample_defaults):
-    """Ensure overly long platform strings are truncated to 100 characters."""
+    """Ensure overly long platform strings are truncated to 100 characters while preserving the ``<DRIVER> <os_version>`` format."""
     long_os_version = "v" * 150
     device_info = sample_device_info.copy()
     device_info["os_version"] = long_os_version
@@ -451,8 +451,30 @@ def test_translate_data_truncates_platform(sample_device_info, sample_defaults):
     entities = list(translate_data(data))
 
     assert len(entities) == 1
-    assert entities[0].device.platform.name == long_os_version[:100]
+    # Truncation preserves the "IOS " driver prefix instead of dropping it.
+    expected = ("IOS " + long_os_version)[:100]
+    assert entities[0].device.platform.name == expected
+    assert entities[0].device.platform.name.startswith("IOS ")
     assert len(entities[0].device.platform.name) == 100
+
+
+def test_translate_data_handles_missing_os_version(sample_device_info, sample_defaults):
+    """A None/missing os_version must not crash _resolve_platform."""
+    device_info = sample_device_info.copy()
+    device_info["os_version"] = None
+    data = {
+        "device": device_info,
+        "interface": {},
+        "interface_ip": {},
+        "driver": "ios",
+        "defaults": sample_defaults,
+    }
+
+    entities = list(translate_data(data))
+
+    assert len(entities) == 1
+    # Driver-only when os_version is empty/None.
+    assert entities[0].device.platform.name == "IOS"
 
 
 def test_translate_data_creates_missing_interface(sample_device_info, sample_defaults):
@@ -633,6 +655,54 @@ def test_translate_vlan_with_defaults(sample_defaults):
     assert vlan.tenant.name == "Default Tenant"
     assert vlan.role.name == "Default Role"
     assert len(vlan.tags) == 3
+
+
+def test_translate_vlan_group_scope_site_set_when_site_defined(sample_defaults):
+    """VLAN group is wrapped with slug + scope_site when defaults.site is a real value."""
+    sample_defaults.site = "New York"
+    sample_defaults.vlan = VlanParameters(group="Default Group")
+
+    vlan = translate_vlan("10", "V10", sample_defaults)
+
+    assert vlan.group.name == "Default Group"
+    assert vlan.group.slug == "default-group"
+    assert vlan.group.scope_site.name == "New York"
+
+
+def test_translate_vlan_group_scope_site_set_when_site_undefined(sample_defaults):
+    """scope_site is still populated when defaults.site is the sentinel 'undefined'."""
+    sample_defaults.site = "undefined"
+    sample_defaults.vlan = VlanParameters(group="Default Group")
+
+    vlan = translate_vlan("11", "V11", sample_defaults)
+
+    assert vlan.group.name == "Default Group"
+    assert vlan.group.slug == "default-group"
+    assert vlan.group.scope_site.name == "undefined"
+
+
+def test_translate_vlan_group_no_scope_site_when_site_none(sample_defaults):
+    """VLAN group has slug but no scope_site when defaults.site is None."""
+    sample_defaults.site = None
+    sample_defaults.vlan = VlanParameters(group="Default Group")
+
+    vlan = translate_vlan("12", "V12", sample_defaults)
+
+    assert vlan.group.name == "Default Group"
+    assert vlan.group.slug == "default-group"
+    assert vlan.group.scope_site.name == ""
+
+
+def test_translate_vlan_no_group_unaffected_by_site(sample_defaults):
+    """When no group is set, scope_site is not applied (group stays unset)."""
+    sample_defaults.site = "New York"
+    sample_defaults.vlan = VlanParameters(comments="no group")
+
+    vlan = translate_vlan("13", "V13", sample_defaults)
+
+    assert vlan.group.name == ""
+    assert vlan.group.slug == ""
+    assert vlan.group.scope_site.name == ""
 
 
 def test_translate_vlan_with_tenant_parameters(
