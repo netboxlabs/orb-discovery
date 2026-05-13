@@ -12,9 +12,6 @@ import (
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 )
 
-// strPtr is declared in stubs_test.go (same package mapping), so it
-// is reachable from here without redeclaration.
-
 func newTestDeviceMapper() *DeviceMapper {
 	return &DeviceMapper{logger: slog.Default()}
 }
@@ -134,13 +131,17 @@ func TestDeviceMapper_applyDefaults_AssetTagEmptyConfigIsNoop(t *testing.T) {
 func TestDeviceMapper_applyDefaults_AssetTagExceedsMaxLengthSkips(t *testing.T) {
 	// NetBox asset_tag is CharField(max_length=50). The diode SDK does
 	// not validate; we warn-skip rather than truncate to avoid silent
-	// uniqueness collisions.
+	// uniqueness collisions. Start with a non-nil AssetTag so the test
+	// observes "skipped" as "did not overwrite" rather than the trivial
+	// "stayed nil because no path writes it" assertion.
 	m := newTestDeviceMapper()
-	entity := &diode.Device{}
+	preset := "ORIGINAL"
+	entity := &diode.Device{AssetTag: &preset}
 	tooLong := strings.Repeat("x", 51)
 	defaults := &config.Defaults{AssetTag: tooLong}
 	m.applyDefaults(entity, defaults, nil)
-	assert.Nil(t, entity.AssetTag)
+	require.NotNil(t, entity.AssetTag)
+	assert.Equal(t, "ORIGINAL", *entity.AssetTag)
 }
 
 func TestDeviceMapper_applyDefaults_AssetTagExactlyMaxLengthSet(t *testing.T) {
@@ -151,4 +152,28 @@ func TestDeviceMapper_applyDefaults_AssetTagExactlyMaxLengthSet(t *testing.T) {
 	m.applyDefaults(entity, defaults, nil)
 	require.NotNil(t, entity.AssetTag)
 	assert.Equal(t, exact, *entity.AssetTag)
+}
+
+func TestDeviceMapper_applyDefaults_AssetTagFiftyRunesNonASCIISet(t *testing.T) {
+	// NetBox CharField(max_length=N) counts characters. A string of 50
+	// non-ASCII runes is exactly 50 characters (and 150 bytes in UTF-8)
+	// and must be accepted, not rejected on byte length.
+	m := newTestDeviceMapper()
+	entity := &diode.Device{}
+	exact := strings.Repeat("é", 50) // 50 runes, 100 bytes
+	defaults := &config.Defaults{AssetTag: exact}
+	m.applyDefaults(entity, defaults, nil)
+	require.NotNil(t, entity.AssetTag)
+	assert.Equal(t, exact, *entity.AssetTag)
+}
+
+func TestDeviceMapper_applyDefaults_AssetTagFiftyOneRunesNonASCIISkips(t *testing.T) {
+	m := newTestDeviceMapper()
+	preset := "ORIGINAL"
+	entity := &diode.Device{AssetTag: &preset}
+	tooLong := strings.Repeat("é", 51) // 51 runes
+	defaults := &config.Defaults{AssetTag: tooLong}
+	m.applyDefaults(entity, defaults, nil)
+	require.NotNil(t, entity.AssetTag)
+	assert.Equal(t, "ORIGINAL", *entity.AssetTag)
 }

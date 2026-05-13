@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
@@ -983,6 +984,12 @@ func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defa
 
 	if defaults.Location != "" {
 		if resolved, ok := data.ResolveDefault(defaults.Location, walked); ok {
+			// Builds a fresh Location, overriding anything a future
+			// mapper may have set on entity.Location. Site is taken from
+			// defaults.Site only; a Site that was previously attached to
+			// entity.Location is not preserved. No mapper sets
+			// entity.Location today, so this is a documented forward
+			// invariant rather than an observable change.
 			loc := &diode.Location{Name: &resolved}
 			if defaults.Site != "" {
 				loc.Site = &diode.Site{Name: &defaults.Site}
@@ -993,11 +1000,15 @@ func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defa
 
 	if defaults.AssetTag != "" {
 		if resolved, ok := data.ResolveDefault(defaults.AssetTag, walked); ok {
-			if len(resolved) > assetTagMaxLen {
+			// NetBox CharField(max_length=N) counts characters, not bytes;
+			// use rune count so non-ASCII tags at exactly 50 chars are
+			// accepted instead of being skipped on byte count alone.
+			runeCount := utf8.RuneCountInString(resolved)
+			if runeCount > assetTagMaxLen {
 				m.logger.Warn(
 					"defaults.asset_tag resolved value exceeds NetBox max length; skipping",
 					"max_length", assetTagMaxLen,
-					"value_length", len(resolved),
+					"value_length", runeCount,
 				)
 			} else {
 				entity.AssetTag = &resolved
@@ -1138,10 +1149,16 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 					fieldFound = true
 				case "sysContact":
 					// Walked solely so defaults can reference this OID;
-					// no direct mapper consumption.
+					// no direct mapper consumption. Mark fieldFound so
+					// applyDefaults still runs for devices that respond
+					// to sysContact but not to name/description/platform.
+					fieldFound = true
 				case "sysLocation":
 					// Walked solely so defaults can reference this OID;
-					// no direct mapper consumption.
+					// no direct mapper consumption. Mark fieldFound so
+					// applyDefaults still runs for devices that respond
+					// to sysLocation but not to name/description/platform.
+					fieldFound = true
 				default:
 					m.logger.Warn("unknown field", "field", propertyMappingEntry.Field)
 				}
