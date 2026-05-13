@@ -450,13 +450,14 @@ func TranslateAsStack(
 		}
 	}
 
-	// 5. Rebuild output partitioned by type so ordering is deterministic
-	//    even though `entities` came out of Go-map iteration upstream.
+	// 5. Rebuild output partitioned by type so the sorted buckets have a
+	//    deterministic order even though `entities` came out of Go-map
+	//    iteration upstream.
 	//    Canonical order:
 	//      master, VC, member_devices (sorted by VcPosition),
 	//      interfaces (sorted by Name), IPs (sorted by Address),
-	//      MACs (sorted by MacAddress), other entities (stable order
-	//      via type then a type-specific sort key).
+	//      MACs (sorted by MacAddress), then VLANs, modules, and any
+	//      remaining entities in encountered order.
 	var (
 		ifaces  []*diode.Interface
 		ips     []*diode.IPAddress
