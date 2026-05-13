@@ -931,7 +931,7 @@ type DeviceMapper struct {
 }
 
 // applyDefaults applies default values to a device entity
-func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defaults) {
+func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defaults, walked map[string]string) {
 	if defaults == nil {
 		return
 	}
@@ -1132,7 +1132,7 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 
 	// Apply defaults if available
 	if fieldFound {
-		m.applyDefaults(deviceEntity, defaults)
+		m.applyDefaults(deviceEntity, defaults, walked)
 		if deviceEntity.Name != nil {
 			m.logger.Debug("successfully mapped device", "name", *deviceEntity.Name)
 		} else {
