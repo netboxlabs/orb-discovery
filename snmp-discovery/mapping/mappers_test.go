@@ -4633,6 +4633,49 @@ func TestDeviceMapper_Map_DefaultsResolveFromWalkedSnapshot(t *testing.T) {
 	assert.Equal(t, "asset-12345", *device.AssetTag)
 }
 
+// TestDeviceMapper_Map_DefaultsResolveFromSysLocationOnly is the
+// symmetric partial-walk test for sysLocation: a device that responds
+// only to sysLocation (no name/description/platform/sysContact) must
+// still apply defaults via the no-op switch case's fieldFound=true.
+func TestDeviceMapper_Map_DefaultsResolveFromSysLocationOnly(t *testing.T) {
+	logger := slog.Default()
+	mapper := mapping.NewDeviceMapper(&MockManufacturerDataRetriever{}, &MockDeviceLookup{}, logger)
+
+	values := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"1.3.6.1.2.1.1.6.0": {
+			OID:    "1.3.6.1.2.1.1.6.0",
+			Index:  "0",
+			Parent: "1.3.6.1.2.1.1.6",
+			Value:  "Data Center 02",
+			Type:   mapping.OctetString,
+		},
+	}
+	mappingEntry := &mapping.Entry{
+		OID:    "1.3.6.1.2.1.1",
+		Entity: "device",
+		Field:  "_id",
+		MappingEntries: []mapping.Entry{
+			{OID: "1.3.6.1.2.1.1.6", Entity: "device", Field: "sysLocation"},
+		},
+	}
+	defaults := &config.Defaults{
+		Site:     "dc2",
+		Location: ".1.3.6.1.2.1.1.6.0",
+	}
+
+	registry := mapping.NewEntityRegistry(logger)
+	entity := mapper.Map(values, mappingEntry, registry, defaults)
+	require.NotNil(t, entity)
+	device, ok := entity.(*diode.Device)
+	require.True(t, ok)
+
+	require.NotNil(t, device.Location)
+	require.NotNil(t, device.Location.Name)
+	assert.Equal(t, "Data Center 02", *device.Location.Name)
+	require.NotNil(t, device.Location.Site)
+	assert.Equal(t, "dc2", *device.Location.Site.Name)
+}
+
 // TestDeviceMapper_Map_DefaultsResolveFromSysContactOnly covers the
 // edge case where a device responds to sysContact/sysLocation but not
 // to name/description/platform. The no-op switch cases set fieldFound
