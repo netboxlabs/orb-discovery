@@ -3,6 +3,7 @@ package mapping_test
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/mapping"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestIPAddressMapper_Map(t *testing.T) {
@@ -4514,4 +4517,44 @@ func TestIPAddressMapper_LegacyTable_StillIPv4Only(t *testing.T) {
 	got := mapper.Map(pdus, entry, registry, nil)
 	ip := got.(*diode.IPAddress)
 	assert.Equal(t, "10.0.0.1/32", *ip.Address)
+}
+
+// TestDeviceMapping_WalksSysContactAndSysLocation confirms that the
+// two OIDs needed for OID-ref defaults are direct children of the
+// device system-group block (.1.3.6.1.2.1.1) in mapping.yaml, with the
+// expected field names. Anchoring at the system-group block (not a
+// recursive search across the whole file) ensures the OIDs are in the
+// per-Map() walked snapshot that applyDefaults consumes.
+func TestDeviceMapping_WalksSysContactAndSysLocation(t *testing.T) {
+	data, err := os.ReadFile("../policy/mapping.yaml")
+	require.NoError(t, err)
+
+	var m config.Mapping
+	require.NoError(t, yaml.Unmarshal(data, &m))
+
+	var sysGroup *config.MappingEntry
+	for i := range m.Entries {
+		if m.Entries[i].OID == ".1.3.6.1.2.1.1" && m.Entries[i].Entity == "device" {
+			sysGroup = &m.Entries[i]
+			break
+		}
+	}
+	require.NotNil(t, sysGroup, "device system-group block .1.3.6.1.2.1.1 not found in mapping.yaml")
+
+	wantOIDs := map[string]string{
+		".1.3.6.1.2.1.1.4.0": "sysContact",
+		".1.3.6.1.2.1.1.6.0": "sysLocation",
+	}
+	found := map[string]string{}
+	for _, child := range sysGroup.MappingEntries {
+		if expectedField, want := wantOIDs[child.OID]; want {
+			found[child.OID] = child.Field
+			assert.Equal(t, expectedField, child.Field,
+				"OID %s should have field=%q", child.OID, expectedField)
+		}
+	}
+	for oid := range wantOIDs {
+		_, present := found[oid]
+		assert.True(t, present, "expected %s as a direct child of the device system-group block", oid)
+	}
 }

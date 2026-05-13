@@ -1117,6 +1117,12 @@ func (m *DeviceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEntry
 					}
 					deviceEntity.Serial = &serial
 					fieldFound = true
+				case "sysContact":
+					// Walked solely so defaults can reference this OID;
+					// no direct mapper consumption.
+				case "sysLocation":
+					// Walked solely so defaults can reference this OID;
+					// no direct mapper consumption.
 				default:
 					m.logger.Warn("unknown field", "field", propertyMappingEntry.Field)
 				}
