@@ -975,14 +975,13 @@ func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defa
 		}
 	}
 
-	if entity.Location == nil && defaults.Location != "" {
-		entity.Location = &diode.Location{
-			Name: &defaults.Location,
-		}
-		if entity.Location.Site == nil && defaults.Site != "" {
-			entity.Location.Site = &diode.Site{
-				Name: &defaults.Site,
+	if defaults.Location != "" {
+		if resolved, ok := data.ResolveDefault(defaults.Location, walked); ok {
+			loc := &diode.Location{Name: &resolved}
+			if defaults.Site != "" {
+				loc.Site = &diode.Site{Name: &defaults.Site}
 			}
+			entity.Location = loc
 		}
 	}
 }
