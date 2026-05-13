@@ -155,7 +155,7 @@ func TestDeviceMapper_applyDefaults_AssetTagExactlyMaxLengthSet(t *testing.T) {
 
 func TestDeviceMapper_applyDefaults_AssetTagFiftyRunesNonASCIISet(t *testing.T) {
 	// NetBox CharField(max_length=N) counts characters. A string of 50
-	// non-ASCII runes is exactly 50 characters (and 150 bytes in UTF-8)
+	// non-ASCII runes is exactly 50 characters (and 100 bytes in UTF-8)
 	// and must be accepted, not rejected on byte length.
 	m := newTestDeviceMapper()
 	entity := &diode.Device{}
