@@ -54,18 +54,28 @@ func newMACMatchStub(mac *diode.MACAddress) *diode.MACAddress {
 // INVARIANT: the fields here must be a superset of (a) every
 // dcim.device matcher field that snmp-discovery currently populates
 // on the rich Device, and (b) every dcim.device field NetBox treats
-// as required for create. As of this change, snmp-discovery DOES
-// populate VcPosition + VirtualChassis on non-master member Devices
-// when emitting a stack, but those are intentionally NOT carried on
-// stubs: matcher #8 (virtual_chassis + vc_position) sits behind
-// higher-precedence matchers (asset_tag, primary_ip*, name+site+tenant,
-// name+site, rack+position+face) that every member Device already
-// carries via the fields above. Copying the rich VirtualChassis subtree
-// onto every nested stub would just bloat the wire payload. If a new
-// mapper starts setting other matcher fields, or if NetBox adds new
-// required fields for dcim.device, this stub must grow to match —
-// otherwise the rich entity and the stub will resolve via different
-// matcher precedence paths or fail validation on the first cycle.
+// as required for create. As of this branch:
+//
+//   - AssetTag IS populated (via PolicyConfig.Defaults.AssetTag,
+//     literal or OID reference). The stub MUST carry it so rich and
+//     stub resolve via the same matcher precedence path.
+//
+//   - VcPosition and VirtualChassis ARE populated on non-master
+//     member Devices when emitting a stack, but are intentionally
+//     NOT carried on stubs. Matcher #8 (virtual_chassis plus
+//     vc_position) sits behind higher-precedence matchers — asset_tag,
+//     primary_ip*, name+site+tenant, name+site, rack+position+face —
+//     that every member Device already carries via the fields above.
+//     Copying the rich VirtualChassis subtree onto every nested stub
+//     would just bloat the wire payload.
+//
+//   - OobIp, Rack, Position, and Face remain not-populated.
+//
+// If a new mapper starts setting other matcher fields, or if NetBox
+// adds new required fields for dcim.device, this stub must grow to
+// match — otherwise the rich entity and the stub will resolve via
+// different matcher precedence paths or fail validation on the first
+// cycle.
 //
 // Metadata.source_match (e.g. netbox_id) is the diode-netbox-plugin's
 // PK-based match path, so it must not diverge between rich and stub.
@@ -81,6 +91,7 @@ func newDeviceStub(d *diode.Device) *diode.Device {
 		Tenant:     d.Tenant,
 		DeviceType: d.DeviceType,
 		Role:       d.Role,
+		AssetTag:   d.AssetTag,
 		PrimaryIp4: newIPMatchStub(d.PrimaryIp4),
 		PrimaryIp6: newIPMatchStub(d.PrimaryIp6),
 	}
