@@ -2,6 +2,7 @@ package mapping
 
 import (
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -83,4 +84,71 @@ func TestDeviceMapper_applyDefaults_LocationOverridesPreSetValue(t *testing.T) {
 	require.NotNil(t, entity.Location)
 	require.NotNil(t, entity.Location.Name)
 	assert.Equal(t, "DC1-Building-A", *entity.Location.Name)
+}
+
+func TestDeviceMapper_applyDefaults_AssetTagLiteral(t *testing.T) {
+	m := newTestDeviceMapper()
+	entity := &diode.Device{}
+	defaults := &config.Defaults{AssetTag: "ASSET-007"}
+	m.applyDefaults(entity, defaults, nil)
+	require.NotNil(t, entity.AssetTag)
+	assert.Equal(t, "ASSET-007", *entity.AssetTag)
+}
+
+func TestDeviceMapper_applyDefaults_AssetTagOIDReferenceResolves(t *testing.T) {
+	m := newTestDeviceMapper()
+	entity := &diode.Device{}
+	defaults := &config.Defaults{AssetTag: ".1.3.6.1.2.1.1.4.0"}
+	walked := map[string]string{".1.3.6.1.2.1.1.4.0": "asset-12345"}
+	m.applyDefaults(entity, defaults, walked)
+	require.NotNil(t, entity.AssetTag)
+	assert.Equal(t, "asset-12345", *entity.AssetTag)
+}
+
+func TestDeviceMapper_applyDefaults_AssetTagOIDReferenceMissingSkips(t *testing.T) {
+	m := newTestDeviceMapper()
+	entity := &diode.Device{}
+	defaults := &config.Defaults{AssetTag: ".1.3.6.1.2.1.1.4.0"}
+	m.applyDefaults(entity, defaults, map[string]string{})
+	assert.Nil(t, entity.AssetTag)
+}
+
+func TestDeviceMapper_applyDefaults_AssetTagOverridesPreSetValue(t *testing.T) {
+	m := newTestDeviceMapper()
+	existing := "PRE-EXISTING"
+	entity := &diode.Device{AssetTag: &existing}
+	defaults := &config.Defaults{AssetTag: "FROM-CONFIG"}
+	m.applyDefaults(entity, defaults, nil)
+	require.NotNil(t, entity.AssetTag)
+	assert.Equal(t, "FROM-CONFIG", *entity.AssetTag)
+}
+
+func TestDeviceMapper_applyDefaults_AssetTagEmptyConfigIsNoop(t *testing.T) {
+	m := newTestDeviceMapper()
+	entity := &diode.Device{}
+	defaults := &config.Defaults{}
+	m.applyDefaults(entity, defaults, nil)
+	assert.Nil(t, entity.AssetTag)
+}
+
+func TestDeviceMapper_applyDefaults_AssetTagExceedsMaxLengthSkips(t *testing.T) {
+	// NetBox asset_tag is CharField(max_length=50). The diode SDK does
+	// not validate; we warn-skip rather than truncate to avoid silent
+	// uniqueness collisions.
+	m := newTestDeviceMapper()
+	entity := &diode.Device{}
+	tooLong := strings.Repeat("x", 51)
+	defaults := &config.Defaults{AssetTag: tooLong}
+	m.applyDefaults(entity, defaults, nil)
+	assert.Nil(t, entity.AssetTag)
+}
+
+func TestDeviceMapper_applyDefaults_AssetTagExactlyMaxLengthSet(t *testing.T) {
+	m := newTestDeviceMapper()
+	entity := &diode.Device{}
+	exact := strings.Repeat("x", 50)
+	defaults := &config.Defaults{AssetTag: exact}
+	m.applyDefaults(entity, defaults, nil)
+	require.NotNil(t, entity.AssetTag)
+	assert.Equal(t, exact, *entity.AssetTag)
 }

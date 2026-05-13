@@ -923,6 +923,12 @@ func (m *InterfaceMapper) FormatMACAddress(input string) (string, error) {
 	return output, nil
 }
 
+// assetTagMaxLen mirrors NetBox's dcim.Device.asset_tag column
+// (CharField(max_length=50)). Resolved AssetTag values that exceed
+// this length are warn-skipped rather than truncated so we don't
+// introduce silent uniqueness collisions.
+const assetTagMaxLen = 50
+
 // DeviceMapper is a struct that maps devices to entities
 type DeviceMapper struct {
 	manufacturers data.ManufacturerRetriever
@@ -982,6 +988,20 @@ func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defa
 				loc.Site = &diode.Site{Name: &defaults.Site}
 			}
 			entity.Location = loc
+		}
+	}
+
+	if defaults.AssetTag != "" {
+		if resolved, ok := data.ResolveDefault(defaults.AssetTag, walked); ok {
+			if len(resolved) > assetTagMaxLen {
+				m.logger.Warn(
+					"defaults.asset_tag resolved value exceeds NetBox max length; skipping",
+					"max_length", assetTagMaxLen,
+					"value_length", len(resolved),
+				)
+			} else {
+				entity.AssetTag = &resolved
+			}
 		}
 	}
 }
