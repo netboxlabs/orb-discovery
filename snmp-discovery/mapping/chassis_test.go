@@ -395,7 +395,7 @@ func TestBuildMemberDevice_CarriesVcPositionAndMatcherBlock(t *testing.T) {
 
 	dev := buildMemberDevice(master, member, masterRef, "3850-stack")
 
-	assert.Equal(t, "3850-stack-stack-2", *dev.Name)
+	assert.Equal(t, "3850-stack-2", *dev.Name)
 	assert.Equal(t, "FCW2147L0K4", *dev.Serial)
 	assert.Nil(t, dev.AssetTag, "AssetTag must be CLEARED on members")
 	assert.Equal(t, int64(2), *dev.VcPosition)
@@ -492,7 +492,7 @@ func TestTranslateAsStack_TwoMemberStackEmitsVCAndMember(t *testing.T) {
 
 	// Interface routing: Gi1/0/1 -> master; Gi2/0/1 -> member.
 	assert.Equal(t, master, ifaceM1.Device, "Gi1/0/1 stays on master")
-	assert.Equal(t, "3850-stack.example-stack-2", *ifaceM2.Device.Name,
+	assert.Equal(t, "3850-stack.example-2", *ifaceM2.Device.Name,
 		"Gi2/0/1 routes to member 2")
 }
 
@@ -546,7 +546,7 @@ func TestTranslateAsStack_CiscoStackWiseVirtual_EmitsVCAndMember(t *testing.T) {
 
 	// Interface routing via ifName parsing.
 	assert.Equal(t, master, ifaceM1.Device, "HundredGigE1/0/1 stays on master")
-	assert.Equal(t, "c9400x-svl.example-stack-2", *ifaceM2.Device.Name,
+	assert.Equal(t, "c9400x-svl.example-2", *ifaceM2.Device.Name,
 		"HundredGigE2/0/1 routes to member 2")
 }
 
@@ -634,7 +634,7 @@ func TestTranslateAsStack_IPRoutedToMemberViaAssignedObject(t *testing.T) {
 	}
 	assert.NotNil(t, seenIP)
 	iface, _ := seenIP.AssignedObject.(*diode.Interface)
-	assert.Equal(t, "3850-stack.example-stack-2", *iface.Device.Name,
+	assert.Equal(t, "3850-stack.example-2", *iface.Device.Name,
 		"IP.AssignedObject.Interface.Device must be re-pointed to member-2")
 }
 
@@ -704,7 +704,7 @@ func TestTranslateAsStack_ArubaCX_2MemberVSF(t *testing.T) {
 	}
 	assert.Len(t, members, 1)
 	assert.Equal(t, "SG12346", *members[0].Serial)
-	assert.Equal(t, "aruba-cx-stack-stack-2", *memberIface.Device.Name)
+	assert.Equal(t, "aruba-cx-stack-2", *memberIface.Device.Name)
 }
 
 func TestTranslateAsStack_JunosQFX_4MemberVC(t *testing.T) {
@@ -734,7 +734,7 @@ func TestTranslateAsStack_JunosQFX_4MemberVC(t *testing.T) {
 	assert.Equal(t, "BR0000000001", *master.Serial)
 
 	// xe-2/0/0 routes to FPC 2 member.
-	assert.Equal(t, "vc-edge-01-stack-2", *fpc2Iface.Device.Name)
+	assert.Equal(t, "vc-edge-01-2", *fpc2Iface.Device.Name)
 }
 
 // stubManufacturers and stubDeviceLookup satisfy the data.ManufacturerRetriever

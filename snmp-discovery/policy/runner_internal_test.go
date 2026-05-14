@@ -1069,7 +1069,7 @@ func TestRunWithMetadata_EmitsFullStackShape(t *testing.T) {
 	require.NotNil(t, gi1.Device)
 	require.NotNil(t, gi2.Device)
 	assert.Equal(t, "3850-stack", *gi1.Device.Name, "Gi1/0/1 routes to master")
-	assert.Equal(t, "3850-stack-stack-2", *gi2.Device.Name, "Gi2/0/1 routes to member")
+	assert.Equal(t, "3850-stack-2", *gi2.Device.Name, "Gi2/0/1 routes to member")
 }
 
 func TestNewRunner_RangeScheduledWithCron(t *testing.T) {

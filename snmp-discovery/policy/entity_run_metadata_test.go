@@ -200,7 +200,7 @@ func TestAnnotateDeviceWithSourceMatch_SkipsMemberDevices(t *testing.T) {
 	pos := int64(2)
 	master := &diode.Device{Name: stringPtr("master")}
 	member := &diode.Device{
-		Name:       stringPtr("master-stack-2"),
+		Name:       stringPtr("master-2"),
 		VcPosition: &pos, // member identity signal
 	}
 	annotateDeviceWithSourceMatch([]diode.Entity{master, member}, 42)
@@ -218,7 +218,7 @@ func TestAnnotateDeviceWithSourceMatch_AnnotatesVirtualChassisMaster(t *testing.
 	two := int64(2)
 	// member Device: VcPosition != nil, so the member itself must NOT get source_match.
 	memberDev := &diode.Device{
-		Name:       stringPtr("3850-stack-stack-2"),
+		Name:       stringPtr("3850-stack-2"),
 		VcPosition: &two,
 		VirtualChassis: &diode.VirtualChassis{
 			Name:   stringPtr("3850-stack"),

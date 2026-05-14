@@ -259,7 +259,7 @@ func buildMasterRef(master *diode.Device) *diode.Device {
 
 // buildMemberDevice constructs a non-master member Device proto.
 //
-//   - Name = "{vcName}-stack-{memberID}" (entPhysicalName like
+//   - Name = "{vcName}-{memberID}" (entPhysicalName like
 //     "Switch 2" is intentionally not used: it would produce poor
 //     NetBox names and collide across stacks in the same site).
 //   - Serial = per-member entPhysicalSerialNum.
@@ -270,7 +270,7 @@ func buildMasterRef(master *diode.Device) *diode.Device {
 //   - DeviceType from member.Model when populated, else inherit master's.
 //   - Site / Tenant / Role / Platform inherited from master.
 func buildMemberDevice(master *diode.Device, member ChassisMember, masterRef *diode.Device, vcName string) *diode.Device {
-	name := fmt.Sprintf("%s-stack-%d", vcName, member.ID)
+	name := fmt.Sprintf("%s-%d", vcName, member.ID)
 	pos := int64(member.ID)
 	dev := &diode.Device{
 		Name:       &name,
