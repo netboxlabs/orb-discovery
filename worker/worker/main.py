@@ -182,7 +182,7 @@ def main():
         if args.otel_endpoint:
             setup_metrics_export(args.otel_endpoint, args.otel_export_period)
 
-        # Install the OrbPackageFinder so bundle-delivered plugins are importable.
+        # Install the package finder so bundle-delivered plugins are importable.
         install_finder()
 
         config = DiodeConfig(

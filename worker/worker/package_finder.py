@@ -16,9 +16,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Root where orb-agent extracts bundles:
+# Root where the package manager extracts bundles:
 #   BUNDLES_ROOT/<bundle_name>/current/  (symlink → <version>/)
-BUNDLES_ROOT = Path(os.getenv("ORB_BUNDLES_ROOT", "/opt/orb/packages"))
+BUNDLES_ROOT = Path(os.environ["BUNDLES_ROOT_PATH"])
 
 
 class OrbPackageFinder(importlib.abc.MetaPathFinder):
