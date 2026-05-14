@@ -11,6 +11,7 @@ import netboxlabs.diode.sdk.version as SdkVersion
 import uvicorn
 from netboxlabs.diode.sdk import DiodeClient
 
+from worker.package_finder import install_finder
 from worker.metrics import setup_metrics_export
 from worker.models import DiodeConfig
 from worker.server import app, manager
@@ -180,6 +181,9 @@ def main():
 
         if args.otel_endpoint:
             setup_metrics_export(args.otel_endpoint, args.otel_export_period)
+
+        # Install the OrbPackageFinder so bundle-delivered plugins are importable.
+        install_finder()
 
         config = DiodeConfig(
             target=target,
