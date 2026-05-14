@@ -58,7 +58,7 @@ class PolicyRunner:
             "\n", ""
         )
 
-        # Evict stale cached modules if orb-agent has swapped the bundle
+        # Evict stale cached modules
         # symlink to a newer version since we last imported this package.
         _maybe_evict(policy.config.package)
 
