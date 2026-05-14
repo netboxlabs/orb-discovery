@@ -12,18 +12,12 @@ import pytest
 import worker.package_finder as pf
 from worker.package_finder import OrbPackageFinder, _maybe_evict, install_finder
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _make_bundle(root: Path, bundle_name: str, version: str, module_name: str) -> Path:
-    """
-    Create a minimal on-disk bundle under root/<bundle_name>/<version>/
-    with a `current` symlink pointing at it, and a importable package inside.
-
-    Returns the version directory path.
-    """
+    """Create a bundle directory with a current symlink and an importable package."""
     version_dir = root / bundle_name / version
     pkg_dir = version_dir / module_name
     pkg_dir.mkdir(parents=True)
@@ -38,10 +32,7 @@ def _make_bundle(root: Path, bundle_name: str, version: str, module_name: str) -
 
 
 def _make_single_file_bundle(root: Path, bundle_name: str, version: str, module_name: str) -> Path:
-    """
-    Like _make_bundle but installs a single-file module (module_name.py)
-    instead of a package directory.
-    """
+    """Create a bundle directory with a current symlink and a single-file module."""
     version_dir = root / bundle_name / version
     version_dir.mkdir(parents=True)
     (version_dir / f"{module_name}.py").write_text(f'VERSION = "{version}"\n')
@@ -67,17 +58,18 @@ def _remove_from_sys_modules(*names: str):
 # ---------------------------------------------------------------------------
 
 class TestOrbPackageFinderFindSpec:
+    """Tests for OrbPackageFinder.find_spec."""
 
     def test_resolves_package_from_current_symlink(self, tmp_path, monkeypatch):
         """find_spec returns a valid spec for a package inside a current/ symlink."""
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
-        _make_bundle(tmp_path, "nbl-cisco-meraki", "0.1.0", "nbl_cisco_meraki")
+        _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
         finder = OrbPackageFinder()
-        spec = finder.find_spec("nbl_cisco_meraki", None)
+        spec = finder.find_spec("nbl_custom_worker", None)
 
         assert spec is not None
-        assert spec.name == "nbl_cisco_meraki"
+        assert spec.name == "nbl_custom_worker"
 
     def test_resolves_single_file_module(self, tmp_path, monkeypatch):
         """find_spec resolves a single-file module (module.py) from a bundle."""
@@ -95,12 +87,12 @@ class TestOrbPackageFinderFindSpec:
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path / "nonexistent")
 
         finder = OrbPackageFinder()
-        assert finder.find_spec("nbl_cisco_meraki", None) is None
+        assert finder.find_spec("nbl_custom_worker", None) is None
 
     def test_returns_none_when_module_not_in_any_bundle(self, tmp_path, monkeypatch):
         """find_spec returns None for a module not present in any bundle."""
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
-        _make_bundle(tmp_path, "nbl-cisco-meraki", "0.1.0", "nbl_cisco_meraki")
+        _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
         finder = OrbPackageFinder()
         assert finder.find_spec("nbl_something_else", None) is None
@@ -184,78 +176,78 @@ class TestMaybeEvict:
     def test_noop_when_module_not_imported(self, tmp_path, monkeypatch):
         """_maybe_evict does nothing when the module is not in sys.modules."""
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
-        _make_bundle(tmp_path, "nbl-cisco-meraki", "0.1.0", "nbl_cisco_meraki")
-        _remove_from_sys_modules("nbl_cisco_meraki")
+        _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
+        _remove_from_sys_modules("nbl_custom_worker")
 
-        _maybe_evict("nbl_cisco_meraki")  # not in sys.modules → silent return
+        _maybe_evict("nbl_custom_worker")  # not in sys.modules → silent return
 
     def test_stamps_bundle_path_on_first_call(self, tmp_path, monkeypatch):
         """_maybe_evict stamps __orb_bundle_path__ on the module the first time it sees it."""
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
-        _make_bundle(tmp_path, "nbl-cisco-meraki", "0.1.0", "nbl_cisco_meraki")
+        _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
-        fake = types.ModuleType("nbl_cisco_meraki")
-        sys.modules["nbl_cisco_meraki"] = fake
+        fake = types.ModuleType("nbl_custom_worker")
+        sys.modules["nbl_custom_worker"] = fake
         try:
-            _maybe_evict("nbl_cisco_meraki")
+            _maybe_evict("nbl_custom_worker")
             assert hasattr(fake, "__orb_bundle_path__")
             assert "0.1.0" in fake.__orb_bundle_path__
         finally:
-            _remove_from_sys_modules("nbl_cisco_meraki")
+            _remove_from_sys_modules("nbl_custom_worker")
 
     def test_does_not_evict_when_symlink_unchanged(self, tmp_path, monkeypatch):
         """_maybe_evict leaves sys.modules intact when the symlink hasn't moved."""
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
-        version_dir = _make_bundle(tmp_path, "nbl-cisco-meraki", "0.1.0", "nbl_cisco_meraki")
+        version_dir = _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
-        fake = types.ModuleType("nbl_cisco_meraki")
+        fake = types.ModuleType("nbl_custom_worker")
         fake.__orb_bundle_path__ = str(version_dir)
-        sys.modules["nbl_cisco_meraki"] = fake
+        sys.modules["nbl_custom_worker"] = fake
         try:
-            _maybe_evict("nbl_cisco_meraki")
-            assert "nbl_cisco_meraki" in sys.modules
+            _maybe_evict("nbl_custom_worker")
+            assert "nbl_custom_worker" in sys.modules
         finally:
-            _remove_from_sys_modules("nbl_cisco_meraki")
+            _remove_from_sys_modules("nbl_custom_worker")
 
     def test_evicts_module_tree_when_symlink_changes(self, tmp_path, monkeypatch):
         """_maybe_evict drops the full package subtree when the symlink moves to a new version."""
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
 
         # Start at 0.1.0
-        _make_bundle(tmp_path, "nbl-cisco-meraki", "0.1.0", "nbl_cisco_meraki")
-        old_path = str(tmp_path / "nbl-cisco-meraki" / "0.1.0")
+        _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
+        old_path = str(tmp_path / "nbl-custom-worker" / "0.1.0")
 
         # Populate sys.modules with the old version tree
-        fake_root = types.ModuleType("nbl_cisco_meraki")
+        fake_root = types.ModuleType("nbl_custom_worker")
         fake_root.__orb_bundle_path__ = old_path
         fake_sub = types.ModuleType("nbl_cisco_meraki.runner")
-        sys.modules["nbl_cisco_meraki"] = fake_root
+        sys.modules["nbl_custom_worker"] = fake_root
         sys.modules["nbl_cisco_meraki.runner"] = fake_sub
 
         # Upgrade symlink to 0.2.0
-        _make_bundle(tmp_path, "nbl-cisco-meraki", "0.2.0", "nbl_cisco_meraki")
+        _make_bundle(tmp_path, "nbl-custom-worker", "0.2.0", "nbl_custom_worker")
 
         try:
-            _maybe_evict("nbl_cisco_meraki")
-            assert "nbl_cisco_meraki" not in sys.modules
-            assert "nbl_cisco_meraki.runner" not in sys.modules
+            _maybe_evict("nbl_custom_worker")
+            assert "nbl_custom_worker" not in sys.modules
+            assert "nbl_custom_worker.runner" not in sys.modules
         finally:
-            _remove_from_sys_modules("nbl_cisco_meraki")
+            _remove_from_sys_modules("nbl_custom_worker")
 
     def test_handles_hyphen_to_underscore_bundle_dir(self, tmp_path, monkeypatch):
         """_maybe_evict finds bundle dir using hyphens when module name uses underscores."""
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
         # Bundle dir uses hyphens; module name uses underscores
-        _make_bundle(tmp_path, "nbl-cisco-meraki", "0.1.0", "nbl_cisco_meraki")
+        _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
-        fake = types.ModuleType("nbl_cisco_meraki")
-        sys.modules["nbl_cisco_meraki"] = fake
+        fake = types.ModuleType("nbl_custom_worker")
+        sys.modules["nbl_custom_worker"] = fake
         try:
-            _maybe_evict("nbl_cisco_meraki")
+            _maybe_evict("nbl_custom_worker")
             # Should have stamped the path (found via hyphen dir name)
             assert hasattr(fake, "__orb_bundle_path__")
         finally:
-            _remove_from_sys_modules("nbl_cisco_meraki")
+            _remove_from_sys_modules("nbl_custom_worker")
 
 
 # ---------------------------------------------------------------------------

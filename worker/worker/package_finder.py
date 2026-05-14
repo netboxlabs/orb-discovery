@@ -1,15 +1,14 @@
 #!/usr/bin/env python
 # Copyright 2025 NetBox Labs Inc
 """
-Orb Worker Package Finder.
+Worker Package Finder.
 
-Discovers plugins installed by orb-agent's PackageManager from disk.
-Bundles are extracted to /opt/orb/packages/<name>/current/ and this
+Discovers plugins installed by the PackageManager from disk.
+Bundles are extracted to BUNDLES_ROOT/<name>/current/ and this
 finder makes them importable without pip.
 """
 
 import importlib.abc
-import importlib.machinery
 import importlib.util
 import logging
 import os
@@ -18,118 +17,84 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Root directory where orb-agent extracts bundles.
-# Matches the path in the OBS-2925 architecture:
-#   /opt/orb/packages/<name>/current/  (symlink → <version>/)
-BUNDLES_ROOT = Path(os.getenv("ORB_BUNDLES_ROOT", "/opt/orb/packages"))
+# Root directory where the package manager extracts bundles:
+#   BUNDLES_ROOT/<bundle_name>/current/  (symlink → <version>/)
+BUNDLES_ROOT = Path(os.environ["BUNDLES_ROOT_PATH"])
 
 
 class OrbPackageFinder(importlib.abc.MetaPathFinder):
     """
-    sys.meta_path finder that discovers modules from orb-agent bundle directories.
+    sys.meta_path finder that resolves modules from bundle directories.
 
-    Each bundle is extracted by orb-agent's PackageManager to:
-        BUNDLES_ROOT/<bundle_name>/current/
-
-    where `current` is an atomic symlink pointing at the active version directory.
-    This finder adds those directories to the module search path on demand so that
-    `import <module>` resolves correctly without any pip involvement.
+    Appended last in sys.meta_path so it only fires after stdlib and
+    pip-installed packages are exhausted.
     """
 
     def find_spec(self, fullname: str, path, target=None):
-        """
-        Locate a module spec by scanning active bundle directories.
-
-        Only the top-level package name is used for the directory scan;
-        sub-module resolution is handled by the standard machinery once
-        the top-level package path is registered.
-        """
+        """Locate a module spec by scanning active bundle current/ directories."""
         top_level = fullname.split(".")[0]
 
         for bundle_dir in self._active_bundle_dirs():
+            # Package directory (top_level/__init__.py)
             candidate = bundle_dir / top_level
-            init = candidate / "__init__.py"
-
-            if init.is_file():
+            if (candidate / "__init__.py").is_file():
                 spec = importlib.util.spec_from_file_location(
                     fullname,
-                    init,
+                    candidate / "__init__.py",
                     submodule_search_locations=[str(candidate)],
                 )
                 if spec is not None:
-                    # Stamp the resolved bundle path so _maybe_evict can detect upgrades.
-                    self._stamp_bundle_path(fullname, bundle_dir)
-                    logger.debug(
-                        f"OrbPackageFinder: resolved '{fullname}' from {bundle_dir}"
-                    )
+                    logger.debug(f"PackageFinder: resolved '{fullname}' from {bundle_dir}")
                     return spec
 
-            # Single-file module (e.g. top_level.py)
+            # Single-file module (top_level.py)
             module_file = bundle_dir / f"{top_level}.py"
             if module_file.is_file():
                 spec = importlib.util.spec_from_file_location(fullname, module_file)
                 if spec is not None:
-                    self._stamp_bundle_path(fullname, bundle_dir)
-                    logger.debug(
-                        f"OrbPackageFinder: resolved '{fullname}' from {bundle_dir}"
-                    )
+                    logger.debug(f"PackageFinder: resolved '{fullname}' from {bundle_dir}")
                     return spec
 
         return None
 
     def _active_bundle_dirs(self) -> list[Path]:
-        """
-        Return the list of `current/` directories for all installed bundles.
-
-        Skips bundles where the symlink is missing or broken.
-        """
+        """Return current/ dirs for all bundles with a valid symlink."""
         if not BUNDLES_ROOT.is_dir():
             return []
-
-        dirs = []
-        for bundle in BUNDLES_ROOT.iterdir():
-            current = bundle / "current"
-            if current.exists():  # follows symlink; False if broken
-                dirs.append(current)
-        return dirs
-
-    @staticmethod
-    def _stamp_bundle_path(fullname: str, bundle_dir: Path) -> None:
-        """
-        Stamp __orb_bundle_path__ on the top-level module after import.
-
-        This is the value _maybe_evict() compares against to detect
-        whether orb-agent has swapped the symlink to a newer version.
-        """
-        top_level = fullname.split(".")[0]
-        mod = sys.modules.get(top_level)
-        if mod is not None:
-            resolved = str((bundle_dir / "..").resolve() / "current")
-            try:
-                resolved = str((bundle_dir).resolve())
-            except OSError:
-                pass
-            mod.__orb_bundle_path__ = resolved
+        return [
+            b / "current"
+            for b in BUNDLES_ROOT.iterdir()
+            if (b / "current").exists()
+        ]
 
 
 def _maybe_evict(package_name: str) -> None:
     """
-    Evict a package from sys.modules if its `current` symlink has changed.
+    Evict a package from sys.modules if its bundle symlink has changed.
 
-    Called from PolicyRunner.setup() before loading a backend class so that
-    a version upgrade applied by orb-agent's PackageManager takes effect
-    without restarting the worker process.
+    Called in PolicyRunner.setup() before load_class() so a version upgrade
+    by the PackageManager takes effect without restarting the worker.
+
+    The resolved symlink path is stamped onto the module as __orb_bundle_path__
+    here (post-import) rather than in find_spec (pre-import) so sys.modules
+    is guaranteed to contain the module when we write the attribute.
 
     Args:
     ----
-        package_name: The top-level module name (e.g. "nbl_cisco_meraki").
+        package_name: Top-level module name (e.g. "nbl_custom_worker").
 
     """
-    bundle_dir = BUNDLES_ROOT / package_name
-    current = bundle_dir / "current"
-
-    if not current.exists():
-        # Bundle not managed by OrbPackageFinder; nothing to evict.
+    # Derive the bundle directory name: module names use underscores,
+    # bundle dirs may use hyphens (e.g. nbl-custom-worker). Check both.
+    bundles_root = BUNDLES_ROOT
+    candidates = [
+        bundles_root / package_name,
+        bundles_root / package_name.replace("_", "-"),
+    ]
+    current = next(
+        (c / "current" for c in candidates if (c / "current").exists()), None
+    )
+    if current is None:
         return
 
     try:
@@ -139,11 +104,15 @@ def _maybe_evict(package_name: str) -> None:
 
     mod = sys.modules.get(package_name)
     if mod is None:
-        # Not yet imported — nothing to evict.
         return
 
-    cached_path = getattr(mod, "__orb_bundle_path__", None)
-    if cached_path != resolved:
+    # Stamp on first sight so we have a baseline for future calls.
+    cached = getattr(mod, "__orb_bundle_path__", None)
+    if cached is None:
+        mod.__orb_bundle_path__ = resolved
+        return
+
+    if cached != resolved:
         to_remove = [
             k for k in sys.modules
             if k == package_name or k.startswith(f"{package_name}.")
@@ -151,26 +120,17 @@ def _maybe_evict(package_name: str) -> None:
         for key in to_remove:
             del sys.modules[key]
         logger.info(
-            f"OrbPackageFinder: evicted {len(to_remove)} module(s) for '{package_name}' "
-            f"(symlink: {cached_path!r} → {resolved!r})"
+            f"PackageFinder: evicted {len(to_remove)} module(s) for '{package_name}' "
+            f"({cached!r} → {resolved!r})"
         )
     else:
-        logger.debug(
-            f"OrbPackageFinder: '{package_name}' is current, no eviction needed"
-        )
+        logger.debug(f"PackageFinder: '{package_name}' is current, no eviction needed")
 
 
 def install_finder() -> None:
-    """
-    Install OrbPackageFinder into sys.meta_path if not already present.
-
-    Safe to call multiple times (idempotent).
-    Called once from worker/main.py at startup.
-    """
-    for finder in sys.meta_path:
-        if isinstance(finder, OrbPackageFinder):
-            logger.debug("OrbPackageFinder: already installed, skipping")
-            return
-
+    """Install OrbPackageFinder into sys.meta_path (idempotent)."""
+    if any(isinstance(f, OrbPackageFinder) for f in sys.meta_path):
+        logger.debug("PackageFinder: already installed, skipping")
+        return
     sys.meta_path.append(OrbPackageFinder())
-    logger.info(f"OrbPackageFinder: installed (bundles root: {BUNDLES_ROOT})")
+    logger.info(f"PackageFinder: installed (bundles root: {BUNDLES_ROOT})")
