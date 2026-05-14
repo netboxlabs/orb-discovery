@@ -116,18 +116,19 @@ func TestRouteIfIndex_AliasToDroppedChassisReturnsDroppedID(t *testing.T) {
 // of Go's randomized `oids` iteration order.
 //
 // Precedence (newChassisRouter):
-//  1. Prefer rows with entAliasLogicalIndexOrZero == 0 (RFC 6933
-//     default mapping) over non-zero rows.
-//  2. Among ties, prefer the lowest entPhysicalIndex.
+//  1. Prefer rows with entAliasLogicalIndexOrZero != 0 (RFC 6933
+//     per-logical-entity mapping) over the zero-indexed default.
+//  2. Among non-zero rows, prefer the lowest logical index.
+//  3. Final tiebreaker: lowest entPhysicalIndex.
 func TestRouteIfIndex_DuplicateIfIndexDeterministicResolution(t *testing.T) {
 	logger := slog.Default()
 	oids := fixtureCisco3850TwoMemberStack()
 
 	// Both rows resolve to ifIndex 10301. The first is the default
-	// mapping (logical=0) for entPhysicalIndex 1; the second is a
-	// non-zero logical mapping (logical=5) for entPhysicalIndex 1000.
-	// Per the resolution rule, the logical=0 row must win → ent 1
-	// → member id 1.
+	// mapping (logical=0) for entPhysicalIndex 1 (chassis 1 / member 1);
+	// the second is a non-zero logical mapping (logical=5) for
+	// entPhysicalIndex 1000 (chassis 2 / member 2). Per the resolution
+	// rule, the non-zero row must win → ent 1000 → member id 2.
 	oids[".1.3.6.1.2.1.47.1.3.2.1.2.1.0"] = Value{Value: ".1.3.6.1.2.1.2.2.1.1.10301"}
 	oids[".1.3.6.1.2.1.47.1.3.2.1.2.1000.5"] = Value{Value: ".1.3.6.1.2.1.2.2.1.1.10301"}
 
@@ -139,7 +140,28 @@ func TestRouteIfIndex_DuplicateIfIndexDeterministicResolution(t *testing.T) {
 		r := newChassisRouter(inv, oids, logger)
 		id, ok := r.routeIfIndex(10301)
 		assert.True(t, ok, "iter %d: routeIfIndex must resolve duplicate-row ifIndex", i)
-		assert.Equal(t, 1, id, "iter %d: logical=0 row (ent 1, member 1) must win over logical=5 row", i)
+		assert.Equal(t, 2, id, "iter %d: non-zero logical row (ent 1000, member 2) must win over logical=0 row", i)
+	}
+}
+
+// TestRouteIfIndex_DuplicateNonZeroLogicalLowestLogicalWins covers
+// the second precedence rung: two non-zero logical rows competing
+// for the same ifIndex. The row with the lower logical index wins.
+func TestRouteIfIndex_DuplicateNonZeroLogicalLowestLogicalWins(t *testing.T) {
+	logger := slog.Default()
+	oids := fixtureCisco3850TwoMemberStack()
+
+	// logical=2 on chassis 1000 (member 2), logical=7 on chassis 1
+	// (member 1). Lower logical index (2) wins → member 2.
+	oids[".1.3.6.1.2.1.47.1.3.2.1.2.1000.2"] = Value{Value: ".1.3.6.1.2.1.2.2.1.1.10501"}
+	oids[".1.3.6.1.2.1.47.1.3.2.1.2.1.7"] = Value{Value: ".1.3.6.1.2.1.2.2.1.1.10501"}
+
+	inv := extractInventory(oids, logger)
+	for i := 0; i < 25; i++ {
+		r := newChassisRouter(inv, oids, logger)
+		id, ok := r.routeIfIndex(10501)
+		assert.True(t, ok, "iter %d", i)
+		assert.Equal(t, 2, id, "iter %d: lowest logical-index (2) wins → member 2", i)
 	}
 }
 

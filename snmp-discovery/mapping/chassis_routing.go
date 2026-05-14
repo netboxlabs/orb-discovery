@@ -186,25 +186,35 @@ func newChassisRouter(inv ChassisInventory, oids ObjectIDValueMap, logger *slog.
 
 	// Resolve each ifIndex to a single entPhysicalIndex with a
 	// deterministic precedence:
-	//   1. Prefer rows where entAliasLogicalIndexOrZero == 0. Per
-	//      RFC 6933, these are the "default mapping for the
-	//      corresponding physical entity"; non-zero rows are auxiliary
-	//      per-logical-entity mappings.
-	//   2. Among ties, prefer the lowest entPhysicalIndex. Matches the
+	//   1. Prefer rows where entAliasLogicalIndexOrZero != 0. RFC 6933
+	//      defines non-zero rows as the per-logical-entity mapping
+	//      carrying explicit context, taking precedence over the
+	//      zero-indexed "default mapping in the absence of any
+	//      logical entity". When both kinds of rows resolve to the
+	//      same ifIndex, the logical-entity row is the authoritative
+	//      view of which physical component owns the interface.
+	//   2. Among non-zero rows, prefer the LOWEST logical index — this
+	//      keeps the resolution stable when several per-entity rows
+	//      compete (rare in practice; defensive).
+	//   3. Final tiebreaker: lowest entPhysicalIndex. Matches the
 	//      lowest-id master-pinning convention used elsewhere and
 	//      keeps the resolution stable across re-runs.
 	for ifIdx, rows := range candidates {
 		slices.SortFunc(rows, func(a, b aliasRow) int {
-			aZero := 0
-			if a.logicalIdx != 0 {
-				aZero = 1
+			aZero := 1
+			if a.logicalIdx == 0 {
+				aZero = 0
 			}
-			bZero := 0
-			if b.logicalIdx != 0 {
-				bZero = 1
+			bZero := 1
+			if b.logicalIdx == 0 {
+				bZero = 0
 			}
 			if aZero != bZero {
-				return aZero - bZero
+				// Non-zero (aZero=1 / bZero=1) should sort FIRST.
+				return bZero - aZero
+			}
+			if a.logicalIdx != b.logicalIdx {
+				return a.logicalIdx - b.logicalIdx
 			}
 			return a.entInt - b.entInt
 		})
