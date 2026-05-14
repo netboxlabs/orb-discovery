@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # Copyright 2025 NetBox Labs Inc
-"""Orb Worker Package Finder.
+"""
+Orb Worker Package Finder.
 
 Discovers plugins installed by orb-agent's PackageManager from disk.
 Bundles are extracted to /opt/orb/packages/<name>/current/ and this
