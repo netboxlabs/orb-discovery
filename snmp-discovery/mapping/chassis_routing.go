@@ -3,6 +3,7 @@ package mapping
 import (
 	"log/slog"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -106,6 +107,17 @@ type chassisRouter struct {
 	logger       *slog.Logger
 }
 
+// aliasRow is one parsed entAliasMappingTable row used to build the
+// ifIndex -> entPhysicalIndex resolution. Captured BEFORE final
+// resolution so multiple rows hitting the same ifIndex can be
+// resolved deterministically (Go map iteration over `oids` is
+// randomized).
+type aliasRow struct {
+	ent        string // entPhysicalIndex (string form, matches inventory keys)
+	logicalIdx int    // entAliasLogicalIndexOrZero
+	entInt     int    // entPhysicalIndex parsed as int for stable sort
+}
+
 func newChassisRouter(inv ChassisInventory, oids ObjectIDValueMap, logger *slog.Logger) *chassisRouter {
 	r := &chassisRouter{
 		inventory:       inv,
@@ -121,6 +133,16 @@ func newChassisRouter(inv ChassisInventory, oids ObjectIDValueMap, logger *slog.
 	for ent, id := range inv.DroppedEntIndexes {
 		r.droppedByEntIdx[ent] = id
 	}
+
+	// Collect ALL alias rows per ifIndex before resolution so the
+	// final ifIndex -> entPhysicalIndex mapping is deterministic
+	// regardless of Go's randomized `oids` iteration order. An ifIndex
+	// CAN legitimately appear in multiple alias rows when the
+	// underlying entity participates in multiple logical entities
+	// (per-VRF / per-context views) or when a LAG ifIndex is exposed
+	// against multiple physical member entries.
+	candidates := map[int][]aliasRow{}
+
 	for oid, v := range oids {
 		if strings.HasPrefix(oid, oidEntPhysicalContainedIn) {
 			ent := strings.TrimPrefix(oid, oidEntPhysicalContainedIn)
@@ -130,7 +152,18 @@ func newChassisRouter(inv ChassisInventory, oids ObjectIDValueMap, logger *slog.
 		if strings.HasPrefix(oid, oidEntAliasMappingIdent) {
 			suffix := strings.TrimPrefix(oid, oidEntAliasMappingIdent)
 			parts := strings.SplitN(suffix, ".", 2)
+			if len(parts) != 2 {
+				continue // malformed: entAliasMappingTable is indexed by (phys, logical)
+			}
 			entIdx := parts[0]
+			logicalIdx, err := strconv.Atoi(parts[1])
+			if err != nil {
+				continue
+			}
+			entInt, err := strconv.Atoi(entIdx)
+			if err != nil {
+				continue
+			}
 			// Normalize the value by stripping any leading dot —
 			// gosnmp's ObjectIdentifier rendering varies. Also skip
 			// non-ifIndex VariablePointer values (e.g. ifAlias, ifDescr).
@@ -143,8 +176,39 @@ func newChassisRouter(inv ChassisInventory, oids ObjectIDValueMap, logger *slog.
 			if err != nil {
 				continue
 			}
-			r.ifIndexToEnt[ifIdx] = entIdx
+			candidates[ifIdx] = append(candidates[ifIdx], aliasRow{
+				ent:        entIdx,
+				logicalIdx: logicalIdx,
+				entInt:     entInt,
+			})
 		}
+	}
+
+	// Resolve each ifIndex to a single entPhysicalIndex with a
+	// deterministic precedence:
+	//   1. Prefer rows where entAliasLogicalIndexOrZero == 0. Per
+	//      RFC 6933, these are the "default mapping for the
+	//      corresponding physical entity"; non-zero rows are auxiliary
+	//      per-logical-entity mappings.
+	//   2. Among ties, prefer the lowest entPhysicalIndex. Matches the
+	//      lowest-id master-pinning convention used elsewhere and
+	//      keeps the resolution stable across re-runs.
+	for ifIdx, rows := range candidates {
+		slices.SortFunc(rows, func(a, b aliasRow) int {
+			aZero := 0
+			if a.logicalIdx != 0 {
+				aZero = 1
+			}
+			bZero := 0
+			if b.logicalIdx != 0 {
+				bZero = 1
+			}
+			if aZero != bZero {
+				return aZero - bZero
+			}
+			return a.entInt - b.entInt
+		})
+		r.ifIndexToEnt[ifIdx] = rows[0].ent
 	}
 	return r
 }

@@ -107,6 +107,66 @@ func TestRouteIfIndex_AliasToDroppedChassisReturnsDroppedID(t *testing.T) {
 	assert.Equal(t, 2, id, "must return the dropped member id so caller can skip-with-warn")
 }
 
+// TestRouteIfIndex_DuplicateIfIndexDeterministicResolution guards
+// finding #15: when multiple entAliasMappingTable rows resolve to the
+// SAME ifIndex via different (entPhysicalIndex, entAliasLogicalIndexOrZero)
+// pairs — possible for ports that participate in multiple logical
+// entities (VRFs, contexts) or LAG ifIndexes exposed against multiple
+// physical members — the resolution must be deterministic regardless
+// of Go's randomized `oids` iteration order.
+//
+// Precedence (newChassisRouter):
+//  1. Prefer rows with entAliasLogicalIndexOrZero == 0 (RFC 6933
+//     default mapping) over non-zero rows.
+//  2. Among ties, prefer the lowest entPhysicalIndex.
+func TestRouteIfIndex_DuplicateIfIndexDeterministicResolution(t *testing.T) {
+	logger := slog.Default()
+	oids := fixtureCisco3850TwoMemberStack()
+
+	// Both rows resolve to ifIndex 10301. The first is the default
+	// mapping (logical=0) for entPhysicalIndex 1; the second is a
+	// non-zero logical mapping (logical=5) for entPhysicalIndex 1000.
+	// Per the resolution rule, the logical=0 row must win → ent 1
+	// → member id 1.
+	oids[".1.3.6.1.2.1.47.1.3.2.1.2.1.0"] = Value{Value: ".1.3.6.1.2.1.2.2.1.1.10301"}
+	oids[".1.3.6.1.2.1.47.1.3.2.1.2.1000.5"] = Value{Value: ".1.3.6.1.2.1.2.2.1.1.10301"}
+
+	inv := extractInventory(oids, logger)
+	// Repeat the build several times to surface any non-determinism
+	// surviving the sort (Go map iteration order changes per run, but
+	// even within a process it is randomized per range statement).
+	for i := 0; i < 25; i++ {
+		r := newChassisRouter(inv, oids, logger)
+		id, ok := r.routeIfIndex(10301)
+		assert.True(t, ok, "iter %d: routeIfIndex must resolve duplicate-row ifIndex", i)
+		assert.Equal(t, 1, id, "iter %d: logical=0 row (ent 1, member 1) must win over logical=5 row", i)
+	}
+}
+
+// TestRouteIfIndex_DuplicateLogicalZeroLowestEntWins covers the
+// tiebreaker rung: two alias rows for the same ifIndex BOTH carry
+// entAliasLogicalIndexOrZero == 0 (no per-logical-entity context).
+// The lower entPhysicalIndex must win, matching the lowest-id master
+// pinning convention used elsewhere.
+func TestRouteIfIndex_DuplicateLogicalZeroLowestEntWins(t *testing.T) {
+	logger := slog.Default()
+	oids := fixtureCisco3850TwoMemberStack()
+
+	// Two logical=0 rows both pointing at ifIndex 10401 — one on
+	// chassis 1 (member 1), one on chassis 1000 (member 2). The lower
+	// entPhysicalIndex (1) must win.
+	oids[".1.3.6.1.2.1.47.1.3.2.1.2.1000.0"] = Value{Value: ".1.3.6.1.2.1.2.2.1.1.10401"}
+	oids[".1.3.6.1.2.1.47.1.3.2.1.2.1.0"] = Value{Value: ".1.3.6.1.2.1.2.2.1.1.10401"}
+
+	inv := extractInventory(oids, logger)
+	for i := 0; i < 25; i++ {
+		r := newChassisRouter(inv, oids, logger)
+		id, ok := r.routeIfIndex(10401)
+		assert.True(t, ok, "iter %d", i)
+		assert.Equal(t, 1, id, "iter %d: lower entPhysicalIndex (chassis 1, member 1) wins", i)
+	}
+}
+
 func TestParseMemberID(t *testing.T) {
 	cases := []struct {
 		ifName string
