@@ -101,6 +101,42 @@ func TestExtractInventory_ChassisInsideNonStackParentRejected(t *testing.T) {
 	assert.Empty(t, inv.Members)
 }
 
+// TestExtractInventory_PartialRowDoesNotPanic guards the property
+// that a chassis(3) row whose companion columns (containedIn, serial,
+// parentRelPos, modelName, entPhysicalName) are missing from `oids`
+// is safely skipped rather than panicking. ObjectIDValueMap is
+// `map[string]Value` (struct value, not pointer), so a missing key
+// returns the zero `Value{}` and `.Value` is the empty string —
+// trimSNMPString returns "" and the row falls through the
+// containedIn / empty-serial guards without entering the dereference
+// path. This is the partial / ACL-filtered SNMP walk scenario flagged
+// by the reviewer.
+func TestExtractInventory_PartialRowDoesNotPanic(t *testing.T) {
+	logger := slog.Default()
+	oids := ObjectIDValueMap{
+		// Only entPhysicalClass=3 present for index 7 — all other
+		// columns (containedIn, parentRel, name, serial, model) are
+		// absent. extractInventory must not panic and must drop this
+		// row (no containedIn → not "0", not a stack container).
+		".1.3.6.1.2.1.47.1.1.1.1.5.7": {Value: "3"},
+		// A second row with class=3 + containedIn but no serial —
+		// must hit the "empty serial" drop path, not panic.
+		".1.3.6.1.2.1.47.1.1.1.1.5.8": {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.8": {Value: "0"},
+		// A third row class=3 + containedIn pointing at a class=11
+		// parent that is NOT in oids — isStackContainerParent must
+		// return false safely and the row must be dropped.
+		".1.3.6.1.2.1.47.1.1.1.1.5.9":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.4.9":  {Value: "42"}, // parent index 42 not present
+		".1.3.6.1.2.1.47.1.1.1.1.11.9": {Value: "VALID-SERIAL"},
+	}
+	// Should not panic and should produce an empty inventory.
+	assert.NotPanics(t, func() {
+		inv := extractInventory(oids, logger)
+		assert.Empty(t, inv.Members, "all three partial/orphan rows must be dropped")
+	})
+}
+
 func TestExtractInventory_StandaloneSingleChassis(t *testing.T) {
 	logger := slog.Default()
 	oids := ObjectIDValueMap{
