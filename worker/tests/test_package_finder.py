@@ -182,7 +182,7 @@ class TestMaybeEvict:
         _maybe_evict("nbl_custom_worker")  # not in sys.modules → silent return
 
     def test_stamps_bundle_path_on_first_call(self, tmp_path, monkeypatch):
-        """_maybe_evict stamps __orb_bundle_path__ on the module the first time it sees it."""
+        """_maybe_evict stamps __bundle_path__ on the module the first time it sees it."""
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
         _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
@@ -190,8 +190,8 @@ class TestMaybeEvict:
         sys.modules["nbl_custom_worker"] = fake
         try:
             _maybe_evict("nbl_custom_worker")
-            assert hasattr(fake, "__orb_bundle_path__")
-            assert "0.1.0" in fake.__orb_bundle_path__
+            assert hasattr(fake, "__bundle_path__")
+            assert "0.1.0" in fake.__bundle_path__
         finally:
             _remove_from_sys_modules("nbl_custom_worker")
 
@@ -201,7 +201,7 @@ class TestMaybeEvict:
         version_dir = _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
         fake = types.ModuleType("nbl_custom_worker")
-        fake.__orb_bundle_path__ = str(version_dir)
+        fake.__bundle_path__ = str(version_dir)
         sys.modules["nbl_custom_worker"] = fake
         try:
             _maybe_evict("nbl_custom_worker")
@@ -219,7 +219,7 @@ class TestMaybeEvict:
 
         # Populate sys.modules with the old version tree
         fake_root = types.ModuleType("nbl_custom_worker")
-        fake_root.__orb_bundle_path__ = old_path
+        fake_root.__bundle_path__ = old_path
         fake_sub = types.ModuleType("nbl_cisco_meraki.runner")
         sys.modules["nbl_custom_worker"] = fake_root
         sys.modules["nbl_cisco_meraki.runner"] = fake_sub
@@ -245,7 +245,7 @@ class TestMaybeEvict:
         try:
             _maybe_evict("nbl_custom_worker")
             # Should have stamped the path (found via hyphen dir name)
-            assert hasattr(fake, "__orb_bundle_path__")
+            assert hasattr(fake, "__bundle_path__")
         finally:
             _remove_from_sys_modules("nbl_custom_worker")
 

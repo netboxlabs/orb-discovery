@@ -75,7 +75,7 @@ def _maybe_evict(package_name: str) -> None:
     Called in PolicyRunner.setup() before load_class() so a version upgrade
     by the PackageManager takes effect without restarting the worker.
 
-    The resolved symlink path is stamped onto the module as __orb_bundle_path__
+    The resolved symlink path is stamped onto the module as __bundle_path__
     here (post-import) rather than in find_spec (pre-import) so sys.modules
     is guaranteed to contain the module when we write the attribute.
 
@@ -107,9 +107,9 @@ def _maybe_evict(package_name: str) -> None:
         return
 
     # Stamp on first sight so we have a baseline for future calls.
-    cached = getattr(mod, "__orb_bundle_path__", None)
+    cached = getattr(mod, "__bundle_path__", None)
     if cached is None:
-        mod.__orb_bundle_path__ = resolved
+        mod.__bundle_path__ = resolved
         return
 
     if cached != resolved:
