@@ -140,6 +140,7 @@ class TestOrbPackageFinderFindSpec:
 # ---------------------------------------------------------------------------
 
 class TestActiveBundleDirs:
+    """Tests for OrbPackageFinder._active_bundle_dirs."""
 
     def test_returns_empty_when_root_missing(self, tmp_path, monkeypatch):
         """_active_bundle_dirs returns [] when BUNDLES_ROOT does not exist."""
@@ -166,6 +167,7 @@ class TestActiveBundleDirs:
 # ---------------------------------------------------------------------------
 
 class TestMaybeEvict:
+    """Tests for the _maybe_evict eviction helper."""
 
     def test_noop_when_bundle_not_present(self, tmp_path, monkeypatch):
         """_maybe_evict does nothing when the package has no bundle directory."""
@@ -261,6 +263,7 @@ class TestMaybeEvict:
 # ---------------------------------------------------------------------------
 
 class TestInstallFinder:
+    """Tests for the install_finder startup helper."""
 
     def setup_method(self):
         """Remove any existing OrbPackageFinder before each test."""
