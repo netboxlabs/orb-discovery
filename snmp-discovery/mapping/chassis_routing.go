@@ -34,11 +34,16 @@ var numeric3TupleRe = regexp.MustCompile(`^(\d+)/\d+/\d+$`)
 var h3cDashRe = regexp.MustCompile(`^(?:Ten-GigabitEthernet|Forty-GigabitEthernet|Hundred-GigabitEthernet)(\d+)/\d+/\d+$`)
 
 // Names that must route to master regardless of trailing digits.
+//
+// Do NOT add 2-tuple physical-port prefixes (e.g. "FastEthernet0/0").
+// `strings.HasPrefix` would also swallow legitimate stack 3-tuple
+// names like "FastEthernet0/0/0" (member 0, slot 0, port 0). Non-stack
+// 2-tuple physical ports fail to parse a member id via cisco3TupleRe
+// and routeInterface's fallback routes them to master anyway.
 var masterOnlyPrefixes = []string{
 	"Vlan", "Loopback", "Lo", "Port-channel", "Po",
 	"Tunnel", "Tu", "BVI", "Bundle-Ether", "Null",
 	"mgmt", "Management", "ManagementEthernet",
-	"FastEthernet0/0", // non-stack mgmt-only port on some routers
 }
 
 // ParseMemberID extracts the leading stack-member id from ifName per

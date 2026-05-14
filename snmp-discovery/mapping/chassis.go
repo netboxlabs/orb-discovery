@@ -478,14 +478,17 @@ func TranslateAsStack(
 		}
 	}
 
-	// 5. Rebuild output partitioned by type so the sorted buckets have a
-	//    deterministic order even though `entities` came out of Go-map
-	//    iteration upstream.
+	// 5. Rebuild output partitioned by type so the deterministically
+	//    sorted buckets stay deterministic even though `entities` came
+	//    out of Go-map iteration upstream.
 	//    Canonical order:
 	//      master, VC, member_devices (sorted by VcPosition),
 	//      interfaces (sorted by Name), IPs (sorted by Address),
-	//      MACs (sorted by MacAddress), then VLANs, modules, and any
-	//      remaining entities in encountered order.
+	//      MACs (sorted by MacAddress), VLANs (sorted by Vid),
+	//      then modules and any remaining entities, both in input
+	//      order — these buckets are NOT actively sorted; their
+	//      determinism depends on the caller passing a deterministic
+	//      input slice.
 	var (
 		ifaces  []*diode.Interface
 		ips     []*diode.IPAddress
@@ -594,23 +597,29 @@ func routeInterface(
 	logger *slog.Logger,
 ) int {
 	masterID := inv.Members[0].ID
-	if iface.Name == nil || *iface.Name == "" {
-		return masterID
-	}
 
-	// Alias-table path.
+	// Alias-table path runs FIRST and does not require iface.Name —
+	// devices that report ports without ifDescr/ifName still need
+	// member ownership when entAliasMappingTable is present.
 	if ifIdx, ok := ifIndexByIface[iface]; ok && ifIdx > 0 {
 		if id, found := router.routeIfIndex(ifIdx); found {
+			ifName := ""
+			if iface.Name != nil {
+				ifName = *iface.Name
+			}
 			if _, dropped := inv.DroppedIDs[id]; dropped {
 				logger.Warn("interface routed via alias table to a dropped member id; skipping",
-					"ifName", *iface.Name, "member_id", id)
+					"ifName", ifName, "member_id", id)
 				return -1
 			}
 			return id
 		}
 	}
 
-	// ifName fallback.
+	// ifName fallback requires iface.Name.
+	if iface.Name == nil || *iface.Name == "" {
+		return masterID
+	}
 	id, ok := ParseMemberID(*iface.Name)
 	if !ok {
 		return masterID

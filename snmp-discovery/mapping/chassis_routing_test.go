@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -168,6 +169,19 @@ func TestParseMemberID(t *testing.T) {
 		{"Fi1/0/1", 1, true},
 		{"Twe1/0/1", 1, true},
 
+		// FastEthernet stack 3-tuple — rare but real on older Cisco
+		// gear (e.g. some Catalyst stacks). Must NOT be swallowed by a
+		// "FastEthernet0/0" master-only prefix entry.
+		{"FastEthernet0/0/0", 0, true},
+		{"Fa0/0/0", 0, true},
+		{"FastEthernet1/0/24", 1, true},
+		{"Fa2/0/1", 2, true},
+		// Non-stack 2-tuple FastEthernet0/0 (e.g. Cisco router mgmt
+		// port) — must fail to parse a member id; routeInterface
+		// fallback then routes it to master.
+		{"FastEthernet0/0", 0, false},
+		{"Fa0/0", 0, false},
+
 		// Subinterfaces — must parse the parent-port member id, not fall through.
 		{"GigabitEthernet2/0/1.100", 2, true},
 		{"Gi2/0/1.100", 2, true},
@@ -188,4 +202,41 @@ func TestParseMemberID(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRouteInterface_AliasTablePathPrecedesEmptyName guards the
+// invariant that the alias-table lookup runs BEFORE the empty-name
+// short-circuit. On devices where some interfaces lack
+// ifDescr/ifName, the alias-table can still deterministically route
+// them to the owning member; falling straight to master would
+// silently mis-attribute member-owned ports.
+func TestRouteInterface_AliasTablePathPrecedesEmptyName(t *testing.T) {
+	logger := slog.Default()
+	oids := fixtureCisco3850TwoMemberStack()
+	// Port on a card under chassis row 1000 (member 2) — alias table
+	// resolves ifIndex 10201 to that member.
+	oids[".1.3.6.1.2.1.47.1.1.1.1.4.1050"] = Value{Value: "1000"}
+	oids[".1.3.6.1.2.1.47.1.1.1.1.5.1050"] = Value{Value: "9"} // module
+	oids[".1.3.6.1.2.1.47.1.3.2.1.2.1050.0"] = Value{Value: ".1.3.6.1.2.1.2.2.1.1.10201"}
+
+	inv := extractInventory(oids, logger)
+	router := newChassisRouter(inv, oids, logger)
+
+	master := &diode.Device{Name: strPtr("3850-stack")}
+	member := &diode.Device{Name: strPtr("3850-stack-2")}
+	memberByID := map[int]*diode.Device{1: master, 2: member}
+
+	// Interface with NO Name but with a known ifIndex → alias table
+	// must still resolve it to member 2, not fall through to master.
+	ifaceNoName := &diode.Interface{Name: nil}
+	ifIndexByIface := map[*diode.Interface]int{ifaceNoName: 10201}
+
+	got := routeInterface(ifaceNoName, ifIndexByIface, router, inv, memberByID, logger)
+	assert.Equal(t, 2, got, "alias-table should route nameless iface to member 2, not master")
+
+	// Empty string Name path — same behavior.
+	ifaceEmpty := &diode.Interface{Name: strPtr("")}
+	ifIndexByIface[ifaceEmpty] = 10201
+	got = routeInterface(ifaceEmpty, ifIndexByIface, router, inv, memberByID, logger)
+	assert.Equal(t, 2, got, "alias-table should route empty-name iface to member 2")
 }

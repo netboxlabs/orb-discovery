@@ -162,10 +162,12 @@ func annotateVirtualChassis(vc *diode.VirtualChassis, runID string, seen map[uns
 	}
 	seen[p] = struct{}{}
 	mergeRunID(&vc.Metadata, runID)
-	// Annotate the inline Master Device stub with run_id for consistency
-	// with VLAN+Interface treatment. This only stamps Device metadata on
-	// the matcher-only Master stub; the non-recursion invariant remains
-	// that Master.VirtualChassis is nil.
+	// Stamp run_id on the inline Master Device stub so it lines up with
+	// the run_id on the rich top-level Device that the stub matches —
+	// keeps annotation consistent with how VLAN and Interface
+	// annotation reach their nested Device refs. annotateDevice only
+	// mutates d.Metadata (no recursion into Device's nested fields), so
+	// no cycle risk through Master.VirtualChassis.
 	if vc.Master != nil {
 		annotateDevice(vc.Master, runID, seen)
 	}

@@ -172,7 +172,13 @@ func PruneNestedRefs(entities []diode.Entity, currentDevice *diode.Device) {
 	// has already routed to the correct member). Subinterface parent
 	// resolution runs BEFORE TranslateAsStack and may leave nested
 	// refs pointing at master; this index fixes it during pruning.
-	ifaceByName := map[string]*diode.Interface{}
+	// Top-level Interface index. Keyed by Name. Stores ALL matches to
+	// support stacks where two member Devices both expose an iface
+	// with the same name (e.g. per-member management ports like
+	// `me0`/`mgmt0` on Junos VC and Cisco StackWise). When a nested
+	// ref by-name lookup is ambiguous, stubForIface skips the
+	// owner-rewrite rather than rebinding to a wrong member.
+	ifaceByName := map[string][]*diode.Interface{}
 	for _, e := range entities {
 		switch v := e.(type) {
 		case *diode.Device:
@@ -184,7 +190,7 @@ func PruneNestedRefs(entities []diode.Entity, currentDevice *diode.Device) {
 			}
 		case *diode.Interface:
 			if v.Name != nil {
-				ifaceByName[*v.Name] = v
+				ifaceByName[*v.Name] = append(ifaceByName[*v.Name], v)
 			}
 		}
 	}
@@ -229,9 +235,16 @@ func PruneNestedRefs(entities []diode.Entity, currentDevice *diode.Device) {
 			return nil
 		}
 		owner := ref.Device
+		// Only rewrite owner when the top-level lookup is unambiguous.
+		// If multiple top-level interfaces share the same name (cross-
+		// member duplicates like `me0`/`mgmt0` on Junos VC / Cisco
+		// StackWise), the lookup cannot tell which member owns this
+		// particular ref — leaving owner as-is preserves whatever
+		// upstream routing produced (which is correct in the common
+		// case where ref.Device already points at the right member).
 		if ref.Name != nil {
-			if top, ok := ifaceByName[*ref.Name]; ok && top.Device != nil {
-				owner = top.Device
+			if tops, ok := ifaceByName[*ref.Name]; ok && len(tops) == 1 && tops[0].Device != nil {
+				owner = tops[0].Device
 			}
 		}
 		return newInterfaceStub(ref, stubFor(owner))
