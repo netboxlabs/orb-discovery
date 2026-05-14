@@ -73,12 +73,40 @@ const (
 	oidEntPhysicalModelName   = ".1.3.6.1.2.1.47.1.1.1.1.13."
 
 	entPhysicalClassChassis = "3"
+	entPhysicalClassStack   = "11"
 )
 
-// extractInventory scans oids for class=3 + containedIn=0 entPhysical
-// rows with non-empty serial. Returns members sorted ascending by ID.
-// Member id derivation uses the full 3-tier precedence in deriveMemberID
-// (ParentRelPos > 0 → trailing-int parse of EntName → ordinal fallback).
+// isStackContainerParent reports whether the entPhysicalIndex `idx`
+// names a class=11 (stack) entity in the walked map. Cisco StackWise
+// Virtual (and similar two-chassis pair architectures) nest the
+// physical chassis(3) rows under a class=11 (stack) parent rather
+// than placing them at the ENTITY-MIB root. Returning true allows
+// extractInventory to treat the wrapped chassis rows as stack members.
+func isStackContainerParent(oids ObjectIDValueMap, idx string) bool {
+	if idx == "" || idx == "0" {
+		return false
+	}
+	v, ok := oids[oidEntPhysicalClass+idx]
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(v.Value) == entPhysicalClassStack
+}
+
+// extractInventory scans oids for class=3 entPhysical rows with
+// non-empty serial. A chassis row qualifies as a stack member when
+// either:
+//   - entPhysicalContainedIn == 0 (flat pattern — direct children of
+//     the ENTITY-MIB root; used by Catalyst 9300/3850 stacks, Aruba
+//     VSF, Juniper EX Virtual Chassis, etc.); or
+//   - entPhysicalContainedIn points to a class=11 (stack) entity
+//     (wrapped pattern — physical chassis are nested under a stack
+//     container; used by Cisco StackWise Virtual on the 9400/9500/9600
+//     series and similar pair architectures).
+//
+// Returns members sorted ascending by ID. Member id derivation uses
+// the full 3-tier precedence in deriveMemberID (ParentRelPos > 0 →
+// trailing-int parse of EntName → ordinal fallback).
 func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInventory {
 	candidates := []string{}
 	for oid, v := range oids {
@@ -95,7 +123,7 @@ func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInvento
 	members := make([]ChassisMember, 0, len(candidates))
 	for _, idx := range candidates {
 		contained := trimSNMPString(oids[oidEntPhysicalContainedIn+idx].Value)
-		if contained != "0" {
+		if contained != "0" && !isStackContainerParent(oids, contained) {
 			continue
 		}
 		serial := trimSNMPString(oids[oidEntPhysicalSerialNum+idx].Value)

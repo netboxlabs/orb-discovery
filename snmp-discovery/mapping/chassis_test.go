@@ -55,6 +55,52 @@ func TestExtractInventory_TwoMemberStack(t *testing.T) {
 	assert.Equal(t, "1000", inv.Members[1].EntPhysicalIndex)
 }
 
+// TestExtractInventory_WrappedStackContainer covers the Cisco
+// StackWise Virtual (and similar) topology where the physical
+// chassis(3) rows are NOT at the ENTITY-MIB root but nested inside a
+// class=11 (stack) container. extractInventory must traverse
+// entPhysicalContainedIn so wrapped chassis still qualify as members.
+func TestExtractInventory_WrappedStackContainer(t *testing.T) {
+	logger := slog.Default()
+	inv := extractInventory(fixtureCiscoCat9400xStackWiseVirtual(), logger)
+
+	assert.Len(t, inv.Members, 2)
+	assert.True(t, inv.IsStack())
+
+	// Switch 1 — entPhysicalIndex 2, parentRelPos=1 → derived ID 1.
+	assert.Equal(t, 1, inv.Members[0].ID)
+	assert.Equal(t, "FXS2238Q0WZ", inv.Members[0].Serial)
+	assert.Equal(t, "C9407R", inv.Members[0].Model)
+	assert.Equal(t, "Switch 1 Chassis", inv.Members[0].EntName)
+	assert.Equal(t, "2", inv.Members[0].EntPhysicalIndex)
+
+	// Switch 2 — entPhysicalIndex 500, parentRelPos=2 → derived ID 2.
+	assert.Equal(t, 2, inv.Members[1].ID)
+	assert.Equal(t, "FXS2238Q0WG", inv.Members[1].Serial)
+	assert.Equal(t, "500", inv.Members[1].EntPhysicalIndex)
+}
+
+// TestExtractInventory_ChassisInsideNonStackParentRejected guards the
+// wrapped-stack relaxation: a chassis(3) whose parent is anything
+// other than class=11 (stack) — e.g. an arbitrary chassis nested in
+// another chassis, or a chassis in a container(5) for some vendor
+// quirk — must NOT be treated as a stack member. This keeps the
+// flat-vs-wrapped distinction explicit.
+func TestExtractInventory_ChassisInsideNonStackParentRejected(t *testing.T) {
+	logger := slog.Default()
+	oids := ObjectIDValueMap{
+		// Parent is class=5 (container), not class=11 (stack).
+		".1.3.6.1.2.1.47.1.1.1.1.4.1": {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1": {Value: "5"},
+		// Chassis nested inside the container — must be rejected.
+		".1.3.6.1.2.1.47.1.1.1.1.4.2":  {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.2":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.2": {Value: "NESTED-CHASSIS"},
+	}
+	inv := extractInventory(oids, logger)
+	assert.Empty(t, inv.Members)
+}
+
 func TestExtractInventory_StandaloneSingleChassis(t *testing.T) {
 	logger := slog.Default()
 	oids := ObjectIDValueMap{
@@ -448,6 +494,60 @@ func TestTranslateAsStack_TwoMemberStackEmitsVCAndMember(t *testing.T) {
 	assert.Equal(t, master, ifaceM1.Device, "Gi1/0/1 stays on master")
 	assert.Equal(t, "3850-stack.example-stack-2", *ifaceM2.Device.Name,
 		"Gi2/0/1 routes to member 2")
+}
+
+// TestTranslateAsStack_CiscoStackWiseVirtual_EmitsVCAndMember
+// validates the end-to-end wrapped-stack path against a real Cisco
+// Catalyst 9400X-SVL recording shape: two chassis(3) rows nested
+// inside a class=11 (stack) container. Without the wrapped-stack
+// relaxation in extractInventory, this test reproduces the bug
+// observed in orb-test-lab where TranslateAsStack falls through to
+// the single-Device path on real StackWise Virtual hardware.
+func TestTranslateAsStack_CiscoStackWiseVirtual_EmitsVCAndMember(t *testing.T) {
+	logger := slog.Default()
+	master := &diode.Device{
+		Name: strPtr("c9400x-svl.example"),
+		Site: &diode.Site{Name: strPtr("dc1")},
+		DeviceType: &diode.DeviceType{
+			Model:        strPtr("C9407R"),
+			Manufacturer: &diode.Manufacturer{Name: strPtr("Cisco")},
+		},
+	}
+	ifaceM1 := &diode.Interface{Name: strPtr("HundredGigE1/0/1"), Device: master}
+	ifaceM2 := &diode.Interface{Name: strPtr("HundredGigE2/0/1"), Device: master}
+	entities := []diode.Entity{master, ifaceM1, ifaceM2}
+	ifIndexByIface := map[*diode.Interface]int{}
+
+	out := TranslateAsStack(entities, fixtureCiscoCat9400xStackWiseVirtual(), ifIndexByIface, logger)
+
+	var vc *diode.VirtualChassis
+	var members []*diode.Device
+	for _, e := range out {
+		switch v := e.(type) {
+		case *diode.VirtualChassis:
+			vc = v
+		case *diode.Device:
+			if v != master {
+				members = append(members, v)
+			}
+		}
+	}
+	assert.NotNil(t, vc, "StackWise Virtual must emit a VirtualChassis")
+	assert.Equal(t, "c9400x-svl.example", *vc.Name)
+	assert.Len(t, members, 1)
+	assert.Equal(t, "FXS2238Q0WG", *members[0].Serial,
+		"member device serial comes from the second chassis row")
+	assert.Equal(t, int64(2), *members[0].VcPosition)
+
+	// Master gets the lowest-id chassis serial; remains plain (no VC ref).
+	assert.Nil(t, master.VcPosition)
+	assert.Nil(t, master.VirtualChassis)
+	assert.Equal(t, "FXS2238Q0WZ", *master.Serial)
+
+	// Interface routing via ifName parsing.
+	assert.Equal(t, master, ifaceM1.Device, "HundredGigE1/0/1 stays on master")
+	assert.Equal(t, "c9400x-svl.example-stack-2", *ifaceM2.Device.Name,
+		"HundredGigE2/0/1 routes to member 2")
 }
 
 func TestTranslateAsStack_DroppedMemberIfaceSkippedWithWarn(t *testing.T) {

@@ -86,3 +86,39 @@ func fixtureJunosQFX4MemberVC() ObjectIDValueMap {
 	}
 	return out
 }
+
+// fixtureCiscoCat9400xStackWiseVirtual returns an ObjectIDValueMap shaped
+// like a Cisco Catalyst 9400X-SVL pair (real recording, anonymized):
+//   - sysName "c9400x-svl.example"
+//   - entPhysical row 1: class=11 (stack), containedIn=0, name="Virtual Stack" — the parent container
+//   - entPhysical row 2:   class=3 (chassis), containedIn=1, parentRelPos=1, name="Switch 1 Chassis", serial FXS2238Q0WZ, model C9407R
+//   - entPhysical row 500: class=3 (chassis), containedIn=1, parentRelPos=2, name="Switch 2 Chassis", serial FXS2238Q0WG, model C9407R
+//
+// This is the "wrapped" topology: physical chassis are nested under a
+// class=11 (stack) parent rather than at the ENTITY-MIB root. Cisco
+// StackWise Virtual on the 9400/9500/9600 series uses this layout.
+func fixtureCiscoCat9400xStackWiseVirtual() ObjectIDValueMap {
+	return ObjectIDValueMap{
+		".1.3.6.1.2.1.1.5.0": {Value: "c9400x-svl.example"},
+		".1.3.6.1.2.1.1.2.0": {Value: ".1.3.6.1.4.1.9.1.2839"},
+		// Parent stack container (index 1).
+		".1.3.6.1.2.1.47.1.1.1.1.4.1": {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1": {Value: "11"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1": {Value: "-1"},
+		".1.3.6.1.2.1.47.1.1.1.1.7.1": {Value: "Virtual Stack"},
+		// Switch 1 chassis (index 2).
+		".1.3.6.1.2.1.47.1.1.1.1.4.2":  {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.2":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.2":  {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.7.2":  {Value: "Switch 1 Chassis"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.2": {Value: "FXS2238Q0WZ"},
+		".1.3.6.1.2.1.47.1.1.1.1.13.2": {Value: "C9407R"},
+		// Switch 2 chassis (index 500).
+		".1.3.6.1.2.1.47.1.1.1.1.4.500":  {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.500":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.500":  {Value: "2"},
+		".1.3.6.1.2.1.47.1.1.1.1.7.500":  {Value: "Switch 2 Chassis"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.500": {Value: "FXS2238Q0WG"},
+		".1.3.6.1.2.1.47.1.1.1.1.13.500": {Value: "C9407R"},
+	}
+}
