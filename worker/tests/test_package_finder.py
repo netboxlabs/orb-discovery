@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # Copyright 2026 NetBox Labs Inc
-"""NetBox Labs - OrbPackageFinder Unit Tests."""
+"""NetBox Labs - PackageFinder Unit Tests."""
 
 import importlib
 import sys
@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import worker.package_finder as pf
-from worker.package_finder import OrbPackageFinder, _maybe_evict, install_finder
+from worker.package_finder import PackageFinder, _maybe_evict, install_finder
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -54,18 +54,18 @@ def _remove_from_sys_modules(*names: str):
 
 
 # ---------------------------------------------------------------------------
-# OrbPackageFinder.find_spec
+# PackageFinder.find_spec
 # ---------------------------------------------------------------------------
 
-class TestOrbPackageFinderFindSpec:
-    """Tests for OrbPackageFinder.find_spec."""
+class TestPackageFinderFindSpec:
+    """Tests for PackageFinder.find_spec."""
 
     def test_resolves_package_from_current_symlink(self, tmp_path, monkeypatch):
         """find_spec returns a valid spec for a package inside a current/ symlink."""
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
         _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
-        finder = OrbPackageFinder()
+        finder = PackageFinder()
         spec = finder.find_spec("nbl_custom_worker", None)
 
         assert spec is not None
@@ -76,7 +76,7 @@ class TestOrbPackageFinderFindSpec:
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
         _make_single_file_bundle(tmp_path, "nbl-simple", "1.0.0", "nbl_simple")
 
-        finder = OrbPackageFinder()
+        finder = PackageFinder()
         spec = finder.find_spec("nbl_simple", None)
 
         assert spec is not None
@@ -86,7 +86,7 @@ class TestOrbPackageFinderFindSpec:
         """find_spec returns None when BUNDLES_ROOT does not exist."""
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path / "nonexistent")
 
-        finder = OrbPackageFinder()
+        finder = PackageFinder()
         assert finder.find_spec("nbl_custom_worker", None) is None
 
     def test_returns_none_when_module_not_in_any_bundle(self, tmp_path, monkeypatch):
@@ -94,7 +94,7 @@ class TestOrbPackageFinderFindSpec:
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
         _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
-        finder = OrbPackageFinder()
+        finder = PackageFinder()
         assert finder.find_spec("nbl_something_else", None) is None
 
     def test_skips_broken_symlink(self, tmp_path, monkeypatch):
@@ -107,16 +107,16 @@ class TestOrbPackageFinderFindSpec:
         current = bundle_dir / "current"
         current.symlink_to(tmp_path / "nbl-broken" / "nonexistent_version")
 
-        finder = OrbPackageFinder()
+        finder = PackageFinder()
         assert finder.find_spec("nbl_broken", None) is None
 
     def test_module_is_importable_after_finder_installed(self, tmp_path, monkeypatch):
-        """A module resolved by OrbPackageFinder can actually be imported."""
+        """A module resolved by PackageFinder can actually be imported."""
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
         _make_bundle(tmp_path, "nbl-test-pkg", "0.2.0", "nbl_test_pkg")
         _remove_from_sys_modules("nbl_test_pkg")
 
-        finder = OrbPackageFinder()
+        finder = PackageFinder()
         # Temporarily install just for this test
         sys.meta_path.append(finder)
         try:
@@ -128,16 +128,16 @@ class TestOrbPackageFinderFindSpec:
 
 
 # ---------------------------------------------------------------------------
-# OrbPackageFinder._active_bundle_dirs
+# PackageFinder._active_bundle_dirs
 # ---------------------------------------------------------------------------
 
 class TestActiveBundleDirs:
-    """Tests for OrbPackageFinder._active_bundle_dirs."""
+    """Tests for PackageFinder._active_bundle_dirs."""
 
     def test_returns_empty_when_root_missing(self, tmp_path, monkeypatch):
         """_active_bundle_dirs returns [] when BUNDLES_ROOT does not exist."""
         monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path / "missing")
-        assert OrbPackageFinder()._active_bundle_dirs() == []
+        assert PackageFinder()._active_bundle_dirs() == []
 
     def test_returns_only_valid_current_dirs(self, tmp_path, monkeypatch):
         """_active_bundle_dirs returns only bundles with a valid current/ symlink."""
@@ -149,7 +149,7 @@ class TestActiveBundleDirs:
         bad.mkdir()
         (bad / "current").symlink_to(tmp_path / "nbl-bad" / "ghost")
 
-        dirs = OrbPackageFinder()._active_bundle_dirs()
+        dirs = PackageFinder()._active_bundle_dirs()
         assert len(dirs) == 1
         assert dirs[0] == tmp_path / "nbl-good" / "current"
 
@@ -258,26 +258,26 @@ class TestInstallFinder:
     """Tests for the install_finder startup helper."""
 
     def setup_method(self):
-        """Remove any existing OrbPackageFinder before each test."""
-        sys.meta_path[:] = [f for f in sys.meta_path if not isinstance(f, OrbPackageFinder)]
+        """Remove any existing PackageFinder before each test."""
+        sys.meta_path[:] = [f for f in sys.meta_path if not isinstance(f, PackageFinder)]
 
     def teardown_method(self):
         """Clean up after each test."""
-        sys.meta_path[:] = [f for f in sys.meta_path if not isinstance(f, OrbPackageFinder)]
+        sys.meta_path[:] = [f for f in sys.meta_path if not isinstance(f, PackageFinder)]
 
     def test_installs_finder_into_meta_path(self):
-        """install_finder appends an OrbPackageFinder to sys.meta_path."""
+        """install_finder appends an PackageFinder to sys.meta_path."""
         install_finder()
-        assert any(isinstance(f, OrbPackageFinder) for f in sys.meta_path)
+        assert any(isinstance(f, PackageFinder) for f in sys.meta_path)
 
     def test_idempotent_does_not_install_twice(self):
         """install_finder is idempotent — calling it twice installs only one finder."""
         install_finder()
         install_finder()
-        count = sum(1 for f in sys.meta_path if isinstance(f, OrbPackageFinder))
+        count = sum(1 for f in sys.meta_path if isinstance(f, PackageFinder))
         assert count == 1
 
     def test_finder_appended_last(self):
         """install_finder appends to the end of sys.meta_path so stdlib takes priority."""
         install_finder()
-        assert isinstance(sys.meta_path[-1], OrbPackageFinder)
+        assert isinstance(sys.meta_path[-1], PackageFinder)

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 BUNDLES_ROOT = Path(os.environ["BUNDLES_ROOT_PATH"])
 
 
-class OrbPackageFinder(importlib.abc.MetaPathFinder):
+class PackageFinder(importlib.abc.MetaPathFinder):
     """
     sys.meta_path finder that resolves modules from bundle directories.
 
@@ -129,8 +129,8 @@ def _maybe_evict(package_name: str) -> None:
 
 def install_finder() -> None:
     """Install OrbPackageFinder into sys.meta_path (idempotent)."""
-    if any(isinstance(f, OrbPackageFinder) for f in sys.meta_path):
+    if any(isinstance(f, PackageFinder) for f in sys.meta_path):
         logger.debug("PackageFinder: already installed, skipping")
         return
-    sys.meta_path.append(OrbPackageFinder())
+    sys.meta_path.append(PackageFinder())
     logger.info(f"PackageFinder: installed (bundles root: {BUNDLES_ROOT})")
