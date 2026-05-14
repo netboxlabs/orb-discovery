@@ -18,8 +18,19 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # Root directory where the package manager extracts bundles:
-#   BUNDLES_ROOT/<bundle_name>/current/  (symlink → <version>/)
-BUNDLES_ROOT = Path(os.environ["BUNDLES_ROOT_PATH"])
+#   BUNDLES_ROOT/<bundle_name>/current/  (symlink → <version>/)/
+def _bundles_root() -> Path:
+    val = os.environ.get("BUNDLES_ROOT_PATH")
+    if not val:
+        raise RuntimeError(
+            "BUNDLES_ROOT_PATH environment variable is not set."
+        )
+    return Path(val)
+
+
+BUNDLES_ROOT = _bundles_root()
+
+
 
 
 class PackageFinder(importlib.abc.MetaPathFinder):
@@ -32,11 +43,14 @@ class PackageFinder(importlib.abc.MetaPathFinder):
 
     def find_spec(self, fullname: str, path, target=None):
         """Locate a module spec by scanning active bundle current/ directories."""
-        top_level = fullname.split(".")[0]
+        # Only handle top-level imports; submodules are resolved by the standard machinery.
+        if "." in fullname:
+            return None
 
         for bundle_dir in self._active_bundle_dirs():
-            # Package directory (top_level/__init__.py)
-            candidate = bundle_dir / top_level
+            resolved_dir = bundle_dir.resolve()
+            # Package directory (fullname/__init__.py)
+            candidate = resolved_dir / fullname
             if (candidate / "__init__.py").is_file():
                 spec = importlib.util.spec_from_file_location(
                     fullname,
@@ -44,15 +58,15 @@ class PackageFinder(importlib.abc.MetaPathFinder):
                     submodule_search_locations=[str(candidate)],
                 )
                 if spec is not None:
-                    logger.debug(f"PackageFinder: resolved '{fullname}' from {bundle_dir}")
+                    logger.debug(f"PackageFinder: resolved '{fullname}' from {resolved_dir}")
                     return spec
 
-            # Single-file module (top_level.py)
-            module_file = bundle_dir / f"{top_level}.py"
+            # Single-file module (fullname.py)
+            module_file = resolved_dir / f"{fullname}.py"
             if module_file.is_file():
                 spec = importlib.util.spec_from_file_location(fullname, module_file)
                 if spec is not None:
-                    logger.debug(f"PackageFinder: resolved '{fullname}' from {bundle_dir}")
+                    logger.debug(f"PackageFinder: resolved '{fullname}' from {resolved_dir}")
                     return spec
 
         return None
@@ -128,7 +142,7 @@ def _maybe_evict(package_name: str) -> None:
 
 
 def install_finder() -> None:
-    """Install OrbPackageFinder into sys.meta_path (idempotent)."""
+    """Install PackageFinder into sys.meta_path (idempotent)."""
     if any(isinstance(f, PackageFinder) for f in sys.meta_path):
         logger.debug("PackageFinder: already installed, skipping")
         return

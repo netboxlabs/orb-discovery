@@ -58,8 +58,8 @@ class PolicyRunner:
             "\n", ""
         )
 
-        # Evict stale cached modules
-        # symlink to a newer version since we last imported this package.
+        # Evict stale cached modules if the bundle's `current` symlink has been
+        # updated to a newer version since we last imported this package.
         _maybe_evict(policy.config.package)
 
         # Debug logging for backend loading

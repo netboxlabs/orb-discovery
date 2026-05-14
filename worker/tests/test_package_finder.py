@@ -220,19 +220,24 @@ class TestMaybeEvict:
         # Populate sys.modules with the old version tree
         fake_root = types.ModuleType("nbl_custom_worker")
         fake_root.__bundle_path__ = old_path
-        fake_sub = types.ModuleType("nbl_cisco_meraki.runner")
+        fake_sub = types.ModuleType("nbl_custom_worker.runner")
+        fake_unrelated = types.ModuleType("nbl_cisco_meraki.runner")
         sys.modules["nbl_custom_worker"] = fake_root
-        sys.modules["nbl_cisco_meraki.runner"] = fake_sub
+        sys.modules["nbl_custom_worker.runner"] = fake_sub
+        sys.modules["nbl_cisco_meraki.runner"] = fake_unrelated
 
         # Upgrade symlink to 0.2.0
         _make_bundle(tmp_path, "nbl-custom-worker", "0.2.0", "nbl_custom_worker")
 
         try:
             _maybe_evict("nbl_custom_worker")
+            # After
             assert "nbl_custom_worker" not in sys.modules
             assert "nbl_custom_worker.runner" not in sys.modules
+            assert "nbl_cisco_meraki.runner" in sys.modules  # unrelated, must be untouched
         finally:
             _remove_from_sys_modules("nbl_custom_worker")
+            sys.modules.pop("nbl_cisco_meraki.runner", None)
 
     def test_handles_hyphen_to_underscore_bundle_dir(self, tmp_path, monkeypatch):
         """_maybe_evict finds bundle dir using hyphens when module name uses underscores."""
@@ -266,7 +271,7 @@ class TestInstallFinder:
         sys.meta_path[:] = [f for f in sys.meta_path if not isinstance(f, PackageFinder)]
 
     def test_installs_finder_into_meta_path(self):
-        """install_finder appends an PackageFinder to sys.meta_path."""
+        """install_finder appends a PackageFinder to sys.meta_path."""
         install_finder()
         assert any(isinstance(f, PackageFinder) for f in sys.meta_path)
 
