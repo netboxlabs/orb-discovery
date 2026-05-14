@@ -17,18 +17,15 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Root directory where the package manager extracts bundles:
-#   BUNDLES_ROOT/<bundle_name>/current/  (symlink → <version>/)/
 def _bundles_root() -> Path:
+    """Return the bundles root path, reading the env var lazily each time."""
     val = os.environ.get("BUNDLES_ROOT_PATH")
     if not val:
         raise RuntimeError(
-            "BUNDLES_ROOT_PATH environment variable is not set."
+            "BUNDLES_ROOT_PATH environment variable is not set. "
+            "Set it before calling install_finder() or _maybe_evict()."
         )
     return Path(val)
-
-
-BUNDLES_ROOT = _bundles_root()
 
 
 
@@ -73,11 +70,12 @@ class PackageFinder(importlib.abc.MetaPathFinder):
 
     def _active_bundle_dirs(self) -> list[Path]:
         """Return current/ dirs for all bundles with a valid symlink."""
-        if not BUNDLES_ROOT.is_dir():
+        bundles_root = _bundles_root()
+        if not bundles_root.is_dir():
             return []
         return [
             b / "current"
-            for b in BUNDLES_ROOT.iterdir()
+            for b in bundles_root.iterdir()
             if (b / "current").exists()
         ]
 
@@ -98,12 +96,16 @@ def _maybe_evict(package_name: str) -> None:
         package_name: Top-level module name (e.g. "nbl_custom_worker").
 
     """
+    # Derive top-level module name in case a dotted path was passed
+    # (e.g. "nbl_custom_worker.backend" → "nbl_custom_worker").
+    top_level = package_name.split(".", 1)[0]
+
     # Derive the bundle directory name: module names use underscores,
     # bundle dirs may use hyphens (e.g. nbl-custom-worker). Check both.
-    bundles_root = BUNDLES_ROOT
+    bundles_root = _bundles_root()
     candidates = [
-        bundles_root / package_name,
-        bundles_root / package_name.replace("_", "-"),
+        bundles_root / top_level,
+        bundles_root / top_level.replace("_", "-"),
     ]
     current = next(
         (c / "current" for c in candidates if (c / "current").exists()), None
@@ -116,29 +118,35 @@ def _maybe_evict(package_name: str) -> None:
     except OSError:
         return
 
-    mod = sys.modules.get(package_name)
+    mod = sys.modules.get(top_level)
     if mod is None:
         return
 
-    # Stamp on first sight so we have a baseline for future calls.
+    # Stamp on first sight. If the module was loaded before we started
+    # stamping, its code may already be stale — evict if __file__ disagrees.
     cached = getattr(mod, "__bundle_path__", None)
     if cached is None:
-        mod.__bundle_path__ = resolved
-        return
+        mod_file = getattr(mod, "__file__", None)
+        if mod_file and not str(mod_file).startswith(resolved):
+            # Module was loaded from a different (older) bundle version — evict it.
+            cached = str(mod_file)
+        else:
+            mod.__bundle_path__ = resolved
+            return
 
     if cached != resolved:
         to_remove = [
             k for k in sys.modules
-            if k == package_name or k.startswith(f"{package_name}.")
+            if k == top_level or k.startswith(f"{top_level}.")
         ]
         for key in to_remove:
             del sys.modules[key]
         logger.info(
-            f"PackageFinder: evicted {len(to_remove)} module(s) for '{package_name}' "
+            f"PackageFinder: evicted {len(to_remove)} module(s) for '{top_level}' "
             f"({cached!r} → {resolved!r})"
         )
     else:
-        logger.debug(f"PackageFinder: '{package_name}' is current, no eviction needed")
+        logger.debug(f"PackageFinder: '{top_level}' is current, no eviction needed")
 
 
 def install_finder() -> None:
@@ -147,4 +155,4 @@ def install_finder() -> None:
         logger.debug("PackageFinder: already installed, skipping")
         return
     sys.meta_path.append(PackageFinder())
-    logger.info(f"PackageFinder: installed (bundles root: {BUNDLES_ROOT})")
+    logger.info(f"PackageFinder: installed (bundles root: {_bundles_root()})")

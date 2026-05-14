@@ -62,7 +62,7 @@ class TestPackageFinderFindSpec:
 
     def test_resolves_package_from_current_symlink(self, tmp_path, monkeypatch):
         """find_spec returns a valid spec for a package inside a current/ symlink."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path))
         _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
         finder = PackageFinder()
@@ -73,7 +73,7 @@ class TestPackageFinderFindSpec:
 
     def test_resolves_single_file_module(self, tmp_path, monkeypatch):
         """find_spec resolves a single-file module (module.py) from a bundle."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path))
         _make_single_file_bundle(tmp_path, "nbl-simple", "1.0.0", "nbl_simple")
 
         finder = PackageFinder()
@@ -84,14 +84,14 @@ class TestPackageFinderFindSpec:
 
     def test_returns_none_when_bundles_root_missing(self, tmp_path, monkeypatch):
         """find_spec returns None when BUNDLES_ROOT does not exist."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path / "nonexistent")
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path / "nonexistent"))
 
         finder = PackageFinder()
         assert finder.find_spec("nbl_custom_worker", None) is None
 
     def test_returns_none_when_module_not_in_any_bundle(self, tmp_path, monkeypatch):
         """find_spec returns None for a module not present in any bundle."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path))
         _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
         finder = PackageFinder()
@@ -99,7 +99,7 @@ class TestPackageFinderFindSpec:
 
     def test_skips_broken_symlink(self, tmp_path, monkeypatch):
         """find_spec skips a bundle whose current/ symlink is broken."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path))
 
         # Create a dangling symlink
         bundle_dir = tmp_path / "nbl-broken"
@@ -112,7 +112,7 @@ class TestPackageFinderFindSpec:
 
     def test_module_is_importable_after_finder_installed(self, tmp_path, monkeypatch):
         """A module resolved by PackageFinder can actually be imported."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path))
         _make_bundle(tmp_path, "nbl-test-pkg", "0.2.0", "nbl_test_pkg")
         _remove_from_sys_modules("nbl_test_pkg")
 
@@ -136,12 +136,12 @@ class TestActiveBundleDirs:
 
     def test_returns_empty_when_root_missing(self, tmp_path, monkeypatch):
         """_active_bundle_dirs returns [] when BUNDLES_ROOT does not exist."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path / "missing")
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path / "missing"))
         assert PackageFinder()._active_bundle_dirs() == []
 
     def test_returns_only_valid_current_dirs(self, tmp_path, monkeypatch):
         """_active_bundle_dirs returns only bundles with a valid current/ symlink."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path))
         _make_bundle(tmp_path, "nbl-good", "1.0.0", "nbl_good")
 
         # Bundle with broken symlink
@@ -163,7 +163,7 @@ class TestMaybeEvict:
 
     def test_noop_when_bundle_not_present(self, tmp_path, monkeypatch):
         """_maybe_evict does nothing when the package has no bundle directory."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path))
         # Should not raise even if module is in sys.modules
         fake = types.ModuleType("nbl_no_bundle")
         sys.modules["nbl_no_bundle"] = fake
@@ -175,7 +175,7 @@ class TestMaybeEvict:
 
     def test_noop_when_module_not_imported(self, tmp_path, monkeypatch):
         """_maybe_evict does nothing when the module is not in sys.modules."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path))
         _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
         _remove_from_sys_modules("nbl_custom_worker")
 
@@ -183,7 +183,7 @@ class TestMaybeEvict:
 
     def test_stamps_bundle_path_on_first_call(self, tmp_path, monkeypatch):
         """_maybe_evict stamps __bundle_path__ on the module the first time it sees it."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path))
         _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
         fake = types.ModuleType("nbl_custom_worker")
@@ -197,7 +197,7 @@ class TestMaybeEvict:
 
     def test_does_not_evict_when_symlink_unchanged(self, tmp_path, monkeypatch):
         """_maybe_evict leaves sys.modules intact when the symlink hasn't moved."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path))
         version_dir = _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
         fake = types.ModuleType("nbl_custom_worker")
@@ -211,7 +211,7 @@ class TestMaybeEvict:
 
     def test_evicts_module_tree_when_symlink_changes(self, tmp_path, monkeypatch):
         """_maybe_evict drops the full package subtree when the symlink moves to a new version."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path))
 
         # Start at 0.1.0
         _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
@@ -241,7 +241,7 @@ class TestMaybeEvict:
 
     def test_handles_hyphen_to_underscore_bundle_dir(self, tmp_path, monkeypatch):
         """_maybe_evict finds bundle dir using hyphens when module name uses underscores."""
-        monkeypatch.setattr(pf, "BUNDLES_ROOT", tmp_path)
+        monkeypatch.setenv("BUNDLES_ROOT_PATH", str(tmp_path))
         # Bundle dir uses hyphens; module name uses underscores
         _make_bundle(tmp_path, "nbl-custom-worker", "0.1.0", "nbl_custom_worker")
 
