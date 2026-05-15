@@ -17,17 +17,13 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-def _bundles_root() -> Path:
-    """Return the bundles root path, reading the env var lazily each time."""
+def _bundles_root():
+    """Return the bundles root path, or None if BUNDLES_ROOT_PATH is not set."""
     val = os.environ.get("BUNDLES_ROOT_PATH")
     if not val:
-        raise RuntimeError(
-            "BUNDLES_ROOT_PATH environment variable is not set. "
-            "Set it before calling install_finder() or _maybe_evict()."
-        )
+        logger.debug("PackageFinder: BUNDLES_ROOT_PATH is not set; bundle delivery disabled")
+        return None
     return Path(val)
-
-
 
 
 class PackageFinder(importlib.abc.MetaPathFinder):
@@ -38,9 +34,16 @@ class PackageFinder(importlib.abc.MetaPathFinder):
     pip-installed packages are exhausted.
     """
 
+    def __init__(self):
+        """Initialise the finder with an empty bundle-dir cache."""
+        self._cached_bundle_dirs: list[Path] = []
+        self._cached_root_mtime: float | None = None
+
     def find_spec(self, fullname: str, path, target=None):
         """Locate a module spec by scanning active bundle current/ directories."""
-        # Only handle top-level imports; submodules are resolved by the standard machinery.
+        # Only handle top-level imports; submodules are resolved by the standard machinery
+        # via submodule_search_locations set on the top-level spec. Single-file bundle
+        # modules cannot have submodules by design.
         if "." in fullname:
             return None
 
@@ -69,18 +72,32 @@ class PackageFinder(importlib.abc.MetaPathFinder):
         return None
 
     def _active_bundle_dirs(self) -> list[Path]:
-        """Return current/ dirs for all bundles with a valid symlink."""
+        """
+        Return current/ dirs for all bundles with a valid symlink.
+
+        Result is cached and only refreshed when BUNDLES_ROOT mtime changes,
+        avoiding repeated stat/iterdir calls on every import miss.
+        """
         bundles_root = _bundles_root()
-        if not bundles_root.is_dir():
+        if bundles_root is None or not bundles_root.is_dir():
+            self._cached_bundle_dirs = []
+            self._cached_root_mtime = None
             return []
-        return [
-            b / "current"
-            for b in bundles_root.iterdir()
-            if (b / "current").exists()
-        ]
+        try:
+            mtime = bundles_root.stat().st_mtime
+        except OSError:
+            return self._cached_bundle_dirs
+        if mtime != self._cached_root_mtime:
+            self._cached_bundle_dirs = [
+                b / "current"
+                for b in bundles_root.iterdir()
+                if (b / "current").exists()
+            ]
+            self._cached_root_mtime = mtime
+        return self._cached_bundle_dirs
 
 
-def _maybe_evict(package_name: str) -> None:
+def maybe_evict(package_name: str) -> None:
     """
     Evict a package from sys.modules if its bundle symlink has changed.
 
@@ -103,6 +120,8 @@ def _maybe_evict(package_name: str) -> None:
     # Derive the bundle directory name: module names use underscores,
     # bundle dirs may use hyphens (e.g. nbl-custom-worker). Check both.
     bundles_root = _bundles_root()
+    if bundles_root is None:
+        return
     candidates = [
         bundles_root / top_level,
         bundles_root / top_level.replace("_", "-"),
@@ -127,7 +146,7 @@ def _maybe_evict(package_name: str) -> None:
     cached = getattr(mod, "__bundle_path__", None)
     if cached is None:
         mod_file = getattr(mod, "__file__", None)
-        if mod_file and not str(mod_file).startswith(resolved):
+        if mod_file and not Path(mod_file).is_relative_to(Path(resolved)):
             # Module was loaded from a different (older) bundle version — evict it.
             cached = str(mod_file)
         else:
@@ -151,8 +170,16 @@ def _maybe_evict(package_name: str) -> None:
 
 def install_finder() -> None:
     """Install PackageFinder into sys.meta_path (idempotent)."""
+    bundles_root = _bundles_root()
+    if bundles_root is None:
+        logger.debug("PackageFinder: BUNDLES_ROOT_PATH not set, skipping install")
+        return
     if any(isinstance(f, PackageFinder) for f in sys.meta_path):
         logger.debug("PackageFinder: already installed, skipping")
         return
     sys.meta_path.append(PackageFinder())
-    logger.info(f"PackageFinder: installed (bundles root: {_bundles_root()})")
+    logger.info(f"PackageFinder: installed (bundles root: {bundles_root})")
+
+
+# Backward-compatible alias — prefer maybe_evict in new code.
+_maybe_evict = maybe_evict
