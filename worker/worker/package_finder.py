@@ -36,8 +36,8 @@ class PackageFinder(importlib.abc.MetaPathFinder):
 
     def __init__(self):
         """Initialise the finder with an empty bundle-dir cache."""
-        self._cached_bundle_dirs: list[Path] = []
-        self._cached_root_mtime: float | None = None
+        self._cached_bundle_dirs = []  # list[Path]
+        self._cached_root_mtime = None  # float or None
 
     def find_spec(self, fullname: str, path, target=None):
         """Locate a module spec by scanning active bundle current/ directories."""
@@ -71,12 +71,15 @@ class PackageFinder(importlib.abc.MetaPathFinder):
 
         return None
 
-    def _active_bundle_dirs(self) -> list[Path]:
+    def _active_bundle_dirs(self) -> list:
         """
         Return current/ dirs for all bundles with a valid symlink.
 
-        Result is cached and only refreshed when BUNDLES_ROOT mtime changes,
-        avoiding repeated stat/iterdir calls on every import miss.
+        Cache is invalidated when either BUNDLES_ROOT or any of its immediate
+        subdirectories change mtime. This catches both new bundle directories
+        being added at the root level AND current/ symlinks being created or
+        swapped inside existing bundle directories (which only update the
+        bundle subdirectory mtime, not the root).
         """
         bundles_root = _bundles_root()
         if bundles_root is None or not bundles_root.is_dir():
@@ -84,13 +87,18 @@ class PackageFinder(importlib.abc.MetaPathFinder):
             self._cached_root_mtime = None
             return []
         try:
-            mtime = bundles_root.stat().st_mtime
+            # Collect mtimes of root and all immediate subdirectories.
+            subdirs = [b for b in bundles_root.iterdir() if b.is_dir()]
+            mtime = tuple(
+                p.stat().st_mtime
+                for p in [bundles_root] + subdirs
+            )
         except OSError:
             return self._cached_bundle_dirs
         if mtime != self._cached_root_mtime:
             self._cached_bundle_dirs = [
                 b / "current"
-                for b in bundles_root.iterdir()
+                for b in subdirs
                 if (b / "current").exists()
             ]
             self._cached_root_mtime = mtime
