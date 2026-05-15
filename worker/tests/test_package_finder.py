@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 
 import worker.package_finder as pf
-from worker.package_finder import PackageFinder, _maybe_evict, install_finder
+from worker.package_finder import PackageFinder, install_finder
+from worker.package_finder import maybe_evict as _maybe_evict
 
 # ---------------------------------------------------------------------------
 # Helpers

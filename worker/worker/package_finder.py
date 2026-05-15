@@ -187,7 +187,3 @@ def install_finder() -> None:
         return
     sys.meta_path.append(PackageFinder())
     logger.info(f"PackageFinder: installed (bundles root: {bundles_root})")
-
-
-# Backward-compatible alias — prefer maybe_evict in new code.
-_maybe_evict = maybe_evict
