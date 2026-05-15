@@ -88,7 +88,7 @@ class PackageFinder(importlib.abc.MetaPathFinder):
             return []
         try:
             # Collect mtimes of root and all immediate subdirectories.
-            subdirs = [b for b in bundles_root.iterdir() if b.is_dir()]
+            subdirs = sorted(b for b in bundles_root.iterdir() if b.is_dir())
             mtime = tuple(
                 p.stat().st_mtime
                 for p in [bundles_root] + subdirs
