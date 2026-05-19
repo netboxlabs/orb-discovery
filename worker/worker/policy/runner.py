@@ -3,6 +3,7 @@
 """Orb Worker Policy Runner."""
 
 import logging
+import sys
 import time
 from datetime import datetime, timedelta
 
@@ -19,6 +20,7 @@ from netboxlabs.diode.sdk import (
 
 from worker.backend import Backend, load_class
 from worker.entity_metadata import apply_run_id_to_entities
+from worker.exceptions import IngestError, IngestRejected, IngestUnavailable
 from worker.metrics import get_metric
 from worker.models import DiodeConfig, Policy, Status
 from worker.package_finder import maybe_evict
@@ -38,6 +40,7 @@ class PolicyRunner:
         self.status = Status.NEW
         self.scheduler = BackgroundScheduler()
         self.run_store = None
+        self._diode_client = None
 
     def setup(
         self, name: str, diode_config: DiodeConfig, policy: Policy, run_store: RunStore
@@ -65,7 +68,12 @@ class PolicyRunner:
         # Debug logging for backend loading
         logger.debug(f"Loading backend class: {policy.config.package}")
         backend_class = load_class(policy.config.package)
-        backend = backend_class()
+
+        # Build the ingest callback closure. It captures `self` and reads
+        # `self._diode_client` lazily, so it is safe to construct before the
+        # client is assigned below.
+        ingest_callback = self._build_ingest_callback(self.name)
+        backend = backend_class(ingest_callback=ingest_callback, policy=policy)
         logger.debug(f"Backend class loaded successfully: {backend_class.__name__}")
 
         metadata = backend.setup()
@@ -101,6 +109,7 @@ class PolicyRunner:
         self.metadata = metadata
         self.policy = policy
         self.run_store = run_store
+        self._diode_client = client
 
         self.scheduler.start()
 
@@ -126,6 +135,96 @@ class PolicyRunner:
         active_policies = get_metric("active_policies")
         if active_policies:
             active_policies.add(1, {"policy": self.name})
+
+    def _build_ingest_callback(self, policy_name: str):
+        """
+        Build a closure used to ingest entities outside the scheduled run() cycle.
+
+        The returned callable signature:
+            cb(entities=None, *, error=None, **kwargs) -> None
+
+        Exactly one of ``entities`` / ``error`` must be supplied.
+        On the ``entities`` path: a pseudo-run is created in the RunStore,
+        entities are chunked and ingested via the same path run() uses, and
+        response/transport errors are translated into IngestRejected /
+        IngestUnavailable. On the ``error`` path: a failed pseudo-run is
+        recorded; no client.ingest call is made; returns None.
+        """
+
+        def ingest_callback(entities=None, *, error=None, **kw):
+            if (entities is None) == (error is None):
+                raise TypeError(
+                    "ingest_callback requires exactly one of 'entities' or 'error'"
+                )
+            run = self.run_store.create_run(
+                policy_name=policy_name,
+                metadata={
+                    "name": self.metadata.name,
+                    "app_name": self.metadata.app_name,
+                    "app_version": self.metadata.app_version,
+                    "source": "ingest_callback",
+                },
+            )
+            if error is not None:
+                self.run_store.update_run(
+                    policy_name=policy_name,
+                    run_id=run.id,
+                    status=RunStatus.FAILED,
+                    error=error,
+                    entity_count=0,
+                )
+                return
+            entities_list = list(entities)
+            apply_run_id_to_entities(entities_list, run.id)
+            metadata = {
+                "policy_name": policy_name,
+                "worker_backend": self.metadata.name,
+                "run_id": run.id,
+            }
+            client = self._diode_client
+            try:
+                size_bytes = estimate_message_size(entities_list)
+                if size_bytes > (3.0 * 1024 * 1024):
+                    chunks = create_message_chunks(entities_list)
+                    for chunk in chunks:
+                        response = client.ingest(entities=chunk, metadata=metadata)
+                        if response.errors:
+                            raise IngestRejected(
+                                f"Chunk ingestion failed: {response.errors}"
+                            )
+                else:
+                    response = client.ingest(entities=entities_list, metadata=metadata)
+                    if response.errors:
+                        raise IngestRejected(
+                            f"Entities ingestion failed: {response.errors}"
+                        )
+            except IngestError:
+                self.run_store.update_run(
+                    policy_name=policy_name,
+                    run_id=run.id,
+                    status=RunStatus.FAILED,
+                    error=sys.exc_info()[1],
+                    entity_count=len(entities_list),
+                )
+                raise
+            except Exception as exc:
+                self.run_store.update_run(
+                    policy_name=policy_name,
+                    run_id=run.id,
+                    status=RunStatus.FAILED,
+                    error=exc,
+                    entity_count=len(entities_list),
+                )
+                raise IngestUnavailable(str(exc)) from exc
+            self.run_store.update_run(
+                policy_name=policy_name,
+                run_id=run.id,
+                status=RunStatus.COMPLETED,
+                error=None,
+                entity_count=len(entities_list),
+            )
+
+        return ingest_callback
 
     def run(
         self,

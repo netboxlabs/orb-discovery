@@ -88,3 +88,27 @@ def test_load_class_attribute_error(mock_import_module):
         match=f"Failed to load a class inheriting from 'Backend' in module '{mock_module_name}': Attribute error",
     ):
         load_class(mock_module_name)
+
+
+def test_backend_init_default_no_args():
+    """Zero-arg construction still works (back-compat with older worker)."""
+    b = Backend()
+    assert b.ingest_callback is None
+    assert b.policy is None
+
+
+def test_backend_init_stores_kwargs():
+    """ingest_callback and policy are stored on the instance."""
+
+    def cb(**_):
+        return None
+
+    pol = MagicMock(spec=Policy)
+    b = Backend(ingest_callback=cb, policy=pol)
+    assert b.ingest_callback is cb
+    assert b.policy is pol
+
+
+def test_backend_init_absorbs_unknown_kwargs():
+    """Forward-compat: unknown kwargs don't raise."""
+    Backend(unknown_future_resource="x", another_one=42)  # must not raise

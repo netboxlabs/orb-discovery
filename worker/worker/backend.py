@@ -14,6 +14,38 @@ from worker.models import Metadata, Policy
 class Backend:
     """Backend Class."""
 
+    def __init__(
+        self,
+        *,
+        ingest_callback=None,
+        policy: Policy | None = None,
+        **kwargs,
+    ) -> None:
+        """
+        Construct the Backend.
+
+        Worker passes ``ingest_callback`` and ``policy`` at construction
+        starting with the minor release this docstring ships in. Older
+        worker versions construct ``Backend()`` with zero args; integrations
+        that override ``__init__`` should accept ``**kwargs`` so both paths
+        keep working.
+
+        Args:
+        ----
+            ingest_callback: Optional callable that ingests entities or
+                reports errors outside of the ``run()`` cycle. See
+                ``worker.exceptions`` for the exception hierarchy it may
+                raise.
+            policy: Optional construction-time policy. If supplied, the
+                integration may use credentials / scope without waiting for
+                the first scheduled ``run()``.
+            **kwargs: Forward-compat door for additional resources worker
+                may pass in future versions; silently ignored by default.
+
+        """
+        self.ingest_callback = ingest_callback
+        self.policy = policy
+
     def setup(self) -> Metadata:
         """
         Set up the backend.
