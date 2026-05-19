@@ -845,3 +845,33 @@ def test_run_unaffected_by_callback(
     mock_run_store.update_run.assert_called_once()
     update_kwargs = mock_run_store.update_run.call_args.kwargs
     assert update_kwargs["status"] == RunStatus.COMPLETED
+
+
+def test_ingest_callback_raises_when_client_not_initialised(
+    policy_runner,
+    sample_policy,
+    sample_diode_config,
+    mock_run_store,
+    mock_load_class,
+    mock_diode_client,
+):
+    """Calling the callback before _diode_client is assigned raises IngestUnavailable."""
+    with patch.object(policy_runner.scheduler, "start"), patch.object(
+        policy_runner.scheduler, "add_job"
+    ):
+        policy_runner.setup("policy-x", sample_diode_config, sample_policy, mock_run_store)
+
+    callback = _extract_callback(mock_load_class.return_value)
+
+    # Simulate "called before client init" — clear the attribute.
+    policy_runner._diode_client = None
+
+    entity = MagicMock()
+    with patch("worker.policy.runner.apply_run_id_to_entities"):
+        with pytest.raises(IngestUnavailable, match="diode client was initialised"):
+            callback(entities=[entity])
+
+    # Pseudo-run was still recorded as FAILED.
+    mock_run_store.update_run.assert_called()
+    final_call = mock_run_store.update_run.call_args
+    assert final_call.kwargs["status"] == RunStatus.FAILED

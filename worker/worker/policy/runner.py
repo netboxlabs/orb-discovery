@@ -3,7 +3,6 @@
 """Orb Worker Policy Runner."""
 
 import logging
-import sys
 import time
 from datetime import datetime, timedelta
 
@@ -151,7 +150,13 @@ class PolicyRunner:
         recorded; no client.ingest call is made; returns None.
         """
 
-        def ingest_callback(entities=None, *, error=None, **kw):
+        def ingest_callback(
+            entities=None,
+            *,
+            error: Exception | None = None,
+            **kwargs,
+        ) -> None:
+            # kwargs is reserved for forward-compat (run_id, source, etc.); currently ignored.
             if (entities is None) == (error is None):
                 raise TypeError(
                     "ingest_callback requires exactly one of 'entities' or 'error'"
@@ -182,32 +187,35 @@ class PolicyRunner:
                 "run_id": run.id,
             }
             client = self._diode_client
-            try:
-                size_bytes = estimate_message_size(entities_list)
-                if size_bytes > (3.0 * 1024 * 1024):
-                    chunks = create_message_chunks(entities_list)
-                    for chunk in chunks:
-                        response = client.ingest(entities=chunk, metadata=metadata)
-                        if response.errors:
-                            raise IngestRejected(
-                                f"Chunk ingestion failed: {response.errors}"
-                            )
-                else:
-                    response = client.ingest(entities=entities_list, metadata=metadata)
-                    if response.errors:
-                        raise IngestRejected(
-                            f"Entities ingestion failed: {response.errors}"
-                        )
-            except IngestError:
+            if client is None:
+                guard_error = IngestUnavailable(
+                    "ingest_callback invoked before the diode client was initialised "
+                    "(likely called from Backend.setup() — defer until after setup completes)"
+                )
                 self.run_store.update_run(
                     policy_name=policy_name,
                     run_id=run.id,
                     status=RunStatus.FAILED,
-                    error=sys.exc_info()[1],
+                    error=guard_error,
+                    entity_count=len(entities_list),
+                )
+                raise guard_error
+            try:
+                self._send_entities(client, entities_list, metadata)
+            except IngestError as exc:
+                self.run_store.update_run(
+                    policy_name=policy_name,
+                    run_id=run.id,
+                    status=RunStatus.FAILED,
+                    error=exc,
                     entity_count=len(entities_list),
                 )
                 raise
             except Exception as exc:
+                logger.exception(
+                    "Unexpected exception in ingest_callback; "
+                    "translating to IngestUnavailable"
+                )
                 self.run_store.update_run(
                     policy_name=policy_name,
                     run_id=run.id,
@@ -225,6 +233,20 @@ class PolicyRunner:
             )
 
         return ingest_callback
+
+    def _send_entities(self, client, entities_list: list, metadata: dict) -> None:
+        """Send entities to the Diode client, chunking if the payload exceeds 3 MB."""
+        size_bytes = estimate_message_size(entities_list)
+        if size_bytes > (3.0 * 1024 * 1024):
+            chunks = create_message_chunks(entities_list)
+            for chunk in chunks:
+                response = client.ingest(entities=chunk, metadata=metadata)
+                if response.errors:
+                    raise IngestRejected(f"Chunk ingestion failed: {response.errors}")
+        else:
+            response = client.ingest(entities=entities_list, metadata=metadata)
+            if response.errors:
+                raise IngestRejected(f"Entities ingestion failed: {response.errors}")
 
     def run(
         self,
