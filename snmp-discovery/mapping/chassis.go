@@ -273,12 +273,21 @@ func buildMemberDevice(master *diode.Device, member ChassisMember, masterRef *di
 	name := fmt.Sprintf("%s-%d", vcName, member.ID)
 	pos := int64(member.ID)
 	dev := &diode.Device{
-		Name:       &name,
-		Serial:     &member.Serial,
+		Name:   &name,
+		Serial: &member.Serial,
+		// Inherit policy-scoped attributes from the master. Location
+		// is carried alongside Site/Tenant/Role/Platform because
+		// defaults.location applies to the whole discovery scope —
+		// without this, members would be ingested into NetBox without
+		// the configured location even though the master has it.
+		// Pointer-shared (matches how Site/Tenant/Role/Platform are
+		// shared); each member's Device.location FK resolves to the
+		// same NetBox Location object.
 		Site:       master.Site,
 		Tenant:     master.Tenant,
 		Role:       master.Role,
 		Platform:   master.Platform,
+		Location:   master.Location,
 		VcPosition: &pos,
 		VirtualChassis: &diode.VirtualChassis{
 			Name:   &vcName,
