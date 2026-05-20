@@ -218,6 +218,36 @@ class BaseDriverTest:
             expected = json.loads(expected_path.read_text(encoding="utf-8"))
             assert result == expected
 
+    def test_get_modules(self, scenario: str) -> None:
+        """Verify get_modules payload shape (driver-optional)."""
+        mock_dir = self._mock_dir("test_get_modules", scenario)
+        driver = self._build_driver(mock_dir)
+        if not hasattr(driver, "get_modules"):
+            pytest.skip(f"{self.driver_cls.__name__} does not expose get_modules")
+
+        result = driver.get_modules()
+        assert result is None or isinstance(result, dict), (
+            "get_modules must return a dict or None"
+        )
+        if isinstance(result, dict):
+            assert "bays" in result and isinstance(result["bays"], list)
+            assert "interfaces_by_bay" in result and isinstance(
+                result["interfaces_by_bay"], dict
+            )
+            for bay in result["bays"]:
+                assert isinstance(bay, dict)
+                assert isinstance(bay.get("name"), str) and bay["name"]
+                mod = bay.get("module") or {}
+                assert mod.get("serial"), f"bay {bay['name']} has empty serial"
+                assert mod.get("type") in {
+                    "linecard", "supervisor", "fan", "psu", "transceiver",
+                }
+
+        expected_path = mock_dir / "expected_result.json"
+        if expected_path.exists():
+            expected = json.loads(expected_path.read_text(encoding="utf-8"))
+            assert result == expected
+
     def test_get_interfaces_vlans(self, scenario: str) -> None:
         """Verify get_interfaces_vlans returns valid per-iface VLAN config (driver-optional)."""
         mock_dir = self._mock_dir("test_get_interfaces_vlans", scenario)

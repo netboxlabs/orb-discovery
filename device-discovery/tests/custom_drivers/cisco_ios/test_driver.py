@@ -206,6 +206,93 @@ class TestIOSDriver(BaseDriverTest):
         result = classify_switchport(_ios_row_to_switchport_info(row))
         assert result == {"mode": "trunk-all", "tagged": [], "untagged": 99}
 
+    def test_get_modules_short_form_transceiver_canonicalized(self) -> None:
+        """``Te2/0/2`` in show inventory becomes ``TenGigabitEthernet2/0/2`` in the sub-bay."""
+        mock_dir = self.mock_data_root / "test_get_modules" / "modular_9404r_with_transceivers"
+        driver = self._build_driver(mock_dir)
+        result = driver.get_modules()
+        assert result is not None
+        bay_2 = next(b for b in result["bays"] if b["name"] == "2")
+        sub_names = [s["name"] for s in bay_2["module"]["sub_bays"]]
+        # Both rows canonicalize to TenGigabitEthernet, even the short-form Te2/0/2.
+        assert sub_names == [
+            "TenGigabitEthernet2/0/1",
+            "TenGigabitEthernet2/0/2",
+        ]
+        # And full-mode deepest-wins routing pre-populates the self-mapping.
+        assert result["interfaces_by_bay"]["TenGigabitEthernet2/0/2"] == [
+            "TenGigabitEthernet2/0/2",
+        ]
+
+    def test_get_modules_supervisor_classified_by_name_hint(self) -> None:
+        """``Slot N Supervisor`` rows emit type=supervisor, not type=linecard."""
+        mock_dir = self.mock_data_root / "test_get_modules" / "supervisor_only"
+        driver = self._build_driver(mock_dir)
+        result = driver.get_modules()
+        assert result is not None
+        assert len(result["bays"]) == 1
+        assert result["bays"][0]["module"]["type"] == "supervisor"
+
+    def test_get_modules_inventory_failure_returns_none(self) -> None:
+        """A raised exception from send_command propagates as a None result + WARNING."""
+        import logging
+        mock_dir = self.mock_data_root / "test_get_modules" / "modular_9404r_with_transceivers"
+        driver = self._build_driver(mock_dir)
+
+        def boom(*_a, **_kw):
+            raise RuntimeError("connection reset")
+        driver.device.send_command = boom  # type: ignore[method-assign]
+        import custom_napalm.ios as ios_mod
+        with self._caplog(ios_mod.logger, logging.WARNING) as records:
+            assert driver.get_modules() is None
+        assert any("show inventory failed" in r.getMessage() for r in records)
+
+    def test_get_modules_interface_brief_failure_keeps_bays_no_iface_map(self) -> None:
+        """If show ip interface brief fails, bays still emit but interfaces_by_bay stays empty."""
+        mock_dir = self.mock_data_root / "test_get_modules" / "modular_9404r_with_transceivers"
+        driver = self._build_driver(mock_dir)
+
+        original = driver.device.send_command
+
+        def selective(cmd, *a, **kw):  # type: ignore[no-untyped-def]
+            if "ip interface brief" in cmd:
+                raise RuntimeError("ip-brief unavailable")
+            return original(cmd, *a, **kw)
+        driver.device.send_command = selective  # type: ignore[method-assign]
+
+        result = driver.get_modules()
+        assert result is not None
+        # The transceiver self-mapping survives (it's added after the
+        # interfaces_by_bay scaffold), but the per-slot lists stay empty.
+        assert result["interfaces_by_bay"]["1"] == []
+        assert result["interfaces_by_bay"]["2"] == []
+        assert result["interfaces_by_bay"]["3"] == []
+        assert result["interfaces_by_bay"]["TenGigabitEthernet2/0/1"] == [
+            "TenGigabitEthernet2/0/1",
+        ]
+
+    def _caplog(self, logger, level):
+        """Context manager that captures records from a specific logger at ``level``."""
+        import logging
+        records: list[logging.LogRecord] = []
+
+        class _H(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        handler = _H(level=level)
+
+        class _Ctx:
+            def __enter__(self):
+                logger.addHandler(handler)
+                return records
+
+            def __exit__(self, *exc):
+                logger.removeHandler(handler)
+                return False
+
+        return _Ctx()
+
     def test_get_interfaces_vlans_voice_equal_access_stays_access(self) -> None:
         """When voice VLAN equals access VLAN, keep mode=access (don't promote)."""
         from custom_napalm._vlan import classify_switchport

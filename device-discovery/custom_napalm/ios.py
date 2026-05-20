@@ -16,6 +16,18 @@ from napalm.ios.ios import IOSDriver as NapalmIOSDriver
 from ntc_templates.parse import parse_output
 
 from custom_napalm._chassis import ChassisMember, normalize_role, to_payload
+from custom_napalm._modules import (
+    ModuleBay as _ModuleBay,
+)
+from custom_napalm._modules import (
+    ModuleEntry as _ModuleEntry,
+)
+from custom_napalm._modules import (
+    classify_module_type_cisco,
+)
+from custom_napalm._modules import (
+    to_payload as _modules_to_payload,
+)
 from custom_napalm._vlan import SwitchportInfo, classify_switchport, parse_vlan_range_string
 
 logger = logging.getLogger(__name__)
@@ -196,6 +208,25 @@ class IOSDriver(NapalmIOSDriver):
         """
         return _ios_get_chassis_members_impl(self)
 
+    def get_modules(self) -> dict | None:
+        """
+        Return Module / ModuleBay inventory for a standalone modular chassis.
+
+        Parses ``show inventory`` for ``Slot N <role>`` rows (linecards and
+        supervisors on Catalyst 9400 / 9600 and similar IOS-XE chassis) and
+        interface-name rows (transceivers). Attaches transceiver entries as
+        ``sub_bays`` of the parent linecard. ``show ip interface brief``
+        provides the per-slot interface enumeration used to build
+        ``interfaces_by_bay``.
+
+        Returns ``None`` for non-modular chassis (no ``Slot N`` rows) and
+        when ``show inventory`` fails to parse. Virtual-chassis-of-modular
+        composition is deferred — the translate layer short-circuits with
+        a WARNING when ``chassis_members`` is also populated, so this
+        method does not need to detect that case itself.
+        """
+        return _ios_get_modules_impl(self)
+
 
 # Two NAME formats are seen in the wild for stack members:
 #   "Switch 1"   — Catalyst 3850/9300/2960X StackWise (most common)
@@ -277,3 +308,164 @@ def _ios_get_chassis_members_impl(driver) -> dict | None:
         )
 
     return to_payload(members, domain=None)
+
+
+# ---- module inventory ----------------------------------------------------
+#
+# Two `show inventory` row patterns drive emission:
+#
+#   "Slot 1 Linecard"      — physical line card on a Catalyst 9400/9600 modular
+#   "Slot 1 Supervisor"    — supervisor module (treated as its own type)
+#   "module 1"             — alternate phrasing seen on some IOS-XE versions
+#
+# Plus transceiver rows whose NAME is an interface short / long form, e.g.
+# "Te1/0/1" or "TenGigabitEthernet1/0/1". A 4-tuple ifname like
+# "Te1/2/0/1" belongs to VC-of-modular composition, which is deferred —
+# it never matches the regex below and the _modules helper drops the
+# entry at the payload boundary if it slips through some other path.
+_INVENTORY_SLOT_RE = re.compile(
+    r"^(?:Slot|module|Module)\s+(\d+)(?:\s+(\w+))?",
+    re.IGNORECASE,
+)
+_INVENTORY_IFNAME_RE = re.compile(r"^[A-Za-z]+\d+(?:/\d+){1,2}$")
+_INTERFACE_SLOT_RE = re.compile(r"^[A-Za-z]+(\d+)/\d+")
+
+
+def _interface_slot(ifname: str) -> str | None:
+    """Extract the leading slot number from a canonical/short Cisco ifname."""
+    m = _INTERFACE_SLOT_RE.match(ifname)
+    return m.group(1) if m else None
+
+
+def _classify_slot_module(pid: str, role_hint: str) -> str:
+    """
+    Pick a ModuleType for a Slot N inventory row.
+
+    Trusts the NAME's role hint first ("Supervisor" / "Sup..." → supervisor),
+    then falls back to PID-based classification. Anything not classifiable
+    as a transceiver from the PID — supervisor, linecard, fabric, route
+    processor — is treated as ``linecard`` for v1.
+    """
+    role_word = (role_hint or "").lower()
+    if role_word.startswith("sup"):
+        return "supervisor"
+    pid_type = classify_module_type_cisco(pid)
+    # A "Slot N" row that PID-classifies as transceiver is almost certainly
+    # an inventory mislabel — keep it a linecard rather than risk dropping
+    # the bay in linecards mode.
+    return "linecard" if pid_type == "transceiver" else pid_type
+
+
+def _parse_inventory_rows(rows: list[dict]) -> tuple[dict[str, _ModuleBay], dict[str, _ModuleEntry]]:
+    """
+    Split ``show inventory`` rows into slot bays and transceivers-by-ifname.
+
+    Returns ``(bays_by_slot, transceivers_by_ifname)`` where ``bays_by_slot``
+    maps the slot string (``"1"``) to the ModuleBay for that physical slot,
+    and ``transceivers_by_ifname`` maps the raw inventory NAME (often the
+    short form) to a ModuleEntry. The caller canonicalizes the ifname
+    before attaching the transceiver as a sub-bay.
+    """
+    bays_by_slot: dict[str, _ModuleBay] = {}
+    transceivers_by_ifname: dict[str, _ModuleEntry] = {}
+    for row in rows or []:
+        name = (row.get("name") or "").strip()
+        pid = (row.get("pid") or "").strip()
+        sn = (row.get("sn") or "").strip()
+        descr = (row.get("descr") or "").strip()
+        if not (pid and sn):
+            continue
+        slot_match = _INVENTORY_SLOT_RE.match(name)
+        if slot_match:
+            slot = slot_match.group(1)
+            mtype = _classify_slot_module(pid, slot_match.group(2) or "")
+            bays_by_slot[slot] = _ModuleBay(
+                name=slot, position=slot,
+                module=_ModuleEntry(model=pid, serial=sn, type=mtype, description=descr),
+            )
+            continue
+        if _INVENTORY_IFNAME_RE.match(name):
+            transceivers_by_ifname[name] = _ModuleEntry(
+                model=pid, serial=sn,
+                type=classify_module_type_cisco(pid),
+                description=descr,
+            )
+    return bays_by_slot, transceivers_by_ifname
+
+
+def _collect_interfaces_by_slot(driver, slots: set[str]) -> dict[str, list[str]]:
+    """
+    Return ``{slot: [ifname, ...]}`` via ``show ip interface brief``.
+
+    Falls back to an empty mapping when the command fails or the template
+    parse errors — operators still get module / module-bay emission, just
+    without per-interface module attachment for that cycle.
+    """
+    out_map: dict[str, list[str]] = {slot: [] for slot in slots}
+    try:
+        out = driver.device.send_command("show ip interface brief")
+        rows = parse_output(
+            platform="cisco_ios",
+            command="show ip interface brief",
+            data=out or "",
+        )
+    except Exception:
+        logger.debug("ios.get_modules: show ip interface brief failed", exc_info=True)
+        return out_map
+    for row in rows or []:
+        ifname = (row.get("interface") or row.get("intf") or "").strip()
+        if not ifname:
+            continue
+        slot = _interface_slot(ifname)
+        if slot and slot in out_map:
+            out_map[slot].append(ifname)
+    return out_map
+
+
+def _ios_get_modules_impl(driver) -> dict | None:
+    """Implementation of IOSDriver.get_modules (factored for testability)."""
+    try:
+        inv_out = driver.device.send_command("show inventory")
+        inv_rows = parse_output(
+            platform="cisco_ios",
+            command="show inventory",
+            data=inv_out or "",
+        )
+    except Exception as e:
+        logger.warning("ios.get_modules: show inventory failed: %s", e)
+        return None
+    if not inv_rows:
+        return None
+
+    bays_by_slot, transceivers_by_ifname = _parse_inventory_rows(inv_rows)
+    if not bays_by_slot:
+        return None
+
+    interfaces_by_bay = _collect_interfaces_by_slot(driver, set(bays_by_slot))
+
+    # Attach transceivers as sub-bays of their slot's linecard. Canonicalize
+    # the inventory's raw NAME (often the short form "Te1/0/1") so the
+    # sub-bay name matches the long-form ifname produced by
+    # get_interfaces() and consumed by the translator's deepest-wins
+    # routing.
+    for raw_ifname, transceiver in transceivers_by_ifname.items():
+        canonical = canonical_interface_name(
+            raw_ifname, addl_name_map=_IOS_ADDL_NAME_MAP,
+        )
+        slot = _interface_slot(canonical)
+        if not slot or slot not in bays_by_slot:
+            continue
+        parent_bay = bays_by_slot[slot]
+        if parent_bay.module is None:  # pragma: no cover — set above
+            continue
+        parent_bay.module.sub_bays.append(
+            _ModuleBay(name=canonical, position=canonical, module=transceiver),
+        )
+        # Sub-bay self-routes the transceiver's ifname so full-mode
+        # deepest-wins assigns the transceiver as the interface's module.
+        interfaces_by_bay.setdefault(canonical, []).append(canonical)
+
+    return _modules_to_payload(
+        list(bays_by_slot.values()),
+        interfaces_by_bay=interfaces_by_bay,
+    )
