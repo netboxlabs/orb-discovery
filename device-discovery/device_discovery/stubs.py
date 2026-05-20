@@ -241,6 +241,75 @@ def _prune_ip_address_against_index(
     )
 
 
+# Hard cap on nested device-stub recursion through Module / ModuleBay protos.
+# Cisco modular chassis are depth 2 (chassis → linecard → transceiver), Junos
+# is depth 3. Cap matches custom_napalm._modules.MAX_BAY_DEPTH and prevents
+# infinite recursion through the cyclic module.module_bay.module references
+# the emitter creates.
+_MAX_DEVICE_STUB_DEPTH = 4
+
+
+def _stub_device_recursive(msg, dev_stub: pb.Device, depth: int = 0) -> None:
+    """
+    Walk a Module / ModuleBay sub-tree and replace every nested ``device`` with a stub.
+
+    The emitter sets ``device`` on every Module and ModuleBay (the chassis
+    is the matching scope for both), and the nested ``module`` /
+    ``module_bay`` / ``installed_module`` sub-messages each carry their
+    own rich Device copy from protobuf CopyFrom semantics. Without this
+    pass, a chassis with N transceivers duplicates the full Device proto
+    (often with running-config text) N+1 times on the wire.
+    """
+    if depth >= _MAX_DEVICE_STUB_DEPTH:
+        return
+    if msg.HasField("device"):
+        msg.device.CopyFrom(dev_stub)
+    for field in ("module", "module_bay", "installed_module"):
+        # HasField only works on message fields; ModuleBay has module +
+        # installed_module, Module has module_bay. Wrap so we don't raise
+        # when the field doesn't exist on this message type.
+        try:
+            present = msg.HasField(field)
+        except ValueError:
+            continue
+        if present:
+            _stub_device_recursive(getattr(msg, field), dev_stub, depth + 1)
+
+
+def _prune_module_against_index(
+    module: pb.Module,
+    index: dict[str, pb.Device],
+    stub_for,
+) -> None:
+    """Resolve module.device against the top-level index, then stub the whole sub-tree."""
+    rich = _resolve_device(module.device, index)
+    if rich is None:
+        logger.warning(
+            "prune_nested_refs: could not resolve nested device %r for module %r — leaving untouched",
+            module.device.name,
+            module.serial,
+        )
+        return
+    _stub_device_recursive(module, stub_for(rich))
+
+
+def _prune_module_bay_against_index(
+    bay: pb.ModuleBay,
+    index: dict[str, pb.Device],
+    stub_for,
+) -> None:
+    """Resolve bay.device against the top-level index, then stub the whole sub-tree."""
+    rich = _resolve_device(bay.device, index)
+    if rich is None:
+        logger.warning(
+            "prune_nested_refs: could not resolve nested device %r for module_bay %r — leaving untouched",
+            bay.device.name,
+            bay.name,
+        )
+        return
+    _stub_device_recursive(bay, stub_for(rich))
+
+
 def prune_nested_refs(entities: list[Entity]) -> None:
     """
     Walk entities once and replace nested Device and Interface references with stubs.
@@ -248,9 +317,16 @@ def prune_nested_refs(entities: list[Entity]) -> None:
     Call from Client.ingest AFTER apply_run_id_to_entities and BEFORE estimate_message_size
     / diode_client.ingest.
 
-    Multi-Device aware: each Interface/IPAddress nested device-ref is resolved against
-    the top-level Device index by name (serial as fallback). Stack-emitting translate
-    paths produce N top-level Devices; member interfaces must keep their own attribution.
+    Multi-Device aware: each Interface/IPAddress/Module/ModuleBay nested
+    device-ref is resolved against the top-level Device index by name
+    (serial as fallback). Stack-emitting translate paths produce N
+    top-level Devices; member interfaces must keep their own attribution.
+
+    Module / ModuleBay entities additionally have nested ``module`` /
+    ``module_bay`` / ``installed_module`` sub-messages that each carry
+    their own rich Device proto copy — without recursive stubbing, a
+    chassis with N transceivers duplicates the full Device (often with
+    running-config text) N+1 times on the wire.
 
     No-op if entities is empty or no top-level Device is present.
     Unresolved nested device-refs are logged at WARNING and left untouched.
@@ -271,15 +347,24 @@ def prune_nested_refs(entities: list[Entity]) -> None:
         return stub_cache[rich.name]
 
     for e in entities:
-        if e.HasField("device"):
-            # Per-Device: the stub used here MUST be derived from THIS device, not
-            # from a single shared "rich device" — otherwise a multi-Device entity
-            # list (switch stacks) would point member primary-IP back-pointers at
-            # the master's stub.
-            own_stub = _stub_for(e.device)
-            _stub_primary_ip_iface(e.device.primary_ip4, own_stub)
-            _stub_primary_ip_iface(e.device.primary_ip6, own_stub)
-        elif e.HasField("interface"):
-            _prune_interface_against_index(e.interface, index, _stub_for)
-        elif e.HasField("ip_address"):
-            _prune_ip_address_against_index(e.ip_address, index, _stub_for)
+        _prune_entity(e, index, _stub_for)
+
+
+def _prune_entity(e: Entity, index: dict[str, pb.Device], stub_for) -> None:
+    """Dispatch one entity to the right per-type pruner (or fix up its own back-refs)."""
+    if e.HasField("device"):
+        # Per-Device: the stub used here MUST be derived from THIS device, not
+        # from a single shared "rich device" — otherwise a multi-Device entity
+        # list (switch stacks) would point member primary-IP back-pointers at
+        # the master's stub.
+        own_stub = stub_for(e.device)
+        _stub_primary_ip_iface(e.device.primary_ip4, own_stub)
+        _stub_primary_ip_iface(e.device.primary_ip6, own_stub)
+    elif e.HasField("interface"):
+        _prune_interface_against_index(e.interface, index, stub_for)
+    elif e.HasField("ip_address"):
+        _prune_ip_address_against_index(e.ip_address, index, stub_for)
+    elif e.HasField("module"):
+        _prune_module_against_index(e.module, index, stub_for)
+    elif e.HasField("module_bay"):
+        _prune_module_bay_against_index(e.module_bay, index, stub_for)
