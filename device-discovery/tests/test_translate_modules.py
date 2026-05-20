@@ -272,6 +272,79 @@ def test_non_dict_payload_returns_empty_map() -> None:
     assert entities == []
 
 
+def test_malformed_sub_bay_does_not_drop_parent_bay(caplog) -> None:
+    """
+    One bad sub-bay must not take down the parent linecard's emission.
+
+    Earlier the recursive call lived inside the top-level bay's
+    try/except, so any exception raised inside _emit_bay_recursive
+    while processing a sub-bay would skip the whole parent bay (and
+    its already-emitted Module). The fix wraps each sub-bay in its
+    own guard.
+    """
+    payload = {
+        "bays": [
+            {
+                "name": "1", "position": "1",
+                "module": {
+                    "model": "C9400-LC-48U", "serial": "FOC1", "description": "",
+                    "type": "linecard",
+                    "sub_bays": [
+                        # Missing "module" key → AttributeError inside recursion.
+                        {"name": "BROKEN", "position": "BROKEN"},
+                        {
+                            "name": "Te1/0/2", "position": "Te1/0/2",
+                            "module": {
+                                "model": "SFP-10G-LR", "serial": "FNS2",
+                                "description": "", "type": "transceiver",
+                                "sub_bays": [],
+                            },
+                        },
+                    ],
+                },
+            },
+        ],
+        "interfaces_by_bay": {},
+    }
+    entities: list = []
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
+        emit_modules_if_requested(
+            {"modules": payload}, Options(discover_modules="full"),
+            _make_device(), entities,
+        )
+    modules = [e.module for e in entities if e.HasField("module")]
+    # Linecard + the sibling transceiver survive; broken sub-bay is dropped.
+    serials = sorted(m.serial for m in modules)
+    assert serials == ["FNS2", "FOC1"]
+    assert any("sub-bay" in r.message for r in caplog.records)
+
+
+def test_non_dict_sub_bay_logged_and_skipped(caplog) -> None:
+    """A non-dict element in sub_bays is logged and skipped without raising."""
+    payload = {
+        "bays": [
+            {
+                "name": "1", "position": "1",
+                "module": {
+                    "model": "C9400-LC-48U", "serial": "FOC1", "description": "",
+                    "type": "linecard",
+                    "sub_bays": ["garbage-not-a-dict"],
+                },
+            },
+        ],
+        "interfaces_by_bay": {},
+    }
+    entities: list = []
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
+        emit_modules_if_requested(
+            {"modules": payload}, Options(discover_modules="full"),
+            _make_device(), entities,
+        )
+    modules = [e.module for e in entities if e.HasField("module")]
+    assert len(modules) == 1  # parent linecard still emits
+    assert any("not a dict" in r.message for r in caplog.records)
+
+
 def test_non_dict_bay_in_payload_logged_and_skipped(caplog) -> None:
     """A non-dict element inside payload['bays'] must not crash the loop."""
     payload = {

@@ -233,6 +233,29 @@ class TestIOSDriver(BaseDriverTest):
         assert len(result["bays"]) == 1
         assert result["bays"][0]["module"]["type"] == "supervisor"
 
+    def test_get_modules_interface_brief_shortform_canonicalized(self) -> None:
+        """
+        Short-form ifnames in show ip interface brief are canonicalized.
+
+        ``Gi2/0/1`` and ``Te2/0/1`` become ``GigabitEthernet2/0/1`` and
+        ``TenGigabitEthernet2/0/1``, matching the long form
+        ``get_interfaces()`` emits. Without this normalization the
+        translator's iface_module_map keys diverge from the Interface
+        entity names and module ownership silently fails to attach.
+        """
+        mock_dir = self.mock_data_root / "test_get_modules" / "modular_9400r_shortform_ifnames"
+        driver = self._build_driver(mock_dir)
+        result = driver.get_modules()
+        assert result is not None
+        slot2 = result["interfaces_by_bay"]["2"]
+        # Every name is canonicalized; no raw "Gi2/0/1" or "Te2/0/2" leaks.
+        assert all(not n.startswith("Gi") and not n.startswith("Te2") or
+                   n.startswith("GigabitEthernet") or n.startswith("TenGigabit")
+                   for n in slot2), slot2
+        assert "GigabitEthernet2/0/1" in slot2
+        assert "TenGigabitEthernet2/0/1" in slot2
+        assert "GigabitEthernet3/0/1" in result["interfaces_by_bay"]["3"]
+
     def test_get_modules_inventory_failure_returns_none(self) -> None:
         """A raised exception from send_command propagates as a None result + WARNING."""
         import logging

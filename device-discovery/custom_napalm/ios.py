@@ -398,9 +398,12 @@ def _collect_interfaces_by_slot(driver, slots: set[str]) -> dict[str, list[str]]
     """
     Return ``{slot: [ifname, ...]}`` via ``show ip interface brief``.
 
-    Falls back to an empty mapping when the command fails or the template
-    parse errors — operators still get module / module-bay emission, just
-    without per-interface module attachment for that cycle.
+    Names are canonicalized via the existing ``addl_name_map`` override so
+    they match the long-form names ``get_interfaces()`` emits — the
+    translator's interface→module routing keys on the canonical form, so
+    short-form rows like ``Gi1/0/1`` from some IOS versions would
+    otherwise silently fail to attach. Falls back to an empty mapping
+    when the command fails or the template parse errors.
     """
     out_map: dict[str, list[str]] = {slot: [] for slot in slots}
     try:
@@ -414,9 +417,10 @@ def _collect_interfaces_by_slot(driver, slots: set[str]) -> dict[str, list[str]]
         logger.debug("ios.get_modules: show ip interface brief failed", exc_info=True)
         return out_map
     for row in rows or []:
-        ifname = (row.get("interface") or row.get("intf") or "").strip()
-        if not ifname:
+        raw = (row.get("interface") or row.get("intf") or "").strip()
+        if not raw:
             continue
+        ifname = canonical_interface_name(raw, addl_name_map=_IOS_ADDL_NAME_MAP)
         slot = _interface_slot(ifname)
         if slot and slot in out_map:
             out_map[slot].append(ifname)

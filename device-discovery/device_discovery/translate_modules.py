@@ -202,13 +202,30 @@ def _emit_bay_recursive(
         return
 
     for sub_bay in module_data.get("sub_bays", []):
-        _emit_bay_recursive(
-            bay_data=sub_bay,
-            device=device,
-            parent_module=module,
-            mode=mode,
-            manufacturer=manufacturer,
-            entities=entities,
-            iface_module_map=iface_module_map,
-            interfaces_by_bay=interfaces_by_bay,
-        )
+        if not isinstance(sub_bay, dict):
+            logger.warning(
+                "malformed module sub-bay — skipping (not a dict)",
+                extra={"parent_bay": bay_data.get("name"), "sub_bay": repr(sub_bay)[:80]},
+            )
+            _bump("modules_dropped", 1, {"reason": "malformed"})
+            continue
+        # Each sub-bay is guarded on its own so a single bad child cannot
+        # drop the parent bay/module that the outer loop already emitted.
+        try:
+            _emit_bay_recursive(
+                bay_data=sub_bay,
+                device=device,
+                parent_module=module,
+                mode=mode,
+                manufacturer=manufacturer,
+                entities=entities,
+                iface_module_map=iface_module_map,
+                interfaces_by_bay=interfaces_by_bay,
+            )
+        except Exception:
+            logger.warning(
+                "malformed module sub-bay — skipping",
+                extra={"parent_bay": bay_data.get("name"), "sub_bay": sub_bay.get("name")},
+                exc_info=True,
+            )
+            _bump("modules_dropped", 1, {"reason": "malformed"})

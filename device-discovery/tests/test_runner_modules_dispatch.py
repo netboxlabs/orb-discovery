@@ -32,9 +32,18 @@ def _runner(discover_modules: str = "off") -> PolicyRunner:
 
 
 def _mock_device(with_modules: bool):
-    """Build a mock NAPALM device, optionally exposing get_modules()."""
-    dev = MagicMock()
+    """
+    Build a mock NAPALM device, optionally exposing get_modules().
+
+    Uses ``spec=`` so attribute access for anything outside the allowed
+    list raises AttributeError instead of auto-creating a child mock.
+    That makes the ``with_modules=False`` case test the production
+    contract — ``getattr(device, "get_modules", None)`` must return
+    ``None`` for drivers that don't implement the extension.
+    """
+    base_attrs = ["get_facts", "get_interfaces", "get_interfaces_ip", "get_vlans"]
     if with_modules:
+        dev = MagicMock(spec=[*base_attrs, "get_modules"])
         dev.get_modules = MagicMock(return_value={
             "bays": [
                 {
@@ -52,7 +61,7 @@ def _mock_device(with_modules: bool):
             "interfaces_by_bay": {"1": ["Te1/0/1"]},
         })
     else:
-        del dev.get_modules
+        dev = MagicMock(spec=base_attrs)
     return dev
 
 
@@ -123,6 +132,29 @@ def test_collect_modules_skips_for_virtual_chassis(caplog, monkeypatch) -> None:
         for r in caplog.records
     )
     assert counter_calls == [(1, {"reason": "vc_of_modular"})]
+
+
+def test_collect_modules_vc_gate_tolerates_non_dict_payload(caplog) -> None:
+    """
+    A driver returning a non-dict chassis_members payload must not crash.
+
+    The VC gate previously called ``.get("members", [])`` directly on
+    ``data["chassis_members"]``, which AttributeError'd on a list/string
+    payload and aborted discovery. The fix gates on isinstance(dict)
+    before reading members.
+    """
+    runner = _runner("linecards")
+    dev = _mock_device(with_modules=True)
+    # A buggy driver might return a list — must not crash the runner.
+    data: dict = {"chassis_members": ["not", "a", "dict"]}
+    with caplog.at_level(logging.WARNING, logger="device_discovery.policy.runner"):
+        runner._collect_modules(runner.config, dev, data, "host")
+    assert "modules" not in data
+    assert not dev.get_modules.called
+    assert any(
+        "module discovery" in r.message and "virtual chassis" in r.message
+        for r in caplog.records
+    )
 
 
 def test_collect_modules_swallows_driver_exception(caplog) -> None:
