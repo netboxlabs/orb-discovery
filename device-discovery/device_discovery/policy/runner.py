@@ -324,11 +324,27 @@ class PolicyRunner:
         """
         Call the driver's optional get_modules() when discover_modules is enabled.
 
-        Gated by config.options.discover_modules ('off' is a no-op). Exceptions
-        from the driver are logged at WARNING and data['modules'] is set to None
-        so translate_modules falls through to the existing single-Device path.
+        Gated by config.options.discover_modules ('off' is a no-op). Skipped
+        with a WARNING when the device is a virtual chassis member —
+        translate.py routes that case through the chassis-stack branch,
+        which does not emit Module / ModuleBay entities in v1
+        (VC-of-modular composition is deferred). Exceptions from the
+        driver are logged at WARNING and data['modules'] is set to None
+        so translate_modules falls through to the existing single-Device
+        path.
         """
         if not (config.options and config.options.discover_modules != "off"):
+            return
+        if data.get("chassis_members"):
+            members = data["chassis_members"].get("members", []) or []
+            logger.warning(
+                f"Policy {self.name}, Hostname {sanitized_hostname}: "
+                "skipping module discovery for virtual chassis "
+                f"({len(members)} members) — tracked as follow-up to OBS-1594"
+            )
+            counter = get_metric("modules_dropped")
+            if counter is not None:
+                counter.add(1, {"reason": "vc_of_modular"})
             return
         get_modules = getattr(device, "get_modules", None)
         if not callable(get_modules):

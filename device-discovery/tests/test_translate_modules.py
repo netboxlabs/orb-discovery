@@ -215,27 +215,6 @@ def test_full_mode_emits_transceiver_subbay_with_module_parent() -> None:
     assert transceiver.serial == "FNS1"
 
 
-# ---- VC short-circuit ---------------------------------------------------
-
-
-def test_vc_short_circuit_logs_warning_and_emits_nothing(caplog) -> None:
-    """When data has BOTH chassis_members AND modules, emit only a WARNING."""
-    entities: list = []
-    data = {
-        "modules": _linecard_payload(),
-        "chassis_members": {"members": [{"id": 1}, {"id": 2}], "domain": None},
-    }
-    with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
-        iface_module_map = emit_modules_if_requested(
-            data, Options(discover_modules="linecards"), _make_device(), entities,
-        )
-    assert iface_module_map == {}
-    assert entities == []
-    assert any(
-        "deferred for virtual chassis" in r.message for r in caplog.records
-    )
-
-
 # ---- malformed-payload fallthrough --------------------------------------
 
 
@@ -286,17 +265,112 @@ def test_non_dict_payload_returns_empty_map() -> None:
     assert entities == []
 
 
+def test_non_dict_bay_in_payload_logged_and_skipped(caplog) -> None:
+    """A non-dict element inside payload['bays'] must not crash the loop."""
+    payload = {
+        "bays": [
+            "garbage-not-a-dict",
+            {
+                "name": "1",
+                "position": "1",
+                "module": {
+                    "model": "C9400-LC-48U",
+                    "serial": "FOC1",
+                    "description": "",
+                    "type": "linecard",
+                    "sub_bays": [],
+                },
+            },
+        ],
+        "interfaces_by_bay": {},
+    }
+    entities: list = []
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
+        emit_modules_if_requested(
+            {"modules": payload}, Options(discover_modules="linecards"),
+            _make_device(), entities,
+        )
+    modules = [e for e in entities if e.HasField("module")]
+    assert len(modules) == 1
+    assert any("not a dict" in r.message for r in caplog.records)
+
+
+def test_linecards_mode_drops_non_transceiver_sub_bays() -> None:
+    """
+    Linecards mode drops ALL sub_bays regardless of type, not just transceivers.
+
+    A nested fan / psu / supervisor sub-bay (rare in real chassis but
+    representable in the payload) must also be filtered out so that
+    operator dashboards show only the top-level inventory.
+    """
+    payload = {
+        "bays": [
+            {
+                "name": "1", "position": "1",
+                "module": {
+                    "model": "C9400-LC-48U", "serial": "FOC1", "description": "",
+                    "type": "linecard",
+                    "sub_bays": [
+                        {
+                            "name": "FAN-1", "position": "FAN-1",
+                            "module": {
+                                "model": "C9400-FAN", "serial": "FAN_SN",
+                                "description": "", "type": "fan",
+                                "sub_bays": [],
+                            },
+                        },
+                    ],
+                },
+            },
+        ],
+        "interfaces_by_bay": {},
+    }
+    entities: list = []
+    emit_modules_if_requested(
+        {"modules": payload}, Options(discover_modules="linecards"),
+        _make_device(), entities,
+    )
+    modules = [e.module for e in entities if e.HasField("module")]
+    # Only the linecard emits — the nested fan sub-bay is dropped.
+    assert len(modules) == 1
+    assert modules[0].module_type.model == "C9400-LC-48U"
+
+
+def test_full_mode_module_reuses_device_manufacturer_reference() -> None:
+    """
+    Module ModuleType.manufacturer must value-equal the Device's manufacturer.
+
+    v1 inherits the device's manufacturer for every installed Module —
+    constructing a fresh Manufacturer(name=...) here would lose any extra
+    fields the upstream driver populated (slug, custom_field_data, etc.).
+    """
+    entities: list = []
+    data = {"modules": _linecard_payload()}
+    device = _make_device(vendor="Cisco")
+    emit_modules_if_requested(
+        data, Options(discover_modules="linecards"), device, entities,
+    )
+    module = next(e.module for e in entities if e.HasField("module"))
+    # Same name, and the manufacturer message round-trips via SerializeToString
+    # to the same bytes as the device's. Protobuf messages are equal iff their
+    # serialized bytes are equal, so this catches drift in any non-name field.
+    assert (
+        module.module_type.manufacturer.SerializeToString()
+        == device.device_type.manufacturer.SerializeToString()
+    )
+
+
 # ---- iface_module_map deepest-wins --------------------------------------
 
 
 def test_metric_counters_invoked_when_enabled(monkeypatch) -> None:
     """
-    Module / bay emission and VC short-circuit each bump their counters.
+    Module / bay emission each bump their counters with vendor + type attributes.
 
     Stubs ``get_metric`` to a recording fake so we don't depend on the
-    OTel SDK being wired up in the test environment. Verifies the three
-    counters fire with the expected attributes; downstream OTLP export
-    is not exercised here (it lives behind setup_metrics_export()).
+    OTel SDK being wired up in the test environment. The vc_of_modular
+    drop counter is fired upstream in
+    ``policy.runner._collect_modules`` and is covered there.
     """
     import device_discovery.translate_modules as tm
 
@@ -316,7 +390,6 @@ def test_metric_counters_invoked_when_enabled(monkeypatch) -> None:
         return counters[name]
     monkeypatch.setattr(tm, "get_metric", fake_get_metric)
 
-    # Emission path: one linecard + one transceiver sub-bay in full mode.
     entities: list = []
     data = {"modules": _linecard_with_transceiver_payload()}
     emit_modules_if_requested(
@@ -329,21 +402,6 @@ def test_metric_counters_invoked_when_enabled(monkeypatch) -> None:
     # Linecard emits with type=linecard; transceiver with type=transceiver.
     assert {m[2].get("type") for m in mod_counts} == {"linecard", "transceiver"}
     assert all(c[2].get("vendor") == "Cisco" for c in mod_counts + bay_counts)
-
-    # VC short-circuit bumps modules_dropped with reason=vc_of_modular.
-    calls.clear()
-    entities = []
-    data = {
-        "modules": _linecard_payload(),
-        "chassis_members": {"members": [{"id": 1}, {"id": 2}], "domain": None},
-    }
-    emit_modules_if_requested(
-        data, Options(discover_modules="linecards"), _make_device(), entities,
-    )
-    drops = [c for c in calls if c[0] == "modules_dropped"]
-    assert len(drops) == 1
-    assert drops[0][1] == 1  # one bay would have been emitted; it's dropped
-    assert drops[0][2] == {"reason": "vc_of_modular"}
 
 
 def test_metric_counters_noop_when_disabled(monkeypatch) -> None:

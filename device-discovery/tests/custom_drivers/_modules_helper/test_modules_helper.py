@@ -17,7 +17,7 @@ from custom_napalm._modules import (
 # ---- to_payload validation ----------------------------------------------
 
 
-def _bay(name: str, *, serial: str = "S1", type: str = "linecard",  # noqa: A002
+def _bay(name: str, *, serial: str = "S1", mtype: str = "linecard",
          model: str = "M1", description: str = "",
          sub_bays: list[ModuleBay] | None = None) -> ModuleBay:
     """Test helper: build a ModuleBay with sane defaults."""
@@ -27,7 +27,7 @@ def _bay(name: str, *, serial: str = "S1", type: str = "linecard",  # noqa: A002
         module=ModuleEntry(
             model=model,
             serial=serial,
-            type=type,  # type: ignore[arg-type]
+            type=mtype,  # type: ignore[arg-type]
             description=description,
             sub_bays=sub_bays or [],
         ),
@@ -102,7 +102,7 @@ def test_to_payload_rejects_4tuple_ifname_warn_and_drop() -> None:
 
 def test_to_payload_keeps_subbay_at_depth_2() -> None:
     """Cisco shape: chassis → linecard → transceiver. Depth 2."""
-    transceiver = _bay("Te1/0/1", serial="SFP_SN", type="transceiver", model="SFP-10G-LR")
+    transceiver = _bay("Te1/0/1", serial="SFP_SN", mtype="transceiver", model="SFP-10G-LR")
     linecard = _bay("1", serial="LC_SN", model="C9400-LC", sub_bays=[transceiver])
     payload = to_payload([linecard])
     assert payload is not None
@@ -111,7 +111,7 @@ def test_to_payload_keeps_subbay_at_depth_2() -> None:
 
 def test_to_payload_keeps_subbay_at_depth_3() -> None:
     """Junos shape: chassis → FPC → PIC → transceiver. Depth 3."""
-    transceiver = _bay("xe-0/0/0", serial="SFP_SN", type="transceiver")
+    transceiver = _bay("xe-0/0/0", serial="SFP_SN", mtype="transceiver")
     pic = _bay("PIC 0", serial="PIC_SN", sub_bays=[transceiver])
     fpc = _bay("FPC 0", serial="FPC_SN", sub_bays=[pic])
     payload = to_payload([fpc])
@@ -138,7 +138,7 @@ def test_to_payload_drops_subbay_deeper_than_max_depth() -> None:
 
 def test_to_payload_happy_path_serialized_shape() -> None:
     """End-to-end serialization round-trip across all fields and depth-2 nesting."""
-    transceiver = _bay("Te1/0/1", serial="FNS1", type="transceiver", model="SFP-10G-LR",
+    transceiver = _bay("Te1/0/1", serial="FNS1", mtype="transceiver", model="SFP-10G-LR",
                        description="10GBASE-LR")
     linecard = _bay("1", serial="FOC1", model="C9400-LC-48U",
                     description="48-port UPOE+ line card", sub_bays=[transceiver])

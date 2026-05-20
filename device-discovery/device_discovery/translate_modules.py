@@ -48,40 +48,37 @@ def emit_modules_if_requested(
     Returns an empty dict when:
       - ``options.discover_modules == "off"`` (default; zero behavior change).
       - ``data["modules"]`` is missing, ``None``, or has no bays.
-      - The device is a virtual chassis member (VC-of-modular is deferred
-        to a follow-up; a single WARNING is logged per cycle).
       - The payload is malformed in a way the helper missed (defensive).
+
+    Virtual-chassis-of-modular composition is gated upstream in
+    ``policy.runner._collect_modules`` — when chassis_members is
+    populated, the runner skips the driver call entirely and
+    ``data["modules"]`` never reaches this function.
     """
     if options.discover_modules == "off":
         return {}
     payload = data.get("modules")
     if not _payload_has_bays(payload):
         return {}
-    if data.get("chassis_members"):
-        device_name = device.name if device.HasField("name") else "<unknown>"
-        logger.warning(
-            "module discovery deferred for virtual chassis members "
-            "— tracked as follow-up to OBS-1594",
-            extra={
-                "device": device_name,
-                "members": len(data["chassis_members"].get("members", [])),
-                "modules_dropped": len(payload["bays"]),
-            },
-        )
-        _bump("modules_dropped", len(payload["bays"]), {"reason": "vc_of_modular"})
-        return {}
 
     mode = options.discover_modules
-    manufacturer_name = _manufacturer_from_device(device)
+    manufacturer = _manufacturer_from_device(device)
     iface_module_map: dict[str, pb.Module] = {}
     for bay_data in payload["bays"]:
+        if not isinstance(bay_data, dict):
+            logger.warning(
+                "malformed module payload bay — skipping (not a dict)",
+                extra={"bay": repr(bay_data)[:80]},
+            )
+            _bump("modules_dropped", 1, {"reason": "malformed"})
+            continue
         try:
             _emit_bay_recursive(
                 bay_data=bay_data,
                 parent_device=device,
                 parent_module=None,
                 mode=mode,
-                manufacturer_name=manufacturer_name,
+                manufacturer=manufacturer,
                 entities=entities,
                 iface_module_map=iface_module_map,
                 interfaces_by_bay=payload.get("interfaces_by_bay", {}),
@@ -118,18 +115,18 @@ def _payload_has_bays(payload: Any) -> bool:
     return isinstance(bays, list) and len(bays) > 0
 
 
-def _manufacturer_from_device(device: pb.Device) -> str:
+def _manufacturer_from_device(device: pb.Device) -> pb.Manufacturer:
     """
-    Read the device's manufacturer name; fall back to a placeholder.
+    Return the device's Manufacturer message, falling back to a placeholder.
 
-    Modules and ModuleTypes need a Manufacturer reference. v1 reuses the
-    device's manufacturer for all installed modules — operators wanting
-    per-module manufacturer overrides can add them in NetBox by hand.
+    Modules / ModuleTypes need a Manufacturer reference. v1 reuses the
+    device's manufacturer message directly so any extra fields the
+    upstream driver populated (custom_field_data, slug, etc.) propagate
+    to the Module without re-deriving from just the name string.
     """
-    try:
-        return device.device_type.manufacturer.name
-    except AttributeError:
-        return "Unknown"
+    if device.HasField("device_type") and device.device_type.HasField("manufacturer"):
+        return device.device_type.manufacturer
+    return Manufacturer(name="Unknown")
 
 
 def _emit_bay_recursive(
@@ -138,7 +135,7 @@ def _emit_bay_recursive(
     parent_device: pb.Device | None,
     parent_module: pb.Module | None,
     mode: str,
-    manufacturer_name: str,
+    manufacturer: pb.Manufacturer,
     entities: list,
     iface_module_map: dict[str, pb.Module],
     interfaces_by_bay: dict[str, list[str]],
@@ -169,10 +166,10 @@ def _emit_bay_recursive(
         bay_kwargs["module"] = parent_module
     bay = ModuleBay(**bay_kwargs)
     entities.append(Entity(module_bay=bay))
-    _bump("module_bays_emitted", 1, {"vendor": manufacturer_name})
+    _bump("module_bays_emitted", 1, {"vendor": manufacturer.name})
 
     module_type = ModuleType(
-        manufacturer=Manufacturer(name=manufacturer_name),
+        manufacturer=manufacturer,
         model=module_data["model"] or "Unknown",
     )
     module_kwargs: dict[str, Any] = {
@@ -188,7 +185,7 @@ def _emit_bay_recursive(
     entities.append(Entity(module=module))
     _bump(
         "modules_emitted", 1,
-        {"vendor": manufacturer_name, "type": module_data["type"]},
+        {"vendor": manufacturer.name, "type": module_data["type"]},
     )
 
     # Map interfaces owned by THIS bay (top-level or sub) to this module.
@@ -209,7 +206,7 @@ def _emit_bay_recursive(
             parent_device=None,
             parent_module=module,
             mode=mode,
-            manufacturer_name=manufacturer_name,
+            manufacturer=manufacturer,
             entities=entities,
             iface_module_map=iface_module_map,
             interfaces_by_bay=interfaces_by_bay,

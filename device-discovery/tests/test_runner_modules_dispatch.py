@@ -1,22 +1,39 @@
 """
-Test that Runner.run wires get_modules into the data dict for translate.
+Test the runner's _collect_modules dispatch + VC-of-modular gate.
 
-Mirrors the get_chassis_members dispatch pattern. The runner gates the
-call on options.discover_modules and stores the payload in
-``data["modules"]`` for translate_modules to consume.
+Calls ``PolicyRunner._collect_modules`` directly (rather than duplicating
+the snippet) so the production logic is what's pinned. Covers:
+
+- ``options.discover_modules == "off"`` → no driver call, no data mutation.
+- driver lacks ``get_modules`` → no-op.
+- happy path: callable, payload stored on data["modules"].
+- VC-of-modular gate: when chassis_members payload is populated, skip
+  the driver call entirely and log a WARNING. This is the runner-level
+  defer that supersedes the (now-removed) translate-layer guard.
+- driver raises → WARNING + data["modules"] = None, no propagation.
 """
 
 import logging
 from unittest.mock import MagicMock
 
+from device_discovery.policy.models import Config, Defaults, Options
+from device_discovery.policy.runner import PolicyRunner
 
-def _make_napalm_device_mock(with_modules: bool):
-    """Build a mock NAPALM device with the standard getters and (optionally) get_modules."""
+
+def _runner(discover_modules: str = "off") -> PolicyRunner:
+    """Build a minimal PolicyRunner with discover_modules pre-configured."""
+    runner = PolicyRunner()
+    runner.name = "test-policy"
+    runner.config = Config(
+        defaults=Defaults(),
+        options=Options(discover_modules=discover_modules),  # type: ignore[arg-type]
+    )
+    return runner
+
+
+def _mock_device(with_modules: bool):
+    """Build a mock NAPALM device, optionally exposing get_modules()."""
     dev = MagicMock()
-    dev.get_facts.return_value = {"hostname": "core-sw"}
-    dev.get_interfaces.return_value = {}
-    dev.get_interfaces_ip.return_value = {}
-    dev.get_vlans.return_value = {}
     if with_modules:
         dev.get_modules = MagicMock(return_value={
             "bays": [
@@ -26,7 +43,7 @@ def _make_napalm_device_mock(with_modules: bool):
                     "module": {
                         "model": "C9400-LC-48U",
                         "serial": "FOC1",
-                        "description": "48-port UPOE+",
+                        "description": "",
                         "type": "linecard",
                         "sub_bays": [],
                     },
@@ -34,76 +51,70 @@ def _make_napalm_device_mock(with_modules: bool):
             ],
             "interfaces_by_bay": {"1": ["Te1/0/1"]},
         })
+    else:
+        del dev.get_modules
     return dev
 
 
-def test_runner_dispatch_idiom_calls_get_modules_when_present():
-    """getattr-based dispatch returns the bound method when the driver exposes it."""
-    dev = _make_napalm_device_mock(with_modules=True)
-    method = getattr(dev, "get_modules", None)
-    assert callable(method)
-    payload = method()
-    assert payload["bays"][0]["module"]["serial"] == "FOC1"
-
-
-def test_runner_dispatch_idiom_skips_when_method_absent():
-    """When the driver does not expose get_modules, dispatch is a no-op."""
-    dev = MagicMock(spec=["get_facts", "get_interfaces", "get_interfaces_ip", "get_vlans"])
-    assert getattr(dev, "get_modules", None) is None
-
-
-def test_runner_dispatch_skips_when_options_off():
-    """
-    When options.discover_modules == 'off', the runner must NOT call get_modules.
-
-    This pins the behavior at the snippet level so a future runner refactor
-    that drops the options check is caught by the unit test.
-    """
-    dev = _make_napalm_device_mock(with_modules=True)
-    # Simulate the runner's snippet shape — see runner.py:298+ for the live code.
+def test_collect_modules_skips_when_off() -> None:
+    """discover_modules='off' → no driver call, no data mutation."""
+    runner = _runner("off")
+    dev = _mock_device(with_modules=True)
     data: dict = {}
-    discover_modules = "off"
-    if discover_modules != "off":
-        method = getattr(dev, "get_modules", None)
-        if callable(method):
-            data["modules"] = method()
+    runner._collect_modules(runner.config, dev, data, "host")
     assert "modules" not in data
     assert not dev.get_modules.called
 
 
-def test_runner_dispatch_calls_when_options_linecards():
-    """When options.discover_modules == 'linecards', the runner calls get_modules."""
-    dev = _make_napalm_device_mock(with_modules=True)
+def test_collect_modules_skips_when_driver_lacks_method() -> None:
+    """When the driver does not expose get_modules, dispatch is a no-op."""
+    runner = _runner("linecards")
+    dev = _mock_device(with_modules=False)
     data: dict = {}
-    discover_modules = "linecards"
-    if discover_modules != "off":
-        method = getattr(dev, "get_modules", None)
-        if callable(method):
-            data["modules"] = method()
+    runner._collect_modules(runner.config, dev, data, "host")
+    assert "modules" not in data
+
+
+def test_collect_modules_calls_when_linecards() -> None:
+    """discover_modules='linecards' → driver call, payload stored."""
+    runner = _runner("linecards")
+    dev = _mock_device(with_modules=True)
+    data: dict = {}
+    runner._collect_modules(runner.config, dev, data, "host")
     assert "modules" in data
     assert data["modules"]["bays"][0]["module"]["serial"] == "FOC1"
 
 
-def test_runner_dispatch_swallows_exceptions(caplog):
-    """get_modules raising → WARNING logged, data['modules'] set to None, no propagation."""
+def test_collect_modules_skips_for_virtual_chassis(caplog) -> None:
+    """When chassis_members is populated, skip get_modules() and log WARNING."""
+    runner = _runner("linecards")
+    dev = _mock_device(with_modules=True)
+    data: dict = {
+        "chassis_members": {
+            "members": [{"id": 1}, {"id": 2}],
+            "domain": None,
+        },
+    }
+    with caplog.at_level(logging.WARNING, logger="device_discovery.policy.runner"):
+        runner._collect_modules(runner.config, dev, data, "host")
+    assert "modules" not in data
+    assert not dev.get_modules.called
+    assert any(
+        "module discovery" in r.message and "virtual chassis" in r.message
+        for r in caplog.records
+    )
+
+
+def test_collect_modules_swallows_driver_exception(caplog) -> None:
+    """Driver raising → WARNING logged, data['modules']=None, no propagation."""
+    runner = _runner("linecards")
     dev = MagicMock()
     dev.get_modules = MagicMock(side_effect=RuntimeError("boom"))
-
-    logger = logging.getLogger("device_discovery.policy.runner")
     data: dict = {}
     with caplog.at_level(logging.WARNING, logger="device_discovery.policy.runner"):
-        method = getattr(dev, "get_modules", None)
-        if callable(method):
-            try:
-                data["modules"] = method()
-            except Exception as e:
-                logger.warning("Error getting modules: %s. Continuing without module data.", e)
-                data["modules"] = None
-
+        runner._collect_modules(runner.config, dev, data, "host")
     assert data["modules"] is None
     assert any(
-        r.levelno == logging.WARNING
-        and "Error getting modules" in r.message
-        and "boom" in r.message
+        "Error getting modules" in r.message and "boom" in r.message
         for r in caplog.records
-    ), "expected runner to log a WARNING with the exception message"
+    )

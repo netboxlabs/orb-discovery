@@ -456,8 +456,9 @@ def _ios_get_modules_impl(driver) -> dict | None:
         if not slot or slot not in bays_by_slot:
             continue
         parent_bay = bays_by_slot[slot]
-        if parent_bay.module is None:  # pragma: no cover — set above
-            continue
+        # parent_bay.module is always populated by _parse_inventory_rows
+        # (a row without serial+pid never produces a ModuleBay), so the
+        # downstream attribute access here cannot AttributeError.
         parent_bay.module.sub_bays.append(
             _ModuleBay(name=canonical, position=canonical, module=transceiver),
         )
