@@ -335,17 +335,19 @@ class PolicyRunner:
         """
         if not (config.options and config.options.discover_modules != "off"):
             return
+        # Align the VC-of-modular gate with translate_chassis.validate_chassis_payload:
+        # only ≥2 valid members count as a real virtual chassis. A 1-member
+        # payload (or any non-dict shape) is NOT a VC and must not suppress
+        # module discovery — otherwise a standalone modular chassis whose
+        # driver also emits a single-member chassis_members payload would
+        # silently lose its Module / ModuleBay entities.
         chassis_members = data.get("chassis_members")
-        if chassis_members:
-            # Defensive isinstance check — a driver returning a non-dict
-            # truthy payload (e.g. a list) would otherwise AttributeError
-            # here and abort discovery, which is inconsistent with the
-            # error-tolerant collection logic elsewhere in this runner.
-            members = (
-                chassis_members.get("members", []) or []
-                if isinstance(chassis_members, dict)
-                else []
-            )
+        members = (
+            chassis_members.get("members") or []
+            if isinstance(chassis_members, dict)
+            else []
+        )
+        if len(members) >= 2:
             logger.warning(
                 f"Policy {self.name}, Hostname {sanitized_hostname}: "
                 "skipping module discovery for virtual chassis "

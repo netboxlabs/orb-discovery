@@ -335,6 +335,55 @@ def test_prune_nested_refs_strips_nested_parent_module_device():
     assert pruned.module.device.serial == ""
 
 
+def test_prune_nested_refs_stubs_interface_module_reference():
+    """
+    Interface.module is replaced with a matcher-only Module proto.
+
+    The translator attaches the full rich Module (carrying device,
+    module_bay, module_type, description, etc.) to every Interface in
+    the slot. Without stubbing, a 48-port linecard duplicates that rich
+    subtree 48 times in the ingest payload. The stub keeps only the
+    fields Diode needs to resolve the module — device, serial, and a
+    positional module_bay shell — so per-interface wire cost is bounded.
+    """
+    rich_dev = pb.Device(name="sw1", serial="FCW123", status="active")
+    rich_dev.device_type.CopyFrom(
+        pb.DeviceType(model="C9404R", manufacturer=pb.Manufacturer(name="Cisco")),
+    )
+
+    bay = pb.ModuleBay(name="2", position="2")
+    bay.device.CopyFrom(rich_dev)
+
+    rich_module = pb.Module(serial="JAE2401LC02", description="48-port UPOE+")
+    rich_module.device.CopyFrom(rich_dev)
+    rich_module.module_bay.CopyFrom(bay)
+    rich_module.module_type.CopyFrom(
+        pb.ModuleType(model="C9400-LC-48U", manufacturer=pb.Manufacturer(name="Cisco")),
+    )
+
+    iface = pb.Interface(name="GigabitEthernet2/0/1", type="1000base-t")
+    iface.device.CopyFrom(rich_dev)
+    iface.module.CopyFrom(rich_module)
+
+    entities = [Entity(device=rich_dev), Entity(interface=iface)]
+    prune_nested_refs(entities)
+
+    pruned_iface = entities[1].interface
+    # iface.module kept (matcher present), but rich fields stripped.
+    assert pruned_iface.HasField("module")
+    assert pruned_iface.module.serial == "JAE2401LC02"
+    assert pruned_iface.module.description == ""
+    assert not pruned_iface.module.HasField("module_type")
+    # Nested device on the module ref is also a stub.
+    assert pruned_iface.module.device.name == "sw1"
+    assert pruned_iface.module.device.serial == ""
+    # Module bay positional ref preserved as a stub.
+    assert pruned_iface.module.HasField("module_bay")
+    assert pruned_iface.module.module_bay.name == "2"
+    assert pruned_iface.module.module_bay.device.name == "sw1"
+    assert pruned_iface.module.module_bay.device.serial == ""
+
+
 def test_prune_nested_refs_empty_is_noop():
     """Sweep is a no-op on an empty entity list."""
     entities: list[Entity] = []

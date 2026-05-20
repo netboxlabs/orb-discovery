@@ -185,12 +185,37 @@ def _replace_iface_field(parent: pb.Interface, field: str, dev_stub: pb.Device) 
     nested.CopyFrom(_interface_match_stub(nested, dev_stub))
 
 
+def _module_match_stub(rich: pb.Module, dev_stub: pb.Device) -> pb.Module:
+    """
+    Build a matcher-only Module for use as a nested reference.
+
+    Keeps just the fields Diode needs to resolve a Module — the chassis
+    device (matcher-stubbed) and the serial — plus a positional
+    module_bay reference (device-stubbed) when the rich Module carries
+    one. Drops module_type, description, asset_tag, status, and any
+    rich device fields, so that copying this stub into hundreds of
+    Interface entities does not duplicate the running-config-bearing
+    Device proto per port.
+    """
+    stub = pb.Module(serial=rich.serial)
+    stub.device.CopyFrom(dev_stub)
+    if rich.HasField("module_bay"):
+        bay_stub = pb.ModuleBay(
+            name=rich.module_bay.name, position=rich.module_bay.position,
+        )
+        bay_stub.device.CopyFrom(dev_stub)
+        stub.module_bay.CopyFrom(bay_stub)
+    return stub
+
+
 def _prune_interface_entity(iface: pb.Interface, dev_stub: pb.Device) -> None:
-    """Replace ``iface.device`` and any nested parent/bridge/lag with stubs in place."""
+    """Replace ``iface.device`` + any nested parent/bridge/lag/module with stubs in place."""
     iface.device.CopyFrom(dev_stub)
     _replace_iface_field(iface, "parent", dev_stub)
     _replace_iface_field(iface, "bridge", dev_stub)
     _replace_iface_field(iface, "lag", dev_stub)
+    if iface.HasField("module"):
+        iface.module.CopyFrom(_module_match_stub(iface.module, dev_stub))
 
 
 def _stub_primary_ip_iface(ip: pb.IPAddress, dev_stub: pb.Device) -> None:

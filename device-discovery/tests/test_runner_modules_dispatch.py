@@ -134,14 +134,46 @@ def test_collect_modules_skips_for_virtual_chassis(caplog, monkeypatch) -> None:
     assert counter_calls == [(1, {"reason": "vc_of_modular"})]
 
 
+def test_collect_modules_runs_for_single_member_chassis_payload() -> None:
+    """
+    A 1-member chassis_members payload is NOT a virtual chassis.
+
+    translate_chassis.validate_chassis_payload only treats N>=2 as a
+    real VC. The runner's VC gate must align so a standalone modular
+    chassis whose driver returns a single-member chassis_members
+    payload still gets its modules discovered.
+    """
+    runner = _runner("linecards")
+    dev = _mock_device(with_modules=True)
+    data: dict = {
+        "chassis_members": {
+            "members": [{"id": 1, "serial": "ABC123"}],
+            "domain": None,
+        },
+    }
+    runner._collect_modules(runner.config, dev, data, "host")
+    assert "modules" in data  # get_modules was called
+    assert dev.get_modules.called
+
+
+def test_collect_modules_runs_for_empty_members_chassis_payload() -> None:
+    """An empty members list is not a VC and must not suppress module discovery."""
+    runner = _runner("linecards")
+    dev = _mock_device(with_modules=True)
+    data: dict = {"chassis_members": {"members": [], "domain": None}}
+    runner._collect_modules(runner.config, dev, data, "host")
+    assert "modules" in data
+    assert dev.get_modules.called
+
+
 def test_collect_modules_vc_gate_tolerates_non_dict_payload(caplog) -> None:
     """
     A driver returning a non-dict chassis_members payload must not crash.
 
-    The VC gate previously called ``.get("members", [])`` directly on
-    ``data["chassis_members"]``, which AttributeError'd on a list/string
-    payload and aborted discovery. The fix gates on isinstance(dict)
-    before reading members.
+    Behavior post-fix: non-dict payloads are NOT a VC (members are
+    treated as empty), so module discovery proceeds normally rather
+    than being suppressed. The fix gates on isinstance(dict) before
+    reading members and only short-circuits when len(members) >= 2.
     """
     runner = _runner("linecards")
     dev = _mock_device(with_modules=True)
@@ -149,11 +181,11 @@ def test_collect_modules_vc_gate_tolerates_non_dict_payload(caplog) -> None:
     data: dict = {"chassis_members": ["not", "a", "dict"]}
     with caplog.at_level(logging.WARNING, logger="device_discovery.policy.runner"):
         runner._collect_modules(runner.config, dev, data, "host")
-    assert "modules" not in data
-    assert not dev.get_modules.called
-    assert any(
-        "module discovery" in r.message and "virtual chassis" in r.message
-        for r in caplog.records
+    # Not a VC → module discovery proceeds, no WARNING.
+    assert "modules" in data
+    assert dev.get_modules.called
+    assert not any(
+        "virtual chassis" in r.message for r in caplog.records
     )
 
 
