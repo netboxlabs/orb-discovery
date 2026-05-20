@@ -593,7 +593,7 @@ def test_run_chunk_ingestion_error(
         with caplog.at_level("ERROR"):
             policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
-        # Should call ingest once and fail on first chunk error (it raises RuntimeError immediately)
+        # Should call ingest once and fail on first chunk error (it raises IngestRejected immediately)
         assert mock_diode_client.ingest.call_count == 2
 
         # Should log the error
@@ -847,7 +847,7 @@ def test_run_unaffected_by_callback(
     assert update_kwargs["status"] == RunStatus.COMPLETED
 
 
-def test_ingest_callback_raises_when_client_not_initialised(
+def test_ingest_callback_raises_when_not_ready(
     policy_runner,
     sample_policy,
     sample_diode_config,
@@ -855,7 +855,7 @@ def test_ingest_callback_raises_when_client_not_initialised(
     mock_load_class,
     mock_diode_client,
 ):
-    """Calling the callback before _diode_client is assigned raises IngestUnavailable."""
+    """Calling the callback before _callback_ready is True raises IngestUnavailable."""
     with patch.object(policy_runner.scheduler, "start"), patch.object(
         policy_runner.scheduler, "add_job"
     ):
@@ -863,15 +863,117 @@ def test_ingest_callback_raises_when_client_not_initialised(
 
     callback = _extract_callback(mock_load_class.return_value)
 
-    # Simulate "called before client init" — clear the attribute.
-    policy_runner._diode_client = None
+    # Simulate "called before worker finished constructing" — clear the readiness flag.
+    policy_runner._callback_ready = False
 
     entity = MagicMock()
-    with patch("worker.policy.runner.apply_run_id_to_entities"):
-        with pytest.raises(IngestUnavailable, match="diode client was initialised"):
+    with pytest.raises(IngestUnavailable, match="before the worker finished constructing"):
+        callback(entities=[entity])
+
+    # No pseudo-run must have been created (guard fires before create_run).
+    mock_run_store.create_run.assert_not_called()
+
+
+def test_ingest_callback_records_failure_on_apply_run_id_error(
+    policy_runner,
+    sample_policy,
+    sample_diode_config,
+    mock_load_class,
+    mock_diode_client,
+    mock_run_store,
+):
+    """apply_run_id_to_entities failure inside try: records FAILED run as IngestUnavailable."""
+    with patch.object(policy_runner.scheduler, "start"), patch.object(
+        policy_runner.scheduler, "add_job"
+    ):
+        policy_runner.setup("policy1", sample_diode_config, sample_policy, mock_run_store)
+
+    callback = _extract_callback(mock_load_class.return_value)
+
+    entity = ingester_pb2.Entity()
+    entity.device.name = "dev1"
+
+    with patch(
+        "worker.policy.runner.apply_run_id_to_entities",
+        side_effect=RuntimeError("entity corrupt"),
+    ), patch("worker.policy.runner.estimate_message_size", return_value=1024):
+        with pytest.raises(IngestUnavailable):
             callback(entities=[entity])
 
-    # Pseudo-run was still recorded as FAILED.
-    mock_run_store.update_run.assert_called()
-    final_call = mock_run_store.update_run.call_args
-    assert final_call.kwargs["status"] == RunStatus.FAILED
+    mock_run_store.update_run.assert_called_once()
+    update_kwargs = mock_run_store.update_run.call_args.kwargs
+    assert update_kwargs["status"] == RunStatus.FAILED
+    # The entity was materialised before apply_run_id_to_entities raised.
+    assert update_kwargs["entity_count"] == 1
+
+
+def test_ingest_callback_records_failure_on_iterable_error(
+    policy_runner,
+    sample_policy,
+    sample_diode_config,
+    mock_load_class,
+    mock_diode_client,
+    mock_run_store,
+):
+    """An iterable that raises on first next() records FAILED run with entity_count=0."""
+    with patch.object(policy_runner.scheduler, "start"), patch.object(
+        policy_runner.scheduler, "add_job"
+    ):
+        policy_runner.setup("policy1", sample_diode_config, sample_policy, mock_run_store)
+
+    callback = _extract_callback(mock_load_class.return_value)
+
+    bad_iterable = MagicMock()
+    bad_iterable.__iter__ = MagicMock(side_effect=ValueError("bad"))
+
+    with pytest.raises(IngestUnavailable):
+        callback(entities=bad_iterable)
+
+    mock_run_store.update_run.assert_called_once()
+    update_kwargs = mock_run_store.update_run.call_args.kwargs
+    assert update_kwargs["status"] == RunStatus.FAILED
+    # Iterable failed before any entity was materialised.
+    assert update_kwargs["entity_count"] == 0
+
+
+def test_setup_sets_callback_ready_flag(
+    policy_runner,
+    sample_policy,
+    sample_diode_config,
+    mock_load_class,
+    mock_diode_client,
+    mock_run_store,
+):
+    """After setup() returns, _callback_ready is True."""
+    with patch.object(policy_runner.scheduler, "start"), patch.object(
+        policy_runner.scheduler, "add_job"
+    ):
+        policy_runner.setup("policy1", sample_diode_config, sample_policy, mock_run_store)
+
+    assert policy_runner._callback_ready is True
+
+
+def test_stop_clears_callback_ready_flag(
+    policy_runner,
+    sample_policy,
+    sample_diode_config,
+    mock_load_class,
+    mock_diode_client,
+    mock_run_store,
+):
+    """After stop(), _callback_ready is False and the callback raises IngestUnavailable."""
+    with patch.object(policy_runner.scheduler, "start"), patch.object(
+        policy_runner.scheduler, "add_job"
+    ):
+        policy_runner.setup("policy1", sample_diode_config, sample_policy, mock_run_store)
+
+    callback = _extract_callback(mock_load_class.return_value)
+
+    with patch.object(policy_runner.scheduler, "shutdown"):
+        policy_runner.stop()
+
+    assert policy_runner._callback_ready is False
+
+    entity = MagicMock()
+    with pytest.raises(IngestUnavailable, match="before the worker finished constructing"):
+        callback(entities=[entity])

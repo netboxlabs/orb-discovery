@@ -33,7 +33,11 @@ class Backend:
         Args:
         ----
             ingest_callback: Optional callable that ingests entities or
-                reports errors outside of the ``run()`` cycle. See
+                reports errors outside of the ``run()`` cycle. **Do not
+                invoke from ``__init__`` or ``setup()`` — the callback is
+                only usable starting after the worker finishes constructing
+                the Backend (i.e. after ``setup()`` returns); calling it
+                earlier raises ``IngestUnavailable``.** See
                 ``worker.exceptions`` for the exception hierarchy it may
                 raise.
             policy: Optional construction-time policy. If supplied, the

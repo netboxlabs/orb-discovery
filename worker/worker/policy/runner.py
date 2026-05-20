@@ -25,6 +25,10 @@ from worker.models import DiodeConfig, Policy, Status
 from worker.package_finder import maybe_evict
 from worker.policy.run import RunStatus, RunStore
 
+# Diode message-size cap (per chunk). Stays in sync with the reconciler's
+# 4 MiB gRPC ceiling minus a safety margin.
+MAX_INGEST_MESSAGE_BYTES = 3 * 1024 * 1024
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,6 +44,7 @@ class PolicyRunner:
         self.scheduler = BackgroundScheduler()
         self.run_store = None
         self._diode_client = None
+        self._callback_ready = False
 
     def setup(
         self, name: str, diode_config: DiodeConfig, policy: Policy, run_store: RunStore
@@ -131,6 +136,11 @@ class PolicyRunner:
 
         self.status = Status.RUNNING
 
+        # Callback is now safe to invoke — every dependency the closure reads
+        # (run_store, metadata, _diode_client) is attached. Integrations may push
+        # entities via ingest_callback from this point onward.
+        self._callback_ready = True
+
         active_policies = get_metric("active_policies")
         if active_policies:
             active_policies.add(1, {"policy": self.name})
@@ -161,6 +171,12 @@ class PolicyRunner:
                 raise TypeError(
                     "ingest_callback requires exactly one of 'entities' or 'error'"
                 )
+            if not self._callback_ready:
+                raise IngestUnavailable(
+                    "ingest_callback invoked before the worker finished constructing "
+                    "this Backend (likely called from Backend.__init__ or "
+                    "Backend.setup() — defer until after setup() returns)"
+                )
             run = self.run_store.create_run(
                 policy_name=policy_name,
                 metadata={
@@ -179,29 +195,16 @@ class PolicyRunner:
                     entity_count=0,
                 )
                 return
-            entities_list = list(entities)
-            apply_run_id_to_entities(entities_list, run.id)
-            metadata = {
-                "policy_name": policy_name,
-                "worker_backend": self.metadata.name,
-                "run_id": run.id,
-            }
-            client = self._diode_client
-            if client is None:
-                guard_error = IngestUnavailable(
-                    "ingest_callback invoked before the diode client was initialised "
-                    "(likely called from Backend.setup() — defer until after setup completes)"
-                )
-                self.run_store.update_run(
-                    policy_name=policy_name,
-                    run_id=run.id,
-                    status=RunStatus.FAILED,
-                    error=guard_error,
-                    entity_count=len(entities_list),
-                )
-                raise guard_error
+            entities_list: list = []
             try:
-                self._send_entities(client, entities_list, metadata)
+                entities_list = list(entities)
+                apply_run_id_to_entities(entities_list, run.id)
+                metadata = {
+                    "policy_name": policy_name,
+                    "worker_backend": self.metadata.name,
+                    "run_id": run.id,
+                }
+                self._send_entities(self._diode_client, entities_list, metadata)
             except IngestError as exc:
                 self.run_store.update_run(
                     policy_name=policy_name,
@@ -234,19 +237,24 @@ class PolicyRunner:
 
         return ingest_callback
 
-    def _send_entities(self, client, entities_list: list, metadata: dict) -> None:
-        """Send entities to the Diode client, chunking if the payload exceeds 3 MB."""
+    def _send_entities(self, client, entities_list: list, metadata: dict) -> int:
+        """
+        Send entities to the Diode client, chunking if the payload exceeds MAX_INGEST_MESSAGE_BYTES.
+
+        Returns the number of chunks actually sent (1 if not chunked).
+        """
         size_bytes = estimate_message_size(entities_list)
-        if size_bytes > (3.0 * 1024 * 1024):
+        if size_bytes > MAX_INGEST_MESSAGE_BYTES:
             chunks = create_message_chunks(entities_list)
             for chunk in chunks:
                 response = client.ingest(entities=chunk, metadata=metadata)
                 if response.errors:
                     raise IngestRejected(f"Chunk ingestion failed: {response.errors}")
-        else:
-            response = client.ingest(entities=entities_list, metadata=metadata)
-            if response.errors:
-                raise IngestRejected(f"Entities ingestion failed: {response.errors}")
+            return len(chunks)
+        response = client.ingest(entities=entities_list, metadata=metadata)
+        if response.errors:
+            raise IngestRejected(f"Entities ingestion failed: {response.errors}")
+        return 1
 
     def run(
         self,
@@ -295,20 +303,7 @@ class PolicyRunner:
                 "worker_backend": self.metadata.name,
                 "run_id": run.id,
             }
-            chunk_num = 1
-            size_bytes = estimate_message_size(entities)
-
-            if size_bytes > (3.0 * 1024 * 1024):
-                chunks = create_message_chunks(entities)
-                chunk_num = len(chunks)
-                for chunk in chunks:
-                    response = client.ingest(entities=chunk, metadata=metadata)
-                    if response.errors:
-                        raise RuntimeError(f"Chunk ingestion failed: {response.errors}")
-            else:
-                response = client.ingest(entities=entities, metadata=metadata)
-                if response.errors:
-                    raise RuntimeError(f"Entities ingestion failed: {response.errors}")
+            chunk_num = self._send_entities(client, entities, metadata)
             logger.info(
                 f"Policy {self.name}: Successfully ingested {entity_count} entities in {chunk_num} chunks"
             )
@@ -372,6 +367,7 @@ class PolicyRunner:
 
     def stop(self):
         """Stop the policy runner."""
+        self._callback_ready = False
         self.scheduler.shutdown(wait=False)
         self.status = Status.FINISHED
         active_policies = get_metric("active_policies")
