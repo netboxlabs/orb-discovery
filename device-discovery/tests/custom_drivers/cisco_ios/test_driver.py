@@ -225,6 +225,23 @@ class TestIOSDriver(BaseDriverTest):
             "TenGigabitEthernet2/0/2",
         ]
 
+    def test_get_modules_does_not_match_subslot_rows(self) -> None:
+        """
+        ``Slot 0/0`` and ``Slot 2/1/0`` (sub-slot/controller rows) must not match.
+
+        Some IOS-XE platforms emit sub-slot rows in ``show inventory``
+        with a slot prefix that includes ``/``. Without the negative
+        lookahead, the regex partial-matched the leading digit and
+        materialized a phantom top-level slot.
+        """
+        from custom_napalm.ios import _INVENTORY_SLOT_RE
+        assert _INVENTORY_SLOT_RE.match("Slot 0/0") is None
+        assert _INVENTORY_SLOT_RE.match("Slot 2/1/0") is None
+        assert _INVENTORY_SLOT_RE.match("slot 0 /0") is None  # space-then-slash
+        # Sanity: well-formed top-level slot rows still match.
+        assert _INVENTORY_SLOT_RE.match("Slot 1 Supervisor") is not None
+        assert _INVENTORY_SLOT_RE.match("Slot 1") is not None  # role optional
+
     def test_get_modules_does_not_match_isr_asr_module_zero(self) -> None:
         """
         ``NAME: "module 0"`` from ISR/ASR route-processor rows is ignored.

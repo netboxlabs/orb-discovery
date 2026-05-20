@@ -11,8 +11,12 @@ Device branch — VC-of-modular composition is deferred; the translate-
 chassis path runs untouched.
 
 Public entry point: emit_modules_if_requested(...). Returns an
-``iface_module_map: dict[str, Module]`` that the interface builder
+``iface_module_map: dict[str, pb.Module]`` that the interface builder
 consumes to attach ``module=`` on each interface alongside ``device=``.
+The ingester ``Module(...)`` constructor returns a ``pb.Module``
+proto instance directly (the ingester names are factories, not
+wrapper classes), so the map values are protobuf messages even
+though they're created through the SDK wrapper.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ import logging
 from typing import Any
 
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
-from netboxlabs.diode.sdk.ingester import Entity, Manufacturer, Module, ModuleBay, ModuleType
+from netboxlabs.diode.sdk.ingester import Entity, Module, ModuleBay, ModuleType
 
 from device_discovery.metrics import get_metric
 from device_discovery.policy.models import Options
@@ -132,7 +136,7 @@ def _manufacturer_from_device(device: pb.Device) -> pb.Manufacturer:
     """
     if device.HasField("device_type") and device.device_type.HasField("manufacturer"):
         return device.device_type.manufacturer
-    return Manufacturer(name="Unknown")
+    return pb.Manufacturer(name="Unknown")
 
 
 def _emit_bay_recursive(

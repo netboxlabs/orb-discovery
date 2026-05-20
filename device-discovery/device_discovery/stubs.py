@@ -270,15 +270,20 @@ def _prune_ip_address_against_index(
 
 # Hard cap on nested device-stub recursion through Module / ModuleBay protos.
 # Cisco modular chassis are depth 2 (chassis → linecard → transceiver), Junos
-# is depth 3 (chassis → FPC → PIC → transceiver). The cap is
-# ``MAX_BAY_DEPTH + 1`` because the recursion descends through both the
-# physical containment chain AND the cyclic module ↔ module_bay refs the
-# emitter creates (a Module's module_bay points back to its bay, whose
-# module points back to the Module). One extra level is enough to flush
-# device stubs across the cycle at the deepest legitimate level; beyond
-# that the recursion stops and any deeper device proto stays untouched
-# — an acceptable cost since real chassis don't nest that far.
-_MAX_DEVICE_STUB_DEPTH = MAX_BAY_DEPTH + 1
+# is depth 3 (chassis → FPC → PIC → transceiver).
+#
+# Each bay-tier in the emitted entity tree adds TWO recursion steps,
+# not one: from a Module we descend into its ``module_bay`` (depth +1),
+# then from that ModuleBay into its ``module`` parent ref (depth +1).
+# So a depth-N hierarchy needs the recursion to reach depth 2*N to
+# flush the topmost ancestor's device proto. With ``MAX_BAY_DEPTH=3``
+# (Junos PIC) the leaf transceiver's ancestor chain has rich device
+# fields at depths 0..5; setting the cap to ``2 * MAX_BAY_DEPTH``
+# ensures every one of them gets stubbed before the recursion stops.
+# An earlier cap of ``MAX_BAY_DEPTH + 1`` was too low and left the
+# FPC-grandparent device unstubbed on Junos-shape payloads,
+# reintroducing wire-size bloat for the deepest leaves.
+_MAX_DEVICE_STUB_DEPTH = 2 * MAX_BAY_DEPTH
 
 
 def _stub_device_recursive(msg, dev_stub: pb.Device, depth: int = 0) -> None:

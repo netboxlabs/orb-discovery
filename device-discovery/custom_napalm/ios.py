@@ -328,14 +328,15 @@ def _ios_get_chassis_members_impl(driver) -> dict | None:
 # IMPORTANT: only ``Slot N`` is matched here. The earlier ``module|Module``
 # alternation also caught ``"module 0"`` rows emitted by non-modular
 # IOS-XE platforms (ISR/ASR route processors), which would falsely
-# materialize a phantom slot-0 ModuleBay on every such device. ISR/ASR
-# users with discover_modules enabled would see corrupted module
-# inventory in NetBox. Keeping the matcher to ``Slot N`` skips those
-# built-in controllers cleanly; vendor variants that need wider
-# coverage can extend the regex once a real modular emission is
-# observed.
+# materialize a phantom slot-0 ModuleBay on every such device.
+#
+# The negative lookahead ``(?!\s*/)`` after the slot number rejects
+# sub-slot inventory rows like ``"Slot 0/0"`` or ``"Slot 2/1/0"``
+# that some platforms emit for SPA/controller positions. Without it,
+# those rows would silently partial-match as a top-level slot and
+# materialize phantom linecards.
 _INVENTORY_SLOT_RE = re.compile(
-    r"^Slot\s+(\d+)(?:\s*[-:]?\s*(\w+))?",
+    r"^Slot\s+(\d+)(?!\s*/)(?:\s*[-:]?\s*(\w+))?",
     re.IGNORECASE,
 )
 _INVENTORY_IFNAME_RE = re.compile(r"^[A-Za-z]+\d+(?:/\d+){1,2}$")

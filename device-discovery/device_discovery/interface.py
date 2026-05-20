@@ -7,7 +7,8 @@ import logging
 import re
 from collections.abc import Iterable
 
-from netboxlabs.diode.sdk.ingester import Device, Entity, Interface, IPAddress, Module, Prefix
+from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
+from netboxlabs.diode.sdk.ingester import Device, Entity, Interface, IPAddress, Prefix
 
 from device_discovery.defaults import DEFAULT_INTERFACE_PATTERNS
 from device_discovery.policy.models import Defaults
@@ -390,7 +391,7 @@ def _compile_exclude_patterns(patterns: list[str]) -> list[re.Pattern]:
 def _attach_module_ref(
     iface: Interface,
     name: str,
-    iface_module_map: dict[str, Module],
+    iface_module_map: dict[str, pb.Module],
 ) -> None:
     """
     Attach a module ref on an interface when iface_module_map covers it.
@@ -409,7 +410,7 @@ def build_interface_entities(
     interfaces: dict,
     interfaces_ip: dict,
     defaults: Defaults,
-    iface_module_map: dict[str, Module] | None = None,
+    iface_module_map: dict[str, pb.Module] | None = None,
 ) -> list[Entity]:
     """
     Create interface entities from interface definitions and IP data.
