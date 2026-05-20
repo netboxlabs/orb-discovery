@@ -76,6 +76,24 @@ def _init_metric_factories(meter):
             description="Number of currently active policies",
             unit="1",
         ),
+        "modules_emitted": lambda: meter.create_counter(
+            name="modules_emitted",
+            description="Number of NetBox Module entities emitted by translate_modules",
+            unit="1",
+        ),
+        "module_bays_emitted": lambda: meter.create_counter(
+            name="module_bays_emitted",
+            description="Number of NetBox ModuleBay entities emitted by translate_modules",
+            unit="1",
+        ),
+        "modules_dropped": lambda: meter.create_counter(
+            name="modules_dropped",
+            description=(
+                "Number of module payload bays dropped at the translate layer "
+                "(virtual-chassis short-circuit, per-bay exceptions)"
+            ),
+            unit="1",
+        ),
     }
 
 

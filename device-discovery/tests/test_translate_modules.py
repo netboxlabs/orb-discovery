@@ -289,6 +289,77 @@ def test_non_dict_payload_returns_empty_map() -> None:
 # ---- iface_module_map deepest-wins --------------------------------------
 
 
+def test_metric_counters_invoked_when_enabled(monkeypatch) -> None:
+    """
+    Module / bay emission and VC short-circuit each bump their counters.
+
+    Stubs ``get_metric`` to a recording fake so we don't depend on the
+    OTel SDK being wired up in the test environment. Verifies the three
+    counters fire with the expected attributes; downstream OTLP export
+    is not exercised here (it lives behind setup_metrics_export()).
+    """
+    import device_discovery.translate_modules as tm
+
+    calls: list[tuple[str, int, dict]] = []
+
+    class _FakeCounter:
+        def __init__(self, name):
+            self.name = name
+
+        def add(self, value, attrs):
+            calls.append((self.name, value, dict(attrs)))
+
+    counters: dict[str, _FakeCounter] = {}
+
+    def fake_get_metric(name: str):
+        counters.setdefault(name, _FakeCounter(name))
+        return counters[name]
+    monkeypatch.setattr(tm, "get_metric", fake_get_metric)
+
+    # Emission path: one linecard + one transceiver sub-bay in full mode.
+    entities: list = []
+    data = {"modules": _linecard_with_transceiver_payload()}
+    emit_modules_if_requested(
+        data, Options(discover_modules="full"), _make_device(), entities,
+    )
+    bay_counts = [c for c in calls if c[0] == "module_bays_emitted"]
+    mod_counts = [c for c in calls if c[0] == "modules_emitted"]
+    assert len(bay_counts) == 2  # parent bay + transceiver sub-bay
+    assert len(mod_counts) == 2  # linecard + transceiver
+    # Linecard emits with type=linecard; transceiver with type=transceiver.
+    assert {m[2].get("type") for m in mod_counts} == {"linecard", "transceiver"}
+    assert all(c[2].get("vendor") == "Cisco" for c in mod_counts + bay_counts)
+
+    # VC short-circuit bumps modules_dropped with reason=vc_of_modular.
+    calls.clear()
+    entities = []
+    data = {
+        "modules": _linecard_payload(),
+        "chassis_members": {"members": [{"id": 1}, {"id": 2}], "domain": None},
+    }
+    emit_modules_if_requested(
+        data, Options(discover_modules="linecards"), _make_device(), entities,
+    )
+    drops = [c for c in calls if c[0] == "modules_dropped"]
+    assert len(drops) == 1
+    assert drops[0][1] == 1  # one bay would have been emitted; it's dropped
+    assert drops[0][2] == {"reason": "vc_of_modular"}
+
+
+def test_metric_counters_noop_when_disabled(monkeypatch) -> None:
+    """get_metric() returns None when OTel export was never configured — no AttributeError."""
+    import device_discovery.translate_modules as tm
+    monkeypatch.setattr(tm, "get_metric", lambda _name: None)
+    entities: list = []
+    iface_module_map = emit_modules_if_requested(
+        {"modules": _linecard_payload()}, Options(discover_modules="linecards"),
+        _make_device(), entities,
+    )
+    # Emission still succeeds with metrics disabled (the production default).
+    assert any(e.HasField("module") for e in entities)
+    assert iface_module_map  # interfaces routed
+
+
 def test_full_mode_iface_map_uses_deepest_bay_when_payload_specifies() -> None:
     """When the driver maps an ifname to a sub-bay key, that sub-bay wins."""
     payload = _linecard_with_transceiver_payload()

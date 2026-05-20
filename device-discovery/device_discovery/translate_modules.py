@@ -23,6 +23,7 @@ from typing import Any
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
 from netboxlabs.diode.sdk.ingester import Entity, Manufacturer, Module, ModuleBay, ModuleType
 
+from device_discovery.metrics import get_metric
 from device_discovery.policy.models import Options
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ def emit_modules_if_requested(
                 "modules_dropped": len(payload["bays"]),
             },
         )
+        _bump("modules_dropped", len(payload["bays"]), {"reason": "vc_of_modular"})
         return {}
 
     mode = options.discover_modules
@@ -90,7 +92,22 @@ def emit_modules_if_requested(
                 extra={"bay": bay_data.get("name")},
                 exc_info=True,
             )
+            _bump("modules_dropped", 1, {"reason": "malformed"})
     return iface_module_map
+
+
+def _bump(metric_name: str, value: int, attrs: dict[str, str]) -> None:
+    """
+    Increment an OTel counter when metrics are enabled; otherwise no-op.
+
+    Kept narrow on purpose: ``get_metric`` returns ``None`` whenever
+    ``setup_metrics_export`` has not been called (every test and the dry-
+    run mode both leave it unconfigured), so wrapping the .add() call
+    here saves every caller from writing the same guard.
+    """
+    counter = get_metric(metric_name)
+    if counter is not None:
+        counter.add(value, attrs)
 
 
 def _payload_has_bays(payload: Any) -> bool:
@@ -152,6 +169,7 @@ def _emit_bay_recursive(
         bay_kwargs["module"] = parent_module
     bay = ModuleBay(**bay_kwargs)
     entities.append(Entity(module_bay=bay))
+    _bump("module_bays_emitted", 1, {"vendor": manufacturer_name})
 
     module_type = ModuleType(
         manufacturer=Manufacturer(name=manufacturer_name),
@@ -168,6 +186,10 @@ def _emit_bay_recursive(
         module_kwargs["description"] = module_data["description"]
     module = Module(**module_kwargs)
     entities.append(Entity(module=module))
+    _bump(
+        "modules_emitted", 1,
+        {"vendor": manufacturer_name, "type": module_data["type"]},
+    )
 
     # Map interfaces owned by THIS bay (top-level or sub) to this module.
     # Deepest match wins because we walk parent first then sub-bays — a
