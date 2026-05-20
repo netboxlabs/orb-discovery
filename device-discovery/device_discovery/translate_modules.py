@@ -39,8 +39,7 @@ def emit_modules_if_requested(
     Maybe-emit Module / ModuleBay entities for the discovered device.
 
     Reads ``data["modules"]`` (populated upstream in the runner via the
-    driver's optional ``get_modules()`` extension) and
-    ``data["chassis_members"]`` (the VC payload). Mutates ``entities``
+    driver's optional ``get_modules()`` extension). Mutates ``entities``
     in place to append ModuleBay and Module entries. Returns a mapping
     from interface name to the Module the interface belongs to, so the
     interface builder can attach ``module=`` per entity.
@@ -51,9 +50,12 @@ def emit_modules_if_requested(
       - The payload is malformed in a way the helper missed (defensive).
 
     Virtual-chassis-of-modular composition is gated upstream in
-    ``policy.runner._collect_modules`` — when chassis_members is
-    populated, the runner skips the driver call entirely and
-    ``data["modules"]`` never reaches this function.
+    ``policy.runner._collect_modules`` via
+    ``translate_chassis.validate_chassis_payload`` — when that
+    validator confirms a real VC (>=2 validated members) the runner
+    skips the driver call entirely and ``data["modules"]`` never
+    reaches this function. This translator does not consult
+    ``data["chassis_members"]`` itself.
     """
     if options.discover_modules == "off":
         return {}

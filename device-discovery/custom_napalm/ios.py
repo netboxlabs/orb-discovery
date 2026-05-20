@@ -313,24 +313,29 @@ def _ios_get_chassis_members_impl(driver) -> dict | None:
 
 # ---- module inventory ----------------------------------------------------
 #
-# Two `show inventory` row patterns drive emission:
+# `show inventory` row patterns that drive emission:
 #
 #   "Slot 1 Linecard"      — physical line card on a Catalyst 9400/9600 modular
 #   "Slot 1 Supervisor"    — supervisor module (treated as its own type)
-#   "module 1"             — alternate phrasing seen on some IOS-XE versions
+#   "Slot 3 - Supervisor"  — hyphenated variant seen on some IOS-XE versions
 #
 # Plus transceiver rows whose NAME is an interface short / long form, e.g.
 # "Te1/0/1" or "TenGigabitEthernet1/0/1". A 4-tuple ifname like
 # "Te1/2/0/1" belongs to VC-of-modular composition, which is deferred —
 # it never matches the regex below and the _modules helper drops the
 # entry at the payload boundary if it slips through some other path.
-# The role separator is flexible — Catalyst IOS-XE emits both
-# "Slot 1 Supervisor" and "Slot 3 - Supervisor" (with a hyphen) depending
-# on version. Without the optional "[-:]" branch, hyphenated rows fell
-# through to PID-based classification and emitted supervisors as
-# "linecard".
+#
+# IMPORTANT: only ``Slot N`` is matched here. The earlier ``module|Module``
+# alternation also caught ``"module 0"`` rows emitted by non-modular
+# IOS-XE platforms (ISR/ASR route processors), which would falsely
+# materialize a phantom slot-0 ModuleBay on every such device. ISR/ASR
+# users with discover_modules enabled would see corrupted module
+# inventory in NetBox. Keeping the matcher to ``Slot N`` skips those
+# built-in controllers cleanly; vendor variants that need wider
+# coverage can extend the regex once a real modular emission is
+# observed.
 _INVENTORY_SLOT_RE = re.compile(
-    r"^(?:Slot|module|Module)\s+(\d+)(?:\s*[-:]?\s*(\w+))?",
+    r"^Slot\s+(\d+)(?:\s*[-:]?\s*(\w+))?",
     re.IGNORECASE,
 )
 _INVENTORY_IFNAME_RE = re.compile(r"^[A-Za-z]+\d+(?:/\d+){1,2}$")

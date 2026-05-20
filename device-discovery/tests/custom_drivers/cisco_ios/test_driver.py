@@ -225,6 +225,25 @@ class TestIOSDriver(BaseDriverTest):
             "TenGigabitEthernet2/0/2",
         ]
 
+    def test_get_modules_does_not_match_isr_asr_module_zero(self) -> None:
+        """
+        ``NAME: "module 0"`` from ISR/ASR route-processor rows is ignored.
+
+        Earlier the regex matched the lowercase ``module N`` form too,
+        which falsely materialized a phantom slot-0 ModuleBay on every
+        non-modular IOS-XE device whose chassis NAME starts with
+        ``module 0``. Restricting the matcher to ``Slot N`` avoids the
+        false positive while keeping coverage of every real modular
+        Cisco chassis observed today (Catalyst 9400 / 9600).
+        """
+        from custom_napalm.ios import _INVENTORY_SLOT_RE
+        assert _INVENTORY_SLOT_RE.match("module 0") is None
+        assert _INVENTORY_SLOT_RE.match("Module 0") is None
+        assert _INVENTORY_SLOT_RE.match("module 1 Route Processor") is None
+        # Sanity: actual modular slot rows still match.
+        assert _INVENTORY_SLOT_RE.match("Slot 1 Supervisor") is not None
+        assert _INVENTORY_SLOT_RE.match("slot 2 Linecard") is not None
+
     def test_get_modules_hyphenated_slot_role_classified(self) -> None:
         """
         ``Slot 3 - Supervisor`` (hyphenated form) classifies as supervisor.

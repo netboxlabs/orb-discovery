@@ -13,6 +13,8 @@ import logging
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
 from netboxlabs.diode.sdk.ingester import Entity
 
+from custom_napalm._modules import MAX_BAY_DEPTH
+
 logger = logging.getLogger(__name__)
 
 
@@ -268,10 +270,15 @@ def _prune_ip_address_against_index(
 
 # Hard cap on nested device-stub recursion through Module / ModuleBay protos.
 # Cisco modular chassis are depth 2 (chassis → linecard → transceiver), Junos
-# is depth 3. Cap matches custom_napalm._modules.MAX_BAY_DEPTH and prevents
-# infinite recursion through the cyclic module.module_bay.module references
-# the emitter creates.
-_MAX_DEVICE_STUB_DEPTH = 4
+# is depth 3 (chassis → FPC → PIC → transceiver). The cap is
+# ``MAX_BAY_DEPTH + 1`` because the recursion descends through both the
+# physical containment chain AND the cyclic module ↔ module_bay refs the
+# emitter creates (a Module's module_bay points back to its bay, whose
+# module points back to the Module). One extra level is enough to flush
+# device stubs across the cycle at the deepest legitimate level; beyond
+# that the recursion stops and any deeper device proto stays untouched
+# — an acceptable cost since real chassis don't nest that far.
+_MAX_DEVICE_STUB_DEPTH = MAX_BAY_DEPTH + 1
 
 
 def _stub_device_recursive(msg, dev_stub: pb.Device, depth: int = 0) -> None:
