@@ -18,17 +18,15 @@ class Backend:
         self,
         *,
         ingest_callback=None,
-        policy: Policy | None = None,
         **kwargs,
     ) -> None:
         """
         Construct the Backend.
 
-        Worker passes ``ingest_callback`` and ``policy`` at construction
-        starting with the minor release this docstring ships in. Older
-        worker versions construct ``Backend()`` with zero args; integrations
-        that override ``__init__`` should accept ``**kwargs`` so both paths
-        keep working.
+        Worker passes ``ingest_callback`` at construction starting with the
+        minor release this docstring ships in. Older worker versions
+        construct ``Backend()`` with zero args; integrations that override
+        ``__init__`` should accept ``**kwargs`` so both paths keep working.
 
         Args:
         ----
@@ -40,15 +38,11 @@ class Backend:
                 earlier raises ``IngestUnavailable``.** See
                 ``worker.exceptions`` for the exception hierarchy it may
                 raise.
-            policy: Optional construction-time policy. If supplied, the
-                integration may use credentials / scope without waiting for
-                the first scheduled ``run()``.
             **kwargs: Forward-compat door for additional resources worker
                 may pass in future versions; silently ignored by default.
 
         """
         self.ingest_callback = ingest_callback
-        self.policy = policy
 
     def setup(self) -> Metadata:
         """
@@ -61,7 +55,12 @@ class Backend:
         """
         raise NotImplementedError("The 'setup' method must be implemented.")
 
-    def run(self, policy_name: str, policy: Policy) -> Iterable[Entity]:
+    def run(
+        self,
+        policy_name: str,
+        policy: Policy,
+        **kwargs,
+    ) -> Iterable[Entity]:
         """
         Run the backend.
 
@@ -69,10 +68,16 @@ class Backend:
         ----
             policy_name (str): The name of the policy.
             policy (Policy): The policy to run.
+            **kwargs: Passive forward-compat door. The worker passes nothing
+                through it in v1; future minor releases may add per-tick
+                context (e.g. ``source="scheduled"|"trigger"``, ``run_id``).
+                Concrete backends are encouraged to declare ``**kwargs`` so
+                additive kwargs ride into the contract without a coordinated
+                upgrade.
 
         Returns:
         -------
-            Iterable[Entity]: The entities produced by the backend
+            Iterable[Entity]: The entities produced by the backend.
 
         """
         raise NotImplementedError("The 'run' method must be implemented.")

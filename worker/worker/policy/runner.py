@@ -2,6 +2,7 @@
 # Copyright 2025 NetBox Labs Inc
 """Orb Worker Policy Runner."""
 
+import inspect
 import logging
 import time
 from datetime import datetime, timedelta
@@ -30,6 +31,27 @@ from worker.policy.run import RunStatus, RunStore
 MAX_INGEST_MESSAGE_BYTES = 3 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
+
+
+def _construct_backend(backend_class, *, ingest_callback):
+    """
+    Construct a Backend, passing ``ingest_callback`` only when accepted.
+
+    Uses ``inspect.signature`` to detect whether ``backend_class.__init__``
+    has a matching named parameter or ``VAR_KEYWORD`` absorber. Legacy
+    backends with ``__init__(self)`` get constructed zero-arg and never
+    see the kwarg, so the worker can ship this contract bump without a
+    coordinated upgrade across every integration package.
+    """
+    sig = inspect.signature(backend_class)
+    params = sig.parameters
+    accepts_var_kw = any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+    init_kwargs: dict[str, object] = {}
+    if accepts_var_kw or "ingest_callback" in params:
+        init_kwargs["ingest_callback"] = ingest_callback
+    return backend_class(**init_kwargs)
 
 
 class PolicyRunner:
@@ -77,7 +99,7 @@ class PolicyRunner:
         # `self._diode_client` lazily, so it is safe to construct before the
         # client is assigned below.
         ingest_callback = self._build_ingest_callback(self.name)
-        backend = backend_class(ingest_callback=ingest_callback, policy=policy)
+        backend = _construct_backend(backend_class, ingest_callback=ingest_callback)
         logger.debug(f"Backend class loaded successfully: {backend_class.__name__}")
 
         metadata = backend.setup()

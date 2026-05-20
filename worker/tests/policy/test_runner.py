@@ -613,7 +613,7 @@ def test_setup_passes_kwargs_to_backend(
     mock_diode_client,
     mock_run_store,
 ):
-    """setup() constructs the backend with ingest_callback= and policy= kwargs."""
+    """setup() constructs the backend with ingest_callback= kwarg (no policy= per ADR-0008)."""
     with patch.object(policy_runner.scheduler, "start"), patch.object(
         policy_runner.scheduler, "add_job"
     ):
@@ -623,7 +623,46 @@ def test_setup_passes_kwargs_to_backend(
     call_kwargs = mock_backend_class.call_args.kwargs
     assert "ingest_callback" in call_kwargs
     assert callable(call_kwargs["ingest_callback"])
-    assert call_kwargs["policy"] == sample_policy
+    assert "policy" not in call_kwargs
+
+
+@pytest.mark.parametrize(
+    "init_signature, expects_ingest_callback",
+    [
+        pytest.param(
+            "def __init__(self): self.ingest_callback = None",
+            False,
+            id="legacy-zero-arg",
+        ),
+        pytest.param(
+            "def __init__(self, **kwargs): self.ingest_callback = kwargs.get('ingest_callback')",
+            True,
+            id="kwargs-absorber",
+        ),
+        pytest.param(
+            "def __init__(self, *, ingest_callback=None, **kwargs): self.ingest_callback = ingest_callback",
+            True,
+            id="named-kwarg",
+        ),
+    ],
+)
+def test_construct_backend_introspection(init_signature, expects_ingest_callback):
+    """_construct_backend only passes ingest_callback when the class accepts it."""
+    from worker.policy.runner import _construct_backend
+
+    namespace: dict = {}
+    exec(  # noqa: S102 — synthesizing tiny class fixture under test
+        "class _Stub:\n"
+        "    " + init_signature + "\n",
+        namespace,
+    )
+    stub_class = namespace["_Stub"]
+    sentinel = object()
+    instance = _construct_backend(stub_class, ingest_callback=sentinel)
+    if expects_ingest_callback:
+        assert instance.ingest_callback is sentinel
+    else:
+        assert instance.ingest_callback is None
 
 
 def test_ingest_callback_entities_happy_path(
