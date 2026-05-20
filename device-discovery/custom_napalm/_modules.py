@@ -89,11 +89,16 @@ class ModuleBay:
     module: ModuleEntry | None
 
 
-# ---- v1 minimal classifiers ----------------------------------------------
+# ---- module-type classifiers --------------------------------------------
 #
-# Distinguish only "transceiver" vs everything-else. The ``linecards`` mode
-# filter relies on this enum to drop transceivers from emission; finer
-# classification (supervisor / psu / fan) is a follow-up.
+# The ModuleType enum covers linecard / supervisor / fan / psu / transceiver.
+# The classifiers here only auto-distinguish ``transceiver`` from
+# ``linecard`` based on PID / description — that's what the
+# ``linecards`` mode filter in translate_modules needs (drop transceivers,
+# keep everything else). Drivers that want finer classification can build
+# their own type strings; e.g. the IOS driver classifies ``Slot N
+# Supervisor`` rows as ``supervisor`` from the NAME hint. PSU / fan are
+# emitted today only if a driver chooses to set them explicitly.
 
 _CISCO_TRANSCEIVER_PREFIXES = (
     "SFP-",
@@ -213,6 +218,14 @@ def _validate_interfaces_by_bay(
     """
     cleaned: dict[str, list[str]] = {}
     for bay_name, ifnames in interfaces_by_bay.items():
+        if not isinstance(ifnames, list):
+            logger.warning(
+                "interfaces_by_bay value dropped: expected list, got %s",
+                type(ifnames).__name__,
+                extra={"bay_name": bay_name},
+            )
+            cleaned[bay_name] = []
+            continue
         seen: set[str] = set()
         keep: list[str] = []
         for name in ifnames:

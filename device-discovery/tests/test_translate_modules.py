@@ -345,6 +345,37 @@ def test_non_dict_sub_bay_logged_and_skipped(caplog) -> None:
     assert any("not a dict" in r.message for r in caplog.records)
 
 
+def test_malformed_interfaces_by_bay_does_not_block_emission(caplog) -> None:
+    """
+    A non-dict ``interfaces_by_bay`` must not crash bay/module emission.
+
+    The translator normalizes it to ``{}`` so per-interface routing is
+    simply empty; the rest of the payload still emits cleanly.
+    """
+    payload = {
+        "bays": [
+            {
+                "name": "1", "position": "1",
+                "module": {
+                    "model": "C9400-LC-48U", "serial": "FOC1", "description": "",
+                    "type": "linecard",
+                    "sub_bays": [],
+                },
+            },
+        ],
+        # A driver returning None here used to AttributeError inside the loop.
+        "interfaces_by_bay": None,
+    }
+    entities: list = []
+    iface_module_map = emit_modules_if_requested(
+        {"modules": payload}, Options(discover_modules="linecards"),
+        _make_device(), entities,
+    )
+    modules = [e for e in entities if e.HasField("module")]
+    assert len(modules) == 1
+    assert iface_module_map == {}
+
+
 def test_non_dict_bay_in_payload_logged_and_skipped(caplog) -> None:
     """A non-dict element inside payload['bays'] must not crash the loop."""
     payload = {

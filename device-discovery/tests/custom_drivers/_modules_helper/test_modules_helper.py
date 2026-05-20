@@ -116,6 +116,22 @@ def test_to_payload_rejects_non_string_ifname_warn_and_drop() -> None:
     assert payload["interfaces_by_bay"]["1"] == ["Te1/0/1"]
 
 
+def test_to_payload_rejects_non_iterable_ifnames_value() -> None:
+    """
+    A non-list value in interfaces_by_bay is warn-dropped, not iterated.
+
+    The helper used to iterate the value blindly, which would TypeError
+    on None or an int. Non-list values now degrade to an empty list for
+    that bay so to_payload remains forgiving of buggy driver shapes.
+    """
+    payload = to_payload(
+        [_bay("1")],
+        interfaces_by_bay={"1": None, "2": 42, "3": ["Te3/0/1"]},  # type: ignore[dict-item]
+    )
+    assert payload is not None
+    assert payload["interfaces_by_bay"] == {"1": [], "2": [], "3": ["Te3/0/1"]}
+
+
 def test_to_payload_keeps_subbay_at_depth_2() -> None:
     """Cisco shape: chassis → linecard → transceiver. Depth 2."""
     transceiver = _bay("Te1/0/1", serial="SFP_SN", mtype="transceiver", model="SFP-10G-LR")

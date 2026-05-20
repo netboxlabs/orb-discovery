@@ -63,6 +63,10 @@ def emit_modules_if_requested(
 
     mode = options.discover_modules
     manufacturer = _manufacturer_from_device(device)
+    # Normalize interfaces_by_bay so a malformed value (None, list, etc.)
+    # in an otherwise-valid payload does not take down every bay/module.
+    raw_ifaces = payload.get("interfaces_by_bay")
+    interfaces_by_bay = raw_ifaces if isinstance(raw_ifaces, dict) else {}
     iface_module_map: dict[str, pb.Module] = {}
     for bay_data in payload["bays"]:
         if not isinstance(bay_data, dict):
@@ -81,7 +85,7 @@ def emit_modules_if_requested(
                 manufacturer=manufacturer,
                 entities=entities,
                 iface_module_map=iface_module_map,
-                interfaces_by_bay=payload.get("interfaces_by_bay", {}),
+                interfaces_by_bay=interfaces_by_bay,
             )
         except Exception:
             logger.warning(

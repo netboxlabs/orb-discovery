@@ -202,8 +202,10 @@ class Options(BaseModel):
             "'off' (default) skips module discovery entirely — drivers are "
             "not asked for module data and behavior is unchanged from the "
             "pre-OBS-1594 release. 'linecards' emits chassis-level bays "
-            "and linecards but skips transceivers. 'full' adds per-port "
-            "transceiver sub-bays."
+            "and their non-transceiver modules (linecards, supervisors, "
+            "and any psu/fan a driver classifies explicitly); transceiver "
+            "sub-bays are dropped. 'full' adds the per-port transceiver "
+            "sub-bays."
         ),
     )
 
