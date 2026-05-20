@@ -17,6 +17,25 @@ func containsWhitespace(s string) bool {
 	return strings.ContainsAny(s, " \t\n\r")
 }
 
+// looksDescriptive reports whether s looks like a hardware description
+// (e.g. Dell PowerConnect's "Unit: 1 Slot: 0 Port: 1 Gigabit - Level")
+// rather than a canonical interface name. The discriminator is the
+// "colon-space" sequence: it appears in labeled-field descriptive
+// text (Dell PowerConnect, similar vendor families) but never in
+// valid subinterface names (Juniper's "ge-0/0/0:0" has no space after
+// the colon) and never in the whitespace-bearing canonical names we
+// ship today (Dell FTOS "TenGigabitEthernet 0/0", Extreme SLX
+// "Port-channel 1").
+//
+// Distinct from containsWhitespace by design: that predicate is
+// broader (any whitespace) and is used by the subinterface heuristic
+// where the broad rule is safe; looksDescriptive is narrower and is
+// used by the ifDescr-vs-ifName name selection where the narrow rule
+// preserves legitimate space-bearing canonical names.
+func looksDescriptive(s string) bool {
+	return strings.Contains(s, ": ")
+}
+
 // ExtractParentInterfaceName returns the parent interface name if the supplied name
 // represents a subinterface, or an empty string if it's not a subinterface.
 // Subinterfaces are identified by the presence of dot (.) or colon (:) separators.
