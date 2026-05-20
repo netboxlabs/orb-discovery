@@ -324,8 +324,13 @@ def _ios_get_chassis_members_impl(driver) -> dict | None:
 # "Te1/2/0/1" belongs to VC-of-modular composition, which is deferred —
 # it never matches the regex below and the _modules helper drops the
 # entry at the payload boundary if it slips through some other path.
+# The role separator is flexible — Catalyst IOS-XE emits both
+# "Slot 1 Supervisor" and "Slot 3 - Supervisor" (with a hyphen) depending
+# on version. Without the optional "[-:]" branch, hyphenated rows fell
+# through to PID-based classification and emitted supervisors as
+# "linecard".
 _INVENTORY_SLOT_RE = re.compile(
-    r"^(?:Slot|module|Module)\s+(\d+)(?:\s+(\w+))?",
+    r"^(?:Slot|module|Module)\s+(\d+)(?:\s*[-:]?\s*(\w+))?",
     re.IGNORECASE,
 )
 _INVENTORY_IFNAME_RE = re.compile(r"^[A-Za-z]+\d+(?:/\d+){1,2}$")

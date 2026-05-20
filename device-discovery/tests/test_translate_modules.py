@@ -345,6 +345,46 @@ def test_non_dict_sub_bay_logged_and_skipped(caplog) -> None:
     assert any("not a dict" in r.message for r in caplog.records)
 
 
+def test_non_list_per_bay_ifnames_does_not_drop_parent_bay(caplog) -> None:
+    """
+    A non-list per-bay value is treated as empty, not iterated blindly.
+
+    The previous code path iterated whatever ``interfaces_by_bay[name]``
+    returned. If a driver passed a string, Python iterates it
+    character-by-character (silently bogus). If it passed an int, the
+    iteration raises and the outer try/except drops the entire parent
+    Module. The per-bay guard now logs at WARNING and treats non-list
+    values as empty so the bay and its Module still emit cleanly.
+    """
+    payload = {
+        "bays": [
+            {
+                "name": "1", "position": "1",
+                "module": {
+                    "model": "C9400-LC-48U", "serial": "FOC1", "description": "",
+                    "type": "linecard",
+                    "sub_bays": [],
+                },
+            },
+        ],
+        "interfaces_by_bay": {"1": "Te1/0/1"},  # type: ignore[dict-item]
+    }
+    entities: list = []
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
+        emit_modules_if_requested(
+            {"modules": payload}, Options(discover_modules="linecards"),
+            _make_device(), entities,
+        )
+    modules = [e for e in entities if e.HasField("module")]
+    bays = [e for e in entities if e.HasField("module_bay")]
+    # Parent linecard still emits despite the malformed routing entry —
+    # iterating the string by character would have populated bogus
+    # ifnames in iface_module_map; the guard prevents that.
+    assert len(modules) == 1
+    assert len(bays) == 1
+    assert any("expected list" in r.getMessage() for r in caplog.records)
+
+
 def test_malformed_interfaces_by_bay_does_not_block_emission(caplog) -> None:
     """
     A non-dict ``interfaces_by_bay`` must not crash bay/module emission.

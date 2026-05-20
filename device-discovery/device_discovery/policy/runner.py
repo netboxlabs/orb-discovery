@@ -23,6 +23,7 @@ from device_discovery.policy.portscan import (
     find_reachable_hosts,
 )
 from device_discovery.policy.run import RunStatus, RunStore
+from device_discovery.translate_chassis import validate_chassis_payload
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -335,23 +336,21 @@ class PolicyRunner:
         """
         if not (config.options and config.options.discover_modules != "off"):
             return
-        # Align the VC-of-modular gate with translate_chassis.validate_chassis_payload:
-        # only ≥2 valid members count as a real virtual chassis. A 1-member
-        # payload (or any non-dict shape) is NOT a VC and must not suppress
-        # module discovery — otherwise a standalone modular chassis whose
-        # driver also emits a single-member chassis_members payload would
-        # silently lose its Module / ModuleBay entities.
-        chassis_members = data.get("chassis_members")
-        members = (
-            chassis_members.get("members") or []
-            if isinstance(chassis_members, dict)
-            else []
-        )
-        if len(members) >= 2:
+        # Align the VC-of-modular gate with the SAME validator that
+        # translate_chassis uses to decide whether the standalone or
+        # stack path runs. validate_chassis_payload drops malformed and
+        # duplicate members, requires ≥2 valid members, and is tolerant
+        # of every malformed shape (non-dict, non-list members, junk
+        # rows). Sharing the validator here means a raw payload that
+        # collapses to <2 valid members after dedup goes through the
+        # standalone path AND still gets module discovery — they must
+        # not disagree.
+        validated = validate_chassis_payload(data.get("chassis_members"))
+        if validated is not None:
             logger.warning(
                 f"Policy {self.name}, Hostname {sanitized_hostname}: "
                 "skipping module discovery for virtual chassis "
-                f"({len(members)} members) — tracked as follow-up to OBS-1594"
+                f"({len(validated)} members) — tracked as follow-up to OBS-1594"
             )
             counter = get_metric("modules_dropped")
             if counter is not None:

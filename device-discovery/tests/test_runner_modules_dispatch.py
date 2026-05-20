@@ -117,9 +117,14 @@ def test_collect_modules_skips_for_virtual_chassis(caplog, monkeypatch) -> None:
 
     runner = _runner("linecards")
     dev = _mock_device(with_modules=True)
+    # Real serials required — the runner delegates to
+    # validate_chassis_payload, which drops members with empty serials.
     data: dict = {
         "chassis_members": {
-            "members": [{"id": 1}, {"id": 2}],
+            "members": [
+                {"id": 1, "serial": "FOC1"},
+                {"id": 2, "serial": "FOC2"},
+            ],
             "domain": None,
         },
     }
@@ -132,6 +137,33 @@ def test_collect_modules_skips_for_virtual_chassis(caplog, monkeypatch) -> None:
         for r in caplog.records
     )
     assert counter_calls == [(1, {"reason": "vc_of_modular"})]
+
+
+def test_collect_modules_runs_when_raw_members_collapse_to_one_valid() -> None:
+    """
+    Two raw members that dedupe / drop to <2 valid is NOT a VC.
+
+    validate_chassis_payload drops malformed and duplicate members
+    before counting. If the dedup leaves <2 valid members, the
+    standalone translate path runs — so the runner must NOT suppress
+    module discovery on the same payload (otherwise standalone +
+    no-modules silently disagree).
+    """
+    runner = _runner("linecards")
+    dev = _mock_device(with_modules=True)
+    # Two raw members but the second has empty serial — validator drops it.
+    data: dict = {
+        "chassis_members": {
+            "members": [
+                {"id": 1, "serial": "FOC1"},
+                {"id": 2, "serial": ""},
+            ],
+            "domain": None,
+        },
+    }
+    runner._collect_modules(runner.config, dev, data, "host")
+    assert "modules" in data
+    assert dev.get_modules.called
 
 
 def test_collect_modules_runs_for_single_member_chassis_payload() -> None:
@@ -152,7 +184,8 @@ def test_collect_modules_runs_for_single_member_chassis_payload() -> None:
         },
     }
     runner._collect_modules(runner.config, dev, data, "host")
-    assert "modules" in data  # get_modules was called
+    # validate_chassis_payload returns None for <2 valid members → not a VC.
+    assert "modules" in data
     assert dev.get_modules.called
 
 

@@ -196,7 +196,19 @@ def _emit_bay_recursive(
     # Map interfaces owned by THIS bay (top-level or sub) to this module.
     # Deepest match wins because we walk parent first then sub-bays — a
     # later assignment for a deeper bay overwrites the earlier one.
-    for ifname in interfaces_by_bay.get(bay_data["name"], []):
+    # Per-bay value is guarded: a buggy driver returning
+    # ``{"1": None}`` (or a string) would otherwise iterate
+    # character-by-character or TypeError, and the outer try/except
+    # would silently drop this otherwise-valid bay's parent module.
+    bay_ifnames = interfaces_by_bay.get(bay_data["name"])
+    if bay_ifnames is not None and not isinstance(bay_ifnames, list):
+        logger.warning(
+            "interfaces_by_bay value ignored: expected list, got %s",
+            type(bay_ifnames).__name__,
+            extra={"bay": bay_data["name"]},
+        )
+        bay_ifnames = None
+    for ifname in bay_ifnames or []:
         iface_module_map[ifname] = module
 
     if mode == "linecards":

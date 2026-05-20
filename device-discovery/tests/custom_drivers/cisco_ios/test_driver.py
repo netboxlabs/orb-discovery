@@ -225,6 +225,26 @@ class TestIOSDriver(BaseDriverTest):
             "TenGigabitEthernet2/0/2",
         ]
 
+    def test_get_modules_hyphenated_slot_role_classified(self) -> None:
+        """
+        ``Slot 3 - Supervisor`` (hyphenated form) classifies as supervisor.
+
+        Some Catalyst IOS-XE versions emit the hyphenated form. The
+        previous regex captured only the slot number and missed the
+        role word, causing supervisors to emit as ``linecard`` (the
+        PID-based fallback).
+        """
+        from custom_napalm.ios import _INVENTORY_SLOT_RE, _classify_slot_module
+        m = _INVENTORY_SLOT_RE.match("Slot 3 - Supervisor")
+        assert m is not None
+        assert m.group(1) == "3"
+        assert (m.group(2) or "").lower() == "supervisor"
+        assert _classify_slot_module("C9600-SUP-1", m.group(2) or "") == "supervisor"
+        # Sanity: legacy non-hyphenated form still works.
+        m2 = _INVENTORY_SLOT_RE.match("Slot 1 Supervisor")
+        assert m2 is not None
+        assert (m2.group(2) or "").lower() == "supervisor"
+
     def test_get_modules_supervisor_classified_by_name_hint(self) -> None:
         """``Slot N Supervisor`` rows emit type=supervisor, not type=linecard."""
         mock_dir = self.mock_data_root / "test_get_modules" / "supervisor_only"
