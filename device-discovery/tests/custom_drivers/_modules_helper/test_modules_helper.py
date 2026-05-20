@@ -100,6 +100,22 @@ def test_to_payload_rejects_4tuple_ifname_warn_and_drop() -> None:
     assert payload["interfaces_by_bay"]["1"] == ["Te1/0/1"]
 
 
+def test_to_payload_rejects_non_string_ifname_warn_and_drop() -> None:
+    """
+    Non-string entries in interfaces_by_bay are warn-dropped, never raised.
+
+    The helper's contract is to be forgiving of bad-shape input from
+    drivers — None or an int slipping into an ifnames list must not
+    TypeError through the regex match.
+    """
+    payload = to_payload(
+        [_bay("1")],
+        interfaces_by_bay={"1": [None, 42, "Te1/0/1"]},  # type: ignore[list-item]
+    )
+    assert payload is not None
+    assert payload["interfaces_by_bay"]["1"] == ["Te1/0/1"]
+
+
 def test_to_payload_keeps_subbay_at_depth_2() -> None:
     """Cisco shape: chassis → linecard → transceiver. Depth 2."""
     transceiver = _bay("Te1/0/1", serial="SFP_SN", mtype="transceiver", model="SFP-10G-LR")

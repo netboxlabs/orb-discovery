@@ -204,12 +204,24 @@ def _validate_bay(bay: ModuleBay, *, depth: int) -> dict | None:
 def _validate_interfaces_by_bay(
     interfaces_by_bay: dict[str, list[str]],
 ) -> dict[str, list[str]]:
-    """Dedupe and reject 4-tuple Cisco ifnames (VC-of-modular territory)."""
+    """
+    Dedupe and reject 4-tuple Cisco ifnames (VC-of-modular territory).
+
+    Non-string entries (a buggy driver returning ``None`` or an int) are
+    warn-dropped before the regex match, so this helper upholds the
+    ``to_payload`` docstring promise of never raising on data shape.
+    """
     cleaned: dict[str, list[str]] = {}
     for bay_name, ifnames in interfaces_by_bay.items():
         seen: set[str] = set()
         keep: list[str] = []
         for name in ifnames:
+            if not isinstance(name, str):
+                logger.warning(
+                    "interfaces_by_bay entry dropped: non-string ifname",
+                    extra={"bay_name": bay_name, "ifname": repr(name)[:80]},
+                )
+                continue
             if name in seen:
                 continue
             if _CISCO_4TUPLE_RE.match(name):

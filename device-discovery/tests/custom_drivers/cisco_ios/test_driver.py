@@ -1,5 +1,6 @@
 """Unit tests for custom_napalm.ios.IOSDriver."""
 
+import re
 from pathlib import Path
 
 from custom_napalm.ios import IOSDriver, _maybe_int
@@ -248,13 +249,19 @@ class TestIOSDriver(BaseDriverTest):
         result = driver.get_modules()
         assert result is not None
         slot2 = result["interfaces_by_bay"]["2"]
-        # Every name is canonicalized; no raw "Gi2/0/1" or "Te2/0/2" leaks.
-        assert all(not n.startswith("Gi") and not n.startswith("Te2") or
-                   n.startswith("GigabitEthernet") or n.startswith("TenGigabit")
-                   for n in slot2), slot2
+        slot3 = result["interfaces_by_bay"]["3"]
+        # Positive: every name starts with a long-form prefix.
+        long_form_prefixes = ("GigabitEthernet", "TenGigabitEthernet")
+        for name in slot2 + slot3:
+            assert name.startswith(long_form_prefixes), f"non-canonical: {name!r}"
+        # Negative: no raw short-form names like "Gi2/0/1" or "Te2/0/1" leak.
+        short_form_pattern = re.compile(r"^(Gi|Te|Fa)\d")
+        for name in slot2 + slot3:
+            assert not short_form_pattern.match(name), f"short-form leaked: {name!r}"
+        # Exact expected canonicalization spot-checks.
         assert "GigabitEthernet2/0/1" in slot2
         assert "TenGigabitEthernet2/0/1" in slot2
-        assert "GigabitEthernet3/0/1" in result["interfaces_by_bay"]["3"]
+        assert "GigabitEthernet3/0/1" in slot3
 
     def test_get_modules_inventory_failure_returns_none(self) -> None:
         """A raised exception from send_command propagates as a None result + WARNING."""
