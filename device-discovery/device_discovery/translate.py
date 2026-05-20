@@ -31,6 +31,7 @@ from device_discovery.translate_chassis import (
     translate_as_stack,
     validate_chassis_payload,
 )
+from device_discovery.translate_modules import emit_modules_if_requested
 
 logger = logging.getLogger(__name__)
 
@@ -673,8 +674,16 @@ def translate_data(data: dict) -> Iterable[Entity]:
         device = translate_device(device_info, defaults, config_info, options, netbox_id=netbox_id)
         device_for_interfaces = copy.deepcopy(device)
         device_for_interfaces.ClearField("config")
+        # Emit Module / ModuleBay entities (gated by options.discover_modules)
+        # BEFORE the interface builder runs so the returned iface_module_map
+        # can be plumbed into build_interface_entities. The translator
+        # appends ModuleBay + Module entries directly to `entities`.
+        iface_module_map = emit_modules_if_requested(
+            data, options, device_for_interfaces, entities,
+        )
         interface_related_entities = build_interface_entities(
-            device_for_interfaces, interfaces, interfaces_ip, defaults
+            device_for_interfaces, interfaces, interfaces_ip, defaults,
+            iface_module_map=iface_module_map,
         )
         # assign_primary_ip must run before the Device is wrapped into Entity
         # because Entity(device=...) copies the message; subsequent mutations
