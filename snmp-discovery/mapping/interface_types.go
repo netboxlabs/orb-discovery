@@ -2,36 +2,21 @@ package mapping
 
 import "strings"
 
-// containsWhitespace reports whether s contains any ASCII whitespace
-// (space, tab, newline, carriage return). Used by the subinterface
-// heuristic where the broad rule is safe: real subinterface names
-// across every supported vendor are whitespace-free (Cisco
-// "GigabitEthernet0/0.100", Juniper "ge-0/0/0:0", etc.), while
-// descriptive ifDescr strings always contain whitespace (Dell
-// PowerConnect's "Unit: 1 Slot: 0 Port: 1 Gigabit - Level"). Some
-// vendors do publish whitespace-bearing canonical names (Dell FTOS
-// "TenGigabitEthernet 0/0", Extreme SLX "Port-channel 1") but those
-// never contain a subinterface separator, so this helper's only
-// caller — ExtractParentInterfaceName — sees them unchanged.
-func containsWhitespace(s string) bool {
-	return strings.ContainsAny(s, " \t\n\r")
-}
-
 // looksDescriptive reports whether s looks like a hardware description
 // (e.g. Dell PowerConnect's "Unit: 1 Slot: 0 Port: 1 Gigabit - Level")
 // rather than a canonical interface name. The discriminator is the
 // "colon-space" sequence: it appears in labeled-field descriptive
 // text (Dell PowerConnect, similar vendor families) but never in
 // valid subinterface names (Juniper's "ge-0/0/0:0" has no space after
-// the colon) and never in the whitespace-bearing canonical names we
-// ship today (Dell FTOS "TenGigabitEthernet 0/0", Extreme SLX
-// "Port-channel 1").
+// the colon) and never in the canonical names we ship today,
+// including space-bearing ones (Dell FTOS "TenGigabitEthernet 0/0",
+// Extreme SLX "Port-channel 1", and their subinterface forms
+// "TenGigabitEthernet 0/0.100", "Port-channel 1.100").
 //
-// Distinct from containsWhitespace by design: that predicate is
-// broader (any whitespace) and is used by the subinterface heuristic
-// where the broad rule is safe; looksDescriptive is narrower and is
-// used by the ifDescr-vs-ifName name selection where the narrow rule
-// preserves legitimate space-bearing canonical names.
+// Used by both the subinterface heuristic (Lever A) and the ifDescr-
+// vs-ifName name selection (Lever B). Sharing one predicate avoids
+// the over-broad "any whitespace" rule that would mis-classify
+// space-bearing parents like "Port-channel 1.100" as non-subinterfaces.
 func looksDescriptive(s string) bool {
 	return strings.Contains(s, ": ")
 }
@@ -39,13 +24,17 @@ func looksDescriptive(s string) bool {
 // ExtractParentInterfaceName returns the parent interface name if the supplied name
 // represents a subinterface, or an empty string if it's not a subinterface.
 // Subinterfaces are identified by the presence of dot (.) or colon (:) separators.
-// Names containing ASCII whitespace are never subinterfaces — they are
-// descriptive ifDescr strings (e.g. Dell PowerConnect).
+// Names that look descriptive (labeled-field ifDescr strings — see
+// looksDescriptive) are never subinterfaces. Whitespace in the parent
+// part is fine (Dell FTOS "TenGigabitEthernet 0/0.100", Extreme SLX
+// "Port-channel 1.100") because those don't match the descriptive
+// shape; only the colon-space-labeled form is filtered out.
 // Examples: "eth0.100" -> "eth0", "GigabitEthernet0/0.100" -> "GigabitEthernet0/0",
 // "ge-0/0/0:0" -> "ge-0/0/0", "eth0" -> "",
+// "Port-channel 1.100" -> "Port-channel 1",
 // "Unit: 1 Slot: 0 Port: 1 Gigabit - Level" -> ""
 func ExtractParentInterfaceName(interfaceName string) string {
-	if containsWhitespace(interfaceName) {
+	if looksDescriptive(interfaceName) {
 		return ""
 	}
 	separators := []string{".", ":"}

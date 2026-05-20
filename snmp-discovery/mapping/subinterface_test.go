@@ -137,14 +137,14 @@ func TestExtractParentInterfaceName(t *testing.T) {
 		},
 
 		// Descriptive ifDescr strings (Dell PowerConnect and similar
-		// vendors) must NOT be treated as subinterfaces. Real subinterface
-		// names across every supported vendor are whitespace-free, so a
-		// whitespace presence is the discriminator.
+		// vendors) must NOT be treated as subinterfaces. The discriminator
+		// is the colon-space substring, which appears in labeled-field
+		// descriptive text but never in valid subinterface names.
 		{
 			name:           "Dell PowerConnect gigabit ifDescr",
 			interfaceName:  "Unit: 1 Slot: 0 Port: 1 Gigabit - Level",
 			expectedParent: "",
-			description:    "Dell verbose ifDescr should not match as subinterface (contains whitespace)",
+			description:    "Dell verbose ifDescr should not match as subinterface (colon-space label)",
 		},
 		{
 			name:           "Dell PowerConnect 10G ifDescr",
@@ -153,25 +153,25 @@ func TestExtractParentInterfaceName(t *testing.T) {
 			description:    "Dell verbose 10G ifDescr should not match as subinterface",
 		},
 		{
-			name:           "Description text with embedded colon",
+			name:           "Description text with embedded colon-space",
 			interfaceName:  "uplink: trunk to core",
 			expectedParent: "",
 			description:    "Operator-edited descriptive strings should not match as subinterface",
 		},
+		// Whitespace-bearing canonical PARENT names are still legitimate
+		// subinterface parents (Dell FTOS, Extreme SLX). The descriptive
+		// predicate must not over-fire on these.
 		{
-			name:           "Single-space leading whitespace",
-			interfaceName:  " eth0.100",
-			expectedParent: "",
-			description:    "Leading whitespace disqualifies the name from subinterface detection",
+			name:           "Extreme SLX Port-channel subinterface",
+			interfaceName:  "Port-channel 1.100",
+			expectedParent: "Port-channel 1",
+			description:    "Space-bearing parent with .N child must still extract as subinterface",
 		},
 		{
-			// Whitespace + colon: the colon-LastIndex would otherwise
-			// pick "eth 0" as parent and "1" as child. The new
-			// containsWhitespace short-circuit must beat that.
-			name:           "Whitespace-then-colon non-subinterface",
-			interfaceName:  "eth 0:1",
-			expectedParent: "",
-			description:    "Whitespace anywhere disqualifies the name even when a colon would otherwise match",
+			name:           "Dell FTOS TenGigabitEthernet subinterface",
+			interfaceName:  "TenGigabitEthernet 0/0.100",
+			expectedParent: "TenGigabitEthernet 0/0",
+			description:    "Single-space canonical name with .N subinterface child extracts the parent",
 		},
 
 		// Edge cases
