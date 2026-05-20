@@ -6,7 +6,7 @@ import re
 import time
 import uuid
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from croniter import CroniterBadCronError, croniter
 from pydantic import BaseModel, Field, field_validator
@@ -193,6 +193,17 @@ class Options(BaseModel):
             "but absent from the device's VLAN database. Stubs inherit "
             "attributes from defaults.vlan for stable matching. Set "
             "False to drop unknown VIDs from associations."
+        ),
+    )
+    discover_modules: Literal["off", "linecards", "full"] = Field(
+        default="off",
+        description=(
+            "Enable NetBox Module / ModuleBay emission for modular chassis. "
+            "'off' (default) skips module discovery entirely — drivers are "
+            "not asked for module data and behavior is unchanged from the "
+            "pre-OBS-1594 release. 'linecards' emits chassis-level bays "
+            "and linecards but skips transceivers. 'full' adds per-port "
+            "transceiver sub-bays."
         ),
     )
 
