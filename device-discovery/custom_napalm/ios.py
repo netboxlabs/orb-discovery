@@ -221,9 +221,10 @@ class IOSDriver(NapalmIOSDriver):
 
         Returns ``None`` for non-modular chassis (no ``Slot N`` rows) and
         when ``show inventory`` fails to parse. Virtual-chassis-of-modular
-        composition is deferred — the translate layer short-circuits with
-        a WARNING when ``chassis_members`` is also populated, so this
-        method does not need to detect that case itself.
+        composition is deferred — ``policy.runner._collect_modules``
+        gates this call behind a ``data["chassis_members"]`` check and
+        does not invoke it on VC members, so this method does not need
+        to detect that case itself.
         """
         return _ios_get_modules_impl(self)
 

@@ -89,8 +89,9 @@ def _init_metric_factories(meter):
         "modules_dropped": lambda: meter.create_counter(
             name="modules_dropped",
             description=(
-                "Number of module payload bays dropped at the translate layer "
-                "(virtual-chassis short-circuit, per-bay exceptions)"
+                "Number of module payload bays dropped during discovery "
+                "(virtual-chassis short-circuit at the runner, malformed "
+                "payload bays at the translate layer)"
             ),
             unit="1",
         ),

@@ -85,8 +85,27 @@ def test_collect_modules_calls_when_linecards() -> None:
     assert data["modules"]["bays"][0]["module"]["serial"] == "FOC1"
 
 
-def test_collect_modules_skips_for_virtual_chassis(caplog) -> None:
-    """When chassis_members is populated, skip get_modules() and log WARNING."""
+def test_collect_modules_skips_for_virtual_chassis(caplog, monkeypatch) -> None:
+    """
+    When chassis_members is populated, skip get_modules() and log WARNING.
+
+    Also pins the modules_dropped counter bump with reason=vc_of_modular —
+    this is the production telemetry signal operators alert on, so a
+    silent regression of the .add() call would be invisible from logs.
+    """
+    import device_discovery.policy.runner as runner_mod
+
+    counter_calls: list[tuple[int, dict]] = []
+
+    class _FakeCounter:
+        def add(self, value, attrs):
+            counter_calls.append((value, dict(attrs)))
+
+    monkeypatch.setattr(
+        runner_mod, "get_metric",
+        lambda name: _FakeCounter() if name == "modules_dropped" else None,
+    )
+
     runner = _runner("linecards")
     dev = _mock_device(with_modules=True)
     data: dict = {
@@ -103,6 +122,7 @@ def test_collect_modules_skips_for_virtual_chassis(caplog) -> None:
         "module discovery" in r.message and "virtual chassis" in r.message
         for r in caplog.records
     )
+    assert counter_calls == [(1, {"reason": "vc_of_modular"})]
 
 
 def test_collect_modules_swallows_driver_exception(caplog) -> None:
