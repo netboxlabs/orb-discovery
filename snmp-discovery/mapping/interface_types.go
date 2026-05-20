@@ -2,12 +2,33 @@ package mapping
 
 import "strings"
 
+// containsWhitespace reports whether s contains any ASCII whitespace
+// (space, tab, newline, carriage return). Used by the subinterface
+// heuristic where the broad rule is safe: real subinterface names
+// across every supported vendor are whitespace-free (Cisco
+// "GigabitEthernet0/0.100", Juniper "ge-0/0/0:0", etc.), while
+// descriptive ifDescr strings always contain whitespace (Dell
+// PowerConnect's "Unit: 1 Slot: 0 Port: 1 Gigabit - Level"). Some
+// vendors do publish whitespace-bearing canonical names (Dell FTOS
+// "TenGigabitEthernet 0/0", Extreme SLX "Port-channel 1") but those
+// never contain a subinterface separator, so this helper's only
+// caller — ExtractParentInterfaceName — sees them unchanged.
+func containsWhitespace(s string) bool {
+	return strings.ContainsAny(s, " \t\n\r")
+}
+
 // ExtractParentInterfaceName returns the parent interface name if the supplied name
 // represents a subinterface, or an empty string if it's not a subinterface.
 // Subinterfaces are identified by the presence of dot (.) or colon (:) separators.
+// Names containing ASCII whitespace are never subinterfaces — they are
+// descriptive ifDescr strings (e.g. Dell PowerConnect).
 // Examples: "eth0.100" -> "eth0", "GigabitEthernet0/0.100" -> "GigabitEthernet0/0",
-// "ge-0/0/0:0" -> "ge-0/0/0", "eth0" -> ""
+// "ge-0/0/0:0" -> "ge-0/0/0", "eth0" -> "",
+// "Unit: 1 Slot: 0 Port: 1 Gigabit - Level" -> ""
 func ExtractParentInterfaceName(interfaceName string) string {
+	if containsWhitespace(interfaceName) {
+		return ""
+	}
 	separators := []string{".", ":"}
 	for _, separator := range separators {
 		if idx := strings.LastIndex(interfaceName, separator); idx > 0 {

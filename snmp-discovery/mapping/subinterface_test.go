@@ -136,6 +136,44 @@ func TestExtractParentInterfaceName(t *testing.T) {
 			description:    "Vlan100 should return empty string (not a subinterface)",
 		},
 
+		// Descriptive ifDescr strings (Dell PowerConnect and similar
+		// vendors) must NOT be treated as subinterfaces. Real subinterface
+		// names across every supported vendor are whitespace-free, so a
+		// whitespace presence is the discriminator.
+		{
+			name:           "Dell PowerConnect gigabit ifDescr",
+			interfaceName:  "Unit: 1 Slot: 0 Port: 1 Gigabit - Level",
+			expectedParent: "",
+			description:    "Dell verbose ifDescr should not match as subinterface (contains whitespace)",
+		},
+		{
+			name:           "Dell PowerConnect 10G ifDescr",
+			interfaceName:  "Unit: 1 Slot: 0 Port: 1 10G - Level",
+			expectedParent: "",
+			description:    "Dell verbose 10G ifDescr should not match as subinterface",
+		},
+		{
+			name:           "Description text with embedded colon",
+			interfaceName:  "uplink: trunk to core",
+			expectedParent: "",
+			description:    "Operator-edited descriptive strings should not match as subinterface",
+		},
+		{
+			name:           "Single-space leading whitespace",
+			interfaceName:  " eth0.100",
+			expectedParent: "",
+			description:    "Leading whitespace disqualifies the name from subinterface detection",
+		},
+		{
+			// Whitespace + colon: the colon-LastIndex would otherwise
+			// pick "eth 0" as parent and "1" as child. The new
+			// containsWhitespace short-circuit must beat that.
+			name:           "Whitespace-then-colon non-subinterface",
+			interfaceName:  "eth 0:1",
+			expectedParent: "",
+			description:    "Whitespace anywhere disqualifies the name even when a colon would otherwise match",
+		},
+
 		// Edge cases
 		{
 			name:           "Empty interface name",
