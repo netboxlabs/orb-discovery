@@ -189,8 +189,11 @@ def test_full_mode_emits_transceiver_subbay_with_module_parent() -> None:
     """
     Full mode emits the linecard, the sub-bay, AND the transceiver Module.
 
-    The transceiver's ModuleBay must reference the parent Module (not the
-    Device) — that's how NetBox represents nested-bay hierarchy.
+    NetBox requires ``device`` on every ModuleBay and Module, including
+    nested sub-bays — the Diode reconciler rejects bays/modules emitted
+    without it (``Field device is required``). The sub-bay also sets
+    ``module`` to the parent linecard so NetBox places it under the
+    right slot.
     """
     entities: list = []
     data = {"modules": _linecard_with_transceiver_payload()}
@@ -201,17 +204,21 @@ def test_full_mode_emits_transceiver_subbay_with_module_parent() -> None:
     modules = [e.module for e in entities if e.HasField("module")]
     assert len(bays) == 2  # top-level linecard bay + sub transceiver bay
     assert len(modules) == 2  # linecard + transceiver
-    # Top-level bay: device-rooted.
+    # Top-level bay: device-rooted, no module parent.
     top_bay = bays[0]
     assert top_bay.name == "1"
     assert top_bay.device.name == "test-router"
-    # Sub-bay: module-rooted.
+    assert not top_bay.HasField("module")
+    # Sub-bay: BOTH device (chassis scope) AND module (parent linecard).
     sub_bay = bays[1]
     assert sub_bay.name == "Te1/0/1"
-    assert sub_bay.module.serial == "FOC1"  # parent is the linecard
-    # Transceiver module references the sub-bay.
+    assert sub_bay.device.name == "test-router"
+    assert sub_bay.module.serial == "FOC1"
+    # Transceiver module also carries the chassis device + its sub-bay.
     transceiver = modules[1]
     assert transceiver.module_type.model == "SFP-10G-LR"
+    assert transceiver.device.name == "test-router"
+    assert transceiver.module_bay.name == "Te1/0/1"
     assert transceiver.serial == "FNS1"
 
 

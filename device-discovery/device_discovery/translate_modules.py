@@ -75,7 +75,7 @@ def emit_modules_if_requested(
         try:
             _emit_bay_recursive(
                 bay_data=bay_data,
-                parent_device=device,
+                device=device,
                 parent_module=None,
                 mode=mode,
                 manufacturer=manufacturer,
@@ -132,7 +132,7 @@ def _manufacturer_from_device(device: pb.Device) -> pb.Manufacturer:
 def _emit_bay_recursive(
     *,
     bay_data: dict,
-    parent_device: pb.Device | None,
+    device: pb.Device,
     parent_module: pb.Module | None,
     mode: str,
     manufacturer: pb.Manufacturer,
@@ -143,9 +143,12 @@ def _emit_bay_recursive(
     """
     Recursively emit a ModuleBay + Module + their nested sub-bays.
 
-    Exactly one of ``parent_device`` or ``parent_module`` is set:
-      - Top-level bays point at the Device (parent_device != None).
-      - Sub-bays point at the parent Module (parent_module != None).
+    NetBox requires ``device=`` on every ModuleBay and Module — including
+    nested sub-bays — because the chassis device is the matching scope
+    for both. Sub-bays additionally set ``module=parent_module`` so the
+    ingester reconciles them under the right slot. The Diode reconciler
+    rejects bays/modules emitted without ``device=`` with
+    ``Field device is required``.
 
     ``linecards`` mode short-circuits: any bay whose module.type is
     ``"transceiver"`` is skipped entirely (including its sub_bays);
@@ -157,11 +160,10 @@ def _emit_bay_recursive(
         return
 
     bay_kwargs: dict[str, Any] = {
+        "device": device,
         "name": bay_data["name"],
         "position": bay_data.get("position") or bay_data["name"],
     }
-    if parent_device is not None:
-        bay_kwargs["device"] = parent_device
     if parent_module is not None:
         bay_kwargs["module"] = parent_module
     bay = ModuleBay(**bay_kwargs)
@@ -173,12 +175,11 @@ def _emit_bay_recursive(
         model=module_data["model"] or "Unknown",
     )
     module_kwargs: dict[str, Any] = {
+        "device": device,
         "module_bay": bay,
         "module_type": module_type,
         "serial": module_data["serial"],
     }
-    if parent_device is not None:
-        module_kwargs["device"] = parent_device
     if module_data.get("description"):
         module_kwargs["description"] = module_data["description"]
     module = Module(**module_kwargs)
@@ -203,7 +204,7 @@ def _emit_bay_recursive(
     for sub_bay in module_data.get("sub_bays", []):
         _emit_bay_recursive(
             bay_data=sub_bay,
-            parent_device=None,
+            device=device,
             parent_module=module,
             mode=mode,
             manufacturer=manufacturer,
