@@ -36,10 +36,18 @@ forgiving behavior of ``_chassis.py``.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
 logger = logging.getLogger(__name__)
+
+# A 4-tuple Cisco-style ifname like "HundredGigE1/2/0/1" — used to detect
+# and reject VC-of-modular routing keys at the helper boundary so the
+# translator never sees them. Standalone-modular chassis use 2- or 3-tuple
+# names; the 4-tuple form encodes member id in the first slot and belongs
+# to the deferred stacked-modular composition work.
+_CISCO_4TUPLE_RE = re.compile(r"^[A-Za-z]+\d+/\d+/\d+/\d+$")
 
 
 ModuleType = Literal["linecard", "supervisor", "fan", "psu", "transceiver"]
@@ -145,6 +153,73 @@ def to_payload(
     helper never raises on data shape; every drop reason is logged at
     WARNING. Mirrors ``_chassis.to_payload`` forgiveness.
     """
-    # NOTE: implementation lands in the next commit so the contract diff is
-    # reviewable independently of the validation logic.
-    raise NotImplementedError("validation lands in Task 3")
+    validated = [b for b in (_validate_bay(bay, depth=1) for bay in bays) if b]
+    if not validated:
+        return None
+    cleaned_ifaces = _validate_interfaces_by_bay(interfaces_by_bay or {})
+    return {"bays": validated, "interfaces_by_bay": cleaned_ifaces}
+
+
+def _validate_bay(bay: ModuleBay, *, depth: int) -> dict | None:
+    """Recursively validate a single ``ModuleBay``. Returns serialized dict or None."""
+    if depth > MAX_BAY_DEPTH:
+        logger.warning(
+            "module bay dropped: nested deeper than depth %d",
+            MAX_BAY_DEPTH,
+            extra={"bay_name": bay.name, "depth": depth},
+        )
+        return None
+    if bay.module is None:
+        logger.warning("module bay dropped: empty bay", extra={"bay_name": bay.name})
+        return None
+    serial = (bay.module.serial or "").strip()
+    if not serial:
+        logger.warning("module bay dropped: empty serial", extra={"bay_name": bay.name})
+        return None
+    if bay.module.type not in _VALID_TYPES:
+        logger.warning(
+            "module bay dropped: invalid type %r",
+            bay.module.type,
+            extra={"bay_name": bay.name},
+        )
+        return None
+    sub_bays: list[dict] = []
+    for sub in bay.module.sub_bays:
+        validated_sub = _validate_bay(sub, depth=depth + 1)
+        if validated_sub is not None:
+            sub_bays.append(validated_sub)
+    return {
+        "name": bay.name,
+        "position": bay.position,
+        "module": {
+            "model": bay.module.model,
+            "serial": serial,
+            "description": bay.module.description,
+            "type": bay.module.type,
+            "sub_bays": sub_bays,
+        },
+    }
+
+
+def _validate_interfaces_by_bay(
+    interfaces_by_bay: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    """Dedupe and reject 4-tuple Cisco ifnames (VC-of-modular territory)."""
+    cleaned: dict[str, list[str]] = {}
+    for bay_name, ifnames in interfaces_by_bay.items():
+        seen: set[str] = set()
+        keep: list[str] = []
+        for name in ifnames:
+            if name in seen:
+                continue
+            if _CISCO_4TUPLE_RE.match(name):
+                logger.warning(
+                    "interfaces_by_bay entry dropped: Cisco 4-tuple ifname "
+                    "(VC-of-modular is deferred to a follow-up)",
+                    extra={"bay_name": bay_name, "ifname": name},
+                )
+                continue
+            seen.add(name)
+            keep.append(name)
+        cleaned[bay_name] = keep
+    return cleaned
