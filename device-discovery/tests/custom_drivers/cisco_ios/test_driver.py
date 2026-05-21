@@ -281,6 +281,47 @@ class TestIOSDriver(BaseDriverTest):
         assert m2 is not None
         assert (m2.group(2) or "").lower() == "supervisor"
 
+    def test_inventory_vc_slot_regex_matches_9400_svl(self) -> None:
+        """`Switch 1 Slot 2 Linecard` captures member=1, slot=2, role=Linecard."""
+        from custom_napalm.ios import _INVENTORY_VC_SLOT_RE
+        m = _INVENTORY_VC_SLOT_RE.match("Switch 1 Slot 2 Linecard")
+        assert m is not None
+        assert m.group(1) == "1"
+        assert m.group(2) == "2"
+        assert m.group(3).lower() == "linecard"
+
+    def test_inventory_vc_slot_regex_handles_hyphenated_form(self) -> None:
+        """`Switch 2 Slot 3 - Supervisor` (hyphenated) still captures the role."""
+        from custom_napalm.ios import _INVENTORY_VC_SLOT_RE
+        m = _INVENTORY_VC_SLOT_RE.match("Switch 2 Slot 3 - Supervisor")
+        assert m is not None
+        assert m.group(1) == "2"
+        assert m.group(2) == "3"
+        assert m.group(3).lower() == "supervisor"
+
+    def test_inventory_vc_slot_regex_rejects_subslot(self) -> None:
+        """`Switch 1 Slot 2/0` is a sub-slot row and must not match."""
+        from custom_napalm.ios import _INVENTORY_VC_SLOT_RE
+        assert _INVENTORY_VC_SLOT_RE.match("Switch 1 Slot 2/0") is None
+
+    def test_inventory_vc_fru_regex_matches_9300_uplink(self) -> None:
+        """`Switch 1 FRU Uplink Module 1` captures member=1, slot=1."""
+        from custom_napalm.ios import _INVENTORY_VC_FRU_RE
+        m = _INVENTORY_VC_FRU_RE.match("Switch 1 FRU Uplink Module 1")
+        assert m is not None
+        assert m.group(1) == "1"
+        assert m.group(2) == "1"
+
+    def test_inventory_vc_fru_regex_rejects_power_supply(self) -> None:
+        """`Switch 1 - Power Supply A` is not a FRU uplink module — no match."""
+        from custom_napalm.ios import _INVENTORY_VC_FRU_RE
+        assert _INVENTORY_VC_FRU_RE.match("Switch 1 - Power Supply A") is None
+
+    def test_inventory_slot_regex_still_rejects_vc_form(self) -> None:
+        """Standalone Slot N regex must NOT match `Switch 1 Slot 2 ...` (that's VC territory)."""
+        from custom_napalm.ios import _INVENTORY_SLOT_RE
+        assert _INVENTORY_SLOT_RE.match("Switch 1 Slot 2 Linecard") is None
+
     def test_get_modules_supervisor_classified_by_name_hint(self) -> None:
         """``Slot N Supervisor`` rows emit type=supervisor, not type=linecard."""
         mock_dir = self.mock_data_root / "test_get_modules" / "supervisor_only"

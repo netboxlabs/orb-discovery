@@ -339,6 +339,27 @@ _INVENTORY_SLOT_RE = re.compile(
     r"^Slot\s+(\d+)(?!\s*/)(?:\s*[-:]?\s*(\w+))?",
     re.IGNORECASE,
 )
+
+# Virtual-chassis-of-modular slot row, Cat 9400/9500 StackWise Virtual.
+# `Switch 1 Slot 2 Linecard` or `Switch 2 Slot 3 - Supervisor`. The same
+# (?!\s*/) lookahead rejects sub-slot rows like `Switch 1 Slot 2/0` that
+# encode controller positions rather than top-level chassis bays. The
+# standalone _INVENTORY_SLOT_RE above is anchored with `^Slot` and so does
+# NOT match these VC-prefixed rows — a row matches at most one regex.
+_INVENTORY_VC_SLOT_RE = re.compile(
+    r"^Switch\s+(\d+)\s+Slot\s+(\d+)(?!\s*/)(?:\s*[-:]?\s*(\w+))?",
+    re.IGNORECASE,
+)
+
+# Virtual-chassis-of-modular FRU uplink, Cat 9300 stack with network module.
+# `Switch 1 FRU Uplink Module 1`. Distinct from VC_SLOT — 9300 doesn't have
+# Slot N entries; it exposes its single swappable network module via this
+# NAME pattern instead.
+_INVENTORY_VC_FRU_RE = re.compile(
+    r"^Switch\s+(\d+)\s+FRU\s+Uplink\s+Module\s+(\d+)",
+    re.IGNORECASE,
+)
+
 _INVENTORY_IFNAME_RE = re.compile(r"^[A-Za-z]+\d+(?:/\d+){1,2}$")
 _INTERFACE_SLOT_RE = re.compile(r"^[A-Za-z]+(\d+)/\d+")
 
