@@ -15,10 +15,7 @@
         }
       ],
       "interfaces_by_bay": {
-        "1": [
-          "TwentyFiveGigE1/0/1",
-          "HundredGigabitEthernet1/0/49"
-        ]
+        "1": []
       }
     }
   }

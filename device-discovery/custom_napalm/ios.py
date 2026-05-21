@@ -404,31 +404,32 @@ _INVENTORY_IFNAME_RE = re.compile(
 _INTERFACE_SLOT_RE = re.compile(r"^[A-Za-z]+(\d+)/\d+")
 
 
-# A "Switch N ..." inventory row prefix marks a member chassis in a
-# virtual-chassis stack. Standalone modular chassis (e.g. Cat 9404R)
-# emit a single "Chassis" row instead and never have a Switch prefix.
+# A "Switch N ..." inventory row prefix marks per-switch entries on
+# IOS-XE platforms. Real virtual chassis stacks emit ≥2 distinct ids;
+# some single-chassis platforms (notably some Cat 9500 versions) still
+# prefix every row with `Switch 1`. The two cases differ in two
+# orthogonal ways and each is gated on its own signal:
 #
-# The capture group lets _has_switch_rows count DISTINCT member ids —
-# a single "Switch 1 ..." prefix is NOT VC mode. Some single-chassis
-# IOS-XE inventories (notably some Catalyst 9500 versions) emit
-# `Switch 1 Slot N <role>` even on a standalone box; treating that as
-# VC would key the modules under member id 1 and the standalone
-# translate path (devices={None: device}) would drop every module as
-# orphan. Requiring ≥2 distinct ids matches what translate_chassis
-# itself uses to decide stack vs standalone (validate_chassis_payload).
+#   - VC mode (bucket bays by member id, dispatch to per-member Device):
+#     gated on count ≥ 2 — matches what translate_chassis itself uses
+#     via validate_chassis_payload.
+#   - Switch-prefixed interface naming (switch/slot/sub/port — the
+#     leading integer is the switch id, the slot id is the SECOND
+#     integer): gated on count ≥ 1. A single-chassis 9500 with Switch
+#     1 inventory rows uses the same `<speed>1/SLOT/PORT` ifname format
+#     as a VC stack member; the slot extraction has to skip past the
+#     switch dimension or it picks up the member id by mistake.
 _SWITCH_PREFIX_RE = re.compile(r"^Switch\s+(\d+)\b", re.IGNORECASE)
 
 
-def _has_switch_rows(inv_rows: list[dict]) -> bool:
-    """Detect VC mode: inventory carries at least TWO distinct ``Switch N`` member ids."""
+def _count_distinct_switch_ids(inv_rows: list[dict]) -> int:
+    """Return the number of distinct ``Switch N`` member ids in inventory."""
     member_ids: set[str] = set()
     for row in inv_rows or []:
         m = _SWITCH_PREFIX_RE.match((row.get("name") or "").strip())
         if m:
             member_ids.add(m.group(1))
-            if len(member_ids) >= 2:
-                return True
-    return False
+    return len(member_ids)
 
 
 def _interface_member_id(ifname: str) -> int | None:
@@ -572,15 +573,25 @@ def _collect_interfaces_by_member_and_slot(
     driver,
     bays_by_member: dict[int | None, dict[str, _ModuleBay]],
     vc_mode: bool,
+    switch_prefixed: bool,
 ) -> dict[int | None, dict[str, list[str]]]:
     """
     Bin canonicalized ifnames from ``show ip interface brief`` by member then slot.
 
-    Member key matches the inventory parser: in VC mode the leading integer of
-    the ifname is the member id; in standalone mode every ifname binds to the
-    single ``None`` member bucket. Falls back to a skeleton populated with
-    empty lists when the brief command fails — bays/modules still emit, just
-    without per-interface routing for that cycle.
+    The two signals are orthogonal:
+
+    - ``vc_mode`` controls the MEMBER dimension. In VC mode each ifname's
+      leading integer is the member id; otherwise every ifname binds to
+      the single ``None`` member bucket.
+    - ``switch_prefixed`` controls the SLOT dimension. If the inventory
+      had any ``Switch N`` rows, interface names use the
+      ``<speed><switch>/<slot>/...`` form, so the slot id is the SECOND
+      integer regardless of vc_mode. Without Switch prefixes (plain
+      ``Slot N`` inventory) the leading integer IS the slot id.
+
+    Falls back to a skeleton with empty lists when the brief command
+    fails — bays/modules still emit, just without per-interface routing
+    for that cycle.
     """
     out: dict[int | None, dict[str, list[str]]] = {
         m: {slot: [] for slot in bays_by_member[m]} for m in bays_by_member
@@ -595,17 +606,14 @@ def _collect_interfaces_by_member_and_slot(
     except Exception:
         logger.debug("ios.get_modules: show ip interface brief failed", exc_info=True)
         return out
+    slot_depth = 2 if switch_prefixed else 1
     for row in rows or []:
         raw_if = (row.get("interface") or row.get("intf") or "").strip()
         if not raw_if:
             continue
         ifname = canonical_interface_name(raw_if, addl_name_map=_IOS_ADDL_NAME_MAP)
-        if vc_mode:
-            member_id = _interface_member_id(ifname)
-            slot = _interface_slot(ifname, depth=2)
-        else:
-            member_id = None
-            slot = _interface_slot(ifname, depth=1)
+        member_id = _interface_member_id(ifname) if vc_mode else None
+        slot = _interface_slot(ifname, depth=slot_depth)
         if member_id not in out or slot is None or slot not in out[member_id]:
             continue
         out[member_id][slot].append(ifname)
@@ -616,7 +624,7 @@ def _attach_transceivers(
     bays_by_member: dict[int | None, dict[str, _ModuleBay]],
     transceivers_by_member: dict[int | None, dict[str, _ModuleEntry]],
     interfaces_by_member_and_slot: dict[int | None, dict[str, list[str]]],
-    vc_mode: bool,
+    switch_prefixed: bool,
 ) -> None:
     """
     Attach each transceiver entry as a sub-bay of its member's parent slot.
@@ -625,8 +633,11 @@ def _attach_transceivers(
     with the long-form name from ``get_interfaces()``. Also self-routes
     the transceiver's ifname into its own sub-bay key so the translator's
     deepest-wins logic assigns the transceiver as the interface's module
-    in full mode.
+    in full mode. ``switch_prefixed`` (any ``Switch N`` row in inventory)
+    determines whether the slot id is the leading integer (False) or the
+    second integer (True), matching the interface-routing depth above.
     """
+    slot_depth = 2 if switch_prefixed else 1
     for member_id, transceivers in transceivers_by_member.items():
         if member_id not in bays_by_member:
             continue
@@ -634,7 +645,7 @@ def _attach_transceivers(
             canonical = canonical_interface_name(
                 raw_ifname, addl_name_map=_IOS_ADDL_NAME_MAP,
             )
-            slot = _interface_slot(canonical, depth=2 if vc_mode else 1)
+            slot = _interface_slot(canonical, depth=slot_depth)
             if slot is None or slot not in bays_by_member[member_id]:
                 continue
             parent_bay = bays_by_member[member_id][slot]
@@ -661,16 +672,24 @@ def _ios_get_modules_impl(driver) -> dict | None:
     if not inv_rows:
         return None
 
-    vc_mode = _has_switch_rows(inv_rows)
+    distinct_switch_count = _count_distinct_switch_ids(inv_rows)
+    # VC mode (bucket bays by member id, dispatch to per-member Device)
+    # only fires for real stacks with ≥2 distinct ids.
+    vc_mode = distinct_switch_count >= 2
+    # Switch-prefixed ifname format (slot id = second integer, not the
+    # leading switch id) fires whenever inventory has ANY Switch N row —
+    # single-chassis 9500 with Switch 1 prefix uses the same format.
+    switch_prefixed = distinct_switch_count >= 1
     bays_by_member, transceivers_by_member = _parse_inventory_rows(inv_rows, vc_mode)
     if not bays_by_member:
         return None
 
     interfaces_by_member_and_slot = _collect_interfaces_by_member_and_slot(
-        driver, bays_by_member, vc_mode,
+        driver, bays_by_member, vc_mode, switch_prefixed,
     )
     _attach_transceivers(
-        bays_by_member, transceivers_by_member, interfaces_by_member_and_slot, vc_mode,
+        bays_by_member, transceivers_by_member, interfaces_by_member_and_slot,
+        switch_prefixed,
     )
 
     return _modules_to_payload({

@@ -674,12 +674,13 @@ def translate_data(data: dict) -> Iterable[Entity]:
         device = translate_device(device_info, defaults, config_info, options, netbox_id=netbox_id)
         device_for_interfaces = copy.deepcopy(device)
         device_for_interfaces.ClearField("config")
-        # Emit Module / ModuleBay entities (gated by options.discover_modules)
-        # BEFORE the interface builder runs so the returned iface_module_map
-        # can be plumbed into build_interface_entities. The translator
-        # appends ModuleBay + Module entries directly to `entities`.
+        # Emit Module / ModuleBay entities into a separate list so the
+        # final entity order stays Device → modules → interfaces. The
+        # returned iface_module_map still feeds the interface builder
+        # below so each Interface entity can carry module= refs.
+        module_entities: list[Entity] = []
         iface_module_map = emit_modules_if_requested(
-            data, options, {None: device_for_interfaces}, entities,
+            data, options, {None: device_for_interfaces}, module_entities,
         )
         interface_related_entities = build_interface_entities(
             device_for_interfaces, interfaces, interfaces_ip, defaults,
@@ -693,6 +694,7 @@ def translate_data(data: dict) -> Iterable[Entity]:
             data, interface_related_entities, defaults, options, new_stubs,
         )
         entities.append(Entity(device=device))
+        entities.extend(module_entities)
         entities.extend(interface_related_entities)
 
     _emit_vlans_and_stubs(entities, data.get("vlan"), defaults, new_stubs)
