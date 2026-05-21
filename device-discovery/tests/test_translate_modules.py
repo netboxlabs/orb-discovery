@@ -267,7 +267,7 @@ def test_full_mode_emits_transceiver_subbay_without_module_parent() -> None:
     assert top_bay.name == "1"
     assert top_bay.device.name == "test-router"
     assert not top_bay.HasField("module")
-    # Sub-bay: device-rooted, NO module parent (workaround for #173).
+    # Sub-bay: device-rooted, NO module parent (see docstring).
     sub_bay = bays[1]
     assert sub_bay.name == "Te1/0/1"
     assert sub_bay.device.name == "test-router"
