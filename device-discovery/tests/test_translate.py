@@ -1809,8 +1809,8 @@ def test_translate_data_subinterface_becomes_virtual_with_parent(
     assert sub_iface.parent.name == "mgmt0", (
         "sub-interface must carry a parent reference to its physical interface"
     )
-    assert parent_iface.parent.name in ("", "mgmt0"), (
-        "physical parent must not back-reference a non-existent parent"
+    assert parent_iface.parent.name == "", (
+        "physical parent must not carry a parent reference (no self-loops)"
     )
 
     ip_targets = {
