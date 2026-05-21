@@ -379,8 +379,13 @@ _INVENTORY_VC_FRU_RE = re.compile(
 # Accepts 2-tuple (e.g. Te1/1), 3-tuple (Te2/0/1 — standalone modular), and
 # 4-tuple (HundredGigE1/2/0/1 — Cat 9400/9500 SVL) Cisco ifnames.
 #
-# The prefix vocabulary is restricted to the same set of Cisco port
-# prefixes used by parse_member_id's _CISCO_IOS_RE. The earlier broad
+# The prefix vocabulary is the union of parse_member_id's _CISCO_IOS_RE
+# set PLUS ``FastEthernet|Fa`` and ``Ethernet|Eth``. The two extra
+# prefixes are intentional here — inventory rows on older Catalyst
+# chassis and some IOS-XE platforms can name transceiver-bearing ports
+# with ``Fa`` (100M) or bare ``Ethernet`` even when parse_member_id
+# never sees those forms (its job is stack-member extraction, which is
+# limited to the higher-speed Catalyst families). The earlier broad
 # pattern (`^[A-Za-z]+\d+...`) also matched non-interface rows that
 # Catalyst stacks emit — e.g. ``StackPort1/1`` (the inter-switch stack
 # cable port) — which then bogusly attached as transceiver sub-bays under
