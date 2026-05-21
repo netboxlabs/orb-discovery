@@ -78,20 +78,20 @@ def _init_metric_factories(meter):
         ),
         "modules_emitted": lambda: meter.create_counter(
             name="modules_emitted",
-            description="Number of NetBox Module entities emitted by translate_modules",
+            description="Number of module entities emitted by translate_modules",
             unit="1",
         ),
         "module_bays_emitted": lambda: meter.create_counter(
             name="module_bays_emitted",
-            description="Number of NetBox ModuleBay entities emitted by translate_modules",
+            description="Number of module-bay entities emitted by translate_modules",
             unit="1",
         ),
         "modules_dropped": lambda: meter.create_counter(
             name="modules_dropped",
             description=(
                 "Number of module payload bays dropped during discovery "
-                "(virtual-chassis short-circuit at the runner, malformed "
-                "payload bays at the translate layer)"
+                "(orphan member with no matching device, malformed payload "
+                "bays at the translate layer)"
             ),
             unit="1",
         ),
