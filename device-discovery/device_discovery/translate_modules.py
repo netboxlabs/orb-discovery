@@ -109,6 +109,16 @@ def _emit_one_member(
         )
         _bump("modules_dropped", 1, {"reason": "malformed"})
         return
+    # bool is a subclass of int — devices.get(True) would resolve to the
+    # member keyed by 1 and silently misattribute the module entities.
+    # Reject boolean ids as malformed before the lookup.
+    if isinstance(member_id, bool):
+        logger.warning(
+            "malformed module member payload — boolean member_id",
+            extra={"member_id": member_id},
+        )
+        _bump("modules_dropped", 1, {"reason": "malformed"})
+        return
     device = devices.get(member_id)
     if device is None:
         logger.warning(

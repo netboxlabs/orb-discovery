@@ -880,3 +880,53 @@ def test_emit_vc_orphan_member_id_warn_dropped(caplog, monkeypatch) -> None:
     assert {m.serial for m in modules} == {"S1"}
     assert any("orphan" in r.getMessage() for r in caplog.records)
     assert counter_calls == [(1, {"reason": "orphan_member"})]
+
+
+def test_emit_vc_boolean_member_id_warn_dropped(caplog, monkeypatch) -> None:
+    """
+    Boolean member_id (True/False) is dropped before the devices.get() lookup.
+
+    Because ``bool`` is a subclass of ``int`` in Python, ``devices.get(True)``
+    silently resolves to the device keyed by ``1``. Without the explicit
+    guard the bad payload would misattribute the bay/module to member 1
+    instead of being warn-dropped as malformed.
+
+    Note we can't put both ``True`` and ``1`` in the same dict literal —
+    Python collapses them (``hash(True) == hash(1)`` and ``True == 1``).
+    Test the bool-only case directly.
+    """
+    import device_discovery.translate_modules as tm
+    counter_calls: list[tuple[int, dict]] = []
+
+    class _FakeCounter:
+        def add(self, value, attrs):
+            counter_calls.append((value, dict(attrs)))
+
+    monkeypatch.setattr(
+        tm, "get_metric",
+        lambda name: _FakeCounter() if name == "modules_dropped" else None,
+    )
+    members: dict = {}
+    members[True] = {
+        "bays": [{
+            "name": "1", "position": "1",
+            "module": {
+                "model": "M", "serial": "S_TRUE", "description": "",
+                "type": "linecard", "sub_bays": [],
+            },
+        }],
+        "interfaces_by_bay": {},
+    }
+    payload = {"modules": {"members": members}}
+    entities: list = []
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
+        emit_modules_if_requested(
+            payload, Options(discover_modules="linecards"),
+            {1: _make_device(name="sw1")}, entities,
+        )
+    modules = [e.module for e in entities if e.HasField("module")]
+    # bool-True payload is dropped; nothing emitted even though devices has
+    # an entry for int-1 (which would otherwise silently match True).
+    assert modules == []
+    assert any("boolean" in r.getMessage() for r in caplog.records)
+    assert (1, {"reason": "malformed"}) in counter_calls

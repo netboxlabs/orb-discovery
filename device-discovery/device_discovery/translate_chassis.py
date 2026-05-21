@@ -352,9 +352,19 @@ def translate_as_stack(
     # apart from `entities` lets us flush them after the Device / VC
     # / member-Device entries without changing their relative order or
     # the iface_module_map the per-member interface builder consumes.
+    # Mirror the per-member interface path: hand emit_modules deep copies
+    # with config cleared so the master's captured config isn't CopyFrom'd
+    # into every ModuleBay/Module entity. prune_nested_refs would strip it
+    # later, but clearing here avoids the in-memory bloat at emission time
+    # (relevant on linecards with dozens of transceiver sub-bays).
+    module_devices: dict[int | None, pb.Device] = {}
+    for mid, dev in member_devices.items():
+        dev_copy = copy.deepcopy(dev)
+        dev_copy.ClearField("config")
+        module_devices[mid] = dev_copy
     module_entities: list[Entity] = []
     iface_module_map = emit_modules_if_requested(
-        data, options, dict(member_devices), module_entities,
+        data, options, module_devices, module_entities,
     )
 
     interface_entities_by_member = _build_per_member_interfaces(

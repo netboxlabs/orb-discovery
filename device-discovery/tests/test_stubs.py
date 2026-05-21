@@ -302,11 +302,15 @@ def test_prune_nested_refs_strips_rich_device_from_module_and_module_bay():
 
 def test_prune_nested_refs_strips_nested_parent_module_device():
     """
-    A sub-bay's nested ``module`` (parent linecard) gets its device stubbed too.
+    A sub-bay's nested ``module`` ref, if present, gets its device stubbed too.
 
-    In full mode the transceiver ModuleBay sets module=parent_linecard; that
-    parent Module proto carries its own rich Device copy by CopyFrom. Both
-    levels must be reduced to stubs so per-transceiver wire size is bounded.
+    ``translate_modules`` currently emits sub-bays device-rooted (no
+    ``module=parent_linecard`` link — see the docstring on
+    ``_emit_bay_recursive`` for why). This test still exercises the pruner's
+    contract on the shape: if any caller does attach a parent Module ref
+    to a ModuleBay, the prune sweep must reduce both the bay's own
+    ``device`` AND the nested ``module.device`` to matcher-only stubs so
+    per-transceiver wire size stays bounded.
     """
     rich_dev = pb.Device(name="sw1", serial="FCW123", status="active")
     rich_dev.device_type.CopyFrom(
