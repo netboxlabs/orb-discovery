@@ -31,6 +31,7 @@ from netboxlabs.diode.sdk.ingester import Entity
 from device_discovery.interface import build_interface_entities
 from device_discovery.policy.models import Defaults, Options
 from device_discovery.stubs import _ip_match_stub
+from device_discovery.translate_modules import emit_modules_if_requested
 
 logger = logging.getLogger(__name__)
 
@@ -259,12 +260,16 @@ def _build_per_member_interfaces(
     grouped_interfaces: dict[int, dict],
     grouped_ips: dict[int, dict],
     defaults: Defaults,
+    iface_module_map: dict[str, pb.Module] | None = None,
 ) -> dict[int, list[Entity]]:
     """
     Run build_interface_entities once per member and return the per-member entity lists.
 
     Iterates ``member_ids`` in the caller-provided order (already sorted ascending in
     validate_chassis_payload) so per-member emission is deterministic across runs.
+    When ``iface_module_map`` is provided, each member's interface builder
+    threads it in so an Interface entity carries ``module=`` whenever its
+    ifname appears in the map (populated by emit_modules_if_requested).
     """
     out: dict[int, list[Entity]] = {mid: [] for mid in member_ids}
     for mid in member_ids:
@@ -275,7 +280,8 @@ def _build_per_member_interfaces(
         device_for_iface = copy.deepcopy(member_devices[mid])
         device_for_iface.ClearField("config")
         out[mid] = build_interface_entities(
-            device_for_iface, sub_interfaces, sub_ips, defaults
+            device_for_iface, sub_interfaces, sub_ips, defaults,
+            iface_module_map=iface_module_map,
         )
     return out
 
@@ -328,8 +334,22 @@ def translate_as_stack(
     grouped_interfaces, grouped_ips = _route_interfaces_by_member(
         interfaces, interfaces_ip, set(member_ids), master_id, vc_name,
     )
+
+    # Emit per-member module / module-bay entities BEFORE the per-member
+    # interface builder runs. The resulting iface_module_map is threaded
+    # into each member's build_interface_entities call so its Interface
+    # entities carry module= refs to their own member's modules. The
+    # translate_modules helper appends Module + ModuleBay entries
+    # directly to `entities`, attached to each member's Device via the
+    # member-id-keyed dispatch map.
+    entities: list[Entity] = []
+    iface_module_map = emit_modules_if_requested(
+        data, options, dict(member_devices), entities,
+    )
+
     interface_entities_by_member = _build_per_member_interfaces(
         member_ids, member_devices, grouped_interfaces, grouped_ips, defaults,
+        iface_module_map=iface_module_map,
     )
 
     # Primary-IP back-pointer is only meaningful on the master (mgmt IP).
@@ -345,8 +365,6 @@ def translate_as_stack(
         member_devices[m["id"]].virtual_chassis.CopyFrom(
             pb.VirtualChassis(name=vc_name, master=vc_master_ref)
         )
-
-    entities: list[Entity] = []
 
     # 1) Master Device — PLAIN (no vc_position, no virtual_chassis ref).
     entities.append(Entity(device=master_dev))
