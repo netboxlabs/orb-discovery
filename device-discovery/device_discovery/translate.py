@@ -679,7 +679,7 @@ def translate_data(data: dict) -> Iterable[Entity]:
         # can be plumbed into build_interface_entities. The translator
         # appends ModuleBay + Module entries directly to `entities`.
         iface_module_map = emit_modules_if_requested(
-            data, options, device_for_interfaces, entities,
+            data, options, {None: device_for_interfaces}, entities,
         )
         interface_related_entities = build_interface_entities(
             device_for_interfaces, interfaces, interfaces_ip, defaults,
