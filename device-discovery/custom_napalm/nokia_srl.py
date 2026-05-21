@@ -117,7 +117,6 @@ def _strip_prompt(text: str) -> str:
 
 
 def _make_intf_entry(m) -> dict:
-    """Build a fresh physical-interface entry from a regex match."""
     reason = m.group(3)
     return {
         "name": m.group(1),
@@ -131,7 +130,6 @@ def _make_intf_entry(m) -> dict:
 
 
 def _make_sub_entry(name: str, is_up: bool) -> dict:
-    """Build a fresh sub-interface entry."""
     return {
         "name": name,
         "is_up": is_up,
@@ -303,7 +301,11 @@ class SRLDriver(_napalm_base.NetworkDriver):
         # --- show interface all: interface list ---
         intf_out = self.device.send_command("show interface all")
         parsed = _parse_interface_output(intf_out) if intf_out else []
-        interface_list = [entry["name"] for entry in parsed]
+        interface_list = [
+            name
+            for entry in parsed
+            for name in (entry["name"], *(sub["name"] for sub in entry["subs"]))
+        ]
 
         return {
             "hostname": hostname,
