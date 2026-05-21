@@ -143,7 +143,6 @@ def _emit_one_member(
             _emit_bay_recursive(
                 bay_data=bay_data,
                 device=device,
-                parent_module=None,
                 mode=mode,
                 manufacturer=manufacturer,
                 entities=entities,
@@ -212,7 +211,6 @@ def _emit_bay_recursive(
     *,
     bay_data: dict,
     device: pb.Device,
-    parent_module: pb.Module | None,
     mode: str,
     manufacturer: pb.Manufacturer,
     entities: list[Entity],
@@ -224,10 +222,23 @@ def _emit_bay_recursive(
 
     NetBox requires ``device=`` on every ModuleBay and Module — including
     nested sub-bays — because the chassis device is the matching scope
-    for both. Sub-bays additionally set ``module=parent_module`` so the
-    ingester reconciles them under the right slot. The Diode reconciler
-    rejects bays/modules emitted without ``device=`` with
-    ``Field device is required``.
+    for both. The Diode reconciler rejects bays/modules emitted without
+    ``device=`` with ``Field device is required``.
+
+    Sub-bays are emitted as device-rooted bays (no ``module=parent``
+    link). Setting ``module=parent_module`` would let NetBox render the
+    bay nested under its linecard, but in the current reconciler that
+    field forces the parent Module to be re-emitted inside the sub-bay's
+    own changeset, which conflicts at apply time with the linecard
+    created by the earlier top-level Module entity
+    (``dcim_module_module_bay_id_key`` unique-constraint violation). The
+    transceiver Module still installs in the sub-bay correctly via
+    ``Module.module_bay``; only the bay-under-linecard rendering is
+    lost.
+
+    TODO: restore ``module=parent_module`` on sub-bays once the
+    reconciler resolves nested parent-module refs against committed
+    sibling entities in a single ingest call.
 
     ``linecards`` mode short-circuits: any bay whose module.type is
     ``"transceiver"`` is skipped entirely (including its sub_bays);
@@ -238,14 +249,11 @@ def _emit_bay_recursive(
     if mode == "linecards" and module_data["type"] == "transceiver":
         return
 
-    bay_kwargs: dict[str, Any] = {
-        "device": device,
-        "name": bay_data["name"],
-        "position": bay_data.get("position") or bay_data["name"],
-    }
-    if parent_module is not None:
-        bay_kwargs["module"] = parent_module
-    bay = ModuleBay(**bay_kwargs)
+    bay = ModuleBay(
+        device=device,
+        name=bay_data["name"],
+        position=bay_data.get("position") or bay_data["name"],
+    )
     entities.append(Entity(module_bay=bay))
     _bump("module_bays_emitted", 1, {"vendor": manufacturer.name})
 
@@ -306,7 +314,6 @@ def _emit_bay_recursive(
             _emit_bay_recursive(
                 bay_data=sub_bay,
                 device=device,
-                parent_module=module,
                 mode=mode,
                 manufacturer=manufacturer,
                 entities=entities,

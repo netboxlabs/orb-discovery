@@ -236,15 +236,22 @@ def test_linecards_mode_skips_top_level_transceiver_bay() -> None:
 # ---- full mode -----------------------------------------------------------
 
 
-def test_full_mode_emits_transceiver_subbay_with_module_parent() -> None:
+def test_full_mode_emits_transceiver_subbay_without_module_parent() -> None:
     """
     Full mode emits the linecard, the sub-bay, AND the transceiver Module.
 
-    NetBox requires ``device`` on every ModuleBay and Module, including
-    nested sub-bays — the Diode reconciler rejects bays/modules emitted
-    without it (``Field device is required``). The sub-bay also sets
-    ``module`` to the parent linecard so NetBox places it under the
-    right slot.
+    Sub-bays are intentionally device-rooted (no ``module=parent`` link).
+    Setting ``module=parent`` would let NetBox render the bay nested
+    under its linecard, but the current per-entity reconciler then
+    re-emits the parent Module inside the sub-bay's own changeset and
+    conflicts at apply with the linecard created by the prior top-level
+    Module entity. The transceiver still installs in the sub-bay via
+    ``Module.module_bay``; only the bay-under-linecard rendering is
+    lost.
+
+    TODO: restore ``module=parent`` on sub-bays once the reconciler
+    resolves nested parent-module refs against committed sibling
+    entities in a single ingest call.
     """
     entities: list = []
     data = {"modules": _linecard_with_transceiver_payload()}
@@ -260,12 +267,12 @@ def test_full_mode_emits_transceiver_subbay_with_module_parent() -> None:
     assert top_bay.name == "1"
     assert top_bay.device.name == "test-router"
     assert not top_bay.HasField("module")
-    # Sub-bay: BOTH device (chassis scope) AND module (parent linecard).
+    # Sub-bay: device-rooted, NO module parent (workaround for #173).
     sub_bay = bays[1]
     assert sub_bay.name == "Te1/0/1"
     assert sub_bay.device.name == "test-router"
-    assert sub_bay.module.serial == "FOC1"
-    # Transceiver module also carries the chassis device + its sub-bay.
+    assert not sub_bay.HasField("module")
+    # Transceiver module still carries the chassis device + its sub-bay.
     transceiver = modules[1]
     assert transceiver.module_type.model == "SFP-10G-LR"
     assert transceiver.device.name == "test-router"
