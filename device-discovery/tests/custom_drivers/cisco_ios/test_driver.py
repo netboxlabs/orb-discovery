@@ -352,6 +352,32 @@ class TestIOSDriver(BaseDriverTest):
         # Empty / None → standalone.
         assert _count_distinct_switch_ids([]) == 0
         assert _count_distinct_switch_ids(None) == 0  # type: ignore[arg-type]
+        # No-space form (some IOS-XE versions): `Switch1` / `Switch2`.
+        assert _count_distinct_switch_ids([
+            {"name": "Switch1 Chassis"},
+            {"name": "Switch1 Slot 1 Supervisor"},
+        ]) == 1
+        assert _count_distinct_switch_ids([
+            {"name": "Switch1"},
+            {"name": "Switch2"},
+        ]) == 2
+        # Garbage `SwitchXabc` should NOT match — word-boundary guard.
+        assert _count_distinct_switch_ids([
+            {"name": "SwitchPort1/1"},
+        ]) == 0
+
+    def test_inventory_vc_slot_regex_no_space_form(self) -> None:
+        """`Switch1 Slot 2 Linecard` (no space after Switch) is supported too."""
+        from custom_napalm.ios import _INVENTORY_VC_FRU_RE, _INVENTORY_VC_SLOT_RE
+        m = _INVENTORY_VC_SLOT_RE.match("Switch1 Slot 2 Linecard")
+        assert m is not None
+        assert m.group(1) == "1"
+        assert m.group(2) == "2"
+        assert m.group(3).lower() == "linecard"
+        m = _INVENTORY_VC_FRU_RE.match("Switch2 FRU Uplink Module 1")
+        assert m is not None
+        assert m.group(1) == "2"
+        assert m.group(2) == "1"
 
     def test_inventory_slot_regex_still_rejects_vc_form(self) -> None:
         """Standalone Slot N regex must NOT match `Switch 1 Slot 2 ...` (that's VC territory)."""

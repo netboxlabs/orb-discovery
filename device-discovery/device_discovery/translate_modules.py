@@ -35,7 +35,7 @@ def emit_modules_if_requested(
     data: dict[str, Any],
     options: Options,
     devices: dict[int | None, pb.Device],
-    entities: list,
+    entities: list[Entity],
 ) -> dict[str, pb.Module]:
     """
     Maybe-emit Module / ModuleBay entities for the discovered device(s).
@@ -94,7 +94,7 @@ def _emit_one_member(
     member_payload: Any,
     devices: dict[int | None, pb.Device],
     mode: str,
-    entities: list,
+    entities: list[Entity],
     iface_module_map: dict[str, pb.Module],
 ) -> None:
     """Emit one member's bays under that member's Device, or warn-drop the member."""
@@ -215,7 +215,7 @@ def _emit_bay_recursive(
     parent_module: pb.Module | None,
     mode: str,
     manufacturer: pb.Manufacturer,
-    entities: list,
+    entities: list[Entity],
     iface_module_map: dict[str, pb.Module],
     interfaces_by_bay: dict[str, list[str]],
 ) -> None:
