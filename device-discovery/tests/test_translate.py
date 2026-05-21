@@ -1749,11 +1749,11 @@ def test_apply_interface_vlans_rejects_bool_vids():
 def test_translate_data_subinterface_becomes_virtual_with_parent(
     sample_device_info, sample_defaults
 ):
-    """A sub-interface name (e.g. mgmt0.0) must become a NetBox 'virtual'
-    interface with the parent reference set, and any IPs in interface_ip
-    must attach to the sub-interface, not the parent.
+    """
+    Sub-interface names translate to NetBox 'virtual' interfaces with parent set.
 
-    Pins the driver↔translator contract for the Nokia SR Linux model
+    Any IPs in interface_ip attach to the sub-interface, not the parent — this
+    pins the driver↔translator contract for the Nokia SR Linux model
     (parent carries no IPs; subs carry IPs). Same contract applies to
     Junos-style sub-interfaces.
     """

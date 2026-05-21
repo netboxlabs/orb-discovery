@@ -141,7 +141,8 @@ def _make_sub_entry(name: str, is_up: bool) -> dict:
 
 
 def _collect_ip_addresses(line: str, sub: dict) -> None:
-    """Append any IPv4/IPv6 address found in *line* to *sub*'s lists.
+    """
+    Append any IPv4/IPv6 address found in *line* to *sub*'s lists.
 
     SR Linux configures L3 addressing under sub-interfaces, so IPs are
     always attached to the current sub-interface (never the parent).
@@ -158,7 +159,8 @@ def _collect_ip_addresses(line: str, sub: dict) -> None:
 
 
 def _parse_interface_output(output: str) -> list[dict]:
-    """Parse ``show interface all`` output into a list of physical-interface dicts.
+    """
+    Parse ``show interface all`` output into a list of physical-interface dicts.
 
     Each dict has: name, is_up, is_enabled, speed, mtu, description, and a
     ``subs`` list. Each sub has: name, is_up, mtu, description, ipv4, ipv6.
@@ -319,7 +321,8 @@ class SRLDriver(_napalm_base.NetworkDriver):
         }
 
     def get_interfaces(self) -> dict:
-        """Return interface details keyed by interface name.
+        """
+        Return interface details keyed by interface name.
 
         Emits one entry per physical interface plus one entry per
         sub-interface (e.g. ``mgmt0`` and ``mgmt0.0``). The translator
@@ -356,7 +359,8 @@ class SRLDriver(_napalm_base.NetworkDriver):
         return interfaces
 
     def get_interfaces_ip(self) -> dict:
-        """Return IP addresses keyed by *sub-interface* name.
+        """
+        Return IP addresses keyed by *sub-interface* name.
 
         SR Linux configures L3 addressing under sub-interfaces, so the
         physical parent never carries IPs. Sub-interfaces without IPs are
