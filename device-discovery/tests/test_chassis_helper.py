@@ -204,6 +204,13 @@ def test_to_payload_preserves_domain():
         ("HundredGigE2/3/0/24",      2),
         ("Hu1/2/0/1",                1),
         ("Hu2/3/0/24",               2),
+        # Canonical long form — the canonicalizer expands Hu*/HundredGigE*
+        # to HundredGigabitEthernet* on entry, so parse_member_id MUST
+        # accept that spelling too or SVL uplinks lose member attribution.
+        ("HundredGigabitEthernet1/2/0/1", 1),
+        ("HundredGigabitEthernet2/3/0/24", 2),
+        ("HundredGigabitEthernet1/0/1",   1),   # 3-tuple long form too
+        ("HundredGigabitEthernet2/0/1.100", 2),
         ("FortyGigabitEthernet1/2/0/1",  1),
         ("Fo2/3/0/4",                2),
         ("TenGigabitEthernet1/2/0/1",    1),

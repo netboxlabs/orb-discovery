@@ -72,44 +72,75 @@ def emit_modules_if_requested(
     mode = options.discover_modules
     iface_module_map: dict[str, pb.Module] = {}
     for member_id, member_payload in payload["members"].items():
-        device = devices.get(member_id)
-        if device is None:
-            logger.warning(
-                "module discovery dropped orphan member with no matching chassis device",
-                extra={"member_id": member_id},
-            )
-            _bump("modules_dropped", 1, {"reason": "orphan_member"})
-            continue
-        manufacturer = _manufacturer_from_device(device)
-        raw_ifaces = member_payload.get("interfaces_by_bay")
-        interfaces_by_bay = raw_ifaces if isinstance(raw_ifaces, dict) else {}
-        for bay_data in member_payload.get("bays", []):
-            if not isinstance(bay_data, dict):
-                logger.warning(
-                    "malformed module payload bay — skipping (not a dict)",
-                    extra={"bay": repr(bay_data)[:80], "member_id": member_id},
-                )
-                _bump("modules_dropped", 1, {"reason": "malformed"})
-                continue
-            try:
-                _emit_bay_recursive(
-                    bay_data=bay_data,
-                    device=device,
-                    parent_module=None,
-                    mode=mode,
-                    manufacturer=manufacturer,
-                    entities=entities,
-                    iface_module_map=iface_module_map,
-                    interfaces_by_bay=interfaces_by_bay,
-                )
-            except Exception:
-                logger.warning(
-                    "malformed module payload bay — skipping",
-                    extra={"bay": bay_data.get("name"), "member_id": member_id},
-                    exc_info=True,
-                )
-                _bump("modules_dropped", 1, {"reason": "malformed"})
+        _emit_one_member(
+            member_id=member_id,
+            member_payload=member_payload,
+            devices=devices,
+            mode=mode,
+            entities=entities,
+            iface_module_map=iface_module_map,
+        )
     return iface_module_map
+
+
+def _emit_one_member(
+    *,
+    member_id: int | None,
+    member_payload: Any,
+    devices: dict[int | None, pb.Device],
+    mode: str,
+    entities: list,
+    iface_module_map: dict[str, pb.Module],
+) -> None:
+    """Emit one member's bays under that member's Device, or warn-drop the member."""
+    # _payload_has_members only proves at least one entry has bays; it does
+    # not guarantee every entry is a dict. Guard here so one malformed
+    # member (string / None / list) cannot AttributeError the outer loop
+    # and abort emission for the rest of the device.
+    if not isinstance(member_payload, dict):
+        logger.warning(
+            "malformed module member payload — skipping (not a dict)",
+            extra={"member_id": member_id, "payload": repr(member_payload)[:80]},
+        )
+        _bump("modules_dropped", 1, {"reason": "malformed"})
+        return
+    device = devices.get(member_id)
+    if device is None:
+        logger.warning(
+            "module discovery dropped orphan member with no matching chassis device",
+            extra={"member_id": member_id},
+        )
+        _bump("modules_dropped", 1, {"reason": "orphan_member"})
+        return
+    manufacturer = _manufacturer_from_device(device)
+    raw_ifaces = member_payload.get("interfaces_by_bay")
+    interfaces_by_bay = raw_ifaces if isinstance(raw_ifaces, dict) else {}
+    for bay_data in member_payload.get("bays", []):
+        if not isinstance(bay_data, dict):
+            logger.warning(
+                "malformed module payload bay — skipping (not a dict)",
+                extra={"bay": repr(bay_data)[:80], "member_id": member_id},
+            )
+            _bump("modules_dropped", 1, {"reason": "malformed"})
+            continue
+        try:
+            _emit_bay_recursive(
+                bay_data=bay_data,
+                device=device,
+                parent_module=None,
+                mode=mode,
+                manufacturer=manufacturer,
+                entities=entities,
+                iface_module_map=iface_module_map,
+                interfaces_by_bay=interfaces_by_bay,
+            )
+        except Exception:
+            logger.warning(
+                "malformed module payload bay — skipping",
+                extra={"bay": bay_data.get("name"), "member_id": member_id},
+                exc_info=True,
+            )
+            _bump("modules_dropped", 1, {"reason": "malformed"})
 
 
 def _bump(metric_name: str, value: int, attrs: dict[str, str]) -> None:

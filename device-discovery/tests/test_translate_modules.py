@@ -316,7 +316,7 @@ def test_non_dict_payload_returns_empty_map() -> None:
     iface_module_map = emit_modules_if_requested(
         {"modules": ["not", "a", "dict"]},
         Options(discover_modules="linecards"),
-        _make_device(),
+        _devices(),
         entities,
     )
     assert iface_module_map == {}
@@ -686,6 +686,56 @@ def test_emit_vc_two_members_each_get_their_own_bays() -> None:
     # Iface routing: each member's ifname → that member's module.
     assert iface_module_map["Te1/1/1"].serial == "NM1"
     assert iface_module_map["Te2/1/1"].serial == "NM2"
+
+
+def test_emit_vc_skips_malformed_member_payload(caplog, monkeypatch) -> None:
+    """
+    A non-dict member entry is skipped; sibling valid members still emit.
+
+    ``_payload_has_members`` only proves at least one member entry has bays;
+    a mixed payload where one member is a string/None/list slipped through
+    in the past and AttributeError'd on the next iteration. The isinstance
+    guard now warn-drops the bad entry with ``modules_dropped{reason=
+    malformed}`` and lets sibling members through.
+    """
+    import device_discovery.translate_modules as tm
+    counter_calls: list[tuple[int, dict]] = []
+
+    class _FakeCounter:
+        def add(self, value, attrs):
+            counter_calls.append((value, dict(attrs)))
+
+    monkeypatch.setattr(
+        tm, "get_metric",
+        lambda name: _FakeCounter() if name == "modules_dropped" else None,
+    )
+    payload = {
+        "modules": {
+            "members": {
+                1: "garbage-not-a-dict",  # type: ignore[dict-item]
+                2: {
+                    "bays": [{
+                        "name": "1", "position": "1",
+                        "module": {
+                            "model": "M", "serial": "S2", "description": "",
+                            "type": "linecard", "sub_bays": [],
+                        },
+                    }],
+                    "interfaces_by_bay": {},
+                },
+            },
+        },
+    }
+    entities: list = []
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
+        emit_modules_if_requested(
+            payload, Options(discover_modules="linecards"),
+            {1: _make_device(name="sw1"), 2: _make_device(name="sw2")}, entities,
+        )
+    modules = [e.module for e in entities if e.HasField("module")]
+    assert {m.serial for m in modules} == {"S2"}
+    assert any("not a dict" in r.getMessage() for r in caplog.records)
+    assert counter_calls == [(1, {"reason": "malformed"})]
 
 
 def test_emit_vc_orphan_member_id_warn_dropped(caplog, monkeypatch) -> None:

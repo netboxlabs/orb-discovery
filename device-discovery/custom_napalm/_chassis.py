@@ -107,7 +107,7 @@ _CISCO_IOS_RE = re.compile(
     (?:Gi(?:gabitEthernet)?                 # Gi or GigabitEthernet
        | Te(?:nGigabitEthernet)?            # Te or TenGigabitEthernet
        | Fo(?:rtyGigabitEthernet)?          # Fo or FortyGigabitEthernet
-       | Hu(?:ndredGigE)?                   # Hu or HundredGigE
+       | Hu(?:ndredGigE|ndredGigabitEthernet)?  # Hu, HundredGigE, or HundredGigabitEthernet
        | TwentyFiveGigE | Twe               # 25G mGig
        | TwoGigabitEthernet | Tw            # 2.5G mGig (Catalyst 9300/9400)
        | FiveGigabitEthernet | Fi           # 5G mGig
@@ -126,18 +126,18 @@ _FEX_4TUPLE_RE = re.compile(r"^(?:Ethernet|Eth|GigabitEthernet|Gi)\d+/\d+/\d+/\d
 
 # 2b) Cisco IOS / IOS-XE 4-tuple — Catalyst 9400/9500 StackWise Virtual.
 #     Captures the leading switch id from "<word><digits>/<digits>/<digits>/<digits>".
-#     Matches the SAME prefix vocabulary as the 3-tuple Cisco regex but with one
-#     more slash component. FEX-style 4-tuples on Ethernet/Eth/Gi prefixes are
-#     explicitly rejected by _FEX_4TUPLE_RE, which fires first in parse_member_id,
-#     so this regex never sees them. Real SVL deployments use Hu/Fo/Te/Twe/etc.
-#     prefixes that don't collide with FEX's narrow vocabulary.
+#     Gi / GigabitEthernet alternatives are NOT included — _FEX_4TUPLE_RE
+#     fires first in parse_member_id and rejects every Gi/GigabitEthernet
+#     4-tuple as FEX. SVL fabric uplinks use higher-speed prefixes
+#     (Hu/HundredGigE/HundredGigabitEthernet, Fo, Te, multigig) that don't
+#     collide with FEX's narrow vocabulary, so this regex only carries
+#     those.
 _CISCO_IOS_4TUPLE_RE = re.compile(
     r"""
     ^                                       # anchor
-    (?:Gi(?:gabitEthernet)?                 # Gi or GigabitEthernet
-       | Te(?:nGigabitEthernet)?            # Te or TenGigabitEthernet
+    (?:Te(?:nGigabitEthernet)?              # Te or TenGigabitEthernet
        | Fo(?:rtyGigabitEthernet)?          # Fo or FortyGigabitEthernet
-       | Hu(?:ndredGigE)?                   # Hu or HundredGigE
+       | Hu(?:ndredGigE|ndredGigabitEthernet)?  # Hu, HundredGigE, or HundredGigabitEthernet
        | TwentyFiveGigE | Twe               # 25G mGig
        | TwoGigabitEthernet | Tw            # 2.5G mGig
        | FiveGigabitEthernet | Fi           # 5G mGig

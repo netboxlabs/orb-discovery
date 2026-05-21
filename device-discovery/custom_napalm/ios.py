@@ -213,21 +213,28 @@ class IOSDriver(NapalmIOSDriver):
 
     def get_modules(self) -> dict | None:
         """
-        Return Module / ModuleBay inventory for a standalone modular chassis.
+        Return Module / ModuleBay inventory for standalone or VC modular chassis.
 
-        Parses ``show inventory`` for ``Slot N <role>`` rows (linecards and
-        supervisors on Catalyst 9400 / 9600 and similar IOS-XE chassis) and
-        interface-name rows (transceivers). Attaches transceiver entries as
-        ``sub_bays`` of the parent linecard. ``show ip interface brief``
-        provides the per-slot interface enumeration used to build
-        ``interfaces_by_bay``.
+        Parses ``show inventory`` for slot / FRU / transceiver rows and
+        groups them by member id when ``Switch N ...`` prefixes are
+        present. The driver decides between two emission shapes:
 
-        Returns ``None`` for non-modular chassis (no ``Slot N`` rows) and
-        when ``show inventory`` fails to parse. Virtual-chassis-of-modular
-        composition is deferred — ``policy.runner._collect_modules``
-        gates this call behind a ``data["chassis_members"]`` check and
-        does not invoke it on VC members, so this method does not need
-        to detect that case itself.
+        - **Standalone modular** (e.g. Cat 9400 / 9600 single-chassis):
+          inventory has plain ``Slot N <role>`` rows; the canonical
+          envelope is emitted with a single ``None`` member bucket.
+        - **VC-of-modular** (e.g. Cat 9300 stack with FRU uplinks, Cat
+          9400/9500 StackWise Virtual): inventory has ``Switch N`` rows
+          plus either ``Switch N Slot M`` (SVL) or ``Switch N FRU Uplink
+          Module M`` (9300 stack) rows; the envelope is emitted with one
+          member bucket per validated switch id.
+
+        Transceiver rows (NAME = ifname) attach as ``sub_bays`` of their
+        parent slot / FRU module. ``show ip interface brief`` provides
+        the per-member-per-slot interface enumeration that the
+        translator's interface→module routing consumes.
+
+        Returns ``None`` when ``show inventory`` fails to parse or no
+        slot / FRU row was recognized.
         """
         return _ios_get_modules_impl(self)
 
