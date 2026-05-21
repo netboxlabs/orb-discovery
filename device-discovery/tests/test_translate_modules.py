@@ -20,10 +20,27 @@ def _make_device(name: str = "test-router", vendor: str = "Cisco") -> Device:
     )
 
 
-def _linecard_payload() -> dict:
-    """One-bay one-linecard happy-path payload."""
+def _standalone(bays: list, interfaces_by_bay: dict | None = None) -> dict:
+    """Wrap one member's bays into the canonical nested envelope under key None."""
     return {
-        "bays": [
+        "members": {
+            None: {
+                "bays": bays,
+                "interfaces_by_bay": interfaces_by_bay or {},
+            },
+        },
+    }
+
+
+def _devices(device: Device | None = None) -> dict:
+    """Standalone device map under key None for the per-member dispatch signature."""
+    return {None: device if device is not None else _make_device()}
+
+
+def _linecard_payload() -> dict:
+    """One-bay one-linecard happy-path payload (canonical envelope)."""
+    return _standalone(
+        bays=[
             {
                 "name": "1",
                 "position": "1",
@@ -36,14 +53,14 @@ def _linecard_payload() -> dict:
                 },
             },
         ],
-        "interfaces_by_bay": {"1": ["Te1/0/1", "Te1/0/2"]},
-    }
+        interfaces_by_bay={"1": ["Te1/0/1", "Te1/0/2"]},
+    )
 
 
 def _linecard_with_transceiver_payload() -> dict:
     """Linecard with one nested transceiver — exercises depth-2 emission."""
-    return {
-        "bays": [
+    return _standalone(
+        bays=[
             {
                 "name": "1",
                 "position": "1",
@@ -68,8 +85,8 @@ def _linecard_with_transceiver_payload() -> dict:
                 },
             },
         ],
-        "interfaces_by_bay": {"1": ["Te1/0/1", "Te1/0/2"]},
-    }
+        interfaces_by_bay={"1": ["Te1/0/1", "Te1/0/2"]},
+    )
 
 
 # ---- mode gating ---------------------------------------------------------
@@ -80,7 +97,7 @@ def test_off_mode_returns_empty_map_and_does_not_touch_entities() -> None:
     entities: list = []
     data = {"modules": _linecard_payload()}
     iface_module_map = emit_modules_if_requested(
-        data, Options(discover_modules="off"), _make_device(), entities,
+        data, Options(discover_modules="off"), _devices(), entities,
     )
     assert iface_module_map == {}
     assert entities == []
@@ -90,7 +107,7 @@ def test_missing_modules_key_returns_empty_map() -> None:
     """When data['modules'] is absent, fall through cleanly."""
     entities: list = []
     iface_module_map = emit_modules_if_requested(
-        {}, Options(discover_modules="linecards"), _make_device(), entities,
+        {}, Options(discover_modules="linecards"), _devices(), entities,
     )
     assert iface_module_map == {}
     assert entities == []
@@ -100,23 +117,57 @@ def test_none_modules_payload_returns_empty_map() -> None:
     """data['modules'] == None (driver get_modules() returned None) → no emission."""
     entities: list = []
     iface_module_map = emit_modules_if_requested(
-        {"modules": None}, Options(discover_modules="linecards"), _make_device(), entities,
+        {"modules": None}, Options(discover_modules="linecards"), _devices(), entities,
     )
     assert iface_module_map == {}
     assert entities == []
 
 
 def test_empty_bays_returns_empty_map() -> None:
-    """Payload with bays=[] → no emission."""
+    """Payload with one member whose bays=[] → no emission."""
     entities: list = []
     iface_module_map = emit_modules_if_requested(
-        {"modules": {"bays": [], "interfaces_by_bay": {}}},
+        {"modules": _standalone(bays=[])},
         Options(discover_modules="linecards"),
-        _make_device(),
+        _devices(),
         entities,
     )
     assert iface_module_map == {}
     assert entities == []
+
+
+def test_empty_members_dict_returns_empty_map() -> None:
+    """Payload with members={} → no emission (no buckets to dispatch)."""
+    entities: list = []
+    iface_module_map = emit_modules_if_requested(
+        {"modules": {"members": {}}},
+        Options(discover_modules="linecards"),
+        _devices(),
+        entities,
+    )
+    assert iface_module_map == {}
+    assert entities == []
+
+
+def test_legacy_flat_shape_warns_and_skips(caplog) -> None:
+    """
+    A driver still emitting the old flat shape (no 'members' key) is rejected.
+
+    Translator warns once with modules_dropped{reason="malformed"} and
+    skips emission entirely, forcing drivers to migrate to the canonical
+    envelope.
+    """
+    entities: list = []
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
+        iface_map = emit_modules_if_requested(
+            {"modules": {"bays": [{"name": "1"}], "interfaces_by_bay": {}}},
+            Options(discover_modules="linecards"),
+            _devices(),
+            entities,
+        )
+    assert iface_map == {}
+    assert entities == []
+    assert any("'members' envelope" in r.getMessage() for r in caplog.records)
 
 
 # ---- linecards mode ------------------------------------------------------
@@ -127,7 +178,7 @@ def test_linecards_mode_emits_top_level_bay_and_module() -> None:
     entities: list = []
     data = {"modules": _linecard_payload()}
     iface_module_map = emit_modules_if_requested(
-        data, Options(discover_modules="linecards"), _make_device(), entities,
+        data, Options(discover_modules="linecards"), _devices(), entities,
     )
     bays = [e for e in entities if e.HasField("module_bay")]
     modules = [e for e in entities if e.HasField("module")]
@@ -146,7 +197,7 @@ def test_linecards_mode_drops_transceiver_subbays() -> None:
     entities: list = []
     data = {"modules": _linecard_with_transceiver_payload()}
     iface_module_map = emit_modules_if_requested(
-        data, Options(discover_modules="linecards"), _make_device(), entities,
+        data, Options(discover_modules="linecards"), _devices(), entities,
     )
     modules = [e.module for e in entities if e.HasField("module")]
     assert len(modules) == 1  # only the linecard, transceiver dropped
@@ -175,8 +226,8 @@ def test_linecards_mode_skips_top_level_transceiver_bay() -> None:
     }
     entities: list = []
     iface_module_map = emit_modules_if_requested(
-        {"modules": payload}, Options(discover_modules="linecards"),
-        _make_device(), entities,
+        {"modules": {"members": {None: payload}}}, Options(discover_modules="linecards"),
+        _devices(), entities,
     )
     assert entities == []
     assert iface_module_map == {}
@@ -198,7 +249,7 @@ def test_full_mode_emits_transceiver_subbay_with_module_parent() -> None:
     entities: list = []
     data = {"modules": _linecard_with_transceiver_payload()}
     emit_modules_if_requested(
-        data, Options(discover_modules="full"), _make_device(), entities,
+        data, Options(discover_modules="full"), _devices(), entities,
     )
     bays = [e.module_bay for e in entities if e.HasField("module_bay")]
     modules = [e.module for e in entities if e.HasField("module")]
@@ -250,8 +301,8 @@ def test_malformed_bay_logged_and_other_bays_continue(caplog) -> None:
     entities: list = []
     with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
         emit_modules_if_requested(
-            {"modules": payload}, Options(discover_modules="linecards"),
-            _make_device(), entities,
+            {"modules": {"members": {None: payload}}}, Options(discover_modules="linecards"),
+            _devices(), entities,
         )
     modules = [e for e in entities if e.HasField("module")]
     assert len(modules) == 1
@@ -309,8 +360,8 @@ def test_malformed_sub_bay_does_not_drop_parent_bay(caplog) -> None:
     entities: list = []
     with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
         emit_modules_if_requested(
-            {"modules": payload}, Options(discover_modules="full"),
-            _make_device(), entities,
+            {"modules": {"members": {None: payload}}}, Options(discover_modules="full"),
+            _devices(), entities,
         )
     modules = [e.module for e in entities if e.HasField("module")]
     # Linecard + the sibling transceiver survive; broken sub-bay is dropped.
@@ -337,8 +388,8 @@ def test_non_dict_sub_bay_logged_and_skipped(caplog) -> None:
     entities: list = []
     with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
         emit_modules_if_requested(
-            {"modules": payload}, Options(discover_modules="full"),
-            _make_device(), entities,
+            {"modules": {"members": {None: payload}}}, Options(discover_modules="full"),
+            _devices(), entities,
         )
     modules = [e.module for e in entities if e.HasField("module")]
     assert len(modules) == 1  # parent linecard still emits
@@ -372,8 +423,8 @@ def test_non_list_per_bay_ifnames_does_not_drop_parent_bay(caplog) -> None:
     entities: list = []
     with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
         emit_modules_if_requested(
-            {"modules": payload}, Options(discover_modules="linecards"),
-            _make_device(), entities,
+            {"modules": {"members": {None: payload}}}, Options(discover_modules="linecards"),
+            _devices(), entities,
         )
     modules = [e for e in entities if e.HasField("module")]
     bays = [e for e in entities if e.HasField("module_bay")]
@@ -408,8 +459,8 @@ def test_malformed_interfaces_by_bay_does_not_block_emission(caplog) -> None:
     }
     entities: list = []
     iface_module_map = emit_modules_if_requested(
-        {"modules": payload}, Options(discover_modules="linecards"),
-        _make_device(), entities,
+        {"modules": {"members": {None: payload}}}, Options(discover_modules="linecards"),
+        _devices(), entities,
     )
     modules = [e for e in entities if e.HasField("module")]
     assert len(modules) == 1
@@ -438,8 +489,8 @@ def test_non_dict_bay_in_payload_logged_and_skipped(caplog) -> None:
     entities: list = []
     with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
         emit_modules_if_requested(
-            {"modules": payload}, Options(discover_modules="linecards"),
-            _make_device(), entities,
+            {"modules": {"members": {None: payload}}}, Options(discover_modules="linecards"),
+            _devices(), entities,
         )
     modules = [e for e in entities if e.HasField("module")]
     assert len(modules) == 1
@@ -478,8 +529,8 @@ def test_linecards_mode_drops_non_transceiver_sub_bays() -> None:
     }
     entities: list = []
     emit_modules_if_requested(
-        {"modules": payload}, Options(discover_modules="linecards"),
-        _make_device(), entities,
+        {"modules": {"members": {None: payload}}}, Options(discover_modules="linecards"),
+        _devices(), entities,
     )
     modules = [e.module for e in entities if e.HasField("module")]
     # Only the linecard emits — the nested fan sub-bay is dropped.
@@ -499,7 +550,7 @@ def test_full_mode_module_reuses_device_manufacturer_reference() -> None:
     data = {"modules": _linecard_payload()}
     device = _make_device(vendor="Cisco")
     emit_modules_if_requested(
-        data, Options(discover_modules="linecards"), device, entities,
+        data, Options(discover_modules="linecards"), {None: device}, entities,
     )
     module = next(e.module for e in entities if e.HasField("module"))
     # Same name, and the manufacturer message round-trips via SerializeToString
@@ -544,7 +595,7 @@ def test_metric_counters_invoked_when_enabled(monkeypatch) -> None:
     entities: list = []
     data = {"modules": _linecard_with_transceiver_payload()}
     emit_modules_if_requested(
-        data, Options(discover_modules="full"), _make_device(), entities,
+        data, Options(discover_modules="full"), _devices(), entities,
     )
     bay_counts = [c for c in calls if c[0] == "module_bays_emitted"]
     mod_counts = [c for c in calls if c[0] == "modules_emitted"]
@@ -562,7 +613,7 @@ def test_metric_counters_noop_when_disabled(monkeypatch) -> None:
     entities: list = []
     iface_module_map = emit_modules_if_requested(
         {"modules": _linecard_payload()}, Options(discover_modules="linecards"),
-        _make_device(), entities,
+        _devices(), entities,
     )
     # Emission still succeeds with metrics disabled (the production default).
     assert any(e.HasField("module") for e in entities)
@@ -573,13 +624,118 @@ def test_full_mode_iface_map_uses_deepest_bay_when_payload_specifies() -> None:
     """When the driver maps an ifname to a sub-bay key, that sub-bay wins."""
     payload = _linecard_with_transceiver_payload()
     # Driver populates the sub-bay key as well as the parent — deepest wins.
-    payload["interfaces_by_bay"]["Te1/0/1"] = ["Te1/0/1"]
+    payload["members"][None]["interfaces_by_bay"]["Te1/0/1"] = ["Te1/0/1"]
     entities: list = []
     iface_module_map = emit_modules_if_requested(
         {"modules": payload}, Options(discover_modules="full"),
-        _make_device(), entities,
+        _devices(), entities,
     )
     # The transceiver module wins for Te1/0/1.
     assert iface_module_map["Te1/0/1"].module_type.model == "SFP-10G-LR"
     # Te1/0/2 wasn't in the sub-bay map; it stays on the parent linecard.
     assert iface_module_map["Te1/0/2"].module_type.model == "C9400-LC-48U"
+
+
+# ---- VC dispatch ---------------------------------------------------------
+
+
+def test_emit_vc_two_members_each_get_their_own_bays() -> None:
+    """A two-member VC payload emits per-member Module + ModuleBay under that member's Device."""
+    member1_dev = _make_device(name="sw1")
+    member2_dev = _make_device(name="sw2")
+    payload = {
+        "modules": {
+            "members": {
+                1: {
+                    "bays": [{
+                        "name": "1", "position": "1",
+                        "module": {
+                            "model": "C9300-NM-8X", "serial": "NM1",
+                            "description": "", "type": "linecard",
+                            "sub_bays": [],
+                        },
+                    }],
+                    "interfaces_by_bay": {"1": ["Te1/1/1"]},
+                },
+                2: {
+                    "bays": [{
+                        "name": "1", "position": "1",
+                        "module": {
+                            "model": "C9300-NM-8X", "serial": "NM2",
+                            "description": "", "type": "linecard",
+                            "sub_bays": [],
+                        },
+                    }],
+                    "interfaces_by_bay": {"1": ["Te2/1/1"]},
+                },
+            },
+        },
+    }
+    entities: list = []
+    iface_module_map = emit_modules_if_requested(
+        payload, Options(discover_modules="linecards"),
+        {1: member1_dev, 2: member2_dev}, entities,
+    )
+    modules = [e.module for e in entities if e.HasField("module")]
+    assert {m.serial for m in modules} == {"NM1", "NM2"}
+    # Module sn=NM1 lives on member1_dev; sn=NM2 on member2_dev.
+    nm1 = next(m for m in modules if m.serial == "NM1")
+    nm2 = next(m for m in modules if m.serial == "NM2")
+    assert nm1.device.name == "sw1"
+    assert nm2.device.name == "sw2"
+    # Iface routing: each member's ifname → that member's module.
+    assert iface_module_map["Te1/1/1"].serial == "NM1"
+    assert iface_module_map["Te2/1/1"].serial == "NM2"
+
+
+def test_emit_vc_orphan_member_id_warn_dropped(caplog, monkeypatch) -> None:
+    """A member id with no matching device → modules_dropped{reason=orphan_member}, warn, skip."""
+    import device_discovery.translate_modules as tm
+    counter_calls: list[tuple[int, dict]] = []
+
+    class _FakeCounter:
+        def add(self, value, attrs):
+            counter_calls.append((value, dict(attrs)))
+
+    monkeypatch.setattr(
+        tm, "get_metric",
+        lambda name: _FakeCounter() if name == "modules_dropped" else None,
+    )
+    payload = {
+        "modules": {
+            "members": {
+                1: {
+                    "bays": [{
+                        "name": "1", "position": "1",
+                        "module": {
+                            "model": "M", "serial": "S1", "description": "",
+                            "type": "linecard", "sub_bays": [],
+                        },
+                    }],
+                    "interfaces_by_bay": {},
+                },
+                # Member 3 has no matching device → orphan.
+                3: {
+                    "bays": [{
+                        "name": "1", "position": "1",
+                        "module": {
+                            "model": "M", "serial": "S3", "description": "",
+                            "type": "linecard", "sub_bays": [],
+                        },
+                    }],
+                    "interfaces_by_bay": {},
+                },
+            },
+        },
+    }
+    entities: list = []
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
+        emit_modules_if_requested(
+            payload, Options(discover_modules="linecards"),
+            {1: _make_device(name="sw1")}, entities,
+        )
+    modules = [e.module for e in entities if e.HasField("module")]
+    # Member 1 still emits; member 3 is dropped.
+    assert {m.serial for m in modules} == {"S1"}
+    assert any("orphan" in r.getMessage() for r in caplog.records)
+    assert counter_calls == [(1, {"reason": "orphan_member"})]

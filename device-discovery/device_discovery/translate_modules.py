@@ -1,22 +1,20 @@
 #!/usr/bin/env python
 # Copyright 2026 NetBox Labs Inc
 """
-NetBox Labs - Device Discovery - translate vendor-neutral module payloads.
+Translate vendor-neutral module payloads into Module + ModuleBay entities.
 
-Translate vendor-neutral module payloads (from custom_napalm._modules) into
-NetBox Module + ModuleBay entities.
+Reads the per-member nested envelope produced by a driver's optional
+``get_modules()`` and dispatches each member's bays under the right
+Device. Standalone callers pass ``{None: device}``; virtual-chassis
+callers pass ``{member_id: member_device, ...}``.
 
-Called from device_discovery.translate.translate_data in the standalone-
-Device branch — VC-of-modular composition is deferred; the translate-
-chassis path runs untouched.
-
-Public entry point: emit_modules_if_requested(...). Returns an
+Public entry point: ``emit_modules_if_requested(...)``. Returns an
 ``iface_module_map: dict[str, pb.Module]`` that the interface builder
 consumes to attach ``module=`` on each interface alongside ``device=``.
-The ingester ``Module(...)`` constructor returns a ``pb.Module``
-proto instance directly (the ingester names are factories, not
-wrapper classes), so the map values are protobuf messages even
-though they're created through the SDK wrapper.
+The ingester ``Module(...)`` constructor returns a ``pb.Module`` proto
+directly (the ingester names are factories, not wrapper classes), so
+the map values are protobuf messages even though they're created
+through the SDK wrapper.
 """
 
 from __future__ import annotations
@@ -36,70 +34,81 @@ logger = logging.getLogger(__name__)
 def emit_modules_if_requested(
     data: dict[str, Any],
     options: Options,
-    device: pb.Device,
+    devices: dict[int | None, pb.Device],
     entities: list,
 ) -> dict[str, pb.Module]:
     """
-    Maybe-emit Module / ModuleBay entities for the discovered device.
+    Maybe-emit Module / ModuleBay entities for the discovered device(s).
 
-    Reads ``data["modules"]`` (populated upstream in the runner via the
-    driver's optional ``get_modules()`` extension). Mutates ``entities``
-    in place to append ModuleBay and Module entries. Returns a mapping
-    from interface name to the Module the interface belongs to, so the
-    interface builder can attach ``module=`` per entity.
+    ``devices`` maps member id to the Device proto each member's modules
+    should be attached to. Standalone callers pass ``{None: device}``;
+    virtual-chassis callers pass ``{1: member_dev_1, 2: member_dev_2, ...}``.
+
+    Reads ``data["modules"]`` (the nested envelope produced by the driver's
+    optional get_modules() extension). Mutates ``entities`` in place to
+    append ModuleBay and Module entries. Returns a flat ifname → Module
+    map so the interface builder can attach ``module=`` per entity.
 
     Returns an empty dict when:
       - ``options.discover_modules == "off"`` (default; zero behavior change).
-      - ``data["modules"]`` is missing, ``None``, or has no bays.
-      - The payload is malformed in a way the helper missed (defensive).
-
-    Virtual-chassis-of-modular composition is gated upstream in
-    ``policy.runner._collect_modules`` via
-    ``translate_chassis.validate_chassis_payload`` — when that
-    validator confirms a real VC (>=2 validated members) the runner
-    skips the driver call entirely and ``data["modules"]`` never
-    reaches this function. This translator does not consult
-    ``data["chassis_members"]`` itself.
+      - ``data["modules"]`` is missing, ``None``, or has no surviving member bays.
+      - The payload is malformed (missing 'members' envelope, etc.).
     """
     if options.discover_modules == "off":
         return {}
     payload = data.get("modules")
-    if not _payload_has_bays(payload):
+    if payload is None:
+        return {}
+    if not _payload_has_members(payload):
+        if isinstance(payload, dict) and payload:
+            # The driver emitted SOMETHING but not the canonical envelope.
+            logger.warning(
+                "module payload malformed — expected 'members' envelope",
+                extra={"keys": sorted(payload.keys())[:6]},
+            )
+            _bump("modules_dropped", 1, {"reason": "malformed"})
         return {}
 
     mode = options.discover_modules
-    manufacturer = _manufacturer_from_device(device)
-    # Normalize interfaces_by_bay so a malformed value (None, list, etc.)
-    # in an otherwise-valid payload does not take down every bay/module.
-    raw_ifaces = payload.get("interfaces_by_bay")
-    interfaces_by_bay = raw_ifaces if isinstance(raw_ifaces, dict) else {}
     iface_module_map: dict[str, pb.Module] = {}
-    for bay_data in payload["bays"]:
-        if not isinstance(bay_data, dict):
+    for member_id, member_payload in payload["members"].items():
+        device = devices.get(member_id)
+        if device is None:
             logger.warning(
-                "malformed module payload bay — skipping (not a dict)",
-                extra={"bay": repr(bay_data)[:80]},
+                "module discovery dropped orphan member with no matching chassis device",
+                extra={"member_id": member_id},
             )
-            _bump("modules_dropped", 1, {"reason": "malformed"})
+            _bump("modules_dropped", 1, {"reason": "orphan_member"})
             continue
-        try:
-            _emit_bay_recursive(
-                bay_data=bay_data,
-                device=device,
-                parent_module=None,
-                mode=mode,
-                manufacturer=manufacturer,
-                entities=entities,
-                iface_module_map=iface_module_map,
-                interfaces_by_bay=interfaces_by_bay,
-            )
-        except Exception:
-            logger.warning(
-                "malformed module payload bay — skipping",
-                extra={"bay": bay_data.get("name")},
-                exc_info=True,
-            )
-            _bump("modules_dropped", 1, {"reason": "malformed"})
+        manufacturer = _manufacturer_from_device(device)
+        raw_ifaces = member_payload.get("interfaces_by_bay")
+        interfaces_by_bay = raw_ifaces if isinstance(raw_ifaces, dict) else {}
+        for bay_data in member_payload.get("bays", []):
+            if not isinstance(bay_data, dict):
+                logger.warning(
+                    "malformed module payload bay — skipping (not a dict)",
+                    extra={"bay": repr(bay_data)[:80], "member_id": member_id},
+                )
+                _bump("modules_dropped", 1, {"reason": "malformed"})
+                continue
+            try:
+                _emit_bay_recursive(
+                    bay_data=bay_data,
+                    device=device,
+                    parent_module=None,
+                    mode=mode,
+                    manufacturer=manufacturer,
+                    entities=entities,
+                    iface_module_map=iface_module_map,
+                    interfaces_by_bay=interfaces_by_bay,
+                )
+            except Exception:
+                logger.warning(
+                    "malformed module payload bay — skipping",
+                    extra={"bay": bay_data.get("name"), "member_id": member_id},
+                    exc_info=True,
+                )
+                _bump("modules_dropped", 1, {"reason": "malformed"})
     return iface_module_map
 
 
@@ -117,12 +126,17 @@ def _bump(metric_name: str, value: int, attrs: dict[str, str]) -> None:
         counter.add(value, attrs)
 
 
-def _payload_has_bays(payload: Any) -> bool:
-    """Defensive guard: payload is a dict with a non-empty bays list."""
+def _payload_has_members(payload: Any) -> bool:
+    """Defensive guard: payload has a non-empty members dict with at least one bay."""
     if not isinstance(payload, dict):
         return False
-    bays = payload.get("bays")
-    return isinstance(bays, list) and len(bays) > 0
+    members = payload.get("members")
+    if not isinstance(members, dict) or not members:
+        return False
+    for entry in members.values():
+        if isinstance(entry, dict) and entry.get("bays"):
+            return True
+    return False
 
 
 def _manufacturer_from_device(device: pb.Device) -> pb.Manufacturer:
