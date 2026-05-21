@@ -23,7 +23,6 @@ from device_discovery.policy.portscan import (
     find_reachable_hosts,
 )
 from device_discovery.policy.run import RunStatus, RunStore
-from device_discovery.translate_chassis import validate_chassis_payload
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -325,36 +324,14 @@ class PolicyRunner:
         """
         Call the driver's optional get_modules() when discover_modules is enabled.
 
-        Gated by config.options.discover_modules ('off' is a no-op). Skipped
-        with a WARNING when the device is a virtual chassis member —
-        translate.py routes that case through the chassis-stack branch,
-        which does not emit Module / ModuleBay entities in v1
-        (VC-of-modular composition is deferred). Exceptions from the
-        driver are logged at WARNING and data['modules'] is set to None
-        so translate_modules falls through to the existing single-Device
-        path.
+        Gated by config.options.discover_modules ('off' is a no-op). The
+        driver itself decides whether to emit a standalone or per-member
+        envelope based on its own chassis introspection — the runner is
+        agnostic. Exceptions from the driver are logged at WARNING and
+        data['modules'] is set to None so the translator falls through
+        to the existing single-Device path.
         """
         if not (config.options and config.options.discover_modules != "off"):
-            return
-        # Align the VC-of-modular gate with the SAME validator that
-        # translate_chassis uses to decide whether the standalone or
-        # stack path runs. validate_chassis_payload drops malformed and
-        # duplicate members, requires ≥2 valid members, and is tolerant
-        # of every malformed shape (non-dict, non-list members, junk
-        # rows). Sharing the validator here means a raw payload that
-        # collapses to <2 valid members after dedup goes through the
-        # standalone path AND still gets module discovery — they must
-        # not disagree.
-        validated = validate_chassis_payload(data.get("chassis_members"))
-        if validated is not None:
-            logger.warning(
-                f"Policy {self.name}, Hostname {sanitized_hostname}: "
-                "skipping module discovery for virtual chassis "
-                f"({len(validated)} members) — tracked as follow-up to OBS-1594"
-            )
-            counter = get_metric("modules_dropped")
-            if counter is not None:
-                counter.add(1, {"reason": "vc_of_modular"})
             return
         get_modules = getattr(device, "get_modules", None)
         if not callable(get_modules):
