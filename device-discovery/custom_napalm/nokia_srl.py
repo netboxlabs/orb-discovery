@@ -90,7 +90,11 @@ _PHYS_INTF_RE = re.compile(
 )
 
 # Subinterface line: "  ethernet-1/1.0 is up"
-_SUB_INTF_RE = re.compile(r"^\s{2}(\S+\.\d+) is (up|down)", re.IGNORECASE)
+#                    "  ethernet-1/1.0 is down, reason subinterface-admin-disabled"
+_SUB_INTF_RE = re.compile(
+    r"^\s{2}(\S+\.\d+) is (up|down)(?:,\s*reason\s+([\w-]+))?",
+    re.IGNORECASE,
+)
 
 # IP address lines under a subinterface
 _IPV4_ADDR_RE = re.compile(
@@ -129,15 +133,27 @@ def _make_intf_entry(m) -> dict:
     }
 
 
-def _make_sub_entry(name: str, is_up: bool) -> dict:
+def _make_sub_entry(name: str, is_up: bool, is_enabled: bool = True) -> dict:
     return {
         "name": name,
         "is_up": is_up,
+        "is_enabled": is_enabled,
         "mtu": -1,
         "description": "",
         "ipv4": [],
         "ipv6": [],
     }
+
+
+def _sub_is_enabled_from_reason(reason: str | None) -> bool:
+    # Any reason whose name contains "disabled" indicates admin action; pure
+    # operational-down reasons (lower-layer-down, no-light, …) never use the
+    # word, so this heuristic covers port-admin-disabled,
+    # subinterface-admin-disabled, interface-disabled, etc. without
+    # enumerating every SR Linux release's spelling.
+    if reason and "disabled" in reason.lower():
+        return False
+    return True
 
 
 def _collect_ip_addresses(line: str, sub: dict) -> None:
@@ -195,7 +211,11 @@ def _parse_interface_output(output: str) -> list[dict]:
 
         m_sub = _SUB_INTF_RE.match(line)
         if m_sub:
-            current_sub = _make_sub_entry(m_sub.group(1), m_sub.group(2).lower() == "up")
+            current_sub = _make_sub_entry(
+                m_sub.group(1),
+                m_sub.group(2).lower() == "up",
+                is_enabled=_sub_is_enabled_from_reason(m_sub.group(3)),
+            )
             current["subs"].append(current_sub)
             continue
 
@@ -348,7 +368,7 @@ class SRLDriver(_napalm_base.NetworkDriver):
             for sub in entry["subs"]:
                 interfaces[sub["name"]] = {
                     "is_up": sub["is_up"],
-                    "is_enabled": True,
+                    "is_enabled": sub["is_enabled"],
                     "description": sub["description"],
                     "last_flapped": -1.0,
                     "mtu": sub["mtu"],
