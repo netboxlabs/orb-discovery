@@ -21,7 +21,19 @@
             "serial": "JAE2501LC12",
             "description": "Cisco Catalyst 9400 Series 48-Port UPOE+ 10/100/1000(RJ-45)",
             "type": "linecard",
-            "sub_bays": []
+            "sub_bays": [
+              {
+                "name": "HundredGigabitEthernet1/2/0/1",
+                "position": "HundredGigabitEthernet1/2/0/1",
+                "module": {
+                  "model": "QSFP-100G-SR4",
+                  "serial": "FNS2501Q001",
+                  "description": "QSFP-100G-SR4",
+                  "type": "transceiver",
+                  "sub_bays": []
+                }
+              }
+            ]
           }
         }
       ],
@@ -32,6 +44,9 @@
         "2": [
           "HundredGigabitEthernet1/2/0/1",
           "HundredGigabitEthernet1/2/0/2"
+        ],
+        "HundredGigabitEthernet1/2/0/1": [
+          "HundredGigabitEthernet1/2/0/1"
         ]
       }
     },

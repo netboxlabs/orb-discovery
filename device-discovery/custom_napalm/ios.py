@@ -363,7 +363,10 @@ _INVENTORY_VC_FRU_RE = re.compile(
     re.IGNORECASE,
 )
 
-_INVENTORY_IFNAME_RE = re.compile(r"^[A-Za-z]+\d+(?:/\d+){1,2}$")
+# Inventory row NAME that looks like an interface (transceiver row).
+# Accepts 2-tuple (e.g. Te1/1), 3-tuple (Te2/0/1 — standalone modular), and
+# 4-tuple (HundredGigE1/2/0/1 — Cat 9400/9500 SVL) Cisco ifnames.
+_INVENTORY_IFNAME_RE = re.compile(r"^[A-Za-z]+\d+(?:/\d+){1,3}$")
 _INTERFACE_SLOT_RE = re.compile(r"^[A-Za-z]+(\d+)/\d+")
 
 

@@ -1,3 +1,6 @@
+NAME: "Switch 1", DESCR: "Cisco Catalyst 9400 Series Switch"
+PID: C9404R            , VID: V01 , SN: FXS2501L0A1
+
 NAME: "Switch 1 Chassis", DESCR: "Cisco Catalyst 9400 Series 4 Slot Chassis"
 PID: C9404R            , VID: V01 , SN: FXS2501L0A1
 
@@ -9,6 +12,9 @@ PID: C9400-LC-48U      , VID: V01 , SN: JAE2501LC12
 
 NAME: "HundredGigE1/2/0/1", DESCR: "QSFP-100G-SR4"
 PID: QSFP-100G-SR4     , VID: V02 , SN: FNS2501Q001
+
+NAME: "Switch 2", DESCR: "Cisco Catalyst 9400 Series Switch"
+PID: C9404R            , VID: V01 , SN: FXS2501L0A2
 
 NAME: "Switch 2 Chassis", DESCR: "Cisco Catalyst 9400 Series 4 Slot Chassis"
 PID: C9404R            , VID: V01 , SN: FXS2501L0A2
