@@ -318,6 +318,40 @@ class TestIOSDriver(BaseDriverTest):
         from custom_napalm.ios import _INVENTORY_VC_FRU_RE
         assert _INVENTORY_VC_FRU_RE.match("Switch 1 - Power Supply A") is None
 
+    def test_has_switch_rows_requires_two_distinct_member_ids(self) -> None:
+        """
+        VC mode requires at least 2 distinct Switch ids in inventory.
+
+        Single-chassis IOS-XE inventories that prefix `Switch 1` (Cat 9500
+        etc.) must NOT be classified as VC mode — that matches what
+        translate_chassis itself uses to decide stack vs standalone.
+        """
+        from custom_napalm.ios import _has_switch_rows
+        # Single chassis with Switch 1 prefix everywhere → standalone.
+        assert _has_switch_rows([
+            {"name": "Switch 1 Chassis"},
+            {"name": "Switch 1 Slot 1 Supervisor"},
+            {"name": "Switch 1 - Power Supply A"},
+        ]) is False
+        # Real VC stack: 2 distinct ids → VC.
+        assert _has_switch_rows([
+            {"name": "Switch 1"},
+            {"name": "Switch 2"},
+        ]) is True
+        # Mixed prefix patterns, still ≥2 distinct ids → VC.
+        assert _has_switch_rows([
+            {"name": "Switch 1 Chassis"},
+            {"name": "Switch 2 Slot 1 Supervisor"},
+        ]) is True
+        # No Switch rows → standalone.
+        assert _has_switch_rows([
+            {"name": "Chassis"},
+            {"name": "Slot 1 Supervisor"},
+        ]) is False
+        # Empty / None → standalone.
+        assert _has_switch_rows([]) is False
+        assert _has_switch_rows(None) is False  # type: ignore[arg-type]
+
     def test_inventory_slot_regex_still_rejects_vc_form(self) -> None:
         """Standalone Slot N regex must NOT match `Switch 1 Slot 2 ...` (that's VC territory)."""
         from custom_napalm.ios import _INVENTORY_SLOT_RE

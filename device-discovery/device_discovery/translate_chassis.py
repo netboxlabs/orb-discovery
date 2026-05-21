@@ -293,10 +293,19 @@ def translate_as_stack(
     options: Options,
 ) -> list[Entity]:
     """
-    Emit master Device + top-level VirtualChassis + non-master member Devices.
+    Emit master Device + VirtualChassis + member Devices (+ modules) + interfaces.
 
-    Routes every interface / interface_ip entity to the correct member by
-    parse_member_id. Mirrors the three-rule emission shape required by the
+    Emission order, top-down:
+      1. Master Device — PLAIN (no vc_position, no virtual_chassis ref).
+      2. Top-level VirtualChassis with inline master ref.
+      3. Non-master member Devices.
+      4. Module / ModuleBay entities (when ``discover_modules`` is on)
+         attached per-member to their owning Device.
+      5. Interface entities, grouped per member, in ascending member-id
+         order.
+
+    Routes every interface / interface_ip entity to the correct member
+    by parse_member_id. Mirrors the emission shape required by the
     netbox-diode-plugin for VC ingestion via the unique_master matcher.
     """
     from device_discovery.translate import assign_primary_ip
@@ -335,16 +344,17 @@ def translate_as_stack(
         interfaces, interfaces_ip, set(member_ids), master_id, vc_name,
     )
 
-    # Emit per-member module / module-bay entities BEFORE the per-member
-    # interface builder runs. The resulting iface_module_map is threaded
-    # into each member's build_interface_entities call so its Interface
-    # entities carry module= refs to their own member's modules. The
-    # translate_modules helper appends Module + ModuleBay entries
-    # directly to `entities`, attached to each member's Device via the
-    # member-id-keyed dispatch map.
-    entities: list[Entity] = []
+    # Emit per-member module / module-bay entities into a SEPARATE list so
+    # the documented emission order (master Device → VirtualChassis →
+    # non-master member Devices → interfaces) is preserved when modules
+    # are later interleaved. The translate_modules helper appends Module
+    # and ModuleBay entries to whatever list we hand it; collecting them
+    # apart from `entities` lets us flush them after the Device / VC
+    # / member-Device entries without changing their relative order or
+    # the iface_module_map the per-member interface builder consumes.
+    module_entities: list[Entity] = []
     iface_module_map = emit_modules_if_requested(
-        data, options, dict(member_devices), entities,
+        data, options, dict(member_devices), module_entities,
     )
 
     interface_entities_by_member = _build_per_member_interfaces(
@@ -366,6 +376,8 @@ def translate_as_stack(
             pb.VirtualChassis(name=vc_name, master=vc_master_ref)
         )
 
+    entities: list[Entity] = []
+
     # 1) Master Device — PLAIN (no vc_position, no virtual_chassis ref).
     entities.append(Entity(device=master_dev))
 
@@ -380,7 +392,10 @@ def translate_as_stack(
     for m in members[1:]:
         entities.append(Entity(device=member_devices[m["id"]]))
 
-    # 4) Interface entities, grouped per member, in ascending member-id order.
+    # 4) Module / ModuleBay entities (attached to each member's Device).
+    entities.extend(module_entities)
+
+    # 5) Interface entities, grouped per member, in ascending member-id order.
     for mid in member_ids:
         entities.extend(interface_entities_by_member[mid])
 

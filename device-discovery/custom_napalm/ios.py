@@ -404,17 +404,30 @@ _INVENTORY_IFNAME_RE = re.compile(
 _INTERFACE_SLOT_RE = re.compile(r"^[A-Za-z]+(\d+)/\d+")
 
 
-# A bare or prefixed "Switch N ..." inventory row marks a member chassis
-# in a virtual-chassis stack. Standalone modular chassis (e.g. Cat 9404R)
+# A "Switch N ..." inventory row prefix marks a member chassis in a
+# virtual-chassis stack. Standalone modular chassis (e.g. Cat 9404R)
 # emit a single "Chassis" row instead and never have a Switch prefix.
-_SWITCH_PREFIX_RE = re.compile(r"^Switch\s+\d+\b", re.IGNORECASE)
+#
+# The capture group lets _has_switch_rows count DISTINCT member ids —
+# a single "Switch 1 ..." prefix is NOT VC mode. Some single-chassis
+# IOS-XE inventories (notably some Catalyst 9500 versions) emit
+# `Switch 1 Slot N <role>` even on a standalone box; treating that as
+# VC would key the modules under member id 1 and the standalone
+# translate path (devices={None: device}) would drop every module as
+# orphan. Requiring ≥2 distinct ids matches what translate_chassis
+# itself uses to decide stack vs standalone (validate_chassis_payload).
+_SWITCH_PREFIX_RE = re.compile(r"^Switch\s+(\d+)\b", re.IGNORECASE)
 
 
 def _has_switch_rows(inv_rows: list[dict]) -> bool:
-    """Detect VC mode: any inventory row whose NAME starts with ``Switch N``."""
+    """Detect VC mode: inventory carries at least TWO distinct ``Switch N`` member ids."""
+    member_ids: set[str] = set()
     for row in inv_rows or []:
-        if _SWITCH_PREFIX_RE.match((row.get("name") or "").strip()):
-            return True
+        m = _SWITCH_PREFIX_RE.match((row.get("name") or "").strip())
+        if m:
+            member_ids.add(m.group(1))
+            if len(member_ids) >= 2:
+                return True
     return False
 
 
@@ -485,38 +498,43 @@ def _parse_inventory_rows(
         if not (pid and sn):
             continue
 
-        if vc_mode:
-            vc_slot = _INVENTORY_VC_SLOT_RE.match(name)
-            if vc_slot:
-                member_id = int(vc_slot.group(1))
-                slot = vc_slot.group(2)
-                mtype = _classify_slot_module(pid, vc_slot.group(3) or "")
-                bays_by_member.setdefault(member_id, {})[slot] = _ModuleBay(
-                    name=slot, position=slot,
-                    module=_ModuleEntry(
-                        model=pid, serial=sn, type=mtype, description=descr,
-                    ),
-                )
-                continue
-            vc_fru = _INVENTORY_VC_FRU_RE.match(name)
-            if vc_fru:
-                member_id = int(vc_fru.group(1))
-                slot = vc_fru.group(2)
-                # FRU uplink modules have no role hint in NAME, so trust the
-                # PID classifier (linecard for non-transceiver Cisco PIDs).
-                bays_by_member.setdefault(member_id, {})[slot] = _ModuleBay(
-                    name=slot, position=slot,
-                    module=_ModuleEntry(
-                        model=pid, serial=sn,
-                        type=classify_module_type_cisco(pid),
-                        description=descr,
-                    ),
-                )
-                continue
+        # VC slot pattern (Switch N Slot M [role]) is tried regardless of
+        # vc_mode — some single-chassis IOS-XE versions (notably Cat 9500)
+        # use the "Switch 1 Slot M" prefix too. The member id captured
+        # here is discarded in standalone mode so the bay falls into the
+        # None bucket the standalone translate path expects.
+        vc_slot = _INVENTORY_VC_SLOT_RE.match(name)
+        if vc_slot:
+            member_key = int(vc_slot.group(1)) if vc_mode else None
+            slot = vc_slot.group(2)
+            mtype = _classify_slot_module(pid, vc_slot.group(3) or "")
+            bays_by_member.setdefault(member_key, {})[slot] = _ModuleBay(
+                name=slot, position=slot,
+                module=_ModuleEntry(
+                    model=pid, serial=sn, type=mtype, description=descr,
+                ),
+            )
+            continue
+
+        vc_fru = _INVENTORY_VC_FRU_RE.match(name)
+        if vc_fru:
+            member_key = int(vc_fru.group(1)) if vc_mode else None
+            slot = vc_fru.group(2)
+            # FRU uplink modules have no role hint in NAME, so trust the
+            # PID classifier (linecard for non-transceiver Cisco PIDs).
+            bays_by_member.setdefault(member_key, {})[slot] = _ModuleBay(
+                name=slot, position=slot,
+                module=_ModuleEntry(
+                    model=pid, serial=sn,
+                    type=classify_module_type_cisco(pid),
+                    description=descr,
+                ),
+            )
+            continue
 
         slot_match = _INVENTORY_SLOT_RE.match(name)
         if slot_match:
-            # Standalone "Slot N" row — bucketed under member_id=None.
+            # Plain "Slot N" row (no Switch prefix) — bucketed under None.
             slot = slot_match.group(1)
             mtype = _classify_slot_module(pid, slot_match.group(2) or "")
             bays_by_member.setdefault(None, {})[slot] = _ModuleBay(
