@@ -399,3 +399,64 @@ def test_prune_nested_refs_no_top_device_is_noop():
     prune_nested_refs(entities)
     # No rich Device → no-op; rich nested device preserved.
     assert entities[0].interface.device.serial == "XYZ"
+
+
+def test_prune_nested_refs_vc_member_modules_each_get_own_device_stub():
+    """
+    In a VC payload, member 1's Module gets member 1's Device stub, not master's.
+
+    Pins multi-device-aware stubbing for VC-of-modular: a Module
+    entity attached to member-2 must resolve against the member-2
+    top-level Device in the index — not the master Device — so its
+    stubbed device-ref carries the right member name. Without
+    per-member resolution, Diode would reconcile every module under
+    the master chassis instead of the right member.
+    """
+    master = pb.Device(name="stack-sw", serial="FCW0001", status="active")
+    master.device_type.CopyFrom(
+        pb.DeviceType(model="C9300L-48T-4X", manufacturer=pb.Manufacturer(name="Cisco")),
+    )
+    member2 = pb.Device(name="stack-sw-2", serial="FCW0002", status="active")
+    member2.device_type.CopyFrom(
+        pb.DeviceType(model="C9300L-48T-4X", manufacturer=pb.Manufacturer(name="Cisco")),
+    )
+
+    bay1 = pb.ModuleBay(name="1", position="1")
+    bay1.device.CopyFrom(master)
+    mod1 = pb.Module(serial="NM1")
+    mod1.device.CopyFrom(master)
+    mod1.module_type.CopyFrom(
+        pb.ModuleType(model="C9300-NM-8X", manufacturer=pb.Manufacturer(name="Cisco")),
+    )
+
+    bay2 = pb.ModuleBay(name="1", position="1")
+    bay2.device.CopyFrom(member2)
+    mod2 = pb.Module(serial="NM2")
+    mod2.device.CopyFrom(member2)
+    mod2.module_type.CopyFrom(
+        pb.ModuleType(model="C9300-NM-8X", manufacturer=pb.Manufacturer(name="Cisco")),
+    )
+
+    entities = [
+        Entity(device=master),
+        Entity(device=member2),
+        Entity(module_bay=bay1),
+        Entity(module=mod1),
+        Entity(module_bay=bay2),
+        Entity(module=mod2),
+    ]
+    prune_nested_refs(entities)
+
+    pruned_mod1 = entities[3].module
+    pruned_mod2 = entities[5].module
+    # Each Module's stubbed Device carries that MEMBER's name, not master's.
+    assert pruned_mod1.device.name == "stack-sw"
+    assert pruned_mod1.device.serial == ""  # stubbed
+    assert pruned_mod2.device.name == "stack-sw-2"
+    assert pruned_mod2.device.serial == ""
+    # Per-member ModuleBay also resolves to its own device.
+    pruned_bay1 = entities[2].module_bay
+    pruned_bay2 = entities[4].module_bay
+    assert pruned_bay1.device.name == "stack-sw"
+    assert pruned_bay2.device.name == "stack-sw-2"
+
