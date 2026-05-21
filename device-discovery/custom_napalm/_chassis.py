@@ -124,6 +124,32 @@ _CISCO_IOS_RE = re.compile(
 #    leak into a permissive match if someone changes it later.
 _FEX_4TUPLE_RE = re.compile(r"^(?:Ethernet|Eth|GigabitEthernet|Gi)\d+/\d+/\d+/\d+(?:\.\d+)?$")
 
+# 2b) Cisco IOS / IOS-XE 4-tuple — Catalyst 9400/9500 StackWise Virtual.
+#     Captures the leading switch id from "<word><digits>/<digits>/<digits>/<digits>".
+#     Matches the SAME prefix vocabulary as the 3-tuple Cisco regex but with one
+#     more slash component. FEX-style 4-tuples on Ethernet/Eth/Gi prefixes are
+#     explicitly rejected by _FEX_4TUPLE_RE, which fires first in parse_member_id,
+#     so this regex never sees them. Real SVL deployments use Hu/Fo/Te/Twe/etc.
+#     prefixes that don't collide with FEX's narrow vocabulary.
+_CISCO_IOS_4TUPLE_RE = re.compile(
+    r"""
+    ^                                       # anchor
+    (?:Gi(?:gabitEthernet)?                 # Gi or GigabitEthernet
+       | Te(?:nGigabitEthernet)?            # Te or TenGigabitEthernet
+       | Fo(?:rtyGigabitEthernet)?          # Fo or FortyGigabitEthernet
+       | Hu(?:ndredGigE)?                   # Hu or HundredGigE
+       | TwentyFiveGigE | Twe               # 25G mGig
+       | TwoGigabitEthernet | Tw            # 2.5G mGig
+       | FiveGigabitEthernet | Fi           # 5G mGig
+    )
+    (\d+)                                   # switch (member) id
+    /\d+/\d+/\d+                            # slot/subslot/port — exactly three more
+    (?:\.\d+)?                              # optional subinterface
+    $                                       # anchor
+    """,
+    re.VERBOSE,
+)
+
 # 3) Junos / Aruba CX — leading digit-cluster followed by /<digit>/<digit>.
 _JUNOS_RE = re.compile(r"^(?:[a-z]{2}-)?(\d+)/\d+/\d+(?:\.\d+)?$")
 
@@ -198,6 +224,14 @@ def parse_member_id(if_name: str) -> int | None:
     # Reject FEX 4-tuple before any positive match.
     if _FEX_4TUPLE_RE.match(if_name):
         return None
+
+    # Cisco SVL 4-tuple BEFORE the 3-tuple Cisco regex — the 4-tuple regex
+    # is anchored on the slash count, so the 3-tuple regex would not match
+    # a 4-tuple name anyway, but ordering this match first keeps the
+    # match-by-specificity convention obvious to readers.
+    m = _CISCO_IOS_4TUPLE_RE.match(if_name)
+    if m:
+        return int(m.group(1))
 
     m = _CISCO_IOS_RE.match(if_name)
     if m:

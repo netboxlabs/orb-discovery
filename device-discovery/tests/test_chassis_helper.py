@@ -192,6 +192,24 @@ def test_to_payload_preserves_domain():
         ("Eth101/1/1",               None),
         ("Ethernet101/1/1",          None),
         ("GigabitEthernet101/1/0/1", None),
+        ("Ethernet101/1/0/1",        None),
+        ("Eth101/1/0/1",             None),
+
+        # Cisco IOS 4-tuple — Catalyst 9400/9500 StackWise Virtual. The
+        # leading integer is the switch (member) id, followed by
+        # slot/subslot/port. The FEX reject pattern fires first on
+        # Ethernet/Eth/Gi prefixes; the broader Cisco prefix set
+        # (Hu, Fo, Te, etc.) is captured here.
+        ("HundredGigE1/2/0/1",       1),
+        ("HundredGigE2/3/0/24",      2),
+        ("Hu1/2/0/1",                1),
+        ("Hu2/3/0/24",               2),
+        ("FortyGigabitEthernet1/2/0/1",  1),
+        ("Fo2/3/0/4",                2),
+        ("TenGigabitEthernet1/2/0/1",    1),
+        ("Te1/2/0/1",                1),
+        ("HundredGigE1/2/0/1.100",   1),   # SVL subinterface
+        ("Hu2/3/0/24.4094",          2),
 
         # ProCurve / ArubaOS-Switch port shorthand — deferred to batch 3, return None
         ("A1",                       None),
