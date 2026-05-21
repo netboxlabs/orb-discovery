@@ -688,6 +688,90 @@ def test_emit_vc_two_members_each_get_their_own_bays() -> None:
     assert iface_module_map["Te2/1/1"].serial == "NM2"
 
 
+def test_empty_envelope_does_not_log_malformed(caplog, monkeypatch) -> None:
+    """
+    An empty but well-formed envelope is a silent no-op.
+
+    Pre-fix, the malformed-vs-empty paths shared one helper, so a payload
+    like ``{"members": {}}`` or ``{"members": {None: {"bays": []}}}``
+    triggered both a WARNING and a ``modules_dropped{reason="malformed"}``
+    counter even though the shape was valid. The split helpers separate
+    those concerns; this test pins the silent path.
+    """
+    import device_discovery.translate_modules as tm
+    counter_calls: list[tuple[int, dict]] = []
+
+    class _FakeCounter:
+        def add(self, value, attrs):
+            counter_calls.append((value, dict(attrs)))
+
+    monkeypatch.setattr(
+        tm, "get_metric",
+        lambda name: _FakeCounter() if name == "modules_dropped" else None,
+    )
+    entities: list = []
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
+        # Variant 1: members dict is empty.
+        emit_modules_if_requested(
+            {"modules": {"members": {}}},
+            Options(discover_modules="linecards"),
+            _devices(), entities,
+        )
+        # Variant 2: well-formed members entry with empty bays.
+        emit_modules_if_requested(
+            {"modules": {"members": {None: {"bays": [], "interfaces_by_bay": {}}}}},
+            Options(discover_modules="linecards"),
+            _devices(), entities,
+        )
+    assert entities == []
+    # No malformed warning and no counter bump on either variant.
+    assert not any("malformed" in r.getMessage() for r in caplog.records)
+    assert counter_calls == []
+
+
+def test_emit_vc_member_with_non_list_bays_warn_dropped(caplog, monkeypatch) -> None:
+    """A member whose `bays` is non-list (None/int/string) is warn-dropped."""
+    import device_discovery.translate_modules as tm
+    counter_calls: list[tuple[int, dict]] = []
+
+    class _FakeCounter:
+        def add(self, value, attrs):
+            counter_calls.append((value, dict(attrs)))
+
+    monkeypatch.setattr(
+        tm, "get_metric",
+        lambda name: _FakeCounter() if name == "modules_dropped" else None,
+    )
+    payload = {
+        "modules": {
+            "members": {
+                1: {"bays": None, "interfaces_by_bay": {}},  # type: ignore[dict-item]
+                2: {
+                    "bays": [{
+                        "name": "1", "position": "1",
+                        "module": {
+                            "model": "M", "serial": "S2", "description": "",
+                            "type": "linecard", "sub_bays": [],
+                        },
+                    }],
+                    "interfaces_by_bay": {},
+                },
+            },
+        },
+    }
+    entities: list = []
+    with caplog.at_level(logging.WARNING, logger="device_discovery.translate_modules"):
+        emit_modules_if_requested(
+            payload, Options(discover_modules="linecards"),
+            {1: _make_device(name="sw1"), 2: _make_device(name="sw2")}, entities,
+        )
+    modules = [e.module for e in entities if e.HasField("module")]
+    # Member 2 still emits; member 1's bad bays warn-drops the whole member.
+    assert {m.serial for m in modules} == {"S2"}
+    assert any("bays is not a list" in r.getMessage() for r in caplog.records)
+    assert counter_calls == [(1, {"reason": "malformed"})]
+
+
 def test_emit_vc_skips_malformed_member_payload(caplog, monkeypatch) -> None:
     """
     A non-dict member entry is skipped; sibling valid members still emit.

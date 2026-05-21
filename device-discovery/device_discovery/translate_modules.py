@@ -59,14 +59,19 @@ def emit_modules_if_requested(
     payload = data.get("modules")
     if payload is None:
         return {}
-    if not _payload_has_members(payload):
+    # Separate envelope-validation from "has any bays" — an empty but
+    # well-formed envelope (e.g. {"members": {None: {"bays": []}}}) is
+    # a valid no-op and must NOT log/bump the malformed counter. Only
+    # payloads that DON'T match the canonical shape are flagged.
+    if not _payload_is_envelope(payload):
         if isinstance(payload, dict) and payload:
-            # The driver emitted SOMETHING but not the canonical envelope.
             logger.warning(
                 "module payload malformed — expected 'members' envelope",
                 extra={"keys": sorted(payload.keys())[:6]},
             )
             _bump("modules_dropped", 1, {"reason": "malformed"})
+        return {}
+    if not _payload_has_any_bay(payload):
         return {}
 
     mode = options.discover_modules
@@ -93,10 +98,10 @@ def _emit_one_member(
     iface_module_map: dict[str, pb.Module],
 ) -> None:
     """Emit one member's bays under that member's Device, or warn-drop the member."""
-    # _payload_has_members only proves at least one entry has bays; it does
-    # not guarantee every entry is a dict. Guard here so one malformed
-    # member (string / None / list) cannot AttributeError the outer loop
-    # and abort emission for the rest of the device.
+    # _payload_is_envelope only checks shape at the outer level; it does
+    # not guarantee every member value is a dict. Guard here so one
+    # malformed member (string / None / list) cannot AttributeError the
+    # outer loop and abort emission for the rest of the device.
     if not isinstance(member_payload, dict):
         logger.warning(
             "malformed module member payload — skipping (not a dict)",
@@ -115,7 +120,18 @@ def _emit_one_member(
     manufacturer = _manufacturer_from_device(device)
     raw_ifaces = member_payload.get("interfaces_by_bay")
     interfaces_by_bay = raw_ifaces if isinstance(raw_ifaces, dict) else {}
-    for bay_data in member_payload.get("bays", []):
+    # Per-member ``bays`` is expected to be a list; guard against
+    # ``bays=None``/int/string so a buggy driver payload doesn't
+    # TypeError or iterate a string character-by-character.
+    raw_bays = member_payload.get("bays", [])
+    if not isinstance(raw_bays, list):
+        logger.warning(
+            "malformed module member payload — bays is not a list",
+            extra={"member_id": member_id, "bays": repr(raw_bays)[:80]},
+        )
+        _bump("modules_dropped", 1, {"reason": "malformed"})
+        return
+    for bay_data in raw_bays:
         if not isinstance(bay_data, dict):
             logger.warning(
                 "malformed module payload bay — skipping (not a dict)",
@@ -157,14 +173,22 @@ def _bump(metric_name: str, value: int, attrs: dict[str, str]) -> None:
         counter.add(value, attrs)
 
 
-def _payload_has_members(payload: Any) -> bool:
-    """Defensive guard: payload has a non-empty members dict with at least one bay."""
+def _payload_is_envelope(payload: Any) -> bool:
+    """
+    Defensive shape check: payload IS the canonical envelope.
+
+    True for ``{"members": {...}}`` with any (possibly empty) dict of
+    members — including ``{"members": {}}`` and member buckets with
+    ``bays=[]``. Those are valid no-ops, not malformed.
+    """
     if not isinstance(payload, dict):
         return False
-    members = payload.get("members")
-    if not isinstance(members, dict) or not members:
-        return False
-    for entry in members.values():
+    return isinstance(payload.get("members"), dict)
+
+
+def _payload_has_any_bay(payload: dict) -> bool:
+    """True when at least one member entry in the envelope carries a non-empty bays list."""
+    for entry in payload["members"].values():
         if isinstance(entry, dict) and entry.get("bays"):
             return True
     return False

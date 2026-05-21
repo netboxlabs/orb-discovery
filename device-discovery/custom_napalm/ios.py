@@ -330,10 +330,11 @@ def _ios_get_chassis_members_impl(driver) -> dict | None:
 #   "Slot 3 - Supervisor"  — hyphenated variant seen on some IOS-XE versions
 #
 # Plus transceiver rows whose NAME is an interface short / long form, e.g.
-# "Te1/0/1" or "TenGigabitEthernet1/0/1". A 4-tuple ifname like
-# "Te1/2/0/1" belongs to VC-of-modular composition, which is deferred —
-# it never matches the regex below and the _modules helper drops the
-# entry at the payload boundary if it slips through some other path.
+# "Te1/0/1" (standalone modular 3-tuple), "TenGigabitEthernet1/0/1"
+# (canonical long form), or "HundredGigE1/2/0/1" / its long form
+# "HundredGigabitEthernet1/2/0/1" (Cat 9400/9500 SVL 4-tuple). The 4-tuple
+# member dimension is the leading integer; transceivers attach as sub-bays
+# of their member's parent slot.
 #
 # IMPORTANT: only ``Slot N`` is matched here. The earlier ``module|Module``
 # alternation also caught ``"module 0"`` rows emitted by non-modular
@@ -373,7 +374,33 @@ _INVENTORY_VC_FRU_RE = re.compile(
 # Inventory row NAME that looks like an interface (transceiver row).
 # Accepts 2-tuple (e.g. Te1/1), 3-tuple (Te2/0/1 — standalone modular), and
 # 4-tuple (HundredGigE1/2/0/1 — Cat 9400/9500 SVL) Cisco ifnames.
-_INVENTORY_IFNAME_RE = re.compile(r"^[A-Za-z]+\d+(?:/\d+){1,3}$")
+#
+# The prefix vocabulary is restricted to the same set of Cisco port
+# prefixes used by parse_member_id's _CISCO_IOS_RE. The earlier broad
+# pattern (`^[A-Za-z]+\d+...`) also matched non-interface rows that
+# Catalyst stacks emit — e.g. ``StackPort1/1`` (the inter-switch stack
+# cable port) — which then bogusly attached as transceiver sub-bays under
+# slot 1 in VC mode. Even with the narrow prefix list a paranoid second
+# gate is applied at the parse site: rows that DON'T classify as
+# transceiver via the PID are dropped, so a non-transceiver Cisco-prefix
+# row (rare but possible) doesn't materialize a wrong sub-bay.
+_INVENTORY_IFNAME_RE = re.compile(
+    r"""
+    ^
+    (?:Gi(?:gabitEthernet)?
+       | Te(?:nGigabitEthernet)?
+       | Fo(?:rtyGigabitEthernet)?
+       | Hu(?:ndredGigE|ndredGigabitEthernet)?
+       | TwentyFiveGigE | Twe
+       | TwoGigabitEthernet | Tw
+       | FiveGigabitEthernet | Fi
+       | FastEthernet | Fa
+       | Ethernet | Eth
+    )
+    \d+(?:/\d+){1,3}$
+    """,
+    re.VERBOSE,
+)
 _INTERFACE_SLOT_RE = re.compile(r"^[A-Za-z]+(\d+)/\d+")
 
 
@@ -501,14 +528,23 @@ def _parse_inventory_rows(
             continue
 
         if _INVENTORY_IFNAME_RE.match(name):
-            # Transceiver row keyed by ifname. In VC mode the leading
-            # integer of the ifname is the member id; in standalone there
-            # is no member dimension and the transceiver lives in the
-            # same None bucket as its parent.
+            # Transceiver row keyed by ifname. Second-gate by PID class:
+            # only rows whose PID classifies as transceiver actually
+            # become transceiver sub-bays. This drops paranoid edge
+            # cases where a non-transceiver Cisco-prefix row (e.g. a
+            # rare stack-hardware row that happens to use a real port
+            # prefix) sneaks past the narrow ifname regex.
+            module_type = classify_module_type_cisco(pid)
+            if module_type != "transceiver":
+                continue
+            # In VC mode the leading integer of the ifname is the
+            # member id; in standalone there is no member dimension
+            # and the transceiver lives in the same None bucket as
+            # its parent.
             member_for_transceiver = _interface_member_id(name) if vc_mode else None
             trans_by_member.setdefault(member_for_transceiver, {})[name] = _ModuleEntry(
                 model=pid, serial=sn,
-                type=classify_module_type_cisco(pid),
+                type=module_type,
                 description=descr,
             )
     return bays_by_member, trans_by_member
