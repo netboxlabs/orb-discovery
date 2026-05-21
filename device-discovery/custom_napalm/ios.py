@@ -17,6 +17,9 @@ from ntc_templates.parse import parse_output
 
 from custom_napalm._chassis import ChassisMember, normalize_role, to_payload
 from custom_napalm._modules import (
+    MemberModules as _MemberModules,
+)
+from custom_napalm._modules import (
     ModuleBay as _ModuleBay,
 )
 from custom_napalm._modules import (
@@ -364,9 +367,40 @@ _INVENTORY_IFNAME_RE = re.compile(r"^[A-Za-z]+\d+(?:/\d+){1,2}$")
 _INTERFACE_SLOT_RE = re.compile(r"^[A-Za-z]+(\d+)/\d+")
 
 
-def _interface_slot(ifname: str) -> str | None:
-    """Extract the leading slot number from a canonical/short Cisco ifname."""
-    m = _INTERFACE_SLOT_RE.match(ifname)
+# A bare or prefixed "Switch N ..." inventory row marks a member chassis
+# in a virtual-chassis stack. Standalone modular chassis (e.g. Cat 9404R)
+# emit a single "Chassis" row instead and never have a Switch prefix.
+_SWITCH_PREFIX_RE = re.compile(r"^Switch\s+\d+\b", re.IGNORECASE)
+
+
+def _has_switch_rows(inv_rows: list[dict]) -> bool:
+    """Detect VC mode: any inventory row whose NAME starts with ``Switch N``."""
+    for row in inv_rows or []:
+        if _SWITCH_PREFIX_RE.match((row.get("name") or "").strip()):
+            return True
+    return False
+
+
+def _interface_member_id(ifname: str) -> int | None:
+    """Extract the leading integer from a Cisco ifname (member id in VC context)."""
+    m = re.match(r"^[A-Za-z]+(\d+)/", ifname)
+    return int(m.group(1)) if m else None
+
+
+def _interface_slot(ifname: str, *, depth: int = 1) -> str | None:
+    """
+    Extract a slot id from a Cisco ifname.
+
+    ``depth=1`` returns the leading integer — that's the slot id on a
+    standalone modular chassis (e.g. ``TenGigabitEthernet2/0/1`` → ``2``).
+    ``depth=2`` returns the second integer — that's the slot id on a VC
+    member chassis (e.g. ``TenGigabitEthernet1/1/1`` → ``1`` for a 9300
+    stack FRU uplink, ``HundredGigE1/2/0/1`` → ``2`` for 9400 SVL).
+    """
+    if depth == 1:
+        m = _INTERFACE_SLOT_RE.match(ifname)
+        return m.group(1) if m else None
+    m = re.match(r"^[A-Za-z]+\d+/(\d+)", ifname)
     return m.group(1) if m else None
 
 
@@ -389,18 +423,23 @@ def _classify_slot_module(pid: str, role_hint: str) -> str:
     return "linecard" if pid_type == "transceiver" else pid_type
 
 
-def _parse_inventory_rows(rows: list[dict]) -> tuple[dict[str, _ModuleBay], dict[str, _ModuleEntry]]:
+def _parse_inventory_rows(
+    rows: list[dict],
+    vc_mode: bool,
+) -> tuple[
+    dict[int | None, dict[str, _ModuleBay]],
+    dict[int | None, dict[str, _ModuleEntry]],
+]:
     """
-    Split ``show inventory`` rows into slot bays and transceivers-by-ifname.
+    Split ``show inventory`` rows into per-member slot bays and transceivers.
 
-    Returns ``(bays_by_slot, transceivers_by_ifname)`` where ``bays_by_slot``
-    maps the slot string (``"1"``) to the ModuleBay for that physical slot,
-    and ``transceivers_by_ifname`` maps the raw inventory NAME (often the
-    short form) to a ModuleEntry. The caller canonicalizes the ifname
-    before attaching the transceiver as a sub-bay.
+    Returns ``(bays_by_member_then_slot, transceivers_by_member_then_ifname)``.
+    In standalone mode (``vc_mode=False``) both outer dicts have a single
+    ``None`` key. In VC mode the outer key is the member id captured from
+    ``Switch N ...`` prefixes on the inventory row.
     """
-    bays_by_slot: dict[str, _ModuleBay] = {}
-    transceivers_by_ifname: dict[str, _ModuleEntry] = {}
+    bays_by_member: dict[int | None, dict[str, _ModuleBay]] = {}
+    trans_by_member: dict[int | None, dict[str, _ModuleEntry]] = {}
     for row in rows or []:
         name = (row.get("name") or "").strip()
         pid = (row.get("pid") or "").strip()
@@ -408,55 +447,139 @@ def _parse_inventory_rows(rows: list[dict]) -> tuple[dict[str, _ModuleBay], dict
         descr = (row.get("descr") or "").strip()
         if not (pid and sn):
             continue
+
+        if vc_mode:
+            vc_slot = _INVENTORY_VC_SLOT_RE.match(name)
+            if vc_slot:
+                member_id = int(vc_slot.group(1))
+                slot = vc_slot.group(2)
+                mtype = _classify_slot_module(pid, vc_slot.group(3) or "")
+                bays_by_member.setdefault(member_id, {})[slot] = _ModuleBay(
+                    name=slot, position=slot,
+                    module=_ModuleEntry(
+                        model=pid, serial=sn, type=mtype, description=descr,
+                    ),
+                )
+                continue
+            vc_fru = _INVENTORY_VC_FRU_RE.match(name)
+            if vc_fru:
+                member_id = int(vc_fru.group(1))
+                slot = vc_fru.group(2)
+                # FRU uplink modules have no role hint in NAME, so trust the
+                # PID classifier (linecard for non-transceiver Cisco PIDs).
+                bays_by_member.setdefault(member_id, {})[slot] = _ModuleBay(
+                    name=slot, position=slot,
+                    module=_ModuleEntry(
+                        model=pid, serial=sn,
+                        type=classify_module_type_cisco(pid),
+                        description=descr,
+                    ),
+                )
+                continue
+
         slot_match = _INVENTORY_SLOT_RE.match(name)
         if slot_match:
+            # Standalone "Slot N" row — bucketed under member_id=None.
             slot = slot_match.group(1)
             mtype = _classify_slot_module(pid, slot_match.group(2) or "")
-            bays_by_slot[slot] = _ModuleBay(
+            bays_by_member.setdefault(None, {})[slot] = _ModuleBay(
                 name=slot, position=slot,
-                module=_ModuleEntry(model=pid, serial=sn, type=mtype, description=descr),
+                module=_ModuleEntry(
+                    model=pid, serial=sn, type=mtype, description=descr,
+                ),
             )
             continue
+
         if _INVENTORY_IFNAME_RE.match(name):
-            transceivers_by_ifname[name] = _ModuleEntry(
+            # Transceiver row keyed by ifname. In VC mode the leading
+            # integer of the ifname is the member id; in standalone there
+            # is no member dimension and the transceiver lives in the
+            # same None bucket as its parent.
+            member_for_transceiver = _interface_member_id(name) if vc_mode else None
+            trans_by_member.setdefault(member_for_transceiver, {})[name] = _ModuleEntry(
                 model=pid, serial=sn,
                 type=classify_module_type_cisco(pid),
                 description=descr,
             )
-    return bays_by_slot, transceivers_by_ifname
+    return bays_by_member, trans_by_member
 
 
-def _collect_interfaces_by_slot(driver, slots: set[str]) -> dict[str, list[str]]:
+def _collect_interfaces_by_member_and_slot(
+    driver,
+    bays_by_member: dict[int | None, dict[str, _ModuleBay]],
+    vc_mode: bool,
+) -> dict[int | None, dict[str, list[str]]]:
     """
-    Return ``{slot: [ifname, ...]}`` via ``show ip interface brief``.
+    Bin canonicalized ifnames from ``show ip interface brief`` by member then slot.
 
-    Names are canonicalized via the existing ``addl_name_map`` override so
-    they match the long-form names ``get_interfaces()`` emits — the
-    translator's interface→module routing keys on the canonical form, so
-    short-form rows like ``Gi1/0/1`` from some IOS versions would
-    otherwise silently fail to attach. Falls back to an empty mapping
-    when the command fails or the template parse errors.
+    Member key matches the inventory parser: in VC mode the leading integer of
+    the ifname is the member id; in standalone mode every ifname binds to the
+    single ``None`` member bucket. Falls back to a skeleton populated with
+    empty lists when the brief command fails — bays/modules still emit, just
+    without per-interface routing for that cycle.
     """
-    out_map: dict[str, list[str]] = {slot: [] for slot in slots}
+    out: dict[int | None, dict[str, list[str]]] = {
+        m: {slot: [] for slot in bays_by_member[m]} for m in bays_by_member
+    }
     try:
-        out = driver.device.send_command("show ip interface brief")
+        raw = driver.device.send_command("show ip interface brief")
         rows = parse_output(
             platform="cisco_ios",
             command="show ip interface brief",
-            data=out or "",
+            data=raw or "",
         )
     except Exception:
         logger.debug("ios.get_modules: show ip interface brief failed", exc_info=True)
-        return out_map
+        return out
     for row in rows or []:
-        raw = (row.get("interface") or row.get("intf") or "").strip()
-        if not raw:
+        raw_if = (row.get("interface") or row.get("intf") or "").strip()
+        if not raw_if:
             continue
-        ifname = canonical_interface_name(raw, addl_name_map=_IOS_ADDL_NAME_MAP)
-        slot = _interface_slot(ifname)
-        if slot and slot in out_map:
-            out_map[slot].append(ifname)
-    return out_map
+        ifname = canonical_interface_name(raw_if, addl_name_map=_IOS_ADDL_NAME_MAP)
+        if vc_mode:
+            member_id = _interface_member_id(ifname)
+            slot = _interface_slot(ifname, depth=2)
+        else:
+            member_id = None
+            slot = _interface_slot(ifname, depth=1)
+        if member_id not in out or slot is None or slot not in out[member_id]:
+            continue
+        out[member_id][slot].append(ifname)
+    return out
+
+
+def _attach_transceivers(
+    bays_by_member: dict[int | None, dict[str, _ModuleBay]],
+    transceivers_by_member: dict[int | None, dict[str, _ModuleEntry]],
+    interfaces_by_member_and_slot: dict[int | None, dict[str, list[str]]],
+    vc_mode: bool,
+) -> None:
+    """
+    Attach each transceiver entry as a sub-bay of its member's parent slot.
+
+    Canonicalizes the transceiver row's ifname so the sub-bay name aligns
+    with the long-form name from ``get_interfaces()``. Also self-routes
+    the transceiver's ifname into its own sub-bay key so the translator's
+    deepest-wins logic assigns the transceiver as the interface's module
+    in full mode.
+    """
+    for member_id, transceivers in transceivers_by_member.items():
+        if member_id not in bays_by_member:
+            continue
+        for raw_ifname, transceiver in transceivers.items():
+            canonical = canonical_interface_name(
+                raw_ifname, addl_name_map=_IOS_ADDL_NAME_MAP,
+            )
+            slot = _interface_slot(canonical, depth=2 if vc_mode else 1)
+            if slot is None or slot not in bays_by_member[member_id]:
+                continue
+            parent_bay = bays_by_member[member_id][slot]
+            parent_bay.module.sub_bays.append(
+                _ModuleBay(name=canonical, position=canonical, module=transceiver),
+            )
+            interfaces_by_member_and_slot.setdefault(member_id, {}).setdefault(
+                canonical, [],
+            ).append(canonical)
 
 
 def _ios_get_modules_impl(driver) -> dict | None:
@@ -474,36 +597,22 @@ def _ios_get_modules_impl(driver) -> dict | None:
     if not inv_rows:
         return None
 
-    bays_by_slot, transceivers_by_ifname = _parse_inventory_rows(inv_rows)
-    if not bays_by_slot:
+    vc_mode = _has_switch_rows(inv_rows)
+    bays_by_member, transceivers_by_member = _parse_inventory_rows(inv_rows, vc_mode)
+    if not bays_by_member:
         return None
 
-    interfaces_by_bay = _collect_interfaces_by_slot(driver, set(bays_by_slot))
-
-    # Attach transceivers as sub-bays of their slot's linecard. Canonicalize
-    # the inventory's raw NAME (often the short form "Te1/0/1") so the
-    # sub-bay name matches the long-form ifname produced by
-    # get_interfaces() and consumed by the translator's deepest-wins
-    # routing.
-    for raw_ifname, transceiver in transceivers_by_ifname.items():
-        canonical = canonical_interface_name(
-            raw_ifname, addl_name_map=_IOS_ADDL_NAME_MAP,
-        )
-        slot = _interface_slot(canonical)
-        if not slot or slot not in bays_by_slot:
-            continue
-        parent_bay = bays_by_slot[slot]
-        # parent_bay.module is always populated by _parse_inventory_rows
-        # (a row without serial+pid never produces a ModuleBay), so the
-        # downstream attribute access here cannot AttributeError.
-        parent_bay.module.sub_bays.append(
-            _ModuleBay(name=canonical, position=canonical, module=transceiver),
-        )
-        # Sub-bay self-routes the transceiver's ifname so full-mode
-        # deepest-wins assigns the transceiver as the interface's module.
-        interfaces_by_bay.setdefault(canonical, []).append(canonical)
-
-    return _modules_to_payload(
-        list(bays_by_slot.values()),
-        interfaces_by_bay=interfaces_by_bay,
+    interfaces_by_member_and_slot = _collect_interfaces_by_member_and_slot(
+        driver, bays_by_member, vc_mode,
     )
+    _attach_transceivers(
+        bays_by_member, transceivers_by_member, interfaces_by_member_and_slot, vc_mode,
+    )
+
+    return _modules_to_payload({
+        member_id: _MemberModules(
+            bays=list(bays.values()),
+            interfaces_by_bay=interfaces_by_member_and_slot.get(member_id, {}),
+        )
+        for member_id, bays in bays_by_member.items()
+    })

@@ -60,10 +60,7 @@
         }
       ],
       "interfaces_by_bay": {
-        "1": [
-          "TenGigabitEthernet1/1/1",
-          "TenGigabitEthernet1/1/2"
-        ],
+        "1": [],
         "2": [
           "GigabitEthernet2/0/1",
           "GigabitEthernet2/0/2",
@@ -71,8 +68,7 @@
           "TenGigabitEthernet2/0/2"
         ],
         "3": [
-          "GigabitEthernet3/0/1",
-          "GigabitEthernet3/0/2"
+          "GigabitEthernet3/0/1"
         ],
         "TenGigabitEthernet2/0/1": [
           "TenGigabitEthernet2/0/1"

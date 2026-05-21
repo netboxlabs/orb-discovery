@@ -213,15 +213,16 @@ class TestIOSDriver(BaseDriverTest):
         driver = self._build_driver(mock_dir)
         result = driver.get_modules()
         assert result is not None
-        bay_2 = next(b for b in result["bays"] if b["name"] == "2")
+        member = result["members"][None]
+        bay_2 = next(b for b in member["bays"] if b["name"] == "2")
         sub_names = [s["name"] for s in bay_2["module"]["sub_bays"]]
         # Both rows canonicalize to TenGigabitEthernet, even the short-form Te2/0/2.
         assert sub_names == [
             "TenGigabitEthernet2/0/1",
             "TenGigabitEthernet2/0/2",
         ]
-        # And full-mode deepest-wins routing pre-populates the self-mapping.
-        assert result["interfaces_by_bay"]["TenGigabitEthernet2/0/2"] == [
+        # Full-mode deepest-wins routing pre-populates the self-mapping.
+        assert member["interfaces_by_bay"]["TenGigabitEthernet2/0/2"] == [
             "TenGigabitEthernet2/0/2",
         ]
 
@@ -328,8 +329,9 @@ class TestIOSDriver(BaseDriverTest):
         driver = self._build_driver(mock_dir)
         result = driver.get_modules()
         assert result is not None
-        assert len(result["bays"]) == 1
-        assert result["bays"][0]["module"]["type"] == "supervisor"
+        member = result["members"][None]
+        assert len(member["bays"]) == 1
+        assert member["bays"][0]["module"]["type"] == "supervisor"
 
     def test_get_modules_interface_brief_shortform_canonicalized(self) -> None:
         """
@@ -345,8 +347,9 @@ class TestIOSDriver(BaseDriverTest):
         driver = self._build_driver(mock_dir)
         result = driver.get_modules()
         assert result is not None
-        slot2 = result["interfaces_by_bay"]["2"]
-        slot3 = result["interfaces_by_bay"]["3"]
+        member = result["members"][None]
+        slot2 = member["interfaces_by_bay"]["2"]
+        slot3 = member["interfaces_by_bay"]["3"]
         # Positive: every name starts with a long-form prefix.
         long_form_prefixes = ("GigabitEthernet", "TenGigabitEthernet")
         for name in slot2 + slot3:
@@ -389,14 +392,75 @@ class TestIOSDriver(BaseDriverTest):
 
         result = driver.get_modules()
         assert result is not None
+        member = result["members"][None]
         # The transceiver self-mapping survives (it's added after the
         # interfaces_by_bay scaffold), but the per-slot lists stay empty.
-        assert result["interfaces_by_bay"]["1"] == []
-        assert result["interfaces_by_bay"]["2"] == []
-        assert result["interfaces_by_bay"]["3"] == []
-        assert result["interfaces_by_bay"]["TenGigabitEthernet2/0/1"] == [
+        assert member["interfaces_by_bay"]["1"] == []
+        assert member["interfaces_by_bay"]["2"] == []
+        assert member["interfaces_by_bay"]["3"] == []
+        assert member["interfaces_by_bay"]["TenGigabitEthernet2/0/1"] == [
             "TenGigabitEthernet2/0/1",
         ]
+
+    def test_get_modules_9300_stack_emits_per_member_envelope(self) -> None:
+        """
+        9300 stack with NM uplinks emits {members: {1: ..., 2: ...}}.
+
+        Each member's bay carries its FRU uplink module; each member's
+        transceiver attaches as a sub-bay under its own NM. Interfaces
+        bin by leading integer (member id), then by slot (second
+        integer = NM slot ``1``).
+        """
+        mock_dir = self.mock_data_root / "test_get_modules" / "cat9300_stack_with_nm_uplinks"
+        driver = self._build_driver(mock_dir)
+        result = driver.get_modules()
+        assert result is not None
+        assert set(result["members"].keys()) == {1, 2}
+        m1 = result["members"][1]
+        m2 = result["members"][2]
+        # Each member has the NM uplink bay with its own serial.
+        assert len(m1["bays"]) == 1
+        assert m1["bays"][0]["module"]["model"] == "C9300-NM-8X"
+        assert m1["bays"][0]["module"]["serial"] == "FOC2501NM01"
+        assert m2["bays"][0]["module"]["serial"] == "FOC2501NM02"
+        # Each member's NM has a transceiver sub-bay with the right serial.
+        m1_sub = m1["bays"][0]["module"]["sub_bays"]
+        m2_sub = m2["bays"][0]["module"]["sub_bays"]
+        assert len(m1_sub) == 1
+        assert m1_sub[0]["module"]["serial"] == "FNS2501TR01"
+        assert len(m2_sub) == 1
+        assert m2_sub[0]["module"]["serial"] == "FNS2501TR02"
+        # Interface routing: each member's slot-1 ifname bins under its own NM.
+        assert "TenGigabitEthernet1/1/1" in m1["interfaces_by_bay"]["1"]
+        assert "TenGigabitEthernet2/1/1" in m2["interfaces_by_bay"]["1"]
+
+    def test_get_modules_9400_svl_emits_per_member_envelope(self) -> None:
+        """
+        9400 SVL emits per-member envelope with supervisors and linecards.
+
+        Each member's chassis has slots 1 (supervisor) and 2 (linecard);
+        4-tuple ifnames bin into the right member's correct slot.
+        """
+        mock_dir = self.mock_data_root / "test_get_modules" / "cat9400_stackwise_virtual"
+        driver = self._build_driver(mock_dir)
+        result = driver.get_modules()
+        assert result is not None
+        assert set(result["members"].keys()) == {1, 2}
+        m1_models = {b["module"]["model"] for b in result["members"][1]["bays"]}
+        assert m1_models == {"C9400-SUP-1", "C9400-LC-48U"}
+        m2_models = {b["module"]["model"] for b in result["members"][2]["bays"]}
+        assert m2_models == {"C9400-SUP-1", "C9400-LC-48P"}
+        # Supervisor classifies as 'supervisor' (NAME hint), not linecard.
+        sup_bay = next(
+            b for b in result["members"][1]["bays"] if b["module"]["model"] == "C9400-SUP-1"
+        )
+        assert sup_bay["module"]["type"] == "supervisor"
+        # 4-tuple ifname routes to member 1 slot 2 (canonicalized long form).
+        m1_slot2 = result["members"][1]["interfaces_by_bay"].get("2", [])
+        assert "HundredGigabitEthernet1/2/0/1" in m1_slot2
+        # And member 2 slot 1 carries its supervisor's port too.
+        m2_slot1 = result["members"][2]["interfaces_by_bay"].get("1", [])
+        assert "HundredGigabitEthernet2/1/0/1" in m2_slot1
 
     def _caplog(self, logger, level):
         """Context manager that captures records from a specific logger at ``level``."""

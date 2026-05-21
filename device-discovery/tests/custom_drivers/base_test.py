@@ -65,13 +65,35 @@ def _load_expected(mock_dir: Path) -> Any:
     return _normalize_null_member_keys(raw)
 
 
-def _normalize_null_member_keys(value: Any) -> Any:
-    """Recursively rewrite dict keys equal to "null" string → None."""
+def _normalize_null_member_keys(value: Any, *, inside_members: bool = False) -> Any:
+    """
+    Recursively rewrite a JSON-loaded dict tree so member-id keys match Python types.
+
+    JSON cannot encode Python's ``None`` or ``int`` as dict keys. Inside the
+    ``members`` sub-tree of a module-discovery payload, key ``"null"`` is
+    rewritten to ``None`` and any digit-string key is rewritten to ``int``.
+    Outside ``members`` the keys are left as-is (the rest of the payload
+    naturally uses string keys).
+    """
     if isinstance(value, dict):
-        return {
-            (None if k == "null" else k): _normalize_null_member_keys(v)
-            for k, v in value.items()
-        }
+        out = {}
+        for k, v in value.items():
+            if inside_members:
+                if k == "null":
+                    new_key: Any = None
+                elif isinstance(k, str) and k.isdigit():
+                    new_key = int(k)
+                else:
+                    new_key = k
+            else:
+                new_key = k
+            # Recurse — children of a 'members' dict are themselves NOT in
+            # the members-key space, so reset the flag. Conversely, when
+            # we encounter a key named 'members' at any level, the next
+            # level IS the per-member buckets.
+            child_inside = (k == "members")
+            out[new_key] = _normalize_null_member_keys(v, inside_members=child_inside)
+        return out
     if isinstance(value, list):
         return [_normalize_null_member_keys(item) for item in value]
     return value
@@ -251,22 +273,29 @@ class BaseDriverTest:
             "get_modules must return a dict or None"
         )
         if isinstance(result, dict):
-            assert "bays" in result and isinstance(result["bays"], list)
-            assert "interfaces_by_bay" in result and isinstance(
-                result["interfaces_by_bay"], dict
-            )
-            for bay in result["bays"]:
-                assert isinstance(bay, dict)
-                assert isinstance(bay.get("name"), str) and bay["name"]
-                mod = bay.get("module") or {}
-                assert mod.get("serial"), f"bay {bay['name']} has empty serial"
-                assert mod.get("type") in {
-                    "linecard", "supervisor", "fan", "psu", "transceiver",
-                }
+            # Nested envelope: {"members": {member_id_or_None: {bays, ifs}}}.
+            assert "members" in result and isinstance(result["members"], dict)
+            for member_id, member in result["members"].items():
+                assert member_id is None or isinstance(member_id, int), (
+                    f"member id must be int or None, got {member_id!r}"
+                )
+                assert "bays" in member and isinstance(member["bays"], list)
+                assert "interfaces_by_bay" in member and isinstance(
+                    member["interfaces_by_bay"], dict
+                )
+                for bay in member["bays"]:
+                    assert isinstance(bay, dict)
+                    assert isinstance(bay.get("name"), str) and bay["name"]
+                    mod = bay.get("module") or {}
+                    assert mod.get("serial"), (
+                        f"bay {bay['name']} on member {member_id} has empty serial"
+                    )
+                    assert mod.get("type") in {
+                        "linecard", "supervisor", "fan", "psu", "transceiver",
+                    }
 
-        expected_path = mock_dir / "expected_result.json"
-        if expected_path.exists():
-            expected = json.loads(expected_path.read_text(encoding="utf-8"))
+        expected = _load_expected(mock_dir)
+        if (mock_dir / "expected_result.json").exists():
             assert result == expected
 
     def test_get_interfaces_vlans(self, scenario: str) -> None:

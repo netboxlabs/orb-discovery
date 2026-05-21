@@ -285,20 +285,27 @@ def test_load_expected_normalizes_null_member_key(tmp_path):
 
 
 def test_normalize_null_member_keys_handles_nested_list_of_dicts():
-    """The recursive walk descends through lists-of-dicts and rewrites nested 'null' keys."""
+    """The recursive walk descends through lists-of-dicts; rewriting is scoped to members."""
     from tests.custom_drivers.base_test import _normalize_null_member_keys
     raw = {
         "members": {
             "null": {
                 "bays": [
-                    {"name": "1", "module": {"sub_bays": [{"null": "ignored"}]}},
+                    {"name": "1", "module": {"sub_bays": [{"null": "kept-as-string"}]}},
                 ],
             },
+            "2": {"bays": []},
         },
     }
     out = _normalize_null_member_keys(raw)
-    assert None in out["members"]
-    assert None in out["members"][None]["bays"][0]["module"]["sub_bays"][0]
+    # Member keys are normalized: "null" → None, "2" → 2.
+    assert set(out["members"].keys()) == {None, 2}
+    # Deep "null" keys (outside the members level) are NOT rewritten —
+    # the normalization is scoped to member ids and would over-rewrite
+    # genuine "null"-named keys deeper in the tree.
+    deep_subbay = out["members"][None]["bays"][0]["module"]["sub_bays"][0]
+    assert "null" in deep_subbay
+    assert None not in deep_subbay
 
 
 # ---- classify_module_type_cisco -----------------------------------------
