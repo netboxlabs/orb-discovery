@@ -49,11 +49,32 @@ def parametrize_scenarios(metafunc, mock_data_root: Path) -> None:
     metafunc.parametrize("scenario", scenarios)
 
 
-def _load_expected(mock_dir: Path) -> dict | None:
+def _load_expected(mock_dir: Path) -> Any:
+    """
+    Load expected_result.json and normalize string-keyed "null" back to None.
+
+    JSON cannot encode Python's None as a dict key. Module-discovery fixtures
+    use the literal string "null" for the standalone member bucket; this
+    loader rewrites that key back to None so deep equality against the
+    production result holds.
+    """
     path = mock_dir / "expected_result.json"
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return None
+    if not path.exists():
+        return None
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return _normalize_null_member_keys(raw)
+
+
+def _normalize_null_member_keys(value: Any) -> Any:
+    """Recursively rewrite dict keys equal to "null" string → None."""
+    if isinstance(value, dict):
+        return {
+            (None if k == "null" else k): _normalize_null_member_keys(v)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_normalize_null_member_keys(item) for item in value]
+    return value
 
 
 class BaseDriverTest:

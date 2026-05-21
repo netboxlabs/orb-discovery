@@ -7,6 +7,7 @@ import pytest
 
 from custom_napalm._modules import (
     MAX_BAY_DEPTH,
+    MemberModules,
     ModuleBay,
     ModuleEntry,
     classify_module_type_cisco,
@@ -20,7 +21,7 @@ from custom_napalm._modules import (
 def _bay(name: str, *, serial: str = "S1", mtype: str = "linecard",
          model: str = "M1", description: str = "",
          sub_bays: list[ModuleBay] | None = None) -> ModuleBay:
-    """Test helper: build a ModuleBay with sane defaults."""
+    """Build a ModuleBay with sane defaults."""
     return ModuleBay(
         name=name,
         position=name,
@@ -35,28 +36,32 @@ def _bay(name: str, *, serial: str = "S1", mtype: str = "linecard",
 
 
 def test_to_payload_empty_input_returns_none() -> None:
-    """Empty bays list → None (no payload to emit)."""
-    assert to_payload([]) is None
+    """Empty members dict → None (no payload to emit)."""
+    assert to_payload({}) is None
 
 
 def test_to_payload_all_invalid_bays_returns_none() -> None:
-    """When every bay fails validation, the helper returns None."""
-    assert to_payload([_bay("1", serial="")]) is None
+    """When every member's bays fail validation, the helper returns None."""
+    assert to_payload({None: MemberModules(bays=[_bay("1", serial="")])}) is None
 
 
 def test_to_payload_drops_bay_with_empty_serial() -> None:
     """A bay whose module.serial is empty is dropped; valid bays survive."""
-    payload = to_payload([_bay("1", serial=""), _bay("2", serial="OK2")])
+    payload = to_payload({
+        None: MemberModules(bays=[_bay("1", serial=""), _bay("2", serial="OK2")]),
+    })
     assert payload is not None
-    names = [b["name"] for b in payload["bays"]]
+    names = [b["name"] for b in payload["members"][None]["bays"]]
     assert names == ["2"]
 
 
 def test_to_payload_drops_bay_with_whitespace_only_serial() -> None:
     """A bay whose serial is whitespace-only is treated as empty."""
-    payload = to_payload([_bay("1", serial="   "), _bay("2", serial="OK2")])
+    payload = to_payload({
+        None: MemberModules(bays=[_bay("1", serial="   "), _bay("2", serial="OK2")]),
+    })
     assert payload is not None
-    assert [b["name"] for b in payload["bays"]] == ["2"]
+    assert [b["name"] for b in payload["members"][None]["bays"]] == ["2"]
 
 
 def test_to_payload_drops_bay_with_unknown_type() -> None:
@@ -65,80 +70,81 @@ def test_to_payload_drops_bay_with_unknown_type() -> None:
         name="1", position="1",
         module=ModuleEntry(model="M1", serial="S1", type="bogus"),  # type: ignore[arg-type]
     )
-    assert to_payload([bay]) is None
+    assert to_payload({None: MemberModules(bays=[bay])}) is None
 
 
 def test_to_payload_drops_bay_with_no_module() -> None:
-    """An empty bay (module is None) is not emitted to NetBox today."""
+    """An empty bay (module is None) is not emitted today."""
     bay = ModuleBay(name="1", position="1", module=None)
-    assert to_payload([bay]) is None
+    assert to_payload({None: MemberModules(bays=[bay])}) is None
 
 
 def test_to_payload_dedupes_interfaces_by_bay() -> None:
     """Duplicate ifnames in interfaces_by_bay collapse to first occurrence."""
-    payload = to_payload(
-        [_bay("1")],
-        interfaces_by_bay={"1": ["Te1/0/1", "Te1/0/1", "Te1/0/2", "Te1/0/1"]},
-    )
+    payload = to_payload({
+        None: MemberModules(
+            bays=[_bay("1")],
+            interfaces_by_bay={"1": ["Te1/0/1", "Te1/0/1", "Te1/0/2", "Te1/0/1"]},
+        ),
+    })
     assert payload is not None
-    assert payload["interfaces_by_bay"]["1"] == ["Te1/0/1", "Te1/0/2"]
+    assert payload["members"][None]["interfaces_by_bay"]["1"] == ["Te1/0/1", "Te1/0/2"]
 
 
-def test_to_payload_rejects_4tuple_ifname_warn_and_drop() -> None:
+def test_to_payload_accepts_4tuple_ifnames() -> None:
     """
-    Cisco 4-tuple ifname (VC-of-modular territory) is out of v1.
+    SVL ifnames like HundredGigE1/2/0/1 are preserved (no longer rejected).
 
-    Translator depends on the bay-name → ifname map being parseable as
-    a 2- or 3-tuple Cisco/Junos ifname; 4-tuple entries are warn-dropped
-    so the interface stays chassis-owned.
+    The 4-tuple rejection that lived in _validate_interfaces_by_bay during
+    the standalone-only revision is gone — SVL deployments emit those
+    ifnames as valid input.
     """
-    payload = to_payload(
-        [_bay("1")],
-        interfaces_by_bay={"1": ["HundredGigE1/2/0/1", "Te1/0/1"]},
-    )
+    payload = to_payload({
+        1: MemberModules(
+            bays=[_bay("2", serial="LC1", model="C9400-LC-48U")],
+            interfaces_by_bay={"2": ["HundredGigE1/2/0/1", "HundredGigE1/2/0/2"]},
+        ),
+    })
     assert payload is not None
-    assert payload["interfaces_by_bay"]["1"] == ["Te1/0/1"]
+    assert payload["members"][1]["interfaces_by_bay"]["2"] == [
+        "HundredGigE1/2/0/1", "HundredGigE1/2/0/2",
+    ]
 
 
 def test_to_payload_rejects_non_string_ifname_warn_and_drop() -> None:
-    """
-    Non-string entries in interfaces_by_bay are warn-dropped, never raised.
-
-    The helper's contract is to be forgiving of bad-shape input from
-    drivers — None or an int slipping into an ifnames list must not
-    TypeError through the regex match.
-    """
-    payload = to_payload(
-        [_bay("1")],
-        interfaces_by_bay={"1": [None, 42, "Te1/0/1"]},  # type: ignore[list-item]
-    )
+    """Non-string entries in interfaces_by_bay are warn-dropped, never raised."""
+    payload = to_payload({
+        None: MemberModules(
+            bays=[_bay("1")],
+            interfaces_by_bay={"1": [None, 42, "Te1/0/1"]},  # type: ignore[list-item]
+        ),
+    })
     assert payload is not None
-    assert payload["interfaces_by_bay"]["1"] == ["Te1/0/1"]
+    assert payload["members"][None]["interfaces_by_bay"]["1"] == ["Te1/0/1"]
 
 
 def test_to_payload_rejects_non_iterable_ifnames_value() -> None:
-    """
-    A non-list value in interfaces_by_bay is warn-dropped, not iterated.
-
-    The helper used to iterate the value blindly, which would TypeError
-    on None or an int. Non-list values now degrade to an empty list for
-    that bay so to_payload remains forgiving of buggy driver shapes.
-    """
-    payload = to_payload(
-        [_bay("1")],
-        interfaces_by_bay={"1": None, "2": 42, "3": ["Te3/0/1"]},  # type: ignore[dict-item]
-    )
+    """A non-list value in interfaces_by_bay is warn-dropped to an empty list."""
+    payload = to_payload({
+        None: MemberModules(
+            bays=[_bay("1")],
+            interfaces_by_bay={"1": None, "2": 42, "3": ["Te3/0/1"]},  # type: ignore[dict-item]
+        ),
+    })
     assert payload is not None
-    assert payload["interfaces_by_bay"] == {"1": [], "2": [], "3": ["Te3/0/1"]}
+    assert payload["members"][None]["interfaces_by_bay"] == {
+        "1": [], "2": [], "3": ["Te3/0/1"],
+    }
 
 
 def test_to_payload_keeps_subbay_at_depth_2() -> None:
     """Cisco shape: chassis → linecard → transceiver. Depth 2."""
     transceiver = _bay("Te1/0/1", serial="SFP_SN", mtype="transceiver", model="SFP-10G-LR")
     linecard = _bay("1", serial="LC_SN", model="C9400-LC", sub_bays=[transceiver])
-    payload = to_payload([linecard])
+    payload = to_payload({None: MemberModules(bays=[linecard])})
     assert payload is not None
-    assert payload["bays"][0]["module"]["sub_bays"][0]["module"]["type"] == "transceiver"
+    member = payload["members"][None]
+    assert member["bays"][0]["module"]["sub_bays"][0]["module"]["type"] == "transceiver"
 
 
 def test_to_payload_keeps_subbay_at_depth_3() -> None:
@@ -146,9 +152,9 @@ def test_to_payload_keeps_subbay_at_depth_3() -> None:
     transceiver = _bay("xe-0/0/0", serial="SFP_SN", mtype="transceiver")
     pic = _bay("PIC 0", serial="PIC_SN", sub_bays=[transceiver])
     fpc = _bay("FPC 0", serial="FPC_SN", sub_bays=[pic])
-    payload = to_payload([fpc])
+    payload = to_payload({None: MemberModules(bays=[fpc])})
     assert payload is not None
-    fpc_p = payload["bays"][0]
+    fpc_p = payload["members"][None]["bays"][0]
     pic_p = fpc_p["module"]["sub_bays"][0]
     trans_p = pic_p["module"]["sub_bays"][0]
     assert trans_p["module"]["type"] == "transceiver"
@@ -160,54 +166,139 @@ def test_to_payload_drops_subbay_deeper_than_max_depth() -> None:
     leaf = _bay("level3", serial="L3", sub_bays=[too_deep])
     mid = _bay("level2", serial="L2", sub_bays=[leaf])
     top = _bay("level1", serial="L1", sub_bays=[mid])
-    payload = to_payload([top])
+    payload = to_payload({None: MemberModules(bays=[top])})
     assert payload is not None
-    top_p = payload["bays"][0]
+    top_p = payload["members"][None]["bays"][0]
     mid_p = top_p["module"]["sub_bays"][0]
     leaf_p = mid_p["module"]["sub_bays"][0]
     assert leaf_p["module"]["sub_bays"] == []
 
 
-def test_to_payload_happy_path_serialized_shape() -> None:
-    """End-to-end serialization round-trip across all fields and depth-2 nesting."""
+def test_to_payload_happy_path_serialized_shape_standalone() -> None:
+    """End-to-end shape for a standalone payload (None member key)."""
     transceiver = _bay("Te1/0/1", serial="FNS1", mtype="transceiver", model="SFP-10G-LR",
                        description="10GBASE-LR")
     linecard = _bay("1", serial="FOC1", model="C9400-LC-48U",
                     description="48-port UPOE+ line card", sub_bays=[transceiver])
-    payload = to_payload([linecard], interfaces_by_bay={"1": ["Te1/0/1", "Te1/0/2"]})
+    payload = to_payload({
+        None: MemberModules(
+            bays=[linecard],
+            interfaces_by_bay={"1": ["Te1/0/1", "Te1/0/2"]},
+        ),
+    })
     assert payload == {
-        "bays": [
-            {
-                "name": "1",
-                "position": "1",
-                "module": {
-                    "model": "C9400-LC-48U",
-                    "serial": "FOC1",
-                    "description": "48-port UPOE+ line card",
-                    "type": "linecard",
-                    "sub_bays": [
-                        {
-                            "name": "Te1/0/1",
-                            "position": "Te1/0/1",
-                            "module": {
-                                "model": "SFP-10G-LR",
-                                "serial": "FNS1",
-                                "description": "10GBASE-LR",
-                                "type": "transceiver",
-                                "sub_bays": [],
-                            },
+        "members": {
+            None: {
+                "bays": [
+                    {
+                        "name": "1",
+                        "position": "1",
+                        "module": {
+                            "model": "C9400-LC-48U",
+                            "serial": "FOC1",
+                            "description": "48-port UPOE+ line card",
+                            "type": "linecard",
+                            "sub_bays": [
+                                {
+                                    "name": "Te1/0/1",
+                                    "position": "Te1/0/1",
+                                    "module": {
+                                        "model": "SFP-10G-LR",
+                                        "serial": "FNS1",
+                                        "description": "10GBASE-LR",
+                                        "type": "transceiver",
+                                        "sub_bays": [],
+                                    },
+                                },
+                            ],
                         },
-                    ],
-                },
+                    },
+                ],
+                "interfaces_by_bay": {"1": ["Te1/0/1", "Te1/0/2"]},
             },
-        ],
-        "interfaces_by_bay": {"1": ["Te1/0/1", "Te1/0/2"]},
+        },
     }
+
+
+def test_to_payload_vc_two_members_each_with_bays() -> None:
+    """VC envelope with two members, each carrying one valid bay."""
+    payload = to_payload({
+        1: MemberModules(
+            bays=[_bay("1", serial="SN1", model="C9300-NM-8X")],
+            interfaces_by_bay={"1": ["Te1/1/1", "Te1/1/2"]},
+        ),
+        2: MemberModules(
+            bays=[_bay("1", serial="SN2", model="C9300-NM-8X")],
+            interfaces_by_bay={"1": ["Te2/1/1", "Te2/1/2"]},
+        ),
+    })
+    assert payload is not None
+    assert set(payload["members"].keys()) == {1, 2}
+    assert payload["members"][1]["bays"][0]["module"]["serial"] == "SN1"
+    assert payload["members"][2]["bays"][0]["module"]["serial"] == "SN2"
+    assert payload["members"][1]["interfaces_by_bay"]["1"] == ["Te1/1/1", "Te1/1/2"]
+    assert payload["members"][2]["interfaces_by_bay"]["1"] == ["Te2/1/1", "Te2/1/2"]
+
+
+def test_to_payload_vc_drops_member_with_no_valid_bays() -> None:
+    """A VC member whose every bay is invalid is dropped; siblings survive."""
+    payload = to_payload({
+        1: MemberModules(bays=[_bay("1", serial="")]),  # all invalid
+        2: MemberModules(bays=[_bay("1", serial="OK2")]),
+    })
+    assert payload is not None
+    assert list(payload["members"].keys()) == [2]
+
+
+def test_to_payload_vc_returns_none_when_no_member_survives() -> None:
+    """Every member's bays drop → returns None."""
+    payload = to_payload({
+        1: MemberModules(bays=[_bay("1", serial="")]),
+        2: MemberModules(bays=[_bay("1", serial="")]),
+    })
+    assert payload is None
 
 
 def test_max_bay_depth_is_three() -> None:
     """Sanity-pin the depth-3 contract — change with intent."""
     assert MAX_BAY_DEPTH == 3
+
+
+# ---- _load_expected normalizer ------------------------------------------
+#
+# The base test harness rewrites JSON's string ``"null"`` member keys back
+# to Python ``None`` so fixture comparisons work. Pinned here because the
+# normalizer exists to make module-discovery fixtures round-trip.
+
+
+def test_load_expected_normalizes_null_member_key(tmp_path):
+    """Loader rewrites JSON's string `"null"` member key back to Python None."""
+    from tests.custom_drivers.base_test import _load_expected
+    fixture = tmp_path / "test_x" / "scenario_y"
+    fixture.mkdir(parents=True)
+    (fixture / "expected_result.json").write_text(
+        '{"members": {"null": {"bays": []}}}', encoding="utf-8",
+    )
+    loaded = _load_expected(fixture)
+    assert None in loaded["members"]
+    assert "null" not in loaded["members"]
+
+
+def test_normalize_null_member_keys_handles_nested_list_of_dicts():
+    """The recursive walk descends through lists-of-dicts and rewrites nested 'null' keys."""
+    from tests.custom_drivers.base_test import _normalize_null_member_keys
+    raw = {
+        "members": {
+            "null": {
+                "bays": [
+                    {"name": "1", "module": {"sub_bays": [{"null": "ignored"}]}},
+                ],
+            },
+        },
+    }
+    out = _normalize_null_member_keys(raw)
+    assert None in out["members"]
+    assert None in out["members"][None]["bays"][0]["module"]["sub_bays"][0]
 
 
 # ---- classify_module_type_cisco -----------------------------------------

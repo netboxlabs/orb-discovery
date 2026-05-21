@@ -1,53 +1,45 @@
 # Copyright 2026 NetBox Labs Inc
 """
-Generic, vendor-neutral helper for modular-chassis Module / ModuleBay discovery.
+Generic, vendor-neutral helper for modular-chassis module / module-bay discovery.
 
-Each driver's optional ``get_modules()`` builds a list of
-:class:`ModuleBay` (vendor-neutral intermediates), drops bays whose
-serial / type fails validation, and wraps the result with
-:func:`to_payload`. The translate layer
-(``device_discovery.translate_modules``) consumes the payload and
-emits NetBox ``dcim.modulebay`` + ``dcim.module`` entities (plus
-recursive sub-bays in ``full`` mode).
+Each driver's optional ``get_modules()`` returns a single canonical envelope
+keyed by member id. Standalone modular chassis use one bucket keyed ``None``;
+virtual-chassis-of-modular deployments use one bucket per validated member id.
 
-Output payload shape (consumed by translate)::
+Envelope shape::
 
     {
-        "bays": [
-            {
-                "name": "1", "position": "1",
-                "module": {
-                    "model": "...", "serial": "...",
-                    "description": "...", "type": "linecard",
-                    "sub_bays": [...],            # recursive, depth-3 cap
-                },
+        "members": {
+            member_id_or_None: {
+                "bays": [
+                    {
+                        "name": "1", "position": "1",
+                        "module": {
+                            "model": "...", "serial": "...",
+                            "description": "...", "type": "linecard",
+                            "sub_bays": [...],            # recursive, depth-3 cap
+                        },
+                    },
+                    ...
+                ],
+                "interfaces_by_bay": {"1": ["Te1/0/1", ...]},
             },
             ...
-        ],
-        "interfaces_by_bay": {"1": ["Te1/0/1", ...]},
+        },
     }
 
-Returning ``None`` (no valid bays after validation) signals the
-translate layer to keep the existing single-Device path. The helper
-never raises on data shape — bad rows are warn-dropped, matching the
-forgiving behavior of ``_chassis.py``.
+Returning ``None`` (no surviving member) signals the translate layer to keep
+the existing single-Device path. The helper never raises on data shape — bad
+rows are warn-dropped, matching the forgiving behavior of ``_chassis.py``.
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import Literal
 
 logger = logging.getLogger(__name__)
-
-# A 4-tuple Cisco-style ifname like "HundredGigE1/2/0/1" — used to detect
-# and reject VC-of-modular routing keys at the helper boundary so the
-# translator never sees them. Standalone-modular chassis use 2- or 3-tuple
-# names; the 4-tuple form encodes member id in the first slot and belongs
-# to the deferred stacked-modular composition work.
-_CISCO_4TUPLE_RE = re.compile(r"^[A-Za-z]+\d+/\d+/\d+/\d+$")
 
 
 ModuleType = Literal["linecard", "supervisor", "fan", "psu", "transceiver"]
@@ -56,9 +48,8 @@ _VALID_TYPES: frozenset[str] = frozenset(
 )
 
 #: Hard depth cap for recursive sub-bay nesting. Cisco modular chassis are
-#: depth 2 (chassis -> linecard -> transceiver); Junos is depth 3 (chassis
-#: -> FPC -> PIC -> transceiver). Anything deeper is rejected with a
-#: warning.
+#: depth 2 (chassis → linecard → transceiver); Junos is depth 3 (chassis
+#: → FPC → PIC → transceiver). Anything deeper is rejected with a warning.
 MAX_BAY_DEPTH = 3
 
 
@@ -78,15 +69,21 @@ class ModuleBay:
     """
     One slot in a chassis (or in a parent module) that holds a Module.
 
-    Empty bays (``module is None``) are NOT emitted to NetBox today —
-    operators wanting empty-bay layouts pre-populate via the
-    devicetype-library templates. Empty entries here are skipped during
-    payload construction.
+    Empty bays (``module is None``) are not emitted — operators wanting
+    empty-bay layouts pre-populate via the devicetype-library templates.
     """
 
     name: str
     position: str
     module: ModuleEntry | None
+
+
+@dataclass
+class MemberModules:
+    """Per-member bundle: the bays installed in this member and how to route ifnames into them."""
+
+    bays: list[ModuleBay]
+    interfaces_by_bay: dict[str, list[str]] = field(default_factory=dict)
 
 
 # ---- module-type classifiers --------------------------------------------
@@ -116,11 +113,7 @@ _CISCO_TRANSCEIVER_PREFIXES = (
 
 
 def classify_module_type_cisco(pid: str) -> ModuleType:
-    """
-    Map a Cisco PID/model string to a ``ModuleType`` enum value.
-
-    v1: distinguish transceiver; default everything else to ``"linecard"``.
-    """
+    """Map a Cisco PID/model string to a ModuleType. v1: distinguish transceiver."""
     if not pid:
         return "linecard"
     upper = pid.upper()
@@ -130,11 +123,7 @@ def classify_module_type_cisco(pid: str) -> ModuleType:
 
 
 def classify_module_type_junos(description: str) -> ModuleType:
-    """
-    Map a Junos description string to a ``ModuleType`` enum value.
-
-    v1: distinguish transceiver; default everything else to ``"linecard"``.
-    """
+    """Map a Junos description string to a ModuleType. v1: distinguish transceiver."""
     if not description:
         return "linecard"
     lower = description.lower()
@@ -146,27 +135,32 @@ def classify_module_type_junos(description: str) -> ModuleType:
 # ---- payload assembly ----------------------------------------------------
 
 
-def to_payload(
-    bays: list[ModuleBay],
-    interfaces_by_bay: dict[str, list[str]] | None = None,
-) -> dict | None:
+def to_payload(members: dict[int | None, MemberModules]) -> dict | None:
     """
-    Validate ``bays`` + ``interfaces_by_bay``, return the wire payload.
+    Validate and serialize a per-member envelope. Returns None if no member survives.
 
-    Returns ``None`` when no bay survives validation — drivers pass this
-    straight through to signal "fall back to single-Device path." The
-    helper never raises on data shape; every drop reason is logged at
-    WARNING. Mirrors ``_chassis.to_payload`` forgiveness.
+    Each member's bays are independently validated (serial / type / depth-3
+    cap). A member whose every bay is dropped is itself dropped from the
+    result. When every member drops, returns None — the driver passes that
+    straight through.
     """
-    validated = [b for b in (_validate_bay(bay, depth=1) for bay in bays) if b]
-    if not validated:
+    out_members: dict[int | None, dict] = {}
+    for member_id, payload in members.items():
+        validated = [b for b in (_validate_bay(bay, depth=1) for bay in payload.bays) if b]
+        if not validated:
+            continue
+        cleaned_ifaces = _validate_interfaces_by_bay(payload.interfaces_by_bay or {})
+        out_members[member_id] = {
+            "bays": validated,
+            "interfaces_by_bay": cleaned_ifaces,
+        }
+    if not out_members:
         return None
-    cleaned_ifaces = _validate_interfaces_by_bay(interfaces_by_bay or {})
-    return {"bays": validated, "interfaces_by_bay": cleaned_ifaces}
+    return {"members": out_members}
 
 
 def _validate_bay(bay: ModuleBay, *, depth: int) -> dict | None:
-    """Recursively validate a single ``ModuleBay``. Returns serialized dict or None."""
+    """Recursively validate one ModuleBay. Returns serialized dict or None."""
     if depth > MAX_BAY_DEPTH:
         logger.warning(
             "module bay dropped: nested deeper than depth %d",
@@ -210,11 +204,13 @@ def _validate_interfaces_by_bay(
     interfaces_by_bay: dict[str, list[str]],
 ) -> dict[str, list[str]]:
     """
-    Dedupe and reject 4-tuple Cisco ifnames (VC-of-modular territory).
+    Dedupe ifnames within each bay; warn-drop non-list values and non-string entries.
 
-    Non-string entries (a buggy driver returning ``None`` or an int) are
-    warn-dropped before the regex match, so this helper upholds the
-    ``to_payload`` docstring promise of never raising on data shape.
+    The 4-tuple ifname rejection that lived here in the standalone-only
+    revision is removed — SVL deployments emit ifnames like
+    ``HundredGigE1/2/0/1`` whose leading integer is the member id, and
+    those are valid input now. Translator-side routing parses the member
+    id at emission time.
     """
     cleaned: dict[str, list[str]] = {}
     for bay_name, ifnames in interfaces_by_bay.items():
@@ -236,13 +232,6 @@ def _validate_interfaces_by_bay(
                 )
                 continue
             if name in seen:
-                continue
-            if _CISCO_4TUPLE_RE.match(name):
-                logger.warning(
-                    "interfaces_by_bay entry dropped: Cisco 4-tuple ifname "
-                    "(VC-of-modular is deferred to a follow-up)",
-                    extra={"bay_name": bay_name, "ifname": name},
-                )
                 continue
             seen.add(name)
             keep.append(name)
