@@ -358,6 +358,63 @@ func TestPruneNestedRefs_StubsModuleBayAndInterfaceModule(t *testing.T) {
 		"Interface.Module must be reduced to matcher-only — no ModuleType")
 }
 
+// TestPruneNestedRefs_InterfaceModuleSerialNilCleared — an
+// Interface.Module reduced to {Device, Serial: nil} carries no
+// identifier and is useless for matching. Rather than ship an
+// ambiguous stub, the pruner must clear the ref entirely so the
+// top-level Module entity remains the only wire representation.
+func TestPruneNestedRefs_InterfaceModuleSerialNilCleared(t *testing.T) {
+	rich := &diode.Device{
+		Name:   strPtr("sw1"),
+		Site:   &diode.Site{Name: strPtr("dc1")},
+		Serial: strPtr("FCW123"),
+	}
+	// Transceiver Module without a Serial — common for vendors that omit
+	// optic serial on entPhysicalSerialNum.
+	transceiver := &diode.Module{
+		Device: rich,
+		ModuleType: &diode.ModuleType{
+			Model:        strPtr("SFP-10G-LR"),
+			Manufacturer: &diode.Manufacturer{Name: strPtr("Cisco")},
+		},
+	}
+	iface := &diode.Interface{
+		Name:   strPtr("Gi1/0/1"),
+		Device: rich,
+		Module: transceiver,
+	}
+	entities := []diode.Entity{rich, transceiver, iface}
+
+	PruneNestedRefs(entities, rich)
+
+	assert.Nil(t, iface.Module,
+		"Interface.Module must be cleared when its Serial is nil — an identifier-less stub would be ambiguous")
+}
+
+// TestPruneNestedRefs_InterfaceModuleEmptyStringSerialCleared — same
+// behaviour for a pointer-to-empty-string Serial: still no identifier,
+// so still clear the ref.
+func TestPruneNestedRefs_InterfaceModuleEmptyStringSerialCleared(t *testing.T) {
+	rich := &diode.Device{
+		Name: strPtr("sw1"),
+		Site: &diode.Site{Name: strPtr("dc1")},
+	}
+	empty := ""
+	transceiver := &diode.Module{
+		Device: rich,
+		Serial: &empty,
+	}
+	iface := &diode.Interface{
+		Name:   strPtr("Gi1/0/1"),
+		Device: rich,
+		Module: transceiver,
+	}
+	PruneNestedRefs([]diode.Entity{rich, transceiver, iface}, rich)
+
+	assert.Nil(t, iface.Module,
+		"Interface.Module must be cleared when Serial points at the empty string")
+}
+
 // strDerefSafe — tiny test helper for safe *string deref.
 func strDerefSafe(p *string) string {
 	if p == nil {

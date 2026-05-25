@@ -268,11 +268,19 @@ func PruneNestedRefs(entities []diode.Entity, currentDevice *diode.Device) {
 			}
 			if e.Module != nil {
 				// Reduce nested Interface.Module to matcher-only fields
-				// (Name + Serial via Device stub); the top-level Module
-				// entity carries the full record.
-				e.Module = &diode.Module{
-					Device: stubFor(e.Module.Device),
-					Serial: e.Module.Serial,
+				// (Device stub + Serial); the top-level Module entity
+				// carries the full record. If Serial is missing the
+				// stub would be identifier-less (no field for Diode to
+				// match against, and the Device alone is not unique
+				// across multiple modules on the same device) — clear
+				// the ref entirely rather than ship an ambiguous stub.
+				if e.Module.Serial == nil || *e.Module.Serial == "" {
+					e.Module = nil
+				} else {
+					e.Module = &diode.Module{
+						Device: stubFor(e.Module.Device),
+						Serial: e.Module.Serial,
+					}
 				}
 			}
 		case *diode.IPAddress:
