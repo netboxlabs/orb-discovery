@@ -411,13 +411,28 @@ func isPSUPID(upper string) bool {
 }
 
 // isFanPID recognises fan-tray PIDs on an already upper-cased PID.
-// Covers bare prefix (FAN, FAN-T1-R) and model-prefixed Cisco forms
-// where -FAN appears as suffix or middle token (C9400-FAN, C9404R-FAN-2).
+// Tightened to require -FAN as a delimited token (suffix, or followed
+// by a digit) so embedded substrings like C9400-FANTOM-LC do not match.
+// Accepts: FAN-* prefix, FAN<digit> prefix, -FAN suffix, -FAN-<digit>.
 func isFanPID(upper string) bool {
-	if strings.HasPrefix(upper, "FAN") {
+	if upper == "" {
+		return false
+	}
+	if strings.HasPrefix(upper, "FAN-") {
 		return true
 	}
-	if strings.Contains(upper, "-FAN") {
+	if strings.HasSuffix(upper, "-FAN") {
+		return true
+	}
+	// -FAN- followed by a digit (model-suffixed pattern: -FAN-2, -FAN-2KW)
+	if idx := strings.Index(upper, "-FAN-"); idx >= 0 {
+		rest := upper[idx+len("-FAN-"):]
+		if rest != "" && rest[0] >= '0' && rest[0] <= '9' {
+			return true
+		}
+	}
+	// Bare FAN followed by a digit (FAN1, FAN2T)
+	if strings.HasPrefix(upper, "FAN") && len(upper) > 3 && upper[3] >= '0' && upper[3] <= '9' {
 		return true
 	}
 	return false

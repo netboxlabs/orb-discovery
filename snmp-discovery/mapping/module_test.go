@@ -81,6 +81,10 @@ func TestClassifyModule(t *testing.T) {
 		{"fan -FAN suffix", "C9400-FAN", "", false, ModuleTypeFan},
 		{"fan -FAN middle token", "C9404R-FAN-2", "", false, ModuleTypeFan},
 
+		// Negative: fanless linecard PID embeds the substring "-FAN" but
+		// must not be misclassified as a fan tray.
+		{"fanless_linecard_not_mismatched_as_fan", "C9400-FANTOM-LC", "", false, ModuleTypeLinecard},
+
 		// Model-prefixed Cisco PSU PIDs — `-PWR-` / `-PSU-` as middle token.
 		{"psu -PWR- middle token", "C9404R-PWR-2KW-AC", "", false, ModuleTypePSU},
 
