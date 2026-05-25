@@ -544,6 +544,70 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 	entitiesForTarget := mapper.MapObjectIDsToEntity(oids)
 	ifIndexByIface := mapper.InterfacesByIfIndex()
 	entitiesForTarget = mapping.TranslateAsStack(entitiesForTarget, oids, ifIndexByIface, r.logger)
+
+	// Module / module bay emission. Opt-in via options.discover_modules
+	// (default = off -> zero behaviour change). Reuses the chassis-path
+	// entAliasMappingTable index for iface <-> transceiver attachment.
+	//
+	// Diode ingest ordering contract:
+	//   Device(s) -> module bay + module -> Interface -> IP -> MAC -> VLAN
+	//
+	// TranslateAsStack already partitioned entitiesForTarget into that
+	// bucket order, but module entities land in their OWN bucket — naively
+	// appending them would leave them at the tail and break ifaceModuleMap
+	// attachment (Interfaces would appear BEFORE the Modules they reference).
+	// Fix: partition-and-prepend. Find the first non-Device/non-VC index in
+	// entitiesForTarget and splice moduleEntities there.
+	{
+		chassisInv := mapping.ChassisInventoryFromEntities(entitiesForTarget, oids, r.logger)
+		memberDevices := mapping.MemberDevicesFromEntities(entitiesForTarget, chassisInv)
+		aliasMap := mapping.AliasMapFromOIDs(oids)
+		ifIndexToName := mapping.IfNameByIfIndex(ifIndexByIface)
+
+		moduleEntities, ifaceModuleMap := mapping.TranslateModulesWithAlias(
+			oids, chassisInv, memberDevices,
+			&r.config.Options, targetDefaults,
+			r.logger, aliasMap, ifIndexToName,
+		)
+
+		if len(moduleEntities) > 0 {
+			// Devices + VC sit at the head; everything else gets
+			// pushed back by the prepend.
+			splice := len(entitiesForTarget)
+			for i, e := range entitiesForTarget {
+				switch e.(type) {
+				case *diode.Device, *diode.VirtualChassis:
+					continue
+				default:
+					splice = i
+				}
+				if splice < len(entitiesForTarget) {
+					break
+				}
+			}
+			merged := make([]diode.Entity, 0,
+				len(entitiesForTarget)+len(moduleEntities))
+			merged = append(merged, entitiesForTarget[:splice]...)
+			merged = append(merged, moduleEntities...)
+			merged = append(merged, entitiesForTarget[splice:]...)
+			entitiesForTarget = merged
+		}
+
+		// Attach Interface.Module on physical-port Interfaces for `full` mode.
+		// Order-safe because modules now precede interfaces in the slice.
+		if len(ifaceModuleMap) > 0 {
+			for _, e := range entitiesForTarget {
+				iface, ok := e.(*diode.Interface)
+				if !ok || iface.Name == nil {
+					continue
+				}
+				if mod, hit := ifaceModuleMap[*iface.Name]; hit {
+					iface.Module = mod
+				}
+			}
+		}
+	}
+
 	entities = append(entities, entitiesForTarget...)
 
 	// Update discovered hosts gauge

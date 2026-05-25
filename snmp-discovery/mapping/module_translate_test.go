@@ -371,3 +371,61 @@ func TestTranslateModulesWithAlias_VCOfModular_DispatchesPerMember(t *testing.T)
 	assert.Same(t, member2, lc2Mod.Device,
 		"linecard under chassis 1000 (member 2) routes to member-2 device")
 }
+
+// TestTranslateModulesWithAlias_ModulesPrecedeInterfacesAfterSplice pins
+// the Diode ingest ordering contract honoured by the runner's
+// partition-and-prepend splice (policy/runner.go in queryTarget): every
+// *diode.Module / *diode.ModuleBay index must be < every *diode.Interface
+// index in the merged slice. The splice logic is duplicated here
+// inline — keeping the test in the mapping package avoids runner-test
+// setup overhead while still exercising the exact same algorithm.
+func TestTranslateModulesWithAlias_ModulesPrecedeInterfacesAfterSplice(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	dev := &diode.Device{Name: strPtr("test-router")}
+	iface1 := &diode.Interface{Name: strPtr("Gi1/0/1"), Device: dev}
+	iface2 := &diode.Interface{Name: strPtr("Gi1/0/2"), Device: dev}
+	entitiesForTarget := []diode.Entity{dev, iface1, iface2}
+
+	oids := buildOIDs(chassis9404RWithTransceiversFixture())
+	memberDevices := map[int]*diode.Device{0: dev}
+
+	moduleEntities, _ := TranslateModulesWithAlias(
+		oids, nil, memberDevices, modeLinecards(), nil, logger, nil, nil,
+	)
+	require.NotEmpty(t, moduleEntities)
+
+	// Mirrors runner.go's splice: find the first non-Device/non-VC index,
+	// splice moduleEntities there.
+	splice := len(entitiesForTarget)
+	for i, e := range entitiesForTarget {
+		switch e.(type) {
+		case *diode.Device, *diode.VirtualChassis:
+			continue
+		default:
+			splice = i
+		}
+		if splice < len(entitiesForTarget) {
+			break
+		}
+	}
+	merged := append([]diode.Entity{}, entitiesForTarget[:splice]...)
+	merged = append(merged, moduleEntities...)
+	merged = append(merged, entitiesForTarget[splice:]...)
+
+	firstIface := -1
+	lastModule := -1
+	for i, e := range merged {
+		switch e.(type) {
+		case *diode.Module, *diode.ModuleBay:
+			lastModule = i
+		case *diode.Interface:
+			if firstIface == -1 {
+				firstIface = i
+			}
+		}
+	}
+	require.GreaterOrEqual(t, firstIface, 0, "no Interface in merged slice")
+	require.GreaterOrEqual(t, lastModule, 0, "no Module/ModuleBay in merged slice")
+	assert.Less(t, lastModule, firstIface,
+		"Module/ModuleBay must precede Interface — Diode ingest contract")
+}
