@@ -11,6 +11,8 @@ package mapping
 import (
 	"log/slog"
 	"strings"
+
+	"github.com/netboxlabs/diode-sdk-go/diode"
 )
 
 // assignMemberID stamps each ModuleEntry in inv with the logical member
@@ -100,4 +102,49 @@ func assignMemberID(inv *ModuleInventory, chassisInv *ChassisInventory, oids Obj
 	for i := range inv.EmptyBays {
 		stamp(&inv.EmptyBays[i])
 	}
+}
+
+// buildIfaceModuleMap builds the {ifName -> *diode.Module} lookup the
+// runner needs to set Interface.Module on each transceiver-owning port.
+//
+// Only transceivers under inv.SubModules participate — top-level modules
+// (linecards, supervisors) aren't single-port entities and don't route
+// to an ifName. For each transceiver:
+//
+//  1. aliasMap[EntIndex] gives the ifIndex (as set up upstream by the
+//     entAliasMappingTable walk).
+//  2. ifIndexToName[ifIndex] gives the canonical ifName.
+//  3. emittedModules[EntIndex] is the *diode.Module the translator
+//     already produced; this map points the ifName at it.
+//
+// Any step that misses simply skips the transceiver — partial coverage
+// is normal (optic with no alias-table row, port-channel placeholder, etc.).
+func buildIfaceModuleMap(
+	inv ModuleInventory,
+	aliasMap map[string]string,
+	ifIndexToName map[string]string,
+	emittedModules map[string]*diode.Module,
+) map[string]*diode.Module {
+	out := make(map[string]*diode.Module)
+	for _, list := range inv.SubModules {
+		for _, e := range list {
+			if e.Type != ModuleTypeTransceiver {
+				continue
+			}
+			ifIdx, ok := aliasMap[e.EntIndex]
+			if !ok {
+				continue
+			}
+			ifName, ok := ifIndexToName[ifIdx]
+			if !ok {
+				continue
+			}
+			mod, ok := emittedModules[e.EntIndex]
+			if !ok {
+				continue
+			}
+			out[ifName] = mod
+		}
+	}
+	return out
 }

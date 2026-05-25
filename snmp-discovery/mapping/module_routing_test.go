@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -163,5 +164,56 @@ func TestAssignMemberID_VCMasterKeyedByLowestMemberID(t *testing.T) {
 	require.Len(t, inv.Modules, 1)
 	assert.Equal(t, 1, inv.Modules[0].MemberID,
 		"module under master chassis must carry the lowest member id (1), not 0")
+}
+
+// --- buildIfaceModuleMap tests ---
+
+// TestBuildIfaceModuleMap_HappyPath — transceiver EntIndex "203" routes
+// through aliasMap -> ifIndex "10101" -> ifIndexToName -> "Gi1/0/1".
+// The emitted Module at emittedModules["203"] must appear keyed by
+// "Gi1/0/1" in the result so the runner can later set Interface.Module.
+func TestBuildIfaceModuleMap_HappyPath(t *testing.T) {
+	inv := newModuleInventory()
+	inv.SubModules["201"] = []ModuleEntry{
+		{EntIndex: "203", Type: ModuleTypeTransceiver, ParentEntIdx: "201"},
+	}
+	aliasMap := map[string]string{"203": "10101"}
+	ifIndexToName := map[string]string{"10101": "Gi1/0/1"}
+	mod := &diode.Module{}
+	emitted := map[string]*diode.Module{"203": mod}
+
+	got := buildIfaceModuleMap(inv, aliasMap, ifIndexToName, emitted)
+
+	require.Contains(t, got, "Gi1/0/1")
+	assert.Same(t, mod, got["Gi1/0/1"], "result must point at the emittedModules entry")
+	assert.Len(t, got, 1, "only the transceiver routes; no extra keys")
+}
+
+// TestBuildIfaceModuleMap_TransceiverWithoutAliasSkipped — a transceiver
+// missing from aliasMap is silently skipped (no ifName to bind to).
+func TestBuildIfaceModuleMap_TransceiverWithoutAliasSkipped(t *testing.T) {
+	inv := newModuleInventory()
+	inv.SubModules["201"] = []ModuleEntry{
+		{EntIndex: "203", Type: ModuleTypeTransceiver, ParentEntIdx: "201"},
+	}
+	emitted := map[string]*diode.Module{"203": {}}
+
+	got := buildIfaceModuleMap(inv, map[string]string{}, map[string]string{"10101": "Gi1/0/1"}, emitted)
+
+	assert.Empty(t, got, "no aliasMap entry -> transceiver not in result")
+}
+
+// TestBuildIfaceModuleMap_TransceiverWithoutIfNameSkipped — aliasMap
+// resolves but the ifIndexToName lookup misses. Skip with no panic.
+func TestBuildIfaceModuleMap_TransceiverWithoutIfNameSkipped(t *testing.T) {
+	inv := newModuleInventory()
+	inv.SubModules["201"] = []ModuleEntry{
+		{EntIndex: "203", Type: ModuleTypeTransceiver, ParentEntIdx: "201"},
+	}
+	emitted := map[string]*diode.Module{"203": {}}
+
+	got := buildIfaceModuleMap(inv, map[string]string{"203": "10101"}, map[string]string{}, emitted)
+
+	assert.Empty(t, got, "ifIndex without an ifName entry -> transceiver not in result")
 }
 
