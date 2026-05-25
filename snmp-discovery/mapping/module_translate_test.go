@@ -306,6 +306,45 @@ func startsWith(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
+// TestTranslateModules_ModuleTypeManufacturer_SourcedFromDevice pins the
+// invariant that ModuleType.Manufacturer.Name and the metric `vendor`
+// attribute always agree — both must read from the emitted Device's
+// DeviceType.Manufacturer.Name, falling back to defaults only when the
+// device has no manufacturer set. Regression: previously emitModule
+// sourced from defaults so a device with a real Manufacturer but empty
+// defaults produced ModuleType.Manufacturer="Unknown" while the metric
+// label read the real vendor — labels diverged from emitted entities.
+func TestTranslateModules_ModuleTypeManufacturer_SourcedFromDevice(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	oids := buildOIDs(chassis9404RWithTransceiversFixture())
+	dev := &diode.Device{
+		Name: strPtr("test-router"),
+		DeviceType: &diode.DeviceType{
+			Manufacturer: &diode.Manufacturer{Name: strPtr("Cisco")},
+		},
+	}
+	memberDevices := map[int]*diode.Device{0: dev}
+	// defaults has an empty Manufacturer — the device value MUST win.
+	defaults := &config.Defaults{}
+
+	entities, _ := TranslateModules(oids, nil, memberDevices, modeLinecards(), defaults, logger)
+
+	var modules []*diode.Module
+	for _, e := range entities {
+		if m, ok := e.(*diode.Module); ok {
+			modules = append(modules, m)
+		}
+	}
+	require.NotEmpty(t, modules, "fixture must emit at least one module")
+	for _, m := range modules {
+		require.NotNil(t, m.ModuleType, "every emitted Module needs a ModuleType")
+		require.NotNil(t, m.ModuleType.Manufacturer, "ModuleType must carry Manufacturer")
+		require.NotNil(t, m.ModuleType.Manufacturer.Name)
+		assert.Equal(t, "Cisco", *m.ModuleType.Manufacturer.Name,
+			"ModuleType.Manufacturer.Name must come from the emitted Device, not defaults")
+	}
+}
+
 // TestTranslateModulesWithAlias_VCOfModular_DispatchesPerMember — pins
 // that on a virtual-chassis of two modular boxes, each member's
 // linecards are emitted under that member's *diode.Device. The walk

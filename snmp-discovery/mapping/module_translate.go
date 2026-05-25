@@ -72,8 +72,6 @@ func TranslateModulesWithAlias(
 
 	assignMemberID(&inv, chassisInv, oids, logger)
 
-	manufacturer := vendorFromDefaults(defaults)
-
 	var entities []diode.Entity
 	emittedModules := make(map[string]*diode.Module, len(inv.Modules))
 
@@ -101,7 +99,7 @@ func TranslateModulesWithAlias(
 				attribute.String("vendor", vendorFromDevice(device)),
 			))
 		}
-		mod := emitModule(device, bay, m, manufacturer)
+		mod := emitModule(device, bay, m, defaults)
 		entities = append(entities, mod)
 		if c := metrics.GetModulesEmitted(); c != nil {
 			c.Add(context.Background(), 1, metric.WithAttributes(
@@ -147,7 +145,7 @@ func TranslateModulesWithAlias(
 				))
 			}
 
-			mod := emitModule(device, subBay, tr, manufacturer)
+			mod := emitModule(device, subBay, tr, defaults)
 			entities = append(entities, mod)
 			if c := metrics.GetModulesEmitted(); c != nil {
 				c.Add(context.Background(), 1, metric.WithAttributes(
@@ -208,10 +206,15 @@ func emitModuleBay(device *diode.Device, m ModuleEntry) *diode.ModuleBay {
 
 // emitModule constructs a Module entity attached to its ModuleBay.
 // Carries Device (NetBox matching scope) and a ModuleType built from
-// the PID (Model) + the policy-level manufacturer.
-func emitModule(device *diode.Device, bay *diode.ModuleBay, m ModuleEntry, manufacturer string) *diode.Module {
+// the PID (Model) + the manufacturer resolved from the emitted Device.
+// Manufacturer precedence: Device.DeviceType.Manufacturer.Name first
+// (so the ModuleType label always matches what NetBox sees on the
+// owning device), then the policy-level defaults, finally "Unknown".
+// Sharing vendorFromDevice with the metrics path keeps the label and
+// the emitted entity identical strings.
+func emitModule(device *diode.Device, bay *diode.ModuleBay, m ModuleEntry, defaults *config.Defaults) *diode.Module {
 	model := modelOrUnknown(m.Model)
-	mfgName := manufacturer
+	mfgName := resolveModuleManufacturer(device, defaults)
 	moduleType := &diode.ModuleType{
 		Model: &model,
 		Manufacturer: &diode.Manufacturer{
@@ -267,4 +270,19 @@ func vendorFromDefaults(d *config.Defaults) string {
 		return "Unknown"
 	}
 	return d.Device.Manufacturer
+}
+
+// resolveModuleManufacturer picks the Manufacturer name to stamp on an
+// emitted ModuleType. Precedence:
+//  1. The emitted Device's DeviceType.Manufacturer.Name — keeps the
+//     ModuleType label identical to the vendor attribute used by the
+//     OTLP counters (vendorFromDevice).
+//  2. The policy-level defaults.device.manufacturer — fallback for the
+//     rare path where the device entity lacks a manufacturer.
+//  3. "Unknown" — Diode rejects empty strings on this required field.
+func resolveModuleManufacturer(device *diode.Device, defaults *config.Defaults) string {
+	if v := vendorFromDevice(device); v != "Unknown" {
+		return v
+	}
+	return vendorFromDefaults(defaults)
 }
