@@ -96,11 +96,13 @@ except Exception:
 ```
 
 **Set `mac_address = ""` only when the platform genuinely doesn't
-expose per-port MAC.** Two real cases exist:
+expose per-port MAC.** Real cases:
 - Cisco Small Business SG300 / SG350 / SG550 — one chassis MAC across
   all ports; no per-port concept.
 - Cisco AireOS WLC — most "interfaces" are virtual (mgmt / dynamic
   VLANs / AP-manager) with no L2 MAC.
+- Extreme EXOS — all ports share the system MAC by design; no
+  per-port MAC field in any standard ``show ports*`` command.
 
 For every other driver, an unsupported (`""`) MAC field is a feature
 gap, not the intended steady state — track in the supported-platforms
