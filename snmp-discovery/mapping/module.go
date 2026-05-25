@@ -12,11 +12,10 @@ import (
 	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
-
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/metrics"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // entPhysical column prefixes specific to module discovery (the rest
@@ -52,12 +51,13 @@ func (m *ChassisModuleMapper) Map(
 // transceivers) and downstream Diode emission as Module.Type.
 type ModuleType string
 
+// Module-type tags returned by classifyModule.
 const (
 	ModuleTypeLinecard    ModuleType = "linecard"
 	ModuleTypeSupervisor  ModuleType = "supervisor"
 	ModuleTypeTransceiver ModuleType = "transceiver"
-	ModuleTypePSU         ModuleType = "psu"     // classified for labelling only; never emitted as a module entity
-	ModuleTypeFan         ModuleType = "fan"     // classified for labelling only; never emitted as a module entity
+	ModuleTypePSU         ModuleType = "psu" // classified for labelling only; never emitted as a module entity
+	ModuleTypeFan         ModuleType = "fan" // classified for labelling only; never emitted as a module entity
 	ModuleTypeUnknown     ModuleType = "unknown"
 )
 

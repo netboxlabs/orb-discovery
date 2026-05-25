@@ -8,10 +8,9 @@ import (
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 )
 
 // modeOff / modeLinecards / modeFull return *config.Options with the

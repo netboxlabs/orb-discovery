@@ -313,4 +313,3 @@ func TestChassisInventoryFromEntities_WrapsExtractInventory(t *testing.T) {
 	assert.Equal(t, 1, inv.Members[0].ID,
 		"master member ID is lowest present in fixture (parentRelPos=1)")
 }
-

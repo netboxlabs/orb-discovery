@@ -21,11 +21,10 @@ import (
 	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
-
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/metrics"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // TranslateModules is a thin wrapper for callers without alias data —
