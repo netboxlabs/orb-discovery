@@ -306,3 +306,68 @@ func TestTranslateModules_SubBayWorkaround_NotLinkedToParentLinecard(t *testing.
 func startsWith(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
+
+// TestTranslateModulesWithAlias_VCOfModular_DispatchesPerMember — pins
+// that on a virtual-chassis of two modular boxes, each member's
+// linecards are emitted under that member's *diode.Device. The walk
+// chains module 101 → bay 100 → chassis 1 (member 1) and module 1001 →
+// bay 1000 → chassis 1000 (member 2). MemberID is stamped by
+// assignMemberID and the translator routes via memberDevices[MemberID].
+func TestTranslateModulesWithAlias_VCOfModular_DispatchesPerMember(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	// 2-member VC: each member chassis owns a slot + linecard.
+	rows := []fixtureRow{
+		// Member 1 chassis (EntPhysicalIndex "1")
+		{"1", "0", "3", "1", "Switch1 Chassis", "FCW2401SW01", "C9410R", "", ""},
+		{"100", "1", "5", "1", "Slot 1", "", "", "", ""},
+		{"101", "100", "9", "1", "LC1", "JAE24010LC1", "C9400-LC-48U", "", ""},
+		// Member 2 chassis (EntPhysicalIndex "1000")
+		{"1000", "0", "3", "2", "Switch2 Chassis", "FCW2401SW02", "C9410R", "", ""},
+		{"1100", "1000", "5", "1", "Slot 1", "", "", "", ""},
+		{"1101", "1100", "9", "1", "LC2", "JAE24010LC2", "C9400-LC-48U", "", ""},
+	}
+	chassisInv := &ChassisInventory{
+		Members: []ChassisMember{
+			{ID: 1, EntPhysicalIndex: "1", Serial: "FCW2401SW01", Model: "C9410R"},
+			{ID: 2, EntPhysicalIndex: "1000", Serial: "FCW2401SW02", Model: "C9410R"},
+		},
+	}
+
+	master := &diode.Device{Name: strPtr("vc-master")}
+	pos2 := int64(2)
+	member2 := &diode.Device{Name: strPtr("vc-member-2"), VcPosition: &pos2}
+	// Master is keyed by lowest member ID (Members[0].ID == 1) to match
+	// chassis.go's memberByID[lowest.ID] = master convention.
+	memberDevices := map[int]*diode.Device{1: master, 2: member2}
+
+	entities, _ := TranslateModulesWithAlias(
+		buildOIDs(rows), chassisInv, memberDevices,
+		modeLinecards(), nil, logger, nil, nil,
+	)
+
+	var modules []*diode.Module
+	for _, e := range entities {
+		if m, ok := e.(*diode.Module); ok {
+			modules = append(modules, m)
+		}
+	}
+	require.Len(t, modules, 2, "one linecard per VC member")
+
+	var lc1Mod, lc2Mod *diode.Module
+	for _, m := range modules {
+		require.NotNil(t, m.Serial)
+		switch *m.Serial {
+		case "JAE24010LC1":
+			lc1Mod = m
+		case "JAE24010LC2":
+			lc2Mod = m
+		}
+	}
+	require.NotNil(t, lc1Mod, "linecard under chassis 1 must be emitted")
+	require.NotNil(t, lc2Mod, "linecard under chassis 1000 must be emitted")
+	assert.Same(t, master, lc1Mod.Device,
+		"linecard under chassis 1 (member 1) routes to master device")
+	assert.Same(t, member2, lc2Mod.Device,
+		"linecard under chassis 1000 (member 2) routes to member-2 device")
+}
