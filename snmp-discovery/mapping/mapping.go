@@ -293,6 +293,11 @@ const (
 	// associated mapper is a no-op; data flows via the raw oids map
 	// passed to TranslateAsStack.
 	ChassisInventoryEntityType EntityType = "chassis_inventory"
+	// ChassisModuleEntityType is a pseudo-entity that flags ENTITY-MIB
+	// rows (entPhysicalDescr, entPhysicalVendorType) for consumption by
+	// TranslateModulesWithAlias as a post-pass. Map() on its associated
+	// mapper is a no-op; data flows via the raw oids map.
+	ChassisModuleEntityType EntityType = "chassis_module"
 )
 
 // ObjectIDMapper is a struct that maps ObjectIDs to entities
@@ -431,6 +436,7 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 		"vlan":                             vlanMapper,
 		"interface_vlan":                   vlanMapper,
 		string(ChassisInventoryEntityType): &ChassisInventoryMapper{logger: logger},
+		string(ChassisModuleEntityType):    &ChassisModuleMapper{logger: logger},
 	}
 	postPassMappers := []postPassMapper{vlanMapper}
 	// Validate index_kind on every entry (top-level and nested). A typo
