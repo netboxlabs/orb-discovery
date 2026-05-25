@@ -169,7 +169,8 @@ _INTF_BRIEF_RE = re.compile(
 )
 
 # --- show interface (no-arg) MAC parser ------------------------------------ #
-# SLX-OS ``show interface ethernet`` emits one multi-line block per port:
+# SLX-OS ``show interface`` (no port-arg — the command get_interfaces issues)
+# emits one multi-line block per port:
 #
 #   Ethernet 0/1 is up, line protocol is up (connected)
 #   Hardware is Ethernet, address is 6cb1.580f.b900 (bia 6cb1.580f.b900)
