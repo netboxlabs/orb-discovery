@@ -163,9 +163,32 @@ Common pitfalls:
 **Platforms that DON'T expose L3 sub-interfaces** (legitimate
 `mac_address=""`-style cases — emit only physical entries):
 - Pure L2 switches (Cisco SG300, AireOS WLC, ProCurve, AOS-Switch,
-  EXOS, etc.)
+  EXOS, EdgeSwitch / UniFi Switch, Mellanox MLNX-OS / Onyx, etc.)
 - Platforms that route via VLAN-interfaces only (Avaya ERS, Brocade
-  FastIron / NetIron `ve N`, OmniSwitch, etc.)
+  FastIron / NetIron `ve N`, OmniSwitch, ArubaOS controllers — the
+  `aruba_os` driver covers ArubaOS MM/MC where the L3 model is
+  `vlan N` + `loopback`, never `port.N`).
+- Ciena SAOS (port IDs are bare numbers / LAG names; traffic is
+  handled via VLAN-based services, not `parent.sub` naming).
+- Cisco FXOS (the Firepower chassis-management layer — L3
+  sub-interfaces live in the FTD / ASA running on top, not in FXOS
+  itself).
+- Cisco ACI APIC (port profiles + encap VLANs, not `.N` naming).
+
+**Platforms with operator-chosen sub-interface names** (don't fit
+the `parent.X` convention; would need driver-local synthesis of
+`parent.vlanid` from configured fields):
+- FortiOS (VLAN sub-interfaces are named `dmz`, `voice`, etc. with
+  `set vlanid` + `set interface "port1"`).
+- MikroTik RouterOS (VLAN sub-interfaces in `interface print
+  detail` carry `vlan-id=` + `interface=` properties but operator
+  picks the name, e.g. `ether1-vlan100`).
+- Nokia SR OS (L3 interfaces have operator-chosen names like
+  `to-peer-1`; SAPs use `:` separator e.g. `1/1/1:100`. The
+  translator already handles the `:` form, but emitting SAPs at
+  all is a feature addition for the SR OS driver).
+- Ericsson SmartEdge / IPOS (sub-interfaces under `circuit` profiles
+  with operator-chosen names).
 
 ---
 
