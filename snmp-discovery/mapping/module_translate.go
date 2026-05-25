@@ -97,9 +97,57 @@ func TranslateModulesWithAlias(
 		emittedModules[m.EntIndex] = mod
 	}
 
-	// Full-mode-only: transceiver sub-bays + empty bays + iface routing
-	// land in Task 10. Linecards mode stops here.
-	return entities, nil
+	if mode != "full" {
+		// Linecards mode stops here — no transceivers, no empty bays,
+		// no iface attachment map.
+		return entities, nil
+	}
+
+	// Full-mode-only: transceiver sub-bays + empty bays + iface routing.
+	for _, parent := range inv.Modules {
+		if parent.MemberID < 0 {
+			continue
+		}
+		device := memberDevices[parent.MemberID]
+		if device == nil {
+			continue
+		}
+		for _, tr := range inv.SubModules[parent.EntIndex] {
+			if tr.Type != ModuleTypeTransceiver {
+				continue
+			}
+			// Sub-bay reconciler workaround (spec §Sub-bay emission
+			// workaround): emit transceiver sub-bays DEVICE-ROOTED
+			// (no Module=parent_linecard link). Linking the sub-bay to
+			// its parent linecard makes the Diode reconciler re-plan
+			// the parent inside the sub-bay's changeset and trip
+			// dcim_module_module_bay_id_key on apply. Restore the link
+			// when the upstream reconciler resolves nested parent-
+			// module refs against committed sibling entities.
+			subBay := emitModuleBay(device, tr)
+			entities = append(entities, subBay)
+
+			mod := emitModule(device, subBay, tr, manufacturer)
+			entities = append(entities, mod)
+			emittedModules[tr.EntIndex] = mod
+		}
+	}
+
+	// Empty bays — class=5 rows with no class=9 child. Bare ModuleBay
+	// only; no Module entity.
+	for _, b := range inv.EmptyBays {
+		if b.MemberID < 0 {
+			continue
+		}
+		device := memberDevices[b.MemberID]
+		if device == nil {
+			continue
+		}
+		entities = append(entities, emitModuleBay(device, b))
+	}
+
+	ifaceMap := buildIfaceModuleMap(inv, aliasMap, ifIndexToName, emittedModules)
+	return entities, ifaceMap
 }
 
 // emitModuleBay constructs a ModuleBay entity for a top-level

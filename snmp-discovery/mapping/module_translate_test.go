@@ -127,3 +127,117 @@ func TestTranslateModules_PSUAndFan_NotEmitted(t *testing.T) {
 	require.NotNil(t, modules[0].ModuleType.Model)
 	assert.Equal(t, "C9400-LC-48U", *modules[0].ModuleType.Model)
 }
+
+// TestTranslateModules_FullMode_EmitsTransceiversAsSubBayedModules — in
+// full mode the 9404R fixture must emit the supervisor + linecard pair
+// plus a transceiver nested in its own sub-bay, AND the iface attachment
+// map must route Gi1/0/1 → that transceiver Module.
+func TestTranslateModules_FullMode_EmitsTransceiversAsSubBayedModules(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	oids := buildOIDs(chassis9404RWithTransceiversFixture())
+	dev := &diode.Device{Name: strPtr("test-router")}
+	memberDevices := map[int]*diode.Device{0: dev}
+
+	// Transceiver EntIndex "203" sits behind ifIndex "10101" /
+	// ifName "Gi1/0/1" per the fixture's alias wiring intent.
+	aliasMap := map[string]string{"203": "10101"}
+	ifIndexToName := map[string]string{"10101": "Gi1/0/1"}
+
+	entities, ifaceMap := TranslateModulesWithAlias(
+		oids, nil, memberDevices, modeFull(), nil, logger,
+		aliasMap, ifIndexToName,
+	)
+
+	var bays []*diode.ModuleBay
+	var modules []*diode.Module
+	for _, e := range entities {
+		switch v := e.(type) {
+		case *diode.ModuleBay:
+			bays = append(bays, v)
+		case *diode.Module:
+			modules = append(modules, v)
+		}
+	}
+	// Supervisor bay + linecard bay + transceiver sub-bay = 3 bays;
+	// supervisor + linecard + transceiver = 3 modules.
+	require.Len(t, bays, 3, "supervisor bay + linecard bay + transceiver sub-bay")
+	require.Len(t, modules, 3, "supervisor + linecard + transceiver")
+
+	// Iface map points the physical port at the transceiver module.
+	require.Len(t, ifaceMap, 1)
+	require.Contains(t, ifaceMap, "Gi1/0/1")
+	require.NotNil(t, ifaceMap["Gi1/0/1"].Serial)
+	assert.Equal(t, "FNS24010TR1", *ifaceMap["Gi1/0/1"].Serial)
+}
+
+// TestTranslateModules_FullMode_SubBayDeviceRooted — pins the sub-bay
+// reconciler workaround documented in the design spec under
+// "Sub-bay emission workaround". The transceiver's sub-bay MUST carry
+// Device (so Diode has a matching scope) and MUST NOT carry Module
+// (linking the sub-bay to its parent linecard makes the Diode
+// reconciler re-plan the parent inside the sub-bay's changeset and
+// trip dcim_module_module_bay_id_key on apply).
+func TestTranslateModules_FullMode_SubBayDeviceRooted(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	oids := buildOIDs(chassis9404RWithTransceiversFixture())
+	dev := &diode.Device{Name: strPtr("test-router")}
+	memberDevices := map[int]*diode.Device{0: dev}
+
+	entities, _ := TranslateModulesWithAlias(
+		oids, nil, memberDevices, modeFull(), nil, logger, nil, nil,
+	)
+
+	// The transceiver's bay carries the port-shaped name from the
+	// fixture ("TenGigabitEthernet2/0/1"). Find it and assert the
+	// workaround invariants.
+	var subBay *diode.ModuleBay
+	for _, e := range entities {
+		b, ok := e.(*diode.ModuleBay)
+		if !ok || b.Name == nil {
+			continue
+		}
+		if *b.Name == "TenGigabitEthernet2/0/1" {
+			subBay = b
+			break
+		}
+	}
+	require.NotNil(t, subBay, "transceiver sub-bay must be emitted")
+	assert.NotNil(t, subBay.Device,
+		"sub-bay must be device-rooted (workaround for Diode reconciler)")
+	assert.Nil(t, subBay.Module,
+		"sub-bay must NOT carry Module=parent_linecard — see spec §Sub-bay emission workaround")
+}
+
+// TestTranslateModules_FullMode_EmptyBayEmittedAsBareModuleBay —
+// Aruba CX-style empty bays surface as bare ModuleBay entities (no
+// Module installed) in full mode only.
+func TestTranslateModules_FullMode_EmptyBayEmittedAsBareModuleBay(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	rows := []fixtureRow{
+		{"1", "0", "3", "1", "Chassis", "FOO", "8400", "Chassis", ""},
+		// Empty bay — class=5 under chassis, no class=9 child.
+		{"700", "1", "5", "5", "Slot 5 (empty)", "", "", "Slot 5", ""},
+	}
+	dev := &diode.Device{Name: strPtr("test")}
+	memberDevices := map[int]*diode.Device{0: dev}
+
+	entities, _ := TranslateModulesWithAlias(
+		buildOIDs(rows), nil, memberDevices, modeFull(), nil, logger, nil, nil,
+	)
+
+	var bays []*diode.ModuleBay
+	var modules []*diode.Module
+	for _, e := range entities {
+		switch v := e.(type) {
+		case *diode.ModuleBay:
+			bays = append(bays, v)
+		case *diode.Module:
+			modules = append(modules, v)
+		}
+	}
+	require.Len(t, bays, 1, "one bare ModuleBay for the empty slot")
+	require.Empty(t, modules, "no Module entity for an empty bay")
+	require.NotNil(t, bays[0].Name)
+	assert.Equal(t, "Slot 5 (empty)", *bays[0].Name)
+	assert.NotNil(t, bays[0].Device, "even bare bays carry Device")
+}
