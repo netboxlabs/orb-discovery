@@ -115,6 +115,58 @@ For every other driver, an unsupported (`""`) MAC field is a feature
 gap, not the intended steady state — track in the supported-platforms
 table and follow up with a driver-specific fix.
 
+### `get_interfaces()` — sub-interfaces
+
+When the underlying platform supports L3 sub-interfaces (VLAN-tagged
+routed interfaces named `<parent>.<vlanid>` — Cisco IOS / ASA / FTD,
+Juniper, Huawei VRP, Cumulus / Linux, Palo Alto PAN-OS, Nokia SR Linux,
+etc.), the driver MUST emit one dict entry per sub-interface alongside
+its physical parent:
+
+```python
+{
+  "GigabitEthernet0/1":     {...},  # parent, physical
+  "GigabitEthernet0/1.100": {...},  # sub on VLAN 100
+  "GigabitEthernet0/1.200": {...},  # sub on VLAN 200
+}
+```
+
+The Diode translator's `extract_parent_interface_name()` recognises the
+`.` and `:` separator conventions and automatically links each sub to
+its parent as a NetBox `virtual` interface — drivers do NOT need to
+emit any extra parent reference, just the correctly-named entries.
+
+`get_interfaces_ip()` MUST key IPs by the same sub-interface name (not
+collapse onto the parent). The translator pairs IP entries with
+interface entries by exact key match.
+
+Common pitfalls:
+- The CLI command for physical interfaces (`show interface hardware`,
+  `get system interface physical`, etc.) often does NOT list
+  sub-interfaces. A separate command (`show interface logical`,
+  `get system interface`, ...) usually does. The driver must merge
+  both.
+- ntc-templates with strict `^. -> Error` rules can crash on
+  sub-interface-only lines (e.g. ASA's `Encapsulation: 802.1Q VLAN`,
+  VRP's `PVID:`). Pre-filter unrecognised lines via a driver-local
+  regex before calling `parse_output()`.
+- Linux `ip link show` decorates sub-interface names with the parent
+  suffix `@<parent>` (e.g. `swp1.100@swp1`). Strip the suffix so the
+  name in NetBox is the canonical `swp1.100`.
+- FortiGate VLAN sub-interfaces use **arbitrary operator-chosen names**
+  (e.g. `dmz`, `voice`) with `set vlanid` + `set interface "port1"`.
+  These can't be auto-linked through naming alone; either emit them
+  as standalone interfaces (losing parent linkage) or synthesise
+  `parent.vlanid` names via driver-local parsing of the
+  `interface:` / `vlanid:` fields.
+
+**Platforms that DON'T expose L3 sub-interfaces** (legitimate
+`mac_address=""`-style cases — emit only physical entries):
+- Pure L2 switches (Cisco SG300, AireOS WLC, ProCurve, AOS-Switch,
+  EXOS, etc.)
+- Platforms that route via VLAN-interfaces only (Avaya ERS, Brocade
+  FastIron / NetIron `ve N`, OmniSwitch, etc.)
+
 ---
 
 ## Optional method: `get_interfaces_vlans`

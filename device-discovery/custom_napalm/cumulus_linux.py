@@ -292,6 +292,12 @@ class CumulusDriver(_napalm_base.NetworkDriver):
             intf = row.get("interface", "").strip()
             if not intf:
                 continue
+            # Linux ``ip link show`` decorates sub-interface names with the
+            # parent suffix ``@<parent>`` (e.g. ``swp1.100@swp1``). Strip it
+            # so NetBox sees the canonical ``swp1.100`` name, which the
+            # translator's ``extract_parent_interface_name`` then maps back
+            # to the parent interface via the ``.``-split convention.
+            intf = intf.split("@", 1)[0]
 
             flags = row.get("flags", "") or ""
             state = (row.get("state", "") or "").upper()
@@ -340,6 +346,10 @@ class CumulusDriver(_napalm_base.NetworkDriver):
             intf = row.get("interface", "").strip()
             if not intf:
                 continue
+            # ``ip address show`` decorates sub-interface names with the
+            # parent suffix ``@<parent>`` — strip so the IP key matches
+            # the canonical name emitted by get_interfaces().
+            intf = intf.split("@", 1)[0]
 
             self._merge_ip_family(
                 interfaces_ip, intf, "ipv4",
