@@ -217,3 +217,100 @@ func TestBuildIfaceModuleMap_TransceiverWithoutIfNameSkipped(t *testing.T) {
 	assert.Empty(t, got, "ifIndex without an ifName entry -> transceiver not in result")
 }
 
+// --- Exported helper tests (runner wire-up) ---
+
+// TestAliasMapFromOIDs_ParsesEntAliasMappingRows — confirms the flat
+// entPhysicalIndex -> ifIndex shape: happy path, malformed suffix
+// dropped, non-ifIndex value dropped, unrelated OID ignored.
+func TestAliasMapFromOIDs_ParsesEntAliasMappingRows(t *testing.T) {
+	oids := ObjectIDValueMap{
+		// entAliasMappingIdent.<entPhysicalIndex>.<logicalIdx> -> ifEntry.ifIndex.<ifIdx>
+		".1.3.6.1.2.1.47.1.3.2.1.2.203.0": Value{Value: ".1.3.6.1.2.1.2.2.1.1.10101"},
+		".1.3.6.1.2.1.47.1.3.2.1.2.301.0": Value{Value: ".1.3.6.1.2.1.2.2.1.1.10201"},
+		// Malformed — single-segment suffix, must be skipped.
+		".1.3.6.1.2.1.47.1.3.2.1.2.999": Value{Value: ".1.3.6.1.2.1.2.2.1.1.99999"},
+		// Non-ifIndex value (ifAlias), must be skipped.
+		".1.3.6.1.2.1.47.1.3.2.1.2.404.0": Value{Value: ".1.3.6.1.2.1.31.1.1.1.18.10101"},
+		// Unrelated OID, must be ignored.
+		".1.3.6.1.2.1.2.2.1.2.10101": Value{Value: "GigabitEthernet1/0/1"},
+	}
+	m := AliasMapFromOIDs(oids)
+	assert.Equal(t, "10101", m["203"])
+	assert.Equal(t, "10201", m["301"])
+	assert.NotContains(t, m, "999", "malformed row dropped")
+	assert.NotContains(t, m, "404", "non-ifIndex value dropped")
+	assert.Len(t, m, 2)
+}
+
+// TestIfNameByIfIndex_InvertsRunnerMap — inversion plus nil-Name skip.
+func TestIfNameByIfIndex_InvertsRunnerMap(t *testing.T) {
+	n1 := strPtr("Gi1/0/1")
+	n2 := strPtr("Gi2/0/1")
+	i1 := &diode.Interface{Name: n1}
+	i2 := &diode.Interface{Name: n2}
+	nameless := &diode.Interface{} // Name == nil; skipped
+	ifIndexByIface := map[*diode.Interface]int{
+		i1:       10101,
+		i2:       10201,
+		nameless: 30000,
+	}
+	m := IfNameByIfIndex(ifIndexByIface)
+	assert.Equal(t, "Gi1/0/1", m["10101"])
+	assert.Equal(t, "Gi2/0/1", m["10201"])
+	assert.NotContains(t, m, "30000", "interfaces with nil Name are skipped")
+	assert.Len(t, m, 2)
+}
+
+// TestMemberDevicesFromEntities_VCKeyedByLowestMemberID — the master
+// Device (VcPosition == nil) must be keyed by Members[0].ID — the lowest
+// logical member id — to mirror TranslateAsStack's memberByID convention
+// (chassis.go:432). Non-master members are keyed by *VcPosition.
+func TestMemberDevicesFromEntities_VCKeyedByLowestMemberID(t *testing.T) {
+	master := &diode.Device{Name: strPtr("vc-master")} // VcPosition == nil
+	pos2 := int64(2)
+	pos3 := int64(3)
+	m2 := &diode.Device{Name: strPtr("member-2"), VcPosition: &pos2}
+	m3 := &diode.Device{Name: strPtr("member-3"), VcPosition: &pos3}
+	entities := []diode.Entity{master, m2, m3}
+	inv := &ChassisInventory{Members: []ChassisMember{{ID: 1}, {ID: 2}, {ID: 3}}}
+
+	out := MemberDevicesFromEntities(entities, inv)
+
+	assert.Equal(t, master, out[1], "master keyed by Members[0].ID (lowest), not 0")
+	assert.Equal(t, m2, out[2])
+	assert.Equal(t, m3, out[3])
+	assert.NotContains(t, out, 0, "master must NOT be keyed by 0 in VC")
+	assert.Len(t, out, 3)
+}
+
+// TestMemberDevicesFromEntities_StandaloneKeyedByZero — when there is no
+// ChassisInventory the master falls back to the standalone key 0.
+func TestMemberDevicesFromEntities_StandaloneKeyedByZero(t *testing.T) {
+	dev := &diode.Device{Name: strPtr("standalone")} // VcPosition == nil
+	out := MemberDevicesFromEntities([]diode.Entity{dev}, nil)
+	assert.Equal(t, dev, out[0], "standalone master keyed by 0 when no ChassisInventory")
+	assert.Len(t, out, 1)
+}
+
+// TestChassisInventoryFromEntities_WrapsExtractInventory — single-chassis
+// fixture produces at least one Member and the master member id is the
+// parentRelPos from the fixture (1).
+func TestChassisInventoryFromEntities_WrapsExtractInventory(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	// Minimal stack fixture: one chassis row (class=3).
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":  Value{Value: "3"},           // entPhysicalClass=chassis
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":  Value{Value: "0"},           // contained in nothing
+		".1.3.6.1.2.1.47.1.1.1.1.7.1":  Value{Value: "Stack-1"},     // entPhysicalName
+		".1.3.6.1.2.1.47.1.1.1.1.11.1": Value{Value: "FOC2401L0K0"}, // serial
+		".1.3.6.1.2.1.47.1.1.1.1.13.1": Value{Value: "C9300-48UXM"}, // modelName
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":  Value{Value: "1"},           // parentRelPos
+	}
+	inv := ChassisInventoryFromEntities(nil, oids, logger)
+	require.NotNil(t, inv)
+	require.GreaterOrEqual(t, len(inv.Members), 1,
+		"single-chassis fixture must produce at least one Member")
+	assert.Equal(t, 1, inv.Members[0].ID,
+		"master member ID is lowest present in fixture (parentRelPos=1)")
+}
+

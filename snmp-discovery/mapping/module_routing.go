@@ -10,6 +10,7 @@ package mapping
 
 import (
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -144,6 +145,90 @@ func buildIfaceModuleMap(
 				continue
 			}
 			out[ifName] = mod
+		}
+	}
+	return out
+}
+
+// AliasMapFromOIDs parses entAliasMappingTable rows into a flat
+// entPhysicalIndex -> ifIndex map (decimal strings). Mirrors the parse
+// rules in chassis_routing.go:152-179 (drop malformed suffixes; drop
+// non-ifEntry.ifIndex values) but emits the simpler shape the module
+// path consumes — the chassis router does its own per-ifIndex
+// candidate ranking, so first-occurrence-wins here is harmless.
+func AliasMapFromOIDs(oids ObjectIDValueMap) map[string]string {
+	out := make(map[string]string)
+	for oid, v := range oids {
+		if !strings.HasPrefix(oid, oidEntAliasMappingIdent) {
+			continue
+		}
+		suffix := strings.TrimPrefix(oid, oidEntAliasMappingIdent)
+		parts := strings.SplitN(suffix, ".", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		entIdx := parts[0]
+		// Normalize: strip leading dot (gosnmp's ObjectIdentifier
+		// rendering varies) then require the value to point at
+		// ifEntry.ifIndex — skip ifAlias / ifDescr targets.
+		val := strings.TrimPrefix(strings.TrimSpace(v.Value), ".")
+		if !strings.HasPrefix(val, oidIfEntryIfIndexNoDot) {
+			continue
+		}
+		ifIdx := strings.TrimPrefix(val, oidIfEntryIfIndexNoDot)
+		if _, err := strconv.Atoi(ifIdx); err != nil {
+			continue
+		}
+		if _, exists := out[entIdx]; !exists {
+			out[entIdx] = ifIdx
+		}
+	}
+	return out
+}
+
+// IfNameByIfIndex inverts the runner's *Interface -> ifIndex map into
+// ifIndex (decimal string) -> ifName. Interfaces with nil Name are
+// skipped — a transceiver cannot route to a nameless port.
+func IfNameByIfIndex(ifIndexByIface map[*diode.Interface]int) map[string]string {
+	out := make(map[string]string, len(ifIndexByIface))
+	for iface, idx := range ifIndexByIface {
+		if iface == nil || iface.Name == nil {
+			continue
+		}
+		out[strconv.Itoa(idx)] = *iface.Name
+	}
+	return out
+}
+
+// MemberDevicesFromEntities groups the Devices in entities by member id
+// for module dispatch. Master (VcPosition == nil) is keyed by the lowest
+// member id in chassisInv.Members[0].ID — mirroring TranslateAsStack's
+// memberByID convention (chassis.go:432). For standalone targets
+// (chassisInv nil/empty) the master falls back to key 0. Non-master
+// members are keyed by *VcPosition.
+func MemberDevicesFromEntities(
+	entities []diode.Entity,
+	chassisInv *ChassisInventory,
+) map[int]*diode.Device {
+	out := make(map[int]*diode.Device)
+	masterID := 0
+	if chassisInv != nil && len(chassisInv.Members) > 0 {
+		// Members are sorted ascending by ID upstream;
+		// Members[0].ID is the master's logical member id.
+		masterID = chassisInv.Members[0].ID
+	}
+	for _, e := range entities {
+		dev, ok := e.(*diode.Device)
+		if !ok || dev == nil {
+			continue
+		}
+		if dev.VcPosition != nil {
+			out[int(*dev.VcPosition)] = dev
+			continue
+		}
+		// First master wins — defensive against duplicate emission.
+		if _, exists := out[masterID]; !exists {
+			out[masterID] = dev
 		}
 	}
 	return out

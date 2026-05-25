@@ -219,6 +219,22 @@ func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInvento
 	}
 }
 
+// ChassisInventoryFromEntities returns the parsed ChassisInventory for
+// the device described by oids. Thin exported wrapper around
+// extractInventory so the runner can re-derive what TranslateAsStack
+// computed internally without duplicating the parse. The entities arg
+// is unused today but kept for API symmetry — future implementations
+// may derive parts of the inventory from already-emitted entities
+// rather than re-parsing oids.
+func ChassisInventoryFromEntities(
+	_ []diode.Entity,
+	oids ObjectIDValueMap,
+	logger *slog.Logger,
+) *ChassisInventory {
+	inv := extractInventory(oids, logger)
+	return &inv
+}
+
 // buildMasterRef returns a non-recursive matcher-only Device for use
 // as VirtualChassis.Master on the top-level VC entity AND on each
 // non-master member Device's VirtualChassis.Master.
