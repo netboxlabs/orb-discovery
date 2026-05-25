@@ -187,7 +187,11 @@ _INTF_HEADER_RE = re.compile(
     re.M | re.IGNORECASE,
 )
 _INTF_HW_ADDR_RE = re.compile(
-    r"^\s*Hardware\s+is\s+\S+,\s+address\s+is\s+([0-9a-fA-F:.\-]{12,17})",
+    # End-of-token boundary (\b) prevents the capture group from greedily
+    # absorbing an adjacent string that happens to start with hex chars.
+    # SLX-OS emits a trailing ``(bia <mac>)`` after the configured address
+    # so we need to stop at the boundary, not the end of line.
+    r"^\s*Hardware\s+is\s+\S+,\s+address\s+is\s+([0-9a-fA-F:.\-]{12,17})\b",
     re.M | re.IGNORECASE,
 )
 
@@ -214,10 +218,17 @@ def _parse_intf_hw_addresses(text: str) -> dict[str, str]:
         mac_m = _INTF_HW_ADDR_RE.search(block)
         if not mac_m:
             continue
+        raw = mac_m.group(1)
         try:
-            result[name] = normalize_mac(mac_m.group(1))
+            result[name] = normalize_mac(raw)
         except Exception:
-            result[name] = mac_m.group(1)
+            # napalm normalize_mac rejected the value — log and skip rather
+            # than emit a malformed MAC string that downstream NetBox matching
+            # would silently treat as a distinct interface.
+            logger.warning(
+                "extreme_slx: normalize_mac rejected %r for interface %s — emitting empty MAC",
+                raw, name,
+            )
     return result
 
 # --- vlan brief parsing ---------------------------------------------------- #

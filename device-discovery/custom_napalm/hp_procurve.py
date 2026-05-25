@@ -276,11 +276,33 @@ def _parse_procurve_intf_mac_addresses(text: str) -> dict[str, str]:
         mac_m = _PROCURVE_MAC_RE.search(text[hdr.end():block_end])
         if not mac_m:
             continue
+        raw = mac_m.group(1)
         try:
-            result[port] = normalize_mac(mac_m.group(1))
+            result[port] = normalize_mac(raw)
         except Exception:
-            result[port] = mac_m.group(1)
+            # napalm normalize_mac rejected the value — log and skip rather
+            # than emit a malformed MAC string that downstream NetBox matching
+            # would silently treat as a distinct interface.
+            logger.warning(
+                "hp_procurve: normalize_mac rejected %r for port %s — emitting empty MAC",
+                raw, port,
+            )
     return result
+
+
+# Conservative chunk size for the ``show interfaces <port-list>`` batched
+# call. A 24-port comma-separated list is well under ProCurve / AOS-S CLI
+# input limits (typically ~255 chars) even with longest port-name forms
+# (``A1,A2,...,Trk24``). Larger chassis / stacks fall into multiple chunks
+# of this size, costing one extra round-trip per chunk rather than the
+# per-port iteration the platform-MAC docs warn against.
+_PROCURVE_PORTLIST_CHUNK_SIZE = 24
+
+
+def _chunked(seq: list, size: int):
+    """Yield ``seq`` in fixed-size chunks. Last chunk may be smaller."""
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
 
 
 class ProcurveDriver(_napalm_base.NetworkDriver):
@@ -416,8 +438,12 @@ class ProcurveDriver(_napalm_base.NetworkDriver):
                 "mac_address": "",
             }
 
-        if interfaces:
-            port_list = ",".join(interfaces.keys())
+        # Chunked port-list batching: comma-separated lists longer than ~255
+        # chars can exceed ProCurve / AOS-S CLI input limits on large chassis
+        # / stacks. Issuing ceil(N/24) commands keeps each call well under
+        # the limit while still amortising the per-port iteration cost.
+        for chunk in _chunked(list(interfaces.keys()), _PROCURVE_PORTLIST_CHUNK_SIZE):
+            port_list = ",".join(chunk)
             mac_by_port = _parse_procurve_intf_mac_addresses(
                 self.device.send_command(f"show interfaces {port_list}")
             )

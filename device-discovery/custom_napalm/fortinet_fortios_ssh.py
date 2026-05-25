@@ -70,7 +70,10 @@ def _parse_uptime(output: str) -> int:
 # permanent MAC but is per-port. The current MAC is what NetBox matches
 # against L2 neighbours so we accept it as the right value.
 _FNSYSCTL_IFACE_RE = re.compile(
-    r"^(\S+)\s+Link\s+encap:Ethernet\s+HWaddr\s+([0-9a-fA-F:.\-]{12,17})",
+    # End-of-token boundary (\b) prevents the capture group from greedily
+    # absorbing trailing trash on the same line. ifconfig output ends the
+    # HWaddr line at the MAC, but the explicit boundary is defensive.
+    r"^(\S+)\s+Link\s+encap:Ethernet\s+HWaddr\s+([0-9a-fA-F:.\-]{12,17})\b",
     re.M,
 )
 
@@ -91,7 +94,13 @@ def _parse_fnsysctl_mac_addresses(text: str) -> dict[str, str]:
         try:
             result[name] = normalize_mac(raw)
         except Exception:
-            result[name] = raw
+            # napalm normalize_mac rejected the value — log and skip rather
+            # than emit a malformed MAC string that downstream NetBox matching
+            # would silently treat as a distinct interface.
+            logger.warning(
+                "fortinet_fortios_ssh: normalize_mac rejected %r for interface %s — emitting empty MAC",
+                raw, name,
+            )
     return result
 
 
