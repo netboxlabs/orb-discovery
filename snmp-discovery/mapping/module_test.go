@@ -76,6 +76,14 @@ func TestClassifyModule(t *testing.T) {
 		{"psu psu prefix", "PSU-2KW-AC", "", false, ModuleTypePSU},
 		{"fan prefix", "FAN-T2", "", false, ModuleTypeFan},
 
+		// Model-prefixed Cisco fan PIDs — the `-FAN` token appears as a
+		// suffix or middle token, not a prefix. Common on C9400 chassis.
+		{"fan -FAN suffix", "C9400-FAN", "", false, ModuleTypeFan},
+		{"fan -FAN middle token", "C9404R-FAN-2", "", false, ModuleTypeFan},
+
+		// Model-prefixed Cisco PSU PIDs — `-PWR-` / `-PSU-` as middle token.
+		{"psu -PWR- middle token", "C9404R-PWR-2KW-AC", "", false, ModuleTypePSU},
+
 		// Edge: under module parent but non-optic → linecard (depth alone insufficient).
 		{"non-optic under module parent", "WS-X45-FOO", "", true, ModuleTypeLinecard},
 
@@ -183,6 +191,49 @@ func TestExtractModuleInventory_DuplicateSerialDedup(t *testing.T) {
 	require.Len(t, inv.Modules, 1, "duplicate-serial second occurrence must be dropped")
 	assert.Equal(t, "101", inv.Modules[0].EntIndex,
 		"first occurrence (sorted ascending by EntIndex) wins")
+}
+
+// TestExtractModuleInventory_NormalizesWhitespace — ENTITY-MIB strings
+// can arrive with leading/trailing whitespace or trailing NUL bytes.
+// Every entPhysical string field (Name, Serial, Model, Description,
+// VendorType, plus the bay's Name/ParentRel) must be trimmed via
+// trimSNMPString at extraction so dedup keys stay stable across runs
+// and downstream Diode payloads are clean.
+func TestExtractModuleInventory_NormalizesWhitespace(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	rows := []fixtureRow{
+		{"1", "0", "3", "1", "Chassis", "FOO", "C9404R", "Chassis", ""},
+		{"100", "1", "5", "1", "  Slot 1 \x00", "", "", "Slot 1", ""},
+		{"101", "100", "9", "1", "  Linecard \x00", "  ABC123 \x00 ", "  C9400-LC-48U\x00", "  desc \x00", "  vt \x00"},
+	}
+	inv := extractModuleInventory(buildOIDs(rows), logger)
+	require.Len(t, inv.Modules, 1)
+	m := inv.Modules[0]
+	assert.Equal(t, "ABC123", m.Serial, "trailing NUL + whitespace stripped from Serial")
+	assert.Equal(t, "C9400-LC-48U", m.Model)
+	assert.Equal(t, "Linecard", m.Name)
+	assert.Equal(t, "desc", m.Description)
+	assert.Equal(t, "vt", m.VendorType)
+	assert.Equal(t, "Slot 1", m.BayName, "bay name pulled from parent must also be trimmed")
+}
+
+// TestExtractModuleInventory_PortContainerNotEmptyBay — a class=5
+// container whose only children are class=10 ports is a port slot, not
+// a module bay. Surfacing it as an empty bay produces spurious
+// ModuleBay entries. The empty-bay scan must skip class=5 rows that
+// have any class=10 children.
+func TestExtractModuleInventory_PortContainerNotEmptyBay(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	rows := []fixtureRow{
+		{"1", "0", "3", "1", "Chassis", "FOO", "C9300", "Chassis", ""},
+		// Class=5 port container under chassis. No class=9 child.
+		{"100", "1", "5", "1", "Port Container", "", "", "", ""},
+		// Class=10 port under the container.
+		{"101", "100", "10", "1", "Gi1/0/1", "", "", "", ""},
+	}
+	inv := extractModuleInventory(buildOIDs(rows), logger)
+	assert.Empty(t, inv.EmptyBays,
+		"class=5 with class=10 children is a port container, not an empty module bay")
 }
 
 // TestExtractModuleInventory_EmptyBayHarvested — class=5 row under

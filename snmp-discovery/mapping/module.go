@@ -27,6 +27,7 @@ const (
 
 	entPhysicalClassModule    = "9"
 	entPhysicalClassContainer = "5"
+	entPhysicalClassPort      = "10"
 )
 
 // ChassisModuleMapper is a no-op orbToEntityMapper. See package file
@@ -115,13 +116,16 @@ func classifyModule(model, vendorType string, hasModuleParent bool) ModuleType {
 		pid = strings.TrimSpace(vendorType)
 	}
 
-	// PSU / Fan are vendor-neutral by PID prefix and parent-agnostic —
-	// they appear at chassis level and under shelves alike.
+	// PSU / Fan are vendor-neutral and parent-agnostic — they appear at
+	// chassis level and under shelves alike. Match both bare-prefix
+	// forms (PSU-, PWR-, FAN-) and model-prefixed Cisco forms where
+	// the type token sits in the middle or as a suffix (C9404R-PWR-2KW-AC,
+	// C9400-FAN, C9404R-FAN-2).
 	upper := strings.ToUpper(pid)
-	if strings.HasPrefix(upper, "PSU-") || strings.HasPrefix(upper, "PWR-") {
+	if isPSUPID(upper) {
 		return ModuleTypePSU
 	}
-	if strings.HasPrefix(upper, "FAN") {
+	if isFanPID(upper) {
 		return ModuleTypeFan
 	}
 
@@ -173,55 +177,61 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 		VendorType  string
 	}
 	byIdx := make(map[string]row)
+	// trimSNMPString strips ENTITY-MIB-padded NULs and surrounding
+	// whitespace. Applied to every string field at extraction so dedup
+	// keys stay stable across runs and downstream Diode payloads are
+	// clean (mirrors chassis.go's normalization). Class / ContainedIn /
+	// ParentRel are also numeric-shaped strings that benefit from the
+	// trim, so they go through it too.
 	for s, v := range oids {
 		switch {
 		case strings.HasPrefix(s, oidEntPhysicalClass):
 			idx := strings.TrimPrefix(s, oidEntPhysicalClass)
 			r := byIdx[idx]
 			r.EntIndex = idx
-			r.Class = v.Value
+			r.Class = trimSNMPString(v.Value)
 			byIdx[idx] = r
 		case strings.HasPrefix(s, oidEntPhysicalContainedIn):
 			idx := strings.TrimPrefix(s, oidEntPhysicalContainedIn)
 			r := byIdx[idx]
 			r.EntIndex = idx
-			r.ContainedIn = v.Value
+			r.ContainedIn = trimSNMPString(v.Value)
 			byIdx[idx] = r
 		case strings.HasPrefix(s, oidEntPhysicalParentRel):
 			idx := strings.TrimPrefix(s, oidEntPhysicalParentRel)
 			r := byIdx[idx]
 			r.EntIndex = idx
-			r.ParentRel = v.Value
+			r.ParentRel = trimSNMPString(v.Value)
 			byIdx[idx] = r
 		case strings.HasPrefix(s, oidEntPhysicalName):
 			idx := strings.TrimPrefix(s, oidEntPhysicalName)
 			r := byIdx[idx]
 			r.EntIndex = idx
-			r.Name = v.Value
+			r.Name = trimSNMPString(v.Value)
 			byIdx[idx] = r
 		case strings.HasPrefix(s, oidEntPhysicalSerialNum):
 			idx := strings.TrimPrefix(s, oidEntPhysicalSerialNum)
 			r := byIdx[idx]
 			r.EntIndex = idx
-			r.Serial = v.Value
+			r.Serial = trimSNMPString(v.Value)
 			byIdx[idx] = r
 		case strings.HasPrefix(s, oidEntPhysicalModelName):
 			idx := strings.TrimPrefix(s, oidEntPhysicalModelName)
 			r := byIdx[idx]
 			r.EntIndex = idx
-			r.Model = v.Value
+			r.Model = trimSNMPString(v.Value)
 			byIdx[idx] = r
 		case strings.HasPrefix(s, oidEntPhysicalDescr):
 			idx := strings.TrimPrefix(s, oidEntPhysicalDescr)
 			r := byIdx[idx]
 			r.EntIndex = idx
-			r.Descr = v.Value
+			r.Descr = trimSNMPString(v.Value)
 			byIdx[idx] = r
 		case strings.HasPrefix(s, oidEntPhysicalVendorType):
 			idx := strings.TrimPrefix(s, oidEntPhysicalVendorType)
 			r := byIdx[idx]
 			r.EntIndex = idx
-			r.VendorType = v.Value
+			r.VendorType = trimSNMPString(v.Value)
 			byIdx[idx] = r
 		}
 	}
@@ -334,6 +344,21 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 	// Empty-bay harvest. A class=5 row whose parent is a chassis or
 	// another container and which has no class=9 child is an empty
 	// slot — emitted as a bare bay in `full` mode (Aruba CX quirk).
+	//
+	// Port containers (class=5 whose only children are class=10 ports)
+	// look like "no class=9 child" but they are not module bays — they
+	// are slots for ports, not modules. Track which class=5 rows own
+	// any class=10 child and skip them so we never surface a spurious
+	// empty bay for a port container.
+	containerHasPortChild := make(map[string]bool)
+	for _, r := range byIdx {
+		if r.Class == entPhysicalClassPort {
+			parent, exists := byIdx[r.ContainedIn]
+			if exists && parent.Class == entPhysicalClassContainer {
+				containerHasPortChild[parent.EntIndex] = true
+			}
+		}
+	}
 	class5Idxs := make([]string, 0)
 	for idx, r := range byIdx {
 		if r.Class == entPhysicalClassContainer {
@@ -343,6 +368,9 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 	sort.Strings(class5Idxs)
 	for _, idx := range class5Idxs {
 		if bayHasChild[idx] {
+			continue
+		}
+		if containerHasPortChild[idx] {
 			continue
 		}
 		r := byIdx[idx]
@@ -367,6 +395,32 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 		})
 	}
 	return inv
+}
+
+// isPSUPID recognises power-supply PIDs on an already upper-cased PID.
+// Covers bare prefixes (PSU-2KW-AC, PWR-C5-715WAC) and model-prefixed
+// Cisco forms where the token sits in the middle (C9404R-PWR-2KW-AC).
+func isPSUPID(upper string) bool {
+	if strings.HasPrefix(upper, "PSU-") || strings.HasPrefix(upper, "PWR-") {
+		return true
+	}
+	if strings.Contains(upper, "-PSU-") || strings.Contains(upper, "-PWR-") {
+		return true
+	}
+	return false
+}
+
+// isFanPID recognises fan-tray PIDs on an already upper-cased PID.
+// Covers bare prefix (FAN, FAN-T1-R) and model-prefixed Cisco forms
+// where -FAN appears as suffix or middle token (C9400-FAN, C9404R-FAN-2).
+func isFanPID(upper string) bool {
+	if strings.HasPrefix(upper, "FAN") {
+		return true
+	}
+	if strings.Contains(upper, "-FAN") {
+		return true
+	}
+	return false
 }
 
 // isSupervisorPID recognises Cisco-style supervisor product IDs on an
