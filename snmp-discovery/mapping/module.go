@@ -7,10 +7,22 @@ package mapping
 
 import (
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+)
+
+// entPhysical column prefixes specific to module discovery (the rest
+// — class, containedIn, parentRel, name, serial, model — live in
+// chassis.go and are reused here).
+const (
+	oidEntPhysicalDescr      = ".1.3.6.1.2.1.47.1.1.1.1.2."
+	oidEntPhysicalVendorType = ".1.3.6.1.2.1.47.1.1.1.1.3."
+
+	entPhysicalClassModule    = "9"
+	entPhysicalClassContainer = "5"
 )
 
 // ChassisModuleMapper is a no-op orbToEntityMapper. See package file
@@ -129,6 +141,217 @@ func classifyModule(model, vendorType string, hasModuleParent bool) ModuleType {
 	// Safe default — non-optic under a module parent OR no special
 	// pattern at chassis level both land here.
 	return ModuleTypeLinecard
+}
+
+// extractModuleInventory scans oids for class=9 entPhysical rows and
+// classifies each one. Drops orphans (broken containedIn chain) and
+// unclassifiable rows (class=1/2). Walks the containedIn chain to
+// determine the owning bay (class=5 ancestor) and whether the module
+// sits under another class=9 module (transceiver candidate).
+//
+// Member dispatch (MemberID) is intentionally NOT populated here —
+// that lives in assignMemberID so this extractor stays
+// chassis-topology-agnostic.
+func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleInventory {
+	inv := newModuleInventory()
+
+	// Index every entPhysical row by EntIndex so we can walk parents.
+	type row struct {
+		EntIndex    string
+		ContainedIn string
+		Class       string
+		ParentRel   string
+		Name        string
+		Serial      string
+		Model       string
+		Descr       string
+		VendorType  string
+	}
+	byIdx := make(map[string]row)
+	for s, v := range oids {
+		switch {
+		case strings.HasPrefix(s, oidEntPhysicalClass):
+			idx := strings.TrimPrefix(s, oidEntPhysicalClass)
+			r := byIdx[idx]
+			r.EntIndex = idx
+			r.Class = v.Value
+			byIdx[idx] = r
+		case strings.HasPrefix(s, oidEntPhysicalContainedIn):
+			idx := strings.TrimPrefix(s, oidEntPhysicalContainedIn)
+			r := byIdx[idx]
+			r.EntIndex = idx
+			r.ContainedIn = v.Value
+			byIdx[idx] = r
+		case strings.HasPrefix(s, oidEntPhysicalParentRel):
+			idx := strings.TrimPrefix(s, oidEntPhysicalParentRel)
+			r := byIdx[idx]
+			r.EntIndex = idx
+			r.ParentRel = v.Value
+			byIdx[idx] = r
+		case strings.HasPrefix(s, oidEntPhysicalName):
+			idx := strings.TrimPrefix(s, oidEntPhysicalName)
+			r := byIdx[idx]
+			r.EntIndex = idx
+			r.Name = v.Value
+			byIdx[idx] = r
+		case strings.HasPrefix(s, oidEntPhysicalSerialNum):
+			idx := strings.TrimPrefix(s, oidEntPhysicalSerialNum)
+			r := byIdx[idx]
+			r.EntIndex = idx
+			r.Serial = v.Value
+			byIdx[idx] = r
+		case strings.HasPrefix(s, oidEntPhysicalModelName):
+			idx := strings.TrimPrefix(s, oidEntPhysicalModelName)
+			r := byIdx[idx]
+			r.EntIndex = idx
+			r.Model = v.Value
+			byIdx[idx] = r
+		case strings.HasPrefix(s, oidEntPhysicalDescr):
+			idx := strings.TrimPrefix(s, oidEntPhysicalDescr)
+			r := byIdx[idx]
+			r.EntIndex = idx
+			r.Descr = v.Value
+			byIdx[idx] = r
+		case strings.HasPrefix(s, oidEntPhysicalVendorType):
+			idx := strings.TrimPrefix(s, oidEntPhysicalVendorType)
+			r := byIdx[idx]
+			r.EntIndex = idx
+			r.VendorType = v.Value
+			byIdx[idx] = r
+		}
+	}
+
+	// walkParents climbs the containedIn chain. Returns the nearest
+	// class=5 bay EntIndex and the nearest class=9 module ancestor
+	// EntIndex (both "" when absent). A `seen` set guards against
+	// malformed-MIB cycles — without it a self-referential or mutually
+	// referential containedIn pair would loop forever.
+	walkParents := func(start row) (bayIdx string, parentModuleIdx string, ok bool) {
+		cur := start.ContainedIn
+		seen := make(map[string]struct{})
+		for cur != "" && cur != "0" {
+			if _, dup := seen[cur]; dup {
+				logger.Debug("module: containment cycle detected",
+					"ent", start.EntIndex, "at", cur)
+				return "", "", false
+			}
+			seen[cur] = struct{}{}
+			parent, exists := byIdx[cur]
+			if !exists {
+				// Broken chain — orphan.
+				return "", "", false
+			}
+			if bayIdx == "" && parent.Class == entPhysicalClassContainer {
+				bayIdx = cur
+			}
+			if parentModuleIdx == "" && parent.Class == entPhysicalClassModule {
+				parentModuleIdx = cur
+			}
+			cur = parent.ContainedIn
+		}
+		return bayIdx, parentModuleIdx, true
+	}
+
+	// Process class=9 rows in EntIndex-ascending order so dedup
+	// "first occurrence wins" is deterministic.
+	classNineIdxs := make([]string, 0, len(byIdx))
+	for _, r := range byIdx {
+		if r.Class == entPhysicalClassModule {
+			classNineIdxs = append(classNineIdxs, r.EntIndex)
+		}
+	}
+	sort.Strings(classNineIdxs)
+	seenSerial := make(map[string]struct{})
+
+	// bayHasChild tracks class=5 rows that gained at least one class=9
+	// child — used by the empty-bay harvest below.
+	bayHasChild := make(map[string]bool)
+
+	for _, idx := range classNineIdxs {
+		r := byIdx[idx]
+		bayIdx, parentModuleIdx, chainOK := walkParents(r)
+		if !chainOK || bayIdx == "" {
+			logger.Warn("module discovery: orphan module dropped",
+				"ent", r.EntIndex,
+				"model", r.Model,
+				"reason", "orphan_containment")
+			continue
+		}
+		if r.Serial != "" {
+			key := strings.ToLower(strings.TrimSpace(r.Serial))
+			if _, dup := seenSerial[key]; dup {
+				logger.Warn("module discovery: duplicate-serial module dropped",
+					"ent", r.EntIndex,
+					"serial", r.Serial,
+					"model", r.Model,
+					"reason", "dup_serial")
+				continue
+			}
+			seenSerial[key] = struct{}{}
+		}
+		bayHasChild[bayIdx] = true
+		bay := byIdx[bayIdx]
+		entry := ModuleEntry{
+			EntIndex:     r.EntIndex,
+			BayEntIndex:  bayIdx,
+			BayName:      bay.Name,
+			BayPosition:  r.ParentRel,
+			Name:         r.Name,
+			Serial:       r.Serial,
+			Model:        r.Model,
+			Description:  r.Descr,
+			VendorType:   r.VendorType,
+			Type:         classifyModule(r.Model, r.VendorType, parentModuleIdx != ""),
+			ParentEntIdx: parentModuleIdx,
+		}
+		if parentModuleIdx == "" {
+			inv.Modules = append(inv.Modules, entry)
+		} else {
+			inv.SubModules[parentModuleIdx] = append(inv.SubModules[parentModuleIdx], entry)
+		}
+	}
+
+	// Deterministic emission order for top-level modules.
+	sort.Slice(inv.Modules, func(i, j int) bool {
+		return inv.Modules[i].EntIndex < inv.Modules[j].EntIndex
+	})
+
+	// Empty-bay harvest. A class=5 row whose parent is a chassis or
+	// another container and which has no class=9 child is an empty
+	// slot — emitted as a bare bay in `full` mode (Aruba CX quirk).
+	class5Idxs := make([]string, 0)
+	for idx, r := range byIdx {
+		if r.Class == entPhysicalClassContainer {
+			class5Idxs = append(class5Idxs, idx)
+		}
+	}
+	sort.Strings(class5Idxs)
+	for _, idx := range class5Idxs {
+		if bayHasChild[idx] {
+			continue
+		}
+		r := byIdx[idx]
+		parent, exists := byIdx[r.ContainedIn]
+		if !exists {
+			continue
+		}
+		// Only surface empties whose parent is a chassis or another
+		// container/module — keeps leaf-shaped containers (e.g. ports
+		// with no slot semantics) out of the bay list.
+		if parent.Class != entPhysicalClassChassis &&
+			parent.Class != entPhysicalClassContainer &&
+			parent.Class != entPhysicalClassModule {
+			continue
+		}
+		inv.EmptyBays = append(inv.EmptyBays, ModuleEntry{
+			EntIndex:    r.EntIndex,
+			BayEntIndex: r.EntIndex, // self — no module to anchor to
+			BayName:     r.Name,
+			BayPosition: r.ParentRel,
+			Type:        ModuleTypeUnknown,
+		})
+	}
+	return inv
 }
 
 // isSupervisorPID recognises Cisco-style supervisor product IDs on an

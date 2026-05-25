@@ -2,10 +2,12 @@ package mapping
 
 import (
 	"log/slog"
+	"os"
 	"testing"
 
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestChassisModuleMapper_MapReturnsNil confirms the mapper accepts
@@ -92,4 +94,115 @@ func TestClassifyModule(t *testing.T) {
 			assert.Equal(t, c.want, got)
 		})
 	}
+}
+
+// TestExtractModuleInventory_HappyPath asserts top-level modules are
+// classified correctly (supervisor + linecard) and the transceiver
+// lives in SubModules under the linecard's EntIndex.
+func TestExtractModuleInventory_HappyPath(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	oids := buildOIDs(chassis9404RWithTransceiversFixture())
+
+	inv := extractModuleInventory(oids, logger)
+
+	require.Len(t, inv.Modules, 2)
+	var sup, lc *ModuleEntry
+	for i := range inv.Modules {
+		switch inv.Modules[i].Type {
+		case ModuleTypeSupervisor:
+			sup = &inv.Modules[i]
+		case ModuleTypeLinecard:
+			lc = &inv.Modules[i]
+		}
+	}
+	require.NotNil(t, sup, "supervisor must be classified")
+	require.NotNil(t, lc, "linecard must be classified")
+	assert.Equal(t, "JAE24010ABC", sup.Serial)
+	assert.Equal(t, "C9400-SUP-1", sup.Model)
+	assert.Equal(t, "Slot 1", sup.BayName)
+	assert.Equal(t, "JAE24010LC2", lc.Serial)
+	assert.Equal(t, "Slot 2", lc.BayName)
+
+	subs := inv.SubModules["201"]
+	require.Len(t, subs, 1)
+	assert.Equal(t, ModuleTypeTransceiver, subs[0].Type)
+	assert.Equal(t, "FNS24010TR1", subs[0].Serial)
+	assert.Equal(t, "TenGigabitEthernet2/0/1", subs[0].BayName)
+}
+
+// TestExtractModuleInventory_NoModulesReturnsEmpty — chassis-only
+// fixture produces empty Modules and SubModules.
+func TestExtractModuleInventory_NoModulesReturnsEmpty(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	rows := []fixtureRow{
+		{"1", "0", "3", "1", "Switch", "FOO", "C9300", "Switch", ""},
+	}
+	inv := extractModuleInventory(buildOIDs(rows), logger)
+	assert.Empty(t, inv.Modules)
+	assert.Empty(t, inv.SubModules)
+}
+
+// TestExtractModuleInventory_OrphanContainmentDropped — module whose
+// containedIn points at an absent index is dropped.
+func TestExtractModuleInventory_OrphanContainmentDropped(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	rows := []fixtureRow{
+		{"1", "0", "3", "1", "Chassis", "FOO", "C9404R", "Chassis", ""},
+		{"99", "777", "9", "1", "Orphan", "ORPH1", "C9400-LC", "Orphan linecard", ""},
+	}
+	inv := extractModuleInventory(buildOIDs(rows), logger)
+	assert.Empty(t, inv.Modules, "orphan module must be dropped")
+}
+
+// TestExtractModuleInventory_UnclassifiableClassSkipped — class=1
+// (other) and class=2 (unknown) rows are skipped; only class=9 counts.
+func TestExtractModuleInventory_UnclassifiableClassSkipped(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	rows := []fixtureRow{
+		{"1", "0", "3", "1", "Chassis", "FOO", "C9300", "Chassis", ""},
+		{"50", "1", "1", "1", "Unknown other", "", "", "", ""},
+		{"51", "1", "2", "1", "Unknown unknown", "", "", "", ""},
+	}
+	inv := extractModuleInventory(buildOIDs(rows), logger)
+	assert.Empty(t, inv.Modules)
+}
+
+// TestExtractModuleInventory_DuplicateSerialDedup — two class=9 rows
+// sharing a serial; first occurrence (sorted ascending by EntIndex)
+// wins, second is dropped.
+func TestExtractModuleInventory_DuplicateSerialDedup(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	rows := []fixtureRow{
+		{"1", "0", "3", "1", "Chassis", "FOO", "C9404R", "Chassis", ""},
+		{"100", "1", "5", "1", "Slot 1", "", "", "Slot 1", ""},
+		{"101", "100", "9", "1", "Linecard A", "DUPSERIAL01", "C9400-LC-48U", "", ""},
+		{"200", "1", "5", "2", "Slot 2", "", "", "Slot 2", ""},
+		{"201", "200", "9", "1", "Linecard B (dup)", "DUPSERIAL01", "C9400-LC-48U", "", ""},
+	}
+	inv := extractModuleInventory(buildOIDs(rows), logger)
+	require.Len(t, inv.Modules, 1, "duplicate-serial second occurrence must be dropped")
+	assert.Equal(t, "101", inv.Modules[0].EntIndex,
+		"first occurrence (sorted ascending by EntIndex) wins")
+}
+
+// TestExtractModuleInventory_EmptyBayHarvested — class=5 row under
+// the chassis with no class=9 child surfaces in EmptyBays (Aruba CX
+// quirk). Populated bays continue to emit a normal Module entry.
+func TestExtractModuleInventory_EmptyBayHarvested(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	rows := []fixtureRow{
+		{"1", "0", "3", "1", "Chassis", "FOO", "8400", "Chassis", ""},
+		// Empty bay — class=5 under chassis, no class=9 child.
+		{"700", "1", "5", "5", "Slot 5 (empty)", "", "", "Slot 5", ""},
+		// Populated bay — confirms we only get the empty one in EmptyBays.
+		{"100", "1", "5", "1", "Slot 1", "", "", "Slot 1", ""},
+		{"101", "100", "9", "1", "Linecard", "JAE1", "8400-LC", "", ""},
+	}
+	inv := extractModuleInventory(buildOIDs(rows), logger)
+
+	require.Len(t, inv.EmptyBays, 1)
+	assert.Equal(t, "700", inv.EmptyBays[0].EntIndex)
+	assert.Equal(t, "Slot 5 (empty)", inv.EmptyBays[0].BayName)
+	require.Len(t, inv.Modules, 1)
+	assert.Equal(t, "101", inv.Modules[0].EntIndex)
 }
