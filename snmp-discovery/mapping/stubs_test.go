@@ -307,3 +307,61 @@ func TestPruneNestedRefs_EmptySliceIsNoOp(t *testing.T) {
 	PruneNestedRefs(nil, dev)
 	assert.Equal(t, strPtr("sw1"), dev.Name)
 }
+
+func TestPruneNestedRefs_StubsModuleBayAndInterfaceModule(t *testing.T) {
+	rich := &diode.Device{
+		Name:   strPtr("sw1"),
+		Serial: strPtr("FCW123"),
+		Status: strPtr("active"),
+		DeviceType: &diode.DeviceType{
+			Model:        strPtr("C9404R"),
+			Manufacturer: &diode.Manufacturer{Name: strPtr("Cisco")},
+		},
+	}
+	bay := &diode.ModuleBay{
+		Device: rich,
+		Name:   strPtr("Slot 2"),
+	}
+	transceiverBay := &diode.ModuleBay{
+		Device: rich,
+		Name:   strPtr("TenGigabitEthernet1/0/1"),
+	}
+	transceiver := &diode.Module{
+		Device:    rich,
+		ModuleBay: transceiverBay,
+		Serial:    strPtr("FNS24010TR1"),
+		ModuleType: &diode.ModuleType{
+			Model:        strPtr("SFP-10G-LR"),
+			Manufacturer: &diode.Manufacturer{Name: strPtr("Cisco")},
+		},
+	}
+	iface := &diode.Interface{
+		Name:   strPtr("TenGigabitEthernet1/0/1"),
+		Device: rich,
+		Module: transceiver,
+	}
+	entities := []diode.Entity{rich, bay, transceiverBay, transceiver, iface}
+
+	PruneNestedRefs(entities, rich)
+
+	// ModuleBay.Device must be stubbed.
+	require.NotNil(t, bay.Device)
+	assert.Equal(t, "sw1", *bay.Device.Name)
+	assert.Nil(t, bay.Device.Serial, "ModuleBay.Device serial stripped on stub")
+	assert.Nil(t, bay.Device.Status, "ModuleBay.Device status stripped on stub")
+
+	// Interface.Module reduced to matcher-only (Name + Serial). DeviceType /
+	// Description / Device-richness cleared so the wire payload stays bounded.
+	require.NotNil(t, iface.Module)
+	assert.Equal(t, "FNS24010TR1", strDerefSafe(iface.Module.Serial))
+	assert.Nil(t, iface.Module.ModuleType,
+		"Interface.Module must be reduced to matcher-only — no ModuleType")
+}
+
+// strDerefSafe — tiny test helper for safe *string deref.
+func strDerefSafe(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}

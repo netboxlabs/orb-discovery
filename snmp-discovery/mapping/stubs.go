@@ -266,6 +266,15 @@ func PruneNestedRefs(entities []diode.Entity, currentDevice *diode.Device) {
 			if e.Lag != nil {
 				e.Lag = stubForIface(e.Lag)
 			}
+			if e.Module != nil {
+				// Reduce nested Interface.Module to matcher-only fields
+				// (Name + Serial via Device stub); the top-level Module
+				// entity carries the full record.
+				e.Module = &diode.Module{
+					Device: stubFor(e.Module.Device),
+					Serial: e.Module.Serial,
+				}
+			}
 		case *diode.IPAddress:
 			if iface, ok := e.AssignedObject.(*diode.Interface); ok && iface != nil {
 				e.AssignedObject = stubForIface(iface)
@@ -275,6 +284,8 @@ func PruneNestedRefs(entities []diode.Entity, currentDevice *diode.Device) {
 				e.AssignedObject = stubForIface(iface)
 			}
 		case *diode.Module:
+			e.Device = stubFor(e.Device)
+		case *diode.ModuleBay:
 			e.Device = stubFor(e.Device)
 		}
 	}
