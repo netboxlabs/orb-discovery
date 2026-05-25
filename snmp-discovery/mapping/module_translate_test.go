@@ -241,3 +241,68 @@ func TestTranslateModules_FullMode_EmptyBayEmittedAsBareModuleBay(t *testing.T) 
 	assert.Equal(t, "Slot 5 (empty)", *bays[0].Name)
 	assert.NotNil(t, bays[0].Device, "even bare bays carry Device")
 }
+
+// TestTranslateModules_SubBayWorkaround_NotLinkedToParentLinecard pins
+// the Diode reconciler workaround (spec §Sub-bay emission workaround).
+// Background: dcim_module_module_bay_id_key is a unique constraint; if
+// we emit a transceiver sub-bay with Module=parent_linecard, the
+// reconciler re-plans the parent linecard inside the sub-bay's
+// changeset and the apply step trips the unique constraint. Until the
+// upstream fix lands, every transceiver-shaped ModuleBay must be
+// device-rooted (Device set, Module nil) and the transceiver's own
+// Module.ModuleBay must in turn carry Device (so it has a matching
+// scope).
+func TestTranslateModules_SubBayWorkaround_NotLinkedToParentLinecard(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	oids := buildOIDs(chassis9404RWithTransceiversFixture())
+	dev := &diode.Device{Name: strPtr("test-router")}
+	memberDevices := map[int]*diode.Device{0: dev}
+
+	entities, _ := TranslateModulesWithAlias(
+		oids, nil, memberDevices, modeFull(), nil, logger, nil, nil,
+	)
+
+	// Identify which bays are sub-bays (transceiver-shaped). The 9404R
+	// fixture names its port container "TenGigabitEthernet2/0/1", so a
+	// HasPrefix("TenGigabit") match is sufficient here.
+	subBaysSeen := 0
+	for _, e := range entities {
+		b, ok := e.(*diode.ModuleBay)
+		if !ok || b.Name == nil {
+			continue
+		}
+		name := *b.Name
+		if !startsWith(name, "TenGigabit") {
+			continue
+		}
+		subBaysSeen++
+		// Workaround invariants:
+		assert.Nil(t, b.Module,
+			"sub-bay %q must not link to parent linecard — see spec §Sub-bay emission workaround", name)
+		assert.NotNil(t, b.Device,
+			"sub-bay %q must be device-rooted (Device set)", name)
+	}
+	require.Equal(t, 1, subBaysSeen, "expected exactly one transceiver sub-bay")
+
+	// The transceiver Module must reach Device through its own bay too
+	// (the device-rooted bay carries Device).
+	for _, e := range entities {
+		m, ok := e.(*diode.Module)
+		if !ok || m.ModuleType == nil || m.ModuleType.Model == nil {
+			continue
+		}
+		if *m.ModuleType.Model != "SFP-10G-LR" {
+			continue
+		}
+		require.NotNil(t, m.ModuleBay, "transceiver Module must carry ModuleBay")
+		assert.NotNil(t, m.ModuleBay.Device,
+			"transceiver Module.ModuleBay must carry Device (device-rooted workaround)")
+	}
+}
+
+// startsWith is a tiny local helper to keep the regression test free of
+// strings.HasPrefix imports leakage in case future test refactors drop
+// strings entirely.
+func startsWith(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
