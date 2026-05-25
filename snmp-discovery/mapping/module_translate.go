@@ -18,6 +18,7 @@ package mapping
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -117,16 +118,35 @@ func TranslateModulesWithAlias(
 	}
 
 	// Full-mode-only: transceiver sub-bays + empty bays + iface routing.
-	for _, parent := range inv.Modules {
-		if parent.MemberID < 0 {
-			continue
-		}
-		device := memberDevices[parent.MemberID]
-		if device == nil {
-			continue
-		}
-		for _, tr := range inv.SubModules[parent.EntIndex] {
+	//
+	// Walk EVERY key in inv.SubModules — not just those keyed by
+	// top-level inv.Modules entries. Vendors like Juniper nest optics
+	// two module-levels below the chassis (Chassis -> FPC -> PIC -> optic),
+	// so the optic's parent class=9 (the PIC) is itself a sub-module
+	// stored under inv.SubModules[FPC.EntIndex]. Iterating only top-
+	// level parents silently dropped those optics. Each transceiver
+	// already carries MemberID (stamped by assignMemberID), so device
+	// routing remains correct regardless of nesting depth. The
+	// emittedModules guard prevents the (theoretical) double-emit if
+	// the same EntIndex is reachable via two parents.
+	subKeys := make([]string, 0, len(inv.SubModules))
+	for k := range inv.SubModules {
+		subKeys = append(subKeys, k)
+	}
+	sort.Strings(subKeys)
+	for _, parentIdx := range subKeys {
+		for _, tr := range inv.SubModules[parentIdx] {
 			if tr.Type != ModuleTypeTransceiver {
+				continue
+			}
+			if tr.MemberID < 0 {
+				continue
+			}
+			if _, dup := emittedModules[tr.EntIndex]; dup {
+				continue
+			}
+			device := memberDevices[tr.MemberID]
+			if device == nil {
 				continue
 			}
 			// Sub-bay reconciler workaround (spec §Sub-bay emission

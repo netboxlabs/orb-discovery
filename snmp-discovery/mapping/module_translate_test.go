@@ -306,6 +306,52 @@ func startsWith(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
+// TestTranslateModules_FullMode_EmitsTransceiversNestedTwoLevelsDeep —
+// Juniper-style hierarchy puts optics two module-levels below the
+// chassis: Chassis -> FPC (class=9) -> PIC bay (class=5) -> PIC
+// (class=9) -> port container (class=5) -> optic (class=9). The PIC
+// is itself a sub-module under the FPC, so optics under the PIC live
+// in inv.SubModules keyed by the PIC's EntIndex — not by any
+// inv.Modules entry. The full-mode emitter must walk every key in
+// inv.SubModules (recursive over the containment tree) so optics
+// nested under sub-modules surface as Module entities.
+func TestTranslateModules_FullMode_EmitsTransceiversNestedTwoLevelsDeep(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	rows := []fixtureRow{
+		{"1", "0", "3", "1", "Chassis", "JN1234", "MX480", "", ""},
+		// FPC slot (class=5 bay) + FPC (class=9 module under it)
+		{"10", "1", "5", "1", "FPC 0 Slot", "", "", "", ""},
+		{"11", "10", "9", "1", "FPC 0", "AB123FPC", "MPC7E-MRATE", "", ""},
+		// PIC bay (class=5) under the FPC + PIC (class=9 module) under it
+		{"20", "11", "5", "1", "PIC 0 Bay", "", "", "", ""},
+		{"21", "20", "9", "1", "PIC 0", "CD456PIC", "MIC-3D-10XGE-SFPP", "", ""},
+		// Port container (class=5) under the PIC + optic (class=9) under it
+		{"30", "21", "5", "1", "xe-0/0/0", "", "", "", ""},
+		{"31", "30", "9", "1", "xe-0/0/0 Optic", "EF789OPT", "SFP-10G-LR", "", ""},
+	}
+	dev := &diode.Device{Name: strPtr("mx480")}
+	memberDevices := map[int]*diode.Device{0: dev}
+
+	entities, _ := TranslateModulesWithAlias(
+		buildOIDs(rows), nil, memberDevices, modeFull(), nil, logger, nil, nil,
+	)
+
+	var transceiverSeen bool
+	for _, e := range entities {
+		m, ok := e.(*diode.Module)
+		if !ok || m.ModuleType == nil || m.ModuleType.Model == nil {
+			continue
+		}
+		if *m.ModuleType.Model == "SFP-10G-LR" {
+			transceiverSeen = true
+			require.NotNil(t, m.Serial)
+			assert.Equal(t, "EF789OPT", *m.Serial)
+		}
+	}
+	assert.True(t, transceiverSeen,
+		"optic nested under a sub-module (PIC) must be emitted in full mode")
+}
+
 // TestTranslateModules_ModuleTypeManufacturer_SourcedFromDevice pins the
 // invariant that ModuleType.Manufacturer.Name and the metric `vendor`
 // attribute always agree — both must read from the emitted Device's
