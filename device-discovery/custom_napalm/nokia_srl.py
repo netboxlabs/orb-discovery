@@ -22,12 +22,15 @@ SR Linux commands used:
   admin display-config      — running configuration (YANG flat format)
 """
 
+import logging
 import re
 
 import napalm.base as _napalm_base
 from napalm.base import models
 from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Config sanitization — Nokia SR Linux sensitive fields
@@ -129,10 +132,13 @@ def _parse_hw_mac_addresses(text: str) -> dict[str, str]:
         try:
             result[name] = normalize_mac(raw)
         except Exception:
-            # napalm normalize_mac raises on malformed values; keep the
-            # raw value rather than dropping the row so debuggers still
-            # see the source of truth.
-            result[name] = raw
+            # napalm normalize_mac rejected the value — log and skip rather
+            # than emit a malformed MAC string that downstream NetBox matching
+            # would silently treat as a distinct interface.
+            logger.warning(
+                "nokia_srl: normalize_mac rejected %r for interface %s — emitting empty MAC",
+                raw, name,
+            )
     return result
 
 

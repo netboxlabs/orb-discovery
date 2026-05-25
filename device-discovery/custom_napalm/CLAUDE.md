@@ -90,9 +90,16 @@ from napalm.base.helpers import mac as normalize_mac
 try:
     mac_address = normalize_mac(mac_raw) if mac_raw else ""
 except Exception:
-    # napalm.mac() raises on malformed values; keep the raw value so
-    # debuggers can see the source of truth rather than dropping the row.
-    mac_address = mac_raw
+    # napalm.mac() rejected the value — log at WARNING and emit an
+    # empty MAC. Keeping the malformed raw string would lead NetBox's
+    # unique_primary_mac_address matcher to treat it as a distinct
+    # interface, which is worse than the missing-MAC behaviour callers
+    # already handle gracefully.
+    logger.warning(
+        "%s: normalize_mac rejected %r for interface %s — emitting empty MAC",
+        DRIVER_NAME, mac_raw, name,
+    )
+    mac_address = ""
 ```
 
 **Set `mac_address = ""` only when the platform genuinely doesn't

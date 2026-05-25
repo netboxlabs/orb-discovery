@@ -123,7 +123,8 @@ def _parse_port_hw_mac_addresses(text: str) -> dict[str, str]:
     result: dict[str, str] = {}
     if not text:
         return result
-    # SR-OS uses ===== banners between port blocks. Split on a run of >=5 = chars.
+    # SR-OS uses ``=`` banners between port blocks; split on any run of one
+    # or more ``=`` characters on a line by themselves.
     for block in re.split(r"^=+\s*$", text, flags=re.MULTILINE):
         iface_m = _PORT_INTERFACE_RE.search(block)
         mac_m = _PORT_HW_MAC_RE.search(block)
@@ -133,7 +134,13 @@ def _parse_port_hw_mac_addresses(text: str) -> dict[str, str]:
         try:
             result[port_id] = normalize_mac(mac_raw)
         except Exception:
-            result[port_id] = mac_raw
+            # napalm normalize_mac rejected the value — log and skip rather
+            # than emit a malformed MAC string that downstream NetBox matching
+            # would silently treat as a distinct interface.
+            logger.warning(
+                "nokia_sros_ssh: normalize_mac rejected %r for port %s — emitting empty MAC",
+                mac_raw, port_id,
+            )
     return result
 
 

@@ -409,12 +409,14 @@ class ProcurveDriver(_napalm_base.NetworkDriver):
         """
         Return interface details keyed by interface name.
 
-        Per-port MAC is sourced from one batched ``show interfaces
-        <port-list>`` call — ProCurve accepts a comma-separated port
-        list, so a single round-trip covers every port discovered by
-        ``show interfaces brief`` regardless of port count. Logical
-        interfaces (trunks, VLANs, etc.) emit no MAC row and stay
-        ``mac_address=""``.
+        Per-port MAC is sourced from batched ``show interfaces
+        <port-list>`` calls — ProCurve accepts a comma-separated port
+        list. To stay under ProCurve / AOS-S CLI input limits on large
+        chassis or stacks we chunk the list at
+        ``_PROCURVE_PORTLIST_CHUNK_SIZE`` ports per call, costing
+        ceil(N/chunk_size) round-trips instead of N per-port commands.
+        Logical interfaces (trunks, VLANs, etc.) emit no MAC row and
+        stay ``mac_address=""``.
         """
         raw = self.device.send_command("show interfaces brief")
         if not raw:
