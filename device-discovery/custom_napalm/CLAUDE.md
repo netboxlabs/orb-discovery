@@ -64,6 +64,48 @@ must return the correct empty type so the rest of the pipeline doesn't break.
 hostname, vendor, model, os_version, serial_number, uptime (float, seconds), fqdn, interface_list (list[str])
 ```
 
+### `get_interfaces()` — `mac_address` field
+
+Each per-interface dict carries a `mac_address` string. The translator
+emits it as `Interface.primary_mac_address` and NetBox matches the
+interface via its `unique_primary_mac_address` matcher, so populating
+it is highly valuable to operators.
+
+**Populate it whenever the platform exposes a per-port MAC.** Acceptable
+sources:
+- SSH CLI: a `show interfaces`-style command that prints a per-port MAC
+  (Cisco-family `Hardware ... address`, Dell `Burned MAC`, Mellanox
+  `HW address`, etc.).
+- Structured API: a field in the same payload the driver already
+  pulls (AOS-CX `hw_intf_info.mac_addr`, PAN-OS `mac`, etc.).
+- gNMI / NETCONF state tree: e.g. SR Linux's
+  `interface[name=*]/ethernet/hw-mac-address`, SR OS NETCONF's
+  `state_ns:hardware-mac-address`.
+
+**Normalise through `napalm.base.helpers.mac`** before returning:
+
+```python
+from napalm.base.helpers import mac as normalize_mac
+
+try:
+    mac_address = normalize_mac(mac_raw) if mac_raw else ""
+except Exception:
+    # napalm.mac() raises on malformed values; keep the raw value so
+    # debuggers can see the source of truth rather than dropping the row.
+    mac_address = mac_raw
+```
+
+**Set `mac_address = ""` only when the platform genuinely doesn't
+expose per-port MAC.** Two real cases exist:
+- Cisco Small Business SG300 / SG350 / SG550 — one chassis MAC across
+  all ports; no per-port concept.
+- Cisco AireOS WLC — most "interfaces" are virtual (mgmt / dynamic
+  VLANs / AP-manager) with no L2 MAC.
+
+For every other driver, an unsupported (`""`) MAC field is a feature
+gap, not the intended steady state — track in the supported-platforms
+table and follow up with a driver-specific fix.
+
 ---
 
 ## Optional method: `get_interfaces_vlans`

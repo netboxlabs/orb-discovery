@@ -14,6 +14,11 @@ SR Linux commands used:
   show version              — hostname, software version, chassis type
   show system information   — uptime, serial number
   show interface all        — interface status, speed, IP addresses
+  info from state interface * ethernet hw-mac-address
+                            — per-interface hardware MAC (single shot,
+                              wildcard expands across every physical
+                              interface; YANG path is
+                              /interface[name=*]/ethernet/hw-mac-address)
   admin display-config      — running configuration (YANG flat format)
 """
 
@@ -21,6 +26,7 @@ import re
 
 import napalm.base as _napalm_base
 from napalm.base import models
+from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
 
 # ---------------------------------------------------------------------------
@@ -75,6 +81,44 @@ def _parse_speed(speed_str: str) -> float:
         return -1.0
     value, unit = float(m.group(1)), m.group(2).lower()
     return value * _SPEED_MULT.get(unit, 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Hardware MAC parser — ``info from state interface * ethernet hw-mac-address``
+# ---------------------------------------------------------------------------
+
+# SR Linux emits one block per interface, e.g.::
+#
+#     interface ethernet-1/1 {
+#         ethernet {
+#             hw-mac-address 1A:CD:EE:FF:00:01
+#         }
+#     }
+#
+# Capture the (name, mac) pair across the braces — interfaces without an
+# ethernet/hw-mac-address leaf (e.g. loopbacks, system) won't match and are
+# silently skipped. The MAC value is required to be 17 chars (xx:xx:...).
+_HW_MAC_BLOCK_RE = re.compile(
+    r"interface\s+(\S+)\s*\{[^}]*?ethernet\s*\{[^}]*?hw-mac-address\s+([0-9A-Fa-f:]{17})",
+    re.DOTALL,
+)
+
+
+def _parse_hw_mac_addresses(text: str) -> dict[str, str]:
+    """Return ``{interface_name: normalized_mac}`` parsed from the YANG state output."""
+    result: dict[str, str] = {}
+    if not text:
+        return result
+    for m in _HW_MAC_BLOCK_RE.finditer(text):
+        name, raw = m.group(1), m.group(2)
+        try:
+            result[name] = normalize_mac(raw)
+        except Exception:
+            # napalm normalize_mac raises on malformed values; keep the
+            # raw value rather than dropping the row so debuggers still
+            # see the source of truth.
+            result[name] = raw
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -348,10 +392,21 @@ class SRLDriver(_napalm_base.NetworkDriver):
         sub-interface (e.g. ``mgmt0`` and ``mgmt0.0``). The translator
         maps sub-interface names to NetBox ``virtual`` interfaces with
         parent linkage automatically.
+
+        Physical interface MACs are sourced from
+        ``info from state interface * ethernet hw-mac-address`` (one
+        wildcard call covers every port). Sub-interfaces inherit no
+        L2 identity in SR Linux and remain MAC-less.
         """
         intf_out = self.device.send_command("show interface all")
         if not intf_out:
             return {}
+
+        mac_by_intf = _parse_hw_mac_addresses(
+            self.device.send_command(
+                "info from state interface * ethernet hw-mac-address"
+            )
+        )
 
         parsed = _parse_interface_output(intf_out)
         interfaces: dict = {}
@@ -363,7 +418,7 @@ class SRLDriver(_napalm_base.NetworkDriver):
                 "last_flapped": -1.0,
                 "mtu": entry["mtu"],
                 "speed": entry["speed"],
-                "mac_address": "",
+                "mac_address": mac_by_intf.get(entry["name"], ""),
             }
             for sub in entry["subs"]:
                 interfaces[sub["name"]] = {
