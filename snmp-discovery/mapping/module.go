@@ -6,12 +6,17 @@
 package mapping
 
 import (
+	"context"
 	"log/slog"
 	"sort"
 	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/metrics"
 )
 
 // entPhysical column prefixes specific to module discovery (the rest
@@ -275,6 +280,11 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 				"ent", r.EntIndex,
 				"model", r.Model,
 				"reason", "orphan_containment")
+			if c := metrics.GetModulesDropped(); c != nil {
+				c.Add(context.Background(), 1, metric.WithAttributes(
+					attribute.String("reason", "orphan_containment"),
+				))
+			}
 			continue
 		}
 		if r.Serial != "" {
@@ -285,6 +295,11 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 					"serial", r.Serial,
 					"model", r.Model,
 					"reason", "dup_serial")
+				if c := metrics.GetModulesDropped(); c != nil {
+					c.Add(context.Background(), 1, metric.WithAttributes(
+						attribute.String("reason", "dup_serial"),
+					))
+				}
 				continue
 			}
 			seenSerial[key] = struct{}{}

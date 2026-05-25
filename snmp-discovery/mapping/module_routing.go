@@ -9,11 +9,16 @@
 package mapping
 
 import (
+	"context"
 	"log/slog"
 	"strconv"
 	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/metrics"
 )
 
 // assignMemberID stamps each ModuleEntry in inv with the logical member
@@ -86,6 +91,11 @@ func assignMemberID(inv *ModuleInventory, chassisInv *ChassisInventory, oids Obj
 			logger.Warn("module discovery: orphan module — chassis ancestor not in chassis inventory",
 				"ent", e.EntIndex, "model", e.Model)
 			e.MemberID = -1
+			if c := metrics.GetModulesDropped(); c != nil {
+				c.Add(context.Background(), 1, metric.WithAttributes(
+					attribute.String("reason", "orphan_member"),
+				))
+			}
 			return
 		}
 		e.MemberID = id

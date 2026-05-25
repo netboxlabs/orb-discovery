@@ -16,11 +16,16 @@
 package mapping
 
 import (
+	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/metrics"
 )
 
 // TranslateModules is a thin wrapper for callers without alias data —
@@ -92,8 +97,19 @@ func TranslateModulesWithAlias(
 		}
 		bay := emitModuleBay(device, m)
 		entities = append(entities, bay)
+		if c := metrics.GetModuleBaysEmitted(); c != nil {
+			c.Add(context.Background(), 1, metric.WithAttributes(
+				attribute.String("vendor", vendorFromDevice(device)),
+			))
+		}
 		mod := emitModule(device, bay, m, manufacturer)
 		entities = append(entities, mod)
+		if c := metrics.GetModulesEmitted(); c != nil {
+			c.Add(context.Background(), 1, metric.WithAttributes(
+				attribute.String("vendor", vendorFromDevice(device)),
+				attribute.String("type", string(m.Type)),
+			))
+		}
 		emittedModules[m.EntIndex] = mod
 	}
 
@@ -126,9 +142,20 @@ func TranslateModulesWithAlias(
 			// module refs against committed sibling entities.
 			subBay := emitModuleBay(device, tr)
 			entities = append(entities, subBay)
+			if c := metrics.GetModuleBaysEmitted(); c != nil {
+				c.Add(context.Background(), 1, metric.WithAttributes(
+					attribute.String("vendor", vendorFromDevice(device)),
+				))
+			}
 
 			mod := emitModule(device, subBay, tr, manufacturer)
 			entities = append(entities, mod)
+			if c := metrics.GetModulesEmitted(); c != nil {
+				c.Add(context.Background(), 1, metric.WithAttributes(
+					attribute.String("vendor", vendorFromDevice(device)),
+					attribute.String("type", string(tr.Type)),
+				))
+			}
 			emittedModules[tr.EntIndex] = mod
 		}
 	}
@@ -144,6 +171,11 @@ func TranslateModulesWithAlias(
 			continue
 		}
 		entities = append(entities, emitModuleBay(device, b))
+		if c := metrics.GetModuleBaysEmitted(); c != nil {
+			c.Add(context.Background(), 1, metric.WithAttributes(
+				attribute.String("vendor", vendorFromDevice(device)),
+			))
+		}
 	}
 
 	ifaceMap := buildIfaceModuleMap(inv, aliasMap, ifIndexToName, emittedModules)
@@ -201,6 +233,22 @@ func emitModule(device *diode.Device, bay *diode.ModuleBay, m ModuleEntry, manuf
 		mod.Description = &desc
 	}
 	return mod
+}
+
+// vendorFromDevice resolves the per-device manufacturer name for metric
+// attribution. Reads the already-set DeviceType.Manufacturer.Name on the
+// emitted Device — that's the same value emitModule uses for the
+// ModuleType, so the counter labels stay consistent with what NetBox sees.
+// Falls back to "Unknown" on any nil/blank in the chain so a missing
+// pointer never produces an empty-string attribute.
+func vendorFromDevice(d *diode.Device) string {
+	if d == nil || d.DeviceType == nil || d.DeviceType.Manufacturer == nil || d.DeviceType.Manufacturer.Name == nil {
+		return "Unknown"
+	}
+	if name := strings.TrimSpace(*d.DeviceType.Manufacturer.Name); name != "" {
+		return name
+	}
+	return "Unknown"
 }
 
 // modelOrUnknown trims model and substitutes "Unknown" for the empty
