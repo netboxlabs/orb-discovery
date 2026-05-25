@@ -204,6 +204,19 @@ func (m *Manager) validatePolicy(policy config.Policy) error {
 		}
 	}
 
+	// Reject unknown enum values at parse time so operators get an
+	// immediate error rather than silently degrading at scan time.
+	if policy.Config.Options.DiscoverModules != nil {
+		switch *policy.Config.Options.DiscoverModules {
+		case "off", "linecards", "full":
+		default:
+			return fmt.Errorf(
+				"invalid options.discover_modules %q (allowed: off, linecards, full)",
+				*policy.Config.Options.DiscoverModules,
+			)
+		}
+	}
+
 	return nil
 }
 

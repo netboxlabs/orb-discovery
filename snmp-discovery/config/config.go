@@ -204,6 +204,25 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 // Options represents per-policy global behavior toggles peer to Defaults.
 type Options struct {
 	CreateUnknownVlans *bool `yaml:"create_unknown_vlans,omitempty"`
+
+	// Tri-state pointer so we can distinguish unset (default = "off") from
+	// explicit "off". Values:
+	//   nil         → treat as "off" (default; zero behaviour change)
+	//   "off"       → no module / module bay entities emitted
+	//   "linecards" → top-level chassis-slot modules (linecards + supervisors;
+	//                 PSU/fan classified for labelling but NOT emitted);
+	//                 transceiver sub-bays dropped
+	//   "full"      → linecards plus per-transceiver sub-bays; populates
+	//                 Interface.Module on physical ports
+	DiscoverModules *string `yaml:"discover_modules,omitempty"`
+}
+
+// ModuleDiscoveryMode returns the effective mode, defaulting to "off".
+func (o *Options) ModuleDiscoveryMode() string {
+	if o == nil || o.DiscoverModules == nil {
+		return "off"
+	}
+	return *o.DiscoverModules
 }
 
 // PolicyConfig represents the configuration of a policy

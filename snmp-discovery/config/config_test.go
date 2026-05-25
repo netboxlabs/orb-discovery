@@ -493,3 +493,33 @@ func TestMergeDefaults_AssetTag_NoOverride(t *testing.T) {
 	merged := MergeDefaults(policy, nil)
 	assert.Equal(t, "POLICY-TAG", merged.AssetTag)
 }
+
+func TestPolicyOptions_DiscoverModulesDefaultsToOff(t *testing.T) {
+	raw := []byte(`
+options:
+  create_unknown_vlans: true
+`)
+	var pc PolicyConfig
+	require.NoError(t, yaml.Unmarshal(raw, &pc))
+	assert.Equal(t, "off", pc.Options.ModuleDiscoveryMode(),
+		"DiscoverModules should default to off when omitted")
+}
+
+func TestPolicyOptions_DiscoverModulesParsed(t *testing.T) {
+	cases := []struct {
+		in  string
+		out string
+	}{
+		{"off", "off"},
+		{"linecards", "linecards"},
+		{"full", "full"},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			raw := []byte("options:\n  discover_modules: " + c.in + "\n")
+			var pc PolicyConfig
+			require.NoError(t, yaml.Unmarshal(raw, &pc))
+			assert.Equal(t, c.out, pc.Options.ModuleDiscoveryMode())
+		})
+	}
+}
