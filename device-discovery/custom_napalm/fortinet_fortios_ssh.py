@@ -14,6 +14,7 @@ import re
 
 import napalm.base as _napalm_base
 from napalm.base import models
+from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
@@ -46,6 +47,52 @@ def _parse_uptime(output: str) -> int:
         return 0
     days, hours, minutes = int(m.group(1)), int(m.group(2)), int(m.group(3))
     return days * 86400 + hours * 3600 + minutes * 60
+
+
+# --- fnsysctl ifconfig MAC parser ------------------------------------------ #
+# FortiOS ``fnsysctl ifconfig`` is a shell-passthrough wrapper for Linux
+# ifconfig. It emits all NICs in one shot, e.g.::
+#
+#   port1   Link encap:Ethernet  HWaddr 00:09:0F:09:00:01
+#           inet addr:192.168.1.1  Bcast:192.168.1.255  Mask:255.255.255.0
+#           UP BROADCAST RUNNING ALLMULTI MULTICAST  MTU:1500  Metric:1
+#           ...
+#
+#   port2   Link encap:Ethernet  HWaddr 00:09:0F:09:00:02
+#           ...
+#
+# Pairs ``<name> Link encap:Ethernet`` header with the ``HWaddr`` value on
+# the same line. Loopback / non-ethernet interfaces emit a different encap
+# (``Link encap:Local Loopback``) and don't carry HWaddr — silently skipped.
+#
+# HA caveat: FortiGate HA-secondary nodes report the *current* (operational)
+# MAC rather than the burned-in MAC. ``get hardware nic <port>`` returns
+# permanent MAC but is per-port. The current MAC is what NetBox matches
+# against L2 neighbours so we accept it as the right value.
+_FNSYSCTL_IFACE_RE = re.compile(
+    r"^(\S+)\s+Link\s+encap:Ethernet\s+HWaddr\s+([0-9a-fA-F:.\-]{12,17})",
+    re.M,
+)
+
+
+def _parse_fnsysctl_mac_addresses(text: str) -> dict[str, str]:
+    """
+    Parse ``fnsysctl ifconfig`` output → ``{interface_name: normalised_mac}``.
+
+    Loopback / non-ethernet interfaces (``Link encap:Local Loopback``,
+    GRE tunnels, etc.) don't match the Ethernet-only header and are
+    silently skipped. Empty / None input is tolerated.
+    """
+    result: dict[str, str] = {}
+    if not text:
+        return result
+    for m in _FNSYSCTL_IFACE_RE.finditer(text):
+        name, raw = m.group(1), m.group(2)
+        try:
+            result[name] = normalize_mac(raw)
+        except Exception:
+            result[name] = raw
+    return result
 
 
 def _netmask_to_prefix(netmask: str) -> int:
@@ -135,7 +182,17 @@ class FortiOSSSHDriver(_napalm_base.NetworkDriver):
         }
 
     def get_interfaces(self) -> dict:
-        """Return interface details keyed by interface name."""
+        """
+        Return interface details keyed by interface name.
+
+        Per-port MAC is sourced from ``fnsysctl ifconfig`` — a single shell
+        passthrough call that lists every Ethernet NIC with HWaddr. Non-
+        Ethernet interfaces (Loopback, tunnels) and admin profiles without
+        shell access return no MAC; the field stays ``"" `` for those.
+
+        HA caveat: secondary HA nodes report the *current* (operational) MAC
+        rather than the burned-in MAC — see _parse_fnsysctl_mac_addresses.
+        """
         raw = self.device.send_command("get system interface physical")
         try:
             parsed = parse_output(
@@ -144,6 +201,10 @@ class FortiOSSSHDriver(_napalm_base.NetworkDriver):
         except Exception:
             logger.debug("Failed to parse 'get system interface physical' output", exc_info=True)
             return {}
+
+        mac_by_intf = _parse_fnsysctl_mac_addresses(
+            self.device.send_command("fnsysctl ifconfig")
+        )
 
         interfaces = {}
         for row in parsed:
@@ -165,7 +226,7 @@ class FortiOSSSHDriver(_napalm_base.NetworkDriver):
                 "last_flapped": -1.0,
                 "mtu": 0,
                 "speed": speed,
-                "mac_address": "",
+                "mac_address": mac_by_intf.get(name, ""),
             }
 
         return interfaces
