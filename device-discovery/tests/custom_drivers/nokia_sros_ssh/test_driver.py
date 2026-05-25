@@ -88,3 +88,28 @@ Hardware Mac       : 90:ec:00:00:00:01
 ===============================================================================
 """
     assert _parse_port_hw_mac_addresses(text) == {"1/1/1": "90:EC:00:00:00:01"}
+
+
+def test_parse_port_hw_mac_addresses_md_cli_hardware_address_label():
+    """MD-CLI (SR-OS 19+) uses ``Hardware Address`` instead of ``Hardware Mac``."""
+    text = """\
+===============================================================================
+Ethernet Interface
+===============================================================================
+Interface         : 1/1/c2/1                   Oper Speed         : 10 Gbps
+Configured Address: aa:bb:cc:dd:ee:42
+Hardware Address  : 90:ec:00:00:00:42
+===============================================================================
+"""
+    assert _parse_port_hw_mac_addresses(text) == {"1/1/c2/1": "90:EC:00:00:00:42"}
+
+
+def test_parse_port_hw_mac_addresses_accepts_non_padded_mac():
+    """napalm.mac() accepts ``aa:bb:cc:dd:ee:1`` and pads to ``AA:BB:CC:DD:EE:01`` — regex must allow shorter form too."""
+    text = """\
+===============================================================================
+Interface          : 1/1/1
+Hardware Mac       : aa:bb:cc:dd:ee:1
+===============================================================================
+"""
+    assert _parse_port_hw_mac_addresses(text) == {"1/1/1": "AA:BB:CC:DD:EE:01"}

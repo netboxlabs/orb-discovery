@@ -97,9 +97,24 @@ def _parse_speed(speed_str: str) -> float:
 #
 # Capture the (name, mac) pair across the braces — interfaces without an
 # ethernet/hw-mac-address leaf (e.g. loopbacks, system) won't match and are
-# silently skipped. The MAC value is required to be 17 chars (xx:xx:...).
+# silently skipped.
+#
+# The MAC capture group accepts colon-, dot-, or dash-separated forms and a
+# wider length range (12-17 chars) so `napalm.base.helpers.mac()` — not the
+# regex — does the format validation. This catches non-padded variants like
+# `aa:bb:cc:dd:ee:1` that napalm normalises to `AA:BB:CC:DD:EE:01`.
+#
+# NOTE: the ``[^}]*?`` spans are NOT brace-aware — they stop at the first
+# closing brace. The targeted query `info from state interface *
+# ethernet hw-mac-address` keeps the ethernet sub-block flat (just the
+# requested leaf), so this is safe today. If future SR Linux versions emit
+# extra nested blocks inside ``ethernet { ... }`` before hw-mac-address
+# (e.g. flow-control { }), the regex would silently miss those interfaces
+# and the MAC field would fall back to empty string. Mitigation if that
+# happens: request JSON output via ``| as json`` and switch to a structured
+# parser.
 _HW_MAC_BLOCK_RE = re.compile(
-    r"interface\s+(\S+)\s*\{[^}]*?ethernet\s*\{[^}]*?hw-mac-address\s+([0-9A-Fa-f:]{17})",
+    r"interface\s+(\S+)\s*\{[^}]*?ethernet\s*\{[^}]*?hw-mac-address\s+([0-9A-Fa-f:.\-]{12,17})",
     re.DOTALL,
 )
 

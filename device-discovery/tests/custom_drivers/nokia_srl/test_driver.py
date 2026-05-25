@@ -91,3 +91,15 @@ def test_parse_hw_mac_addresses_skips_interfaces_without_ethernet_block():
 def test_parse_hw_mac_addresses_no_matches_returns_empty():
     """A blob with zero MAC blocks (e.g. error banner) returns an empty dict."""
     assert _parse_hw_mac_addresses("Error: invalid path\n") == {}
+
+
+def test_parse_hw_mac_addresses_accepts_non_padded_mac():
+    """napalm.mac() accepts ``aa:bb:cc:dd:ee:1`` and pads to ``AA:BB:CC:DD:EE:01`` — regex must allow shorter form too."""
+    text = """\
+    interface ethernet-1/1 {
+        ethernet {
+            hw-mac-address aa:bb:cc:dd:ee:1
+        }
+    }
+"""
+    assert _parse_hw_mac_addresses(text) == {"ethernet-1/1": "AA:BB:CC:DD:EE:01"}

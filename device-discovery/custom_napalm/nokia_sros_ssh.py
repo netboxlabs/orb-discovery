@@ -81,17 +81,32 @@ def _parse_uptime(uptime_str: str) -> float:
 
 # SR-OS prints one block per port under `show port detail`, separated by
 # `=====...` banner lines. Within each block:
-#     Interface          : 1/1/1
-#     ...
-#     Hardware Mac       : 90:ec:00:00:00:00
-# The Hardware-Mac row reports the burned-in MAC; the Configured-Mac row
-# above it is the operator-overridden MAC. NetBox interface MAC matches the
-# burned-in MAC by convention.
+#
+#     Classic CLI (older releases):
+#         Interface          : 1/1/1
+#         ...
+#         Hardware Mac       : 90:ec:00:00:00:00
+#
+#     MD-CLI (SR-OS 19+):
+#         Interface         : 1/1/c2/1
+#         ...
+#         Hardware Address  : 90:ec:00:00:00:00
+#
+# The Hardware row reports the burned-in MAC; the Configured row above it
+# is the operator-overridden MAC. NetBox interface MAC matches the burned-in
+# MAC by convention.
+#
+# The MAC capture group accepts colon-, dot-, or dash-separated forms and a
+# wider length range so `napalm.base.helpers.mac()` (not the regex) does the
+# validation. Length 12-17 chars covers `aabbccddeeff`, `aabb.ccdd.eeff`,
+# `aa-bb-cc-dd-ee-ff`, and non-padded variants like `aa:bb:cc:dd:ee:1` that
+# napalm normalises.
 _PORT_INTERFACE_RE = re.compile(
     r"^\s*Interface\s*:\s*(\S+)", re.MULTILINE,
 )
 _PORT_HW_MAC_RE = re.compile(
-    r"^\s*Hardware\s+Mac\s*:\s*([0-9a-fA-F:]{17})", re.MULTILINE,
+    r"^\s*Hardware\s+(?:Mac|Address)\s*:\s*([0-9a-fA-F:.\-]{12,17})\s*$",
+    re.MULTILINE,
 )
 
 
