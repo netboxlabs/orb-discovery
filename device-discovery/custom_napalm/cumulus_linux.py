@@ -277,7 +277,15 @@ class CumulusDriver(_napalm_base.NetworkDriver):
         link_out = self.device.send_command("ip link show")
         try:
             parsed_links = parse_output(platform="linux", command="ip link show", data=link_out)
-            interface_list = [row["interface"] for row in parsed_links if row.get("interface")]
+            # Strip the kernel ``@<parent>`` decoration so interface_list
+            # matches the canonical keys emitted by get_interfaces() /
+            # get_interfaces_ip(). Without this, sub-interfaces would
+            # appear as ``swp1.100@swp1`` in facts but ``swp1.100`` in
+            # the other getters — breaking name-based reconciliation.
+            interface_list = [
+                _strip_link_decoration(row["interface"])
+                for row in parsed_links if row.get("interface")
+            ]
         except Exception:
             logger.debug("Failed to parse 'ip link show' for interface_list", exc_info=True)
             interface_list = []

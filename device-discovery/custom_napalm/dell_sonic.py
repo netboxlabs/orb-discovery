@@ -448,7 +448,14 @@ class SONiCDriver(_napalm_base.NetworkDriver):
         Orphan subs (parent not seen) are debug-logged and skipped so
         the translator doesn't see an unparentable virtual interface.
         """
-        sub_output = self.device.send_command("show subinterface status")
+        # SONiC versions differ on the canonical form — older releases use
+        # ``show subinterface status`` (singular), newer use the plural.
+        # The unsupported variant returns non-empty CLI error text rather
+        # than an empty string, so probe with ``_send_first_nonempty`` and
+        # also reject obvious error banners.
+        sub_output = _send_first_nonempty(
+            self.device, ("show subinterface status", "show subinterfaces status"),
+        )
         if not sub_output:
             return
         sub_col_map = _parse_intf_status_header(sub_output)
@@ -468,7 +475,13 @@ class SONiCDriver(_napalm_base.NetworkDriver):
                 continue
             parsed = _parse_interface_line(line, sub_col_map)
             if parsed is not None:
-                parsed.setdefault("mac_address", interfaces[parent_name].get("mac_address", ""))
+                # ``_parse_interface_line`` always populates ``mac_address``
+                # (with ``""`` when the row has no MAC column), so
+                # ``setdefault`` is a no-op. Explicitly overwrite when
+                # empty so the sub inherits the parent NIC's MAC (SONiC
+                # Linux VLAN devices share the parent's hwaddr).
+                if not parsed.get("mac_address"):
+                    parsed["mac_address"] = interfaces[parent_name].get("mac_address", "")
                 interfaces[name] = parsed
 
     def get_interfaces_ip(self) -> dict:
