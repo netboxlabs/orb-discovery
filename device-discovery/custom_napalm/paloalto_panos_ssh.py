@@ -169,20 +169,36 @@ class PANOSSHDriver(_napalm_base.NetworkDriver):
                 platform="paloalto_panos", command="show interface logical", data=logical_out
             )
         except Exception:
+            # Don't silently swallow — template drift would otherwise drop
+            # every sub-interface without surfacing the cause. DEBUG keeps
+            # the warning floor low for installs that genuinely return
+            # empty / unparseable logical output.
+            logger.debug("Failed to parse 'show interface logical' output", exc_info=True)
             logical_parsed = []
         for row in logical_parsed:
             intf = row.get("interface", "")
             if not intf or "." not in intf or intf in interfaces:
                 continue
-            parent_data = interfaces.get(intf.split(".", 1)[0], {})
+            parent_name = intf.split(".", 1)[0]
+            if parent_name not in interfaces:
+                # Orphan sub-interface — parent wasn't enumerated by
+                # ``show interface hardware``. Skipping rather than
+                # emitting with fake defaults so the translator doesn't
+                # see an unparentable virtual interface in NetBox.
+                logger.debug(
+                    "Skipping orphan sub-interface %s — parent %s not found",
+                    intf, parent_name,
+                )
+                continue
+            parent_data = interfaces[parent_name]
             interfaces[intf] = {
-                "is_up": parent_data.get("is_up", True),
+                "is_up": parent_data["is_up"],
                 "is_enabled": True,
                 "description": "",
                 "last_flapped": -1.0,
                 "mtu": 0,
-                "speed": parent_data.get("speed", 0.0),
-                "mac_address": parent_data.get("mac_address", ""),
+                "speed": parent_data["speed"],
+                "mac_address": parent_data["mac_address"],
             }
 
         return interfaces
