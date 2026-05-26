@@ -38,15 +38,18 @@ func TranslateModules(
 	defaults *config.Defaults,
 	logger *slog.Logger,
 ) ([]diode.Entity, map[string]*diode.Module) {
-	return TranslateModulesWithAlias(oids, chassisInv, memberDevices, options, defaults, logger, nil, nil)
+	return TranslateModulesWithAlias(oids, chassisInv, memberDevices, options, defaults, logger, nil)
 }
 
 // TranslateModulesWithAlias is the full-fidelity entry point used by
 // the runner. Returns (entities, ifaceModuleMap):
 //   - entities: every ModuleBay + Module emitted, in extraction order.
-//   - ifaceModuleMap: in "full" mode, {ifName -> *Module} so the
-//     runner can attach Interface.Module on physical ports. nil in
-//     "linecards" mode.
+//   - ifaceModuleMap: in "full" mode, {ifIndex -> *Module} (ifIndex as
+//     decimal string) so the runner can attach Interface.Module on
+//     physical ports by looking up each Interface's ifIndex. nil in
+//     "linecards" mode. ifIndex keying (not ifName) is required: VC/stack
+//     members can reuse the same canonical ifName locally and an
+//     ifName-keyed map would collapse distinct transceivers.
 //
 // Returns (nil, nil) when:
 //   - mode == "off"
@@ -59,7 +62,6 @@ func TranslateModulesWithAlias(
 	defaults *config.Defaults,
 	logger *slog.Logger,
 	aliasMap map[string]string,
-	ifIndexToName map[string]string,
 ) ([]diode.Entity, map[string]*diode.Module) {
 	mode := options.ModuleDiscoveryMode()
 	if mode == config.DiscoverModulesOff {
@@ -199,7 +201,7 @@ func TranslateModulesWithAlias(
 		}
 	}
 
-	ifaceMap := buildIfaceModuleMap(inv, aliasMap, ifIndexToName, emittedModules)
+	ifaceMap := buildIfaceModuleMap(inv, aliasMap, emittedModules)
 	return entities, ifaceMap
 }
 

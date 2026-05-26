@@ -168,29 +168,29 @@ func TestAssignMemberID_VCMasterKeyedByLowestMemberID(t *testing.T) {
 
 // --- buildIfaceModuleMap tests ---
 
-// TestBuildIfaceModuleMap_HappyPath — transceiver EntIndex "203" routes
-// through aliasMap -> ifIndex "10101" -> ifIndexToName -> "Gi1/0/1".
-// The emitted Module at emittedModules["203"] must appear keyed by
-// "Gi1/0/1" in the result so the runner can later set Interface.Module.
+// TestBuildIfaceModuleMap_HappyPath — transceiver EntIndex "203" resolves
+// through aliasMap to ifIndex "10101". The emitted Module at
+// emittedModules["203"] must appear keyed by ifIndex "10101" in the
+// result so the runner can later set Interface.Module via the
+// ifIndexByIface lookup.
 func TestBuildIfaceModuleMap_HappyPath(t *testing.T) {
 	inv := newModuleInventory()
 	inv.SubModules["201"] = []ModuleEntry{
 		{EntIndex: "203", Type: ModuleTypeTransceiver, ParentEntIdx: "201"},
 	}
 	aliasMap := map[string]string{"203": "10101"}
-	ifIndexToName := map[string]string{"10101": "Gi1/0/1"}
 	mod := &diode.Module{}
 	emitted := map[string]*diode.Module{"203": mod}
 
-	got := buildIfaceModuleMap(inv, aliasMap, ifIndexToName, emitted)
+	got := buildIfaceModuleMap(inv, aliasMap, emitted)
 
-	require.Contains(t, got, "Gi1/0/1")
-	assert.Same(t, mod, got["Gi1/0/1"], "result must point at the emittedModules entry")
+	require.Contains(t, got, "10101")
+	assert.Same(t, mod, got["10101"], "result must point at the emittedModules entry")
 	assert.Len(t, got, 1, "only the transceiver routes; no extra keys")
 }
 
 // TestBuildIfaceModuleMap_TransceiverWithoutAliasSkipped — a transceiver
-// missing from aliasMap is silently skipped (no ifName to bind to).
+// missing from aliasMap is silently skipped (no ifIndex to bind to).
 func TestBuildIfaceModuleMap_TransceiverWithoutAliasSkipped(t *testing.T) {
 	inv := newModuleInventory()
 	inv.SubModules["201"] = []ModuleEntry{
@@ -198,23 +198,40 @@ func TestBuildIfaceModuleMap_TransceiverWithoutAliasSkipped(t *testing.T) {
 	}
 	emitted := map[string]*diode.Module{"203": {}}
 
-	got := buildIfaceModuleMap(inv, map[string]string{}, map[string]string{"10101": "Gi1/0/1"}, emitted)
+	got := buildIfaceModuleMap(inv, map[string]string{}, emitted)
 
 	assert.Empty(t, got, "no aliasMap entry -> transceiver not in result")
 }
 
-// TestBuildIfaceModuleMap_TransceiverWithoutIfNameSkipped — aliasMap
-// resolves but the ifIndexToName lookup misses. Skip with no panic.
-func TestBuildIfaceModuleMap_TransceiverWithoutIfNameSkipped(t *testing.T) {
-	inv := newModuleInventory()
-	inv.SubModules["201"] = []ModuleEntry{
-		{EntIndex: "203", Type: ModuleTypeTransceiver, ParentEntIdx: "201"},
+// TestBuildIfaceModuleMap_VCMembersWithSameIfNameDoNotCollide — codex P1
+// regression: on Juniper VC and some Aruba stacks each member uses a
+// local ifName scope, so two distinct interfaces on two members canonicalize
+// to the same string (e.g. "Gi1/0/1"). Keying by ifName collapses both
+// transceivers onto one map entry and the runner attaches the wrong
+// member's module. ifIndex is globally unique in the SNMP walk space —
+// keying by it preserves both entries.
+func TestBuildIfaceModuleMap_VCMembersWithSameIfNameDoNotCollide(t *testing.T) {
+	mod1 := &diode.Module{Serial: strPtr("XCVR-MEMBER-1")}
+	mod2 := &diode.Module{Serial: strPtr("XCVR-MEMBER-2")}
+	inv := ModuleInventory{
+		SubModules: map[string][]ModuleEntry{
+			"201": {{EntIndex: "203", Type: ModuleTypeTransceiver}}, // member 1 linecard
+			"401": {{EntIndex: "403", Type: ModuleTypeTransceiver}}, // member 2 linecard
+		},
 	}
-	emitted := map[string]*diode.Module{"203": {}}
+	aliasMap := map[string]string{
+		"203": "10101", // member 1 ifIndex
+		"403": "20101", // member 2 ifIndex — DISTINCT
+	}
+	emittedModules := map[string]*diode.Module{
+		"203": mod1,
+		"403": mod2,
+	}
+	out := buildIfaceModuleMap(inv, aliasMap, emittedModules)
 
-	got := buildIfaceModuleMap(inv, map[string]string{"203": "10101"}, map[string]string{}, emitted)
-
-	assert.Empty(t, got, "ifIndex without an ifName entry -> transceiver not in result")
+	require.Equal(t, mod1, out["10101"], "member 1 transceiver routes to ifIndex 10101")
+	require.Equal(t, mod2, out["20101"], "member 2 transceiver routes to ifIndex 20101")
+	require.Len(t, out, 2, "no collapse — distinct ifIndexes preserve distinct modules")
 }
 
 // --- Exported helper tests (runner wire-up) ---
@@ -259,25 +276,6 @@ func TestAliasMapFromOIDs_DeterministicWhenMultipleAliasRowsShareEntIndex(t *tes
 		require.Equal(t, "10101", m["203"],
 			"AliasMapFromOIDs must deterministically pick the lowest ifIndex")
 	}
-}
-
-// TestIfNameByIfIndex_InvertsRunnerMap — inversion plus nil-Name skip.
-func TestIfNameByIfIndex_InvertsRunnerMap(t *testing.T) {
-	n1 := strPtr("Gi1/0/1")
-	n2 := strPtr("Gi2/0/1")
-	i1 := &diode.Interface{Name: n1}
-	i2 := &diode.Interface{Name: n2}
-	nameless := &diode.Interface{} // Name == nil; skipped
-	ifIndexByIface := map[*diode.Interface]int{
-		i1:       10101,
-		i2:       10201,
-		nameless: 30000,
-	}
-	m := IfNameByIfIndex(ifIndexByIface)
-	assert.Equal(t, "Gi1/0/1", m["10101"])
-	assert.Equal(t, "Gi2/0/1", m["10201"])
-	assert.NotContains(t, m, "30000", "interfaces with nil Name are skipped")
-	assert.Len(t, m, 2)
 }
 
 // TestMemberDevicesFromEntities_VCKeyedByLowestMemberID — the master

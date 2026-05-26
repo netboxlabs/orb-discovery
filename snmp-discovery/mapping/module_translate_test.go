@@ -137,14 +137,13 @@ func TestTranslateModules_FullMode_EmitsTransceiversAsSubBayedModules(t *testing
 	dev := &diode.Device{Name: strPtr("test-router")}
 	memberDevices := map[int]*diode.Device{0: dev}
 
-	// Transceiver EntIndex "203" sits behind ifIndex "10101" /
-	// ifName "Gi1/0/1" per the fixture's alias wiring intent.
+	// Transceiver EntIndex "203" sits behind ifIndex "10101"
+	// per the fixture's alias wiring intent.
 	aliasMap := map[string]string{"203": "10101"}
-	ifIndexToName := map[string]string{"10101": "Gi1/0/1"}
 
 	entities, ifaceMap := TranslateModulesWithAlias(
 		oids, nil, memberDevices, modeFull(), nil, logger,
-		aliasMap, ifIndexToName,
+		aliasMap,
 	)
 
 	var bays []*diode.ModuleBay
@@ -162,11 +161,12 @@ func TestTranslateModules_FullMode_EmitsTransceiversAsSubBayedModules(t *testing
 	require.Len(t, bays, 3, "supervisor bay + linecard bay + transceiver sub-bay")
 	require.Len(t, modules, 3, "supervisor + linecard + transceiver")
 
-	// Iface map points the physical port at the transceiver module.
+	// Iface map points the physical port (keyed by ifIndex) at the
+	// transceiver module.
 	require.Len(t, ifaceMap, 1)
-	require.Contains(t, ifaceMap, "Gi1/0/1")
-	require.NotNil(t, ifaceMap["Gi1/0/1"].Serial)
-	assert.Equal(t, "FNS24010TR1", *ifaceMap["Gi1/0/1"].Serial)
+	require.Contains(t, ifaceMap, "10101")
+	require.NotNil(t, ifaceMap["10101"].Serial)
+	assert.Equal(t, "FNS24010TR1", *ifaceMap["10101"].Serial)
 }
 
 // TestTranslateModules_FullMode_SubBayDeviceRooted — pins the sub-bay
@@ -183,7 +183,7 @@ func TestTranslateModules_FullMode_SubBayDeviceRooted(t *testing.T) {
 	memberDevices := map[int]*diode.Device{0: dev}
 
 	entities, _ := TranslateModulesWithAlias(
-		oids, nil, memberDevices, modeFull(), nil, logger, nil, nil,
+		oids, nil, memberDevices, modeFull(), nil, logger, nil,
 	)
 
 	// The transceiver's bay carries the port-shaped name from the
@@ -221,7 +221,7 @@ func TestTranslateModules_FullMode_EmptyBayEmittedAsBareModuleBay(t *testing.T) 
 	memberDevices := map[int]*diode.Device{0: dev}
 
 	entities, _ := TranslateModulesWithAlias(
-		buildOIDs(rows), nil, memberDevices, modeFull(), nil, logger, nil, nil,
+		buildOIDs(rows), nil, memberDevices, modeFull(), nil, logger, nil,
 	)
 
 	var bays []*diode.ModuleBay
@@ -258,7 +258,7 @@ func TestTranslateModules_SubBayWorkaround_NotLinkedToParentLinecard(t *testing.
 	memberDevices := map[int]*diode.Device{0: dev}
 
 	entities, _ := TranslateModulesWithAlias(
-		oids, nil, memberDevices, modeFull(), nil, logger, nil, nil,
+		oids, nil, memberDevices, modeFull(), nil, logger, nil,
 	)
 
 	// Identify which bays are sub-bays (transceiver-shaped). The 9404R
@@ -333,7 +333,7 @@ func TestTranslateModules_FullMode_EmitsTransceiversNestedTwoLevelsDeep(t *testi
 	memberDevices := map[int]*diode.Device{0: dev}
 
 	entities, _ := TranslateModulesWithAlias(
-		buildOIDs(rows), nil, memberDevices, modeFull(), nil, logger, nil, nil,
+		buildOIDs(rows), nil, memberDevices, modeFull(), nil, logger, nil,
 	)
 
 	var transceiverSeen bool
@@ -427,7 +427,7 @@ func TestTranslateModulesWithAlias_VCOfModular_DispatchesPerMember(t *testing.T)
 
 	entities, _ := TranslateModulesWithAlias(
 		buildOIDs(rows), chassisInv, memberDevices,
-		modeLinecards(), nil, logger, nil, nil,
+		modeLinecards(), nil, logger, nil,
 	)
 
 	var modules []*diode.Module
@@ -471,7 +471,7 @@ func TestTranslateModulesWithAlias_ModulesPrecedeInterfacesAfterSplice(t *testin
 	memberDevices := map[int]*diode.Device{0: dev}
 
 	moduleEntities, _ := TranslateModulesWithAlias(
-		oids, nil, memberDevices, modeLinecards(), nil, logger, nil, nil,
+		oids, nil, memberDevices, modeLinecards(), nil, logger, nil,
 	)
 	require.NotEmpty(t, moduleEntities)
 

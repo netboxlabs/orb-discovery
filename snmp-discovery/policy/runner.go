@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -570,25 +571,31 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 		chassisInv := mapping.ChassisInventoryFromOIDs(oids, r.logger)
 		memberDevices := mapping.MemberDevicesFromEntities(entitiesForTarget, chassisInv)
 		aliasMap := mapping.AliasMapFromOIDs(oids)
-		ifIndexToName := mapping.IfNameByIfIndex(ifIndexByIface)
 
 		moduleEntities, ifaceModuleMap := mapping.TranslateModulesWithAlias(
 			oids, chassisInv, memberDevices,
 			&r.config.Options, targetDefaults,
-			r.logger, aliasMap, ifIndexToName,
+			r.logger, aliasMap,
 		)
 
 		entitiesForTarget = mapping.SpliceModulesAfterDevices(entitiesForTarget, moduleEntities)
 
 		// Attach Interface.Module on physical-port Interfaces for `full` mode.
 		// Order-safe because modules now precede interfaces in the slice.
+		// Key by ifIndex (globally unique in the SNMP walk space) — keying
+		// by Interface.Name would collide on VC members that reuse the same
+		// canonical name locally.
 		if len(ifaceModuleMap) > 0 {
 			for _, e := range entitiesForTarget {
 				iface, ok := e.(*diode.Interface)
-				if !ok || iface.Name == nil {
+				if !ok {
 					continue
 				}
-				if mod, hit := ifaceModuleMap[*iface.Name]; hit {
+				idx, hasIdx := ifIndexByIface[iface]
+				if !hasIdx {
+					continue
+				}
+				if mod, hit := ifaceModuleMap[strconv.Itoa(idx)]; hit {
 					iface.Module = mod
 				}
 			}

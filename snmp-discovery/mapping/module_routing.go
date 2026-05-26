@@ -115,25 +115,29 @@ func assignMemberID(inv *ModuleInventory, chassisInv *ChassisInventory, oids Obj
 	}
 }
 
-// buildIfaceModuleMap builds the {ifName -> *diode.Module} lookup the
+// buildIfaceModuleMap builds the {ifIndex -> *diode.Module} lookup the
 // runner needs to set Interface.Module on each transceiver-owning port.
+// Keying by ifIndex (decimal string) — not ifName — is required because
+// VC/stack targets (Juniper VC, some Aruba stacks) reuse the same
+// canonical ifName across members; an ifName-keyed map collapses
+// distinct transceivers onto a single entry and the runner attaches the
+// wrong member's module. ifIndex is globally unique in the SNMP walk
+// space, so collision is impossible.
 //
 // Only transceivers under inv.SubModules participate — top-level modules
 // (linecards, supervisors) aren't single-port entities and don't route
-// to an ifName. For each transceiver:
+// to an ifIndex. For each transceiver:
 //
-//  1. aliasMap[EntIndex] gives the ifIndex (as set up upstream by the
+//  1. aliasMap[EntIndex] gives the ifIndex (set up upstream by the
 //     entAliasMappingTable walk).
-//  2. ifIndexToName[ifIndex] gives the canonical ifName.
-//  3. emittedModules[EntIndex] is the *diode.Module the translator
-//     already produced; this map points the ifName at it.
+//  2. emittedModules[EntIndex] is the *diode.Module the translator
+//     already produced; this map points the ifIndex at it.
 //
 // Any step that misses simply skips the transceiver — partial coverage
 // is normal (optic with no alias-table row, port-channel placeholder, etc.).
 func buildIfaceModuleMap(
 	inv ModuleInventory,
 	aliasMap map[string]string,
-	ifIndexToName map[string]string,
 	emittedModules map[string]*diode.Module,
 ) map[string]*diode.Module {
 	out := make(map[string]*diode.Module)
@@ -146,15 +150,11 @@ func buildIfaceModuleMap(
 			if !ok {
 				continue
 			}
-			ifName, ok := ifIndexToName[ifIdx]
-			if !ok {
-				continue
-			}
 			mod, ok := emittedModules[e.EntIndex]
 			if !ok {
 				continue
 			}
-			out[ifName] = mod
+			out[ifIdx] = mod
 		}
 	}
 	return out
@@ -200,20 +200,6 @@ func AliasMapFromOIDs(oids ObjectIDValueMap) map[string]string {
 	for entIdx, ifIdxs := range candidates {
 		sort.Ints(ifIdxs)
 		out[entIdx] = strconv.Itoa(ifIdxs[0])
-	}
-	return out
-}
-
-// IfNameByIfIndex inverts the runner's *Interface -> ifIndex map into
-// ifIndex (decimal string) -> ifName. Interfaces with nil Name are
-// skipped — a transceiver cannot route to a nameless port.
-func IfNameByIfIndex(ifIndexByIface map[*diode.Interface]int) map[string]string {
-	out := make(map[string]string, len(ifIndexByIface))
-	for iface, idx := range ifIndexByIface {
-		if iface == nil || iface.Name == nil {
-			continue
-		}
-		out[strconv.Itoa(idx)] = *iface.Name
 	}
 	return out
 }
