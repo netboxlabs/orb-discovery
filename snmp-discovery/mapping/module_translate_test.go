@@ -532,4 +532,16 @@ func TestSpliceModulesAfterDevices(t *testing.T) {
 		assert.Same(t, mod, out[3])
 		assert.Same(t, iface, out[4])
 	})
+
+	// Pins the splice=0 path: when the slice has no Device/VC head, modules
+	// must be prepended so they precede the first Interface (Diode ingest
+	// requires Modules before any Interface that references them).
+	t.Run("non_device_headed_slice_modules_prepend", func(t *testing.T) {
+		in := []diode.Entity{iface}
+		out := SpliceModulesAfterDevices(in, []diode.Entity{bay, mod})
+		require.Len(t, out, 3)
+		assert.Same(t, bay, out[0])
+		assert.Same(t, mod, out[1])
+		assert.Same(t, iface, out[2])
+	})
 }
