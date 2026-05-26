@@ -311,10 +311,10 @@ func TestMemberDevicesFromEntities_StandaloneKeyedByZero(t *testing.T) {
 	assert.Len(t, out, 1)
 }
 
-// TestChassisInventoryFromEntities_WrapsExtractInventory — single-chassis
+// TestChassisInventoryFromOIDs_WrapsExtractInventory — single-chassis
 // fixture produces at least one Member and the master member id is the
 // parentRelPos from the fixture (1).
-func TestChassisInventoryFromEntities_WrapsExtractInventory(t *testing.T) {
+func TestChassisInventoryFromOIDs_WrapsExtractInventory(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	// Minimal stack fixture: one chassis row (class=3).
 	oids := ObjectIDValueMap{
@@ -325,7 +325,7 @@ func TestChassisInventoryFromEntities_WrapsExtractInventory(t *testing.T) {
 		".1.3.6.1.2.1.47.1.1.1.1.13.1": Value{Value: "C9300-48UXM"}, // modelName
 		".1.3.6.1.2.1.47.1.1.1.1.6.1":  Value{Value: "1"},           // parentRelPos
 	}
-	inv := ChassisInventoryFromEntities(nil, oids, logger)
+	inv := ChassisInventoryFromOIDs(oids, logger)
 	require.NotNil(t, inv)
 	require.GreaterOrEqual(t, len(inv.Members), 1,
 		"single-chassis fixture must produce at least one Member")
