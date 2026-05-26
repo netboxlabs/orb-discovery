@@ -26,6 +26,9 @@ from custom_napalm._modules import (
     ModuleEntry as _ModuleEntry,
 )
 from custom_napalm._modules import (
+    ModuleType as _ModuleType,
+)
+from custom_napalm._modules import (
     is_optic_pid,
 )
 from custom_napalm._modules import (
@@ -242,7 +245,7 @@ class IOSDriver(NapalmIOSDriver):
 # Cisco IOS PID classifier. PSU / fan prefixes ("PWR-", "FAN") are
 # recognized but never emitted (mirrors PR #419 contract — see spec
 # Out-of-scope: PSU/fan classified for labelling only).
-def classify_module_type_cisco_ios(pid: str) -> str:
+def classify_module_type_cisco_ios(pid: str) -> _ModuleType:
     """
     Map a Cisco IOS PID/model string to a ModuleType.
 

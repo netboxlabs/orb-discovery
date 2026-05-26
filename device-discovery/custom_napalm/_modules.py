@@ -120,15 +120,9 @@ def is_optic_pid(pid: str) -> bool:
     returns False should they consult vendor-specific linecard /
     supervisor / chassis prefixes.
     """
-    if not pid:
+    if not pid or not pid.strip():
         return False
-    upper = pid.strip().upper()
-    if not upper:
-        return False
-    for prefix in _OPTIC_PREFIXES:
-        if upper.startswith(prefix):
-            return True
-    return False
+    return pid.strip().upper().startswith(_OPTIC_PREFIXES)
 
 
 # ---- payload assembly ----------------------------------------------------
