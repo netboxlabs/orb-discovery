@@ -147,6 +147,8 @@ func TranslateModulesWithAlias(
 			}
 			device := memberDevices[tr.MemberID]
 			if device == nil {
+				logger.Warn("module discovery: no device for transceiver member",
+					"member", tr.MemberID, "ent", tr.EntIndex, "model", tr.Model)
 				continue
 			}
 			// Sub-bay reconciler workaround (spec §Sub-bay emission
@@ -185,6 +187,8 @@ func TranslateModulesWithAlias(
 		}
 		device := memberDevices[b.MemberID]
 		if device == nil {
+			logger.Warn("module discovery: no device for empty bay member",
+				"member", b.MemberID, "ent", b.EntIndex, "bay", b.BayName)
 			continue
 		}
 		entities = append(entities, emitModuleBay(device, b))
