@@ -296,6 +296,43 @@ func vendorFromDefaults(d *config.Defaults) string {
 	return d.Device.Manufacturer
 }
 
+// SpliceModulesAfterDevices inserts moduleEntities into entitiesForTarget
+// immediately after the leading run of Device + VirtualChassis entries,
+// preserving the Diode ingest ordering contract:
+//
+//	Device(s) -> ModuleBay + Module -> Interface -> IP -> MAC -> VLAN
+//
+// TranslateAsStack already partitioned entitiesForTarget into that
+// bucket order, but Module entities land in their own bucket — naively
+// appending them would leave them at the tail and break the runner's
+// Interface.Module attachment (Interfaces would appear before the
+// Modules they reference). Find the first non-Device/non-VC index and
+// splice moduleEntities there.
+//
+// Returns entitiesForTarget unchanged when moduleEntities is empty.
+func SpliceModulesAfterDevices(entitiesForTarget []diode.Entity, moduleEntities []diode.Entity) []diode.Entity {
+	if len(moduleEntities) == 0 {
+		return entitiesForTarget
+	}
+	splice := len(entitiesForTarget)
+	for i, e := range entitiesForTarget {
+		switch e.(type) {
+		case *diode.Device, *diode.VirtualChassis:
+			continue
+		default:
+			splice = i
+		}
+		if splice < len(entitiesForTarget) {
+			break
+		}
+	}
+	merged := make([]diode.Entity, 0, len(entitiesForTarget)+len(moduleEntities))
+	merged = append(merged, entitiesForTarget[:splice]...)
+	merged = append(merged, moduleEntities...)
+	merged = append(merged, entitiesForTarget[splice:]...)
+	return merged
+}
+
 // resolveModuleManufacturer picks the Manufacturer name to stamp on an
 // emitted ModuleType. Precedence:
 //  1. The emitted Device's DeviceType.Manufacturer.Name — keeps the

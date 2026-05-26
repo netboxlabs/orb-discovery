@@ -576,28 +576,7 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 			r.logger, aliasMap, ifIndexToName,
 		)
 
-		if len(moduleEntities) > 0 {
-			// Devices + VC sit at the head; everything else gets
-			// pushed back by the prepend.
-			splice := len(entitiesForTarget)
-			for i, e := range entitiesForTarget {
-				switch e.(type) {
-				case *diode.Device, *diode.VirtualChassis:
-					continue
-				default:
-					splice = i
-				}
-				if splice < len(entitiesForTarget) {
-					break
-				}
-			}
-			merged := make([]diode.Entity, 0,
-				len(entitiesForTarget)+len(moduleEntities))
-			merged = append(merged, entitiesForTarget[:splice]...)
-			merged = append(merged, moduleEntities...)
-			merged = append(merged, entitiesForTarget[splice:]...)
-			entitiesForTarget = merged
-		}
+		entitiesForTarget = mapping.SpliceModulesAfterDevices(entitiesForTarget, moduleEntities)
 
 		// Attach Interface.Module on physical-port Interfaces for `full` mode.
 		// Order-safe because modules now precede interfaces in the slice.

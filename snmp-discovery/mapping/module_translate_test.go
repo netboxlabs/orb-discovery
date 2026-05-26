@@ -458,11 +458,8 @@ func TestTranslateModulesWithAlias_VCOfModular_DispatchesPerMember(t *testing.T)
 
 // TestTranslateModulesWithAlias_ModulesPrecedeInterfacesAfterSplice pins
 // the Diode ingest ordering contract honoured by the runner's
-// partition-and-prepend splice (policy/runner.go in queryTarget): every
-// *diode.Module / *diode.ModuleBay index must be < every *diode.Interface
-// index in the merged slice. The splice logic is duplicated here
-// inline — keeping the test in the mapping package avoids runner-test
-// setup overhead while still exercising the exact same algorithm.
+// SpliceModulesAfterDevices call: every *diode.Module / *diode.ModuleBay
+// index must be < every *diode.Interface index in the merged slice.
 func TestTranslateModulesWithAlias_ModulesPrecedeInterfacesAfterSplice(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	dev := &diode.Device{Name: strPtr("test-router")}
@@ -478,23 +475,7 @@ func TestTranslateModulesWithAlias_ModulesPrecedeInterfacesAfterSplice(t *testin
 	)
 	require.NotEmpty(t, moduleEntities)
 
-	// Mirrors runner.go's splice: find the first non-Device/non-VC index,
-	// splice moduleEntities there.
-	splice := len(entitiesForTarget)
-	for i, e := range entitiesForTarget {
-		switch e.(type) {
-		case *diode.Device, *diode.VirtualChassis:
-			continue
-		default:
-			splice = i
-		}
-		if splice < len(entitiesForTarget) {
-			break
-		}
-	}
-	merged := append([]diode.Entity{}, entitiesForTarget[:splice]...)
-	merged = append(merged, moduleEntities...)
-	merged = append(merged, entitiesForTarget[splice:]...)
+	merged := SpliceModulesAfterDevices(entitiesForTarget, moduleEntities)
 
 	firstIface := -1
 	lastModule := -1
@@ -512,4 +493,43 @@ func TestTranslateModulesWithAlias_ModulesPrecedeInterfacesAfterSplice(t *testin
 	require.GreaterOrEqual(t, lastModule, 0, "no Module/ModuleBay in merged slice")
 	assert.Less(t, lastModule, firstIface,
 		"Module/ModuleBay must precede Interface — Diode ingest contract")
+}
+
+// TestSpliceModulesAfterDevices covers the helper's three core shapes:
+// empty modules (no-op), all-Device prefix (append at end of head), and
+// mixed Device+VC head with trailing Interfaces (insert at first
+// non-head index).
+func TestSpliceModulesAfterDevices(t *testing.T) {
+	dev := &diode.Device{Name: strPtr("d")}
+	vc := &diode.VirtualChassis{Name: strPtr("vc")}
+	iface := &diode.Interface{Name: strPtr("Gi0/0"), Device: dev}
+	bay := &diode.ModuleBay{Name: strPtr("Slot 1"), Device: dev}
+	mod := &diode.Module{Device: dev, ModuleBay: bay}
+
+	t.Run("empty modules returns input unchanged", func(t *testing.T) {
+		in := []diode.Entity{dev, iface}
+		out := SpliceModulesAfterDevices(in, nil)
+		assert.Equal(t, in, out)
+	})
+
+	t.Run("all-Device prefix appends modules at the end", func(t *testing.T) {
+		in := []diode.Entity{dev, vc}
+		out := SpliceModulesAfterDevices(in, []diode.Entity{bay, mod})
+		require.Len(t, out, 4)
+		assert.Same(t, dev, out[0])
+		assert.Same(t, vc, out[1])
+		assert.Same(t, bay, out[2])
+		assert.Same(t, mod, out[3])
+	})
+
+	t.Run("mixed head+tail splices before first non-head", func(t *testing.T) {
+		in := []diode.Entity{dev, vc, iface}
+		out := SpliceModulesAfterDevices(in, []diode.Entity{bay, mod})
+		require.Len(t, out, 5)
+		assert.Same(t, dev, out[0])
+		assert.Same(t, vc, out[1])
+		assert.Same(t, bay, out[2])
+		assert.Same(t, mod, out[3])
+		assert.Same(t, iface, out[4])
+	})
 }
