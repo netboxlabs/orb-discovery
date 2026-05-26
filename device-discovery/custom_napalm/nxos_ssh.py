@@ -96,21 +96,54 @@ def _nxos_ssh_parse_inventory(
     return inv_by_slot, transceivers_by_ifname
 
 
+_NXOS_SSH_XBAR_HDR_RE = re.compile(r"^Xbar\s+Ports\b", re.IGNORECASE)
+_NXOS_SSH_XBAR_ROW_RE = re.compile(r"^(\d+)\s+\d+\s+\S")
+
+
+def _nxos_ssh_xbar_slots(sm_out: str) -> list[str]:
+    """
+    Scrape fabric-module slot numbers from the raw show-module Xbar section.
+
+    cisco_nxos_show_module.textfsm Fails (NoRecords) on the ``Xbar Ports``
+    header, so fabric modules never reach the parsed rows. Walk the raw text
+    from the Xbar header to the next blank line and pull leading slot numbers;
+    show inventory then resolves PID + serial via ``Slot <N>``.
+    """
+    slots: list[str] = []
+    in_xbar = False
+    for line in sm_out.splitlines():
+        if _NXOS_SSH_XBAR_HDR_RE.match(line):
+            in_xbar = True
+            continue
+        if not in_xbar:
+            continue
+        if not line.strip():
+            break
+        row_match = _NXOS_SSH_XBAR_ROW_RE.match(line)
+        if row_match:
+            slots.append(row_match.group(1))
+    return slots
+
+
 def _nxos_ssh_build_slot_bays(
-    sm_rows: list[dict], inv_by_slot: dict[str, dict[str, str]],
+    sm_rows: list[dict], xbar_slots: list[str],
+    inv_by_slot: dict[str, dict[str, str]],
 ) -> dict[str, _ModuleBay]:
     """
     Join show-module slots with the inventory lookup into ModuleBays.
 
     ntc-templates cisco_nxos_show_module yields the slot under key ``module``
-    (template field MODULE); older versions used ``mod`` / ``modinf``. PSU /
-    fan slots are classified then dropped — they're never emitted.
+    (template field MODULE); older versions used ``mod`` / ``modinf``. Xbar
+    slots feed fabric modules (emitted as linecards). PSU / fan slots are
+    classified then dropped — they're never emitted.
     """
     bays_by_slot: dict[str, _ModuleBay] = {}
-    for row in sm_rows:
-        slot = str(
-            row.get("module") or row.get("mod") or row.get("modinf") or ""
-        ).strip()
+    slots = [
+        str(row.get("module") or row.get("mod") or row.get("modinf") or "").strip()
+        for row in sm_rows
+    ]
+    slots.extend(xbar_slots)
+    for slot in slots:
         if not slot or slot not in inv_by_slot:
             continue
         inv = inv_by_slot[slot]
@@ -201,7 +234,8 @@ def _nxos_ssh_get_modules_impl(driver) -> dict | None:
 
     inv_by_slot, transceivers_by_ifname = _nxos_ssh_parse_inventory(inv_rows)
 
-    bays_by_slot = _nxos_ssh_build_slot_bays(sm_rows, inv_by_slot)
+    xbar_slots = _nxos_ssh_xbar_slots(sm_out)
+    bays_by_slot = _nxos_ssh_build_slot_bays(sm_rows, xbar_slots, inv_by_slot)
     if not bays_by_slot:
         return None
 

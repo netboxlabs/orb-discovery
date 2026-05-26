@@ -127,17 +127,41 @@ def _nxos_parse_inventory(
     return inv_by_slot, transceivers_by_ifname
 
 
+def _nxos_xbar_slots(xbar_rows: list[dict]) -> list[str]:
+    """
+    Extract fabric-module slot numbers from show-module's Xbar table.
+
+    Fabric modules live in a SEPARATE Xbar section (TABLE_xbarinfo), not the
+    main module table, so they're missed by a modinfo-only join. Their slot
+    numbers re-appear in show inventory as ``Slot <N>`` (e.g. Slot 21/22 on a
+    9508), letting the inventory lookup resolve PID + serial.
+    """
+    slots: list[str] = []
+    for row in xbar_rows:
+        slot = str(row.get("xbarinf") or row.get("xbar") or "").strip()
+        if slot:
+            slots.append(slot)
+    return slots
+
+
 def _nxos_build_slot_bays(
-    sm_rows: list[dict], inv_by_slot: dict[str, dict[str, str]],
+    sm_rows: list[dict], xbar_rows: list[dict],
+    inv_by_slot: dict[str, dict[str, str]],
 ) -> dict[str, _ModuleBay]:
     """
     Join show-module slots with the inventory lookup into ModuleBays.
 
-    PSU / fan slots are classified then dropped — they're never emitted.
+    Main-table (modinfo) slots feed linecards / supervisors; Xbar slots feed
+    fabric modules (emitted as linecards). PSU / fan slots are classified then
+    dropped — they're never emitted.
     """
     bays_by_slot: dict[str, _ModuleBay] = {}
-    for row in sm_rows:
-        slot = str(row.get("modinf") or row.get("modules") or "").strip()
+    slots = [
+        str(row.get("modinf") or row.get("modules") or "").strip()
+        for row in sm_rows
+    ]
+    slots.extend(_nxos_xbar_slots(xbar_rows))
+    for slot in slots:
         if not slot or slot not in inv_by_slot:
             continue
         inv = inv_by_slot[slot]
@@ -206,6 +230,7 @@ def _nxos_get_modules_impl(driver) -> dict | None:
         return None
 
     sm_rows = _flatten_table(sm_payload, "TABLE_modinfo", "ROW_modinfo")
+    xbar_rows = _flatten_table(sm_payload, "TABLE_xbarinfo", "ROW_xbarinfo")
     inv_rows = _flatten_table(inv_payload, "TABLE_inv", "ROW_inv")
 
     # Fixed switch heuristic: a single show-module row is the chassis
@@ -216,7 +241,7 @@ def _nxos_get_modules_impl(driver) -> dict | None:
     # show inventory is the reliable source for PID + serial + description.
     inv_by_slot, transceivers_by_ifname = _nxos_parse_inventory(inv_rows)
 
-    bays_by_slot = _nxos_build_slot_bays(sm_rows, inv_by_slot)
+    bays_by_slot = _nxos_build_slot_bays(sm_rows, xbar_rows, inv_by_slot)
     if not bays_by_slot:
         return None
 
