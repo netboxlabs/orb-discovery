@@ -261,21 +261,57 @@ func TestAliasMapFromOIDs_ParsesEntAliasMappingRows(t *testing.T) {
 
 // TestAliasMapFromOIDs_DeterministicWhenMultipleAliasRowsShareEntIndex —
 // when multiple entAliasMappingTable rows resolve to the same
-// entPhysicalIndex, AliasMapFromOIDs must pick deterministically. We
-// pick the lowest ifIndex, mirroring chassis_routing.go's sorted
-// resolution. Running 50x confirms map-iteration order can't flip it.
+// entPhysicalIndex, AliasMapFromOIDs must pick deterministically.
+// Under the RFC 6933 precedence rule, a non-zero logical-index row wins
+// over the .0 wildcard, so here logical=1 (ifIndex 10101) beats
+// logical=0 (ifIndex 10201). Running 50x confirms map-iteration order
+// can't flip it.
 func TestAliasMapFromOIDs_DeterministicWhenMultipleAliasRowsShareEntIndex(t *testing.T) {
 	oids := ObjectIDValueMap{
 		// Two rows for entPhysicalIndex 203 — different logical idx,
-		// different ifIndex. Result must always be the lower ifIndex.
+		// different ifIndex. Non-zero logical-index row must win.
 		".1.3.6.1.2.1.47.1.3.2.1.2.203.0": Value{Value: ".1.3.6.1.2.1.2.2.1.1.10201"},
 		".1.3.6.1.2.1.47.1.3.2.1.2.203.1": Value{Value: ".1.3.6.1.2.1.2.2.1.1.10101"},
 	}
 	for i := 0; i < 50; i++ {
 		m := AliasMapFromOIDs(oids)
 		require.Equal(t, "10101", m["203"],
-			"AliasMapFromOIDs must deterministically pick the lowest ifIndex")
+			"AliasMapFromOIDs must deterministically pick the non-zero logical-index row")
 	}
+}
+
+// TestAliasMapFromOIDs_NonZeroLogicalIndexBeatsWildcard — RFC 6933
+// entAliasMappingTable is keyed by (entPhysicalIndex,
+// entAliasLogicalIndexOrZero). Non-zero logical-index rows carry
+// per-logical-entity context and MUST take precedence over the .0
+// "default mapping in the absence of any logical entity" row,
+// regardless of which target ifIndex is numerically smaller. This
+// mirrors chassis_routing.go's logical-index precedence rule.
+func TestAliasMapFromOIDs_NonZeroLogicalIndexBeatsWildcard(t *testing.T) {
+	// entPhysicalIndex 203 has TWO alias rows: a .0 wildcard pointing at
+	// ifIndex 10101 (lower) AND a non-zero logical row pointing at
+	// ifIndex 20201 (higher). Per RFC 6933, the non-zero logical-index
+	// row wins regardless of which ifIndex is smaller.
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.3.2.1.2.203.0": Value{Value: ".1.3.6.1.2.1.2.2.1.1.10101"},
+		".1.3.6.1.2.1.47.1.3.2.1.2.203.5": Value{Value: ".1.3.6.1.2.1.2.2.1.1.20201"},
+	}
+	m := AliasMapFromOIDs(oids)
+	require.Equal(t, "20201", m["203"],
+		"non-zero logical-index row must win over .0 wildcard")
+}
+
+// TestAliasMapFromOIDs_LowestLogicalIndexAmongNonZero — among multiple
+// non-zero logical-index rows the lowest logical index is the
+// deterministic tiebreaker. Mirrors chassis_routing.go's secondary sort.
+func TestAliasMapFromOIDs_LowestLogicalIndexAmongNonZero(t *testing.T) {
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.3.2.1.2.203.5": Value{Value: ".1.3.6.1.2.1.2.2.1.1.50505"},
+		".1.3.6.1.2.1.47.1.3.2.1.2.203.2": Value{Value: ".1.3.6.1.2.1.2.2.1.1.20202"},
+	}
+	m := AliasMapFromOIDs(oids)
+	require.Equal(t, "20202", m["203"],
+		"lowest non-zero logical-index wins among non-zero candidates")
 }
 
 // TestMemberDevicesFromEntities_VCKeyedByLowestMemberID — the master

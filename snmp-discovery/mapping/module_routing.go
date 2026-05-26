@@ -11,7 +11,7 @@ package mapping
 import (
 	"context"
 	"log/slog"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -160,18 +160,35 @@ func buildIfaceModuleMap(
 	return out
 }
 
+// aliasCandidate carries the parsed (logical index, ifIndex) for one
+// entAliasMappingTable row so AliasMapFromOIDs can apply the RFC 6933
+// precedence rule (non-zero logical-index beats .0 wildcard).
+type aliasCandidate struct {
+	logicalIdx int
+	ifIdx      int
+}
+
 // AliasMapFromOIDs parses entAliasMappingTable rows into a flat
 // entPhysicalIndex -> ifIndex map (decimal strings). Mirrors the parse
 // rules in chassis_routing.go:152-179 (drop malformed suffixes; drop
 // non-ifEntry.ifIndex values).
 //
-// When multiple rows resolve to the same entPhysicalIndex, the lowest
-// ifIndex wins — deterministic across runs. Map iteration order in Go
-// is randomized, so first-occurrence-wins would otherwise flip between
-// invocations. Mirrors chassis_routing.go's sorted candidate selection
-// (chassis_routing.go:202).
+// When multiple rows resolve to the same entPhysicalIndex, the
+// precedence mirrors chassis_routing.go:188-220:
+//
+//  1. RFC 6933 defines non-zero entAliasLogicalIndexOrZero rows as the
+//     per-logical-entity mapping carrying explicit context. They take
+//     precedence over the .0 "default mapping in the absence of any
+//     logical entity" row — regardless of which target ifIndex is
+//     numerically smaller. Without this rule, devices that publish both
+//     forms (multi-logical-entity contexts) resolve a transceiver to
+//     the wrong interface.
+//  2. Among non-zero rows, the lowest logical index wins — defensive
+//     tiebreaker when several per-entity rows compete.
+//  3. Final tiebreaker: lowest target ifIndex. Keeps resolution stable
+//     across re-runs since Go map iteration is randomized.
 func AliasMapFromOIDs(oids ObjectIDValueMap) map[string]string {
-	candidates := make(map[string][]int)
+	candidates := make(map[string][]aliasCandidate)
 	for oid, v := range oids {
 		if !strings.HasPrefix(oid, oidEntAliasMappingIdent) {
 			continue
@@ -182,6 +199,10 @@ func AliasMapFromOIDs(oids ObjectIDValueMap) map[string]string {
 			continue
 		}
 		entIdx := parts[0]
+		logicalIdx, err := strconv.Atoi(parts[1])
+		if err != nil {
+			continue
+		}
 		// Normalize: strip leading dot (gosnmp's ObjectIdentifier
 		// rendering varies) then require the value to point at
 		// ifEntry.ifIndex — skip ifAlias / ifDescr targets.
@@ -194,12 +215,32 @@ func AliasMapFromOIDs(oids ObjectIDValueMap) map[string]string {
 		if err != nil {
 			continue
 		}
-		candidates[entIdx] = append(candidates[entIdx], ifIdx)
+		candidates[entIdx] = append(candidates[entIdx], aliasCandidate{
+			logicalIdx: logicalIdx,
+			ifIdx:      ifIdx,
+		})
 	}
 	out := make(map[string]string, len(candidates))
-	for entIdx, ifIdxs := range candidates {
-		sort.Ints(ifIdxs)
-		out[entIdx] = strconv.Itoa(ifIdxs[0])
+	for entIdx, rows := range candidates {
+		slices.SortFunc(rows, func(a, b aliasCandidate) int {
+			aZero := 1
+			if a.logicalIdx == 0 {
+				aZero = 0
+			}
+			bZero := 1
+			if b.logicalIdx == 0 {
+				bZero = 0
+			}
+			if aZero != bZero {
+				// Non-zero (aZero=1 / bZero=1) sorts FIRST.
+				return bZero - aZero
+			}
+			if a.logicalIdx != b.logicalIdx {
+				return a.logicalIdx - b.logicalIdx
+			}
+			return a.ifIdx - b.ifIdx
+		})
+		out[entIdx] = strconv.Itoa(rows[0].ifIdx)
 	}
 	return out
 }
