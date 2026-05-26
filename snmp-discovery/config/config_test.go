@@ -501,7 +501,7 @@ options:
 `)
 	var pc PolicyConfig
 	require.NoError(t, yaml.Unmarshal(raw, &pc))
-	assert.Equal(t, "off", pc.Options.ModuleDiscoveryMode(),
+	assert.Equal(t, DiscoverModulesOff, pc.Options.ModuleDiscoveryMode(),
 		"DiscoverModules should default to off when omitted")
 }
 

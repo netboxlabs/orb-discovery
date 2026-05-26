@@ -208,11 +208,12 @@ func (m *Manager) validatePolicy(policy config.Policy) error {
 	// immediate error rather than silently degrading at scan time.
 	if policy.Config.Options.DiscoverModules != nil {
 		switch *policy.Config.Options.DiscoverModules {
-		case "off", "linecards", "full":
+		case config.DiscoverModulesOff, config.DiscoverModulesLinecards, config.DiscoverModulesFull:
 		default:
 			return fmt.Errorf(
-				"invalid options.discover_modules %q (allowed: off, linecards, full)",
+				"invalid options.discover_modules %q (allowed: %s, %s, %s)",
 				*policy.Config.Options.DiscoverModules,
+				config.DiscoverModulesOff, config.DiscoverModulesLinecards, config.DiscoverModulesFull,
 			)
 		}
 	}

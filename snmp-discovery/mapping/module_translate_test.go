@@ -17,17 +17,17 @@ import (
 // matching discover_modules string set. Tiny helpers so each test reads
 // like prose.
 func modeOff() *config.Options {
-	v := "off"
+	v := config.DiscoverModulesOff
 	return &config.Options{DiscoverModules: &v}
 }
 
 func modeLinecards() *config.Options {
-	v := "linecards"
+	v := config.DiscoverModulesLinecards
 	return &config.Options{DiscoverModules: &v}
 }
 
 func modeFull() *config.Options {
-	v := "full"
+	v := config.DiscoverModulesFull
 	return &config.Options{DiscoverModules: &v}
 }
 

@@ -62,7 +62,7 @@ func TranslateModulesWithAlias(
 	ifIndexToName map[string]string,
 ) ([]diode.Entity, map[string]*diode.Module) {
 	mode := options.ModuleDiscoveryMode()
-	if mode == "off" {
+	if mode == config.DiscoverModulesOff {
 		return nil, nil
 	}
 
@@ -111,7 +111,7 @@ func TranslateModulesWithAlias(
 		emittedModules[m.EntIndex] = mod
 	}
 
-	if mode != "full" {
+	if mode != config.DiscoverModulesFull {
 		// Linecards mode stops here — no transceivers, no empty bays,
 		// no iface attachment map.
 		return entities, nil

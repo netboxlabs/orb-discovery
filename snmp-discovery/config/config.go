@@ -201,6 +201,14 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 	return &merged
 }
 
+// DiscoverModules* are the accepted values for options.discover_modules.
+// Off is the default when the field is unset.
+const (
+	DiscoverModulesOff       = "off"
+	DiscoverModulesLinecards = "linecards"
+	DiscoverModulesFull      = "full"
+)
+
 // Options represents per-policy global behavior toggles peer to Defaults.
 type Options struct {
 	CreateUnknownVlans *bool `yaml:"create_unknown_vlans,omitempty"`
@@ -220,7 +228,7 @@ type Options struct {
 // ModuleDiscoveryMode returns the effective mode, defaulting to "off".
 func (o *Options) ModuleDiscoveryMode() string {
 	if o == nil || o.DiscoverModules == nil {
-		return "off"
+		return DiscoverModulesOff
 	}
 	return *o.DiscoverModules
 }
