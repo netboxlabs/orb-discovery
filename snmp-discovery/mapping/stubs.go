@@ -267,20 +267,47 @@ func PruneNestedRefs(entities []diode.Entity, currentDevice *diode.Device) {
 				e.Lag = stubForIface(e.Lag)
 			}
 			if e.Module != nil {
-				// Reduce nested Interface.Module to matcher-only fields
-				// (Device stub + Serial); the top-level Module entity
-				// carries the full record. If Serial is missing the
-				// stub would be identifier-less (no field for Diode to
-				// match against, and the Device alone is not unique
-				// across multiple modules on the same device) — clear
-				// the ref entirely rather than ship an ambiguous stub.
+				// Reduce nested Interface.Module to a matcher-only ref:
+				// chassis Device stub + Serial + ModuleBay matcher
+				// (name + position + chassis Device stub). The top-level
+				// Module entity carries the full record (module_type,
+				// description, status, etc.); this nested form lets the
+				// Diode reconciler resolve the ref to that top-level
+				// row via the (device, bay) or (device, serial) match
+				// paths without re-creating it.
+				//
+				// Shape mirrors device-discovery's _module_match_stub
+				// (device-discovery/device_discovery/stubs.py
+				// `_module_match_stub`). Earlier we shipped only
+				// {Device, Serial}; the reconciler treated that as a
+				// new Module emission and rejected it with
+				// "module_bay required, module_type required" because
+				// the (device, serial) match wasn't enough to bind the
+				// ref. Carrying the bay matcher unblocks the resolve.
+				//
+				// If Serial is missing, the stub would be ambiguous if
+				// multiple modules share the same bay-name shape — and
+				// the bay matcher alone would still resolve in the
+				// common case. We clear the ref entirely instead of
+				// shipping an ambiguous one (preserves the prior
+				// d5d252d guard).
 				if e.Module.Serial == nil || *e.Module.Serial == "" {
 					e.Module = nil
 				} else {
-					e.Module = &diode.Module{
-						Device: stubFor(e.Module.Device),
+					devStub := stubFor(e.Module.Device)
+					stub := &diode.Module{
+						Device: devStub,
 						Serial: e.Module.Serial,
 					}
+					if e.Module.ModuleBay != nil {
+						bayStub := &diode.ModuleBay{
+							Device:   devStub,
+							Name:     e.Module.ModuleBay.Name,
+							Position: e.Module.ModuleBay.Position,
+						}
+						stub.ModuleBay = bayStub
+					}
+					e.Module = stub
 				}
 			}
 		case *diode.IPAddress:

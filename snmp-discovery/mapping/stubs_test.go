@@ -323,8 +323,9 @@ func TestPruneNestedRefs_StubsModuleBayAndInterfaceModule(t *testing.T) {
 		Name:   strPtr("Slot 2"),
 	}
 	transceiverBay := &diode.ModuleBay{
-		Device: rich,
-		Name:   strPtr("TenGigabitEthernet1/0/1"),
+		Device:   rich,
+		Name:     strPtr("TenGigabitEthernet1/0/1"),
+		Position: strPtr("1"),
 	}
 	transceiver := &diode.Module{
 		Device:    rich,
@@ -334,6 +335,7 @@ func TestPruneNestedRefs_StubsModuleBayAndInterfaceModule(t *testing.T) {
 			Model:        strPtr("SFP-10G-LR"),
 			Manufacturer: &diode.Manufacturer{Name: strPtr("Cisco")},
 		},
+		Description: strPtr("SFP-10GBase-LR transceiver"),
 	}
 	iface := &diode.Interface{
 		Name:   strPtr("TenGigabitEthernet1/0/1"),
@@ -350,12 +352,32 @@ func TestPruneNestedRefs_StubsModuleBayAndInterfaceModule(t *testing.T) {
 	assert.Nil(t, bay.Device.Serial, "ModuleBay.Device serial stripped on stub")
 	assert.Nil(t, bay.Device.Status, "ModuleBay.Device status stripped on stub")
 
-	// Interface.Module reduced to matcher-only (Name + Serial). DeviceType /
-	// Description / Device-richness cleared so the wire payload stays bounded.
+	// Interface.Module reduced to a matcher-only ref: Device stub + Serial
+	// + ModuleBay matcher (name+position+device stub). Mirrors
+	// device-discovery's _module_match_stub so the Diode reconciler
+	// resolves the ref to the existing top-level Module instead of
+	// trying to create one and failing the "module_bay/module_type
+	// required" validation. ModuleType / Description / Status etc. stay
+	// dropped so the wire payload stays bounded.
 	require.NotNil(t, iface.Module)
 	assert.Equal(t, "FNS24010TR1", strDerefSafe(iface.Module.Serial))
 	assert.Nil(t, iface.Module.ModuleType,
-		"Interface.Module must be reduced to matcher-only — no ModuleType")
+		"Interface.Module stub must not carry ModuleType (drops large nested manufacturer)")
+	assert.Nil(t, iface.Module.Description,
+		"Interface.Module stub must not carry Description")
+
+	require.NotNil(t, iface.Module.Device, "Interface.Module.Device must be a chassis stub")
+	assert.Equal(t, "sw1", strDerefSafe(iface.Module.Device.Name))
+	assert.Nil(t, iface.Module.Device.Status, "Interface.Module.Device must be a stub (no Status)")
+
+	require.NotNil(t, iface.Module.ModuleBay,
+		"Interface.Module.ModuleBay matcher must be preserved so the reconciler can resolve via the (device, bay) match path")
+	assert.Equal(t, "TenGigabitEthernet1/0/1", strDerefSafe(iface.Module.ModuleBay.Name))
+	assert.Equal(t, "1", strDerefSafe(iface.Module.ModuleBay.Position))
+	require.NotNil(t, iface.Module.ModuleBay.Device, "ModuleBay matcher must carry a chassis device stub")
+	assert.Equal(t, "sw1", strDerefSafe(iface.Module.ModuleBay.Device.Name))
+	assert.Nil(t, iface.Module.ModuleBay.Device.Status,
+		"ModuleBay matcher's Device must itself be a stub (no rich Status)")
 }
 
 // TestPruneNestedRefs_InterfaceModuleSerialNilCleared — an
