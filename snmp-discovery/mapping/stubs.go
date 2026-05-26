@@ -268,45 +268,48 @@ func PruneNestedRefs(entities []diode.Entity, currentDevice *diode.Device) {
 			}
 			if e.Module != nil {
 				// Reduce nested Interface.Module to a matcher-only ref:
-				// chassis Device stub + Serial + ModuleBay matcher
-				// (name + position + chassis Device stub). The top-level
-				// Module entity carries the full record (module_type,
-				// description, status, etc.); this nested form lets the
-				// Diode reconciler resolve the ref to that top-level
-				// row via the (device, bay) or (device, serial) match
+				// chassis Device stub + Serial (if known) + ModuleBay
+				// matcher (if known). The top-level Module entity
+				// carries the full record (module_type, description,
+				// status, etc.); this nested form lets the Diode
+				// reconciler resolve the ref to that top-level row via
+				// the (Device, ModuleBay) or (Device, Serial) match
 				// paths without re-creating it.
 				//
 				// Shape mirrors device-discovery's _module_match_stub
 				// (device-discovery/device_discovery/stubs.py
-				// `_module_match_stub`). Earlier we shipped only
-				// {Device, Serial}; the reconciler treated that as a
-				// new Module emission and rejected it with
-				// "module_bay required, module_type required" because
-				// the (device, serial) match wasn't enough to bind the
-				// ref. Carrying the bay matcher unblocks the resolve.
+				// `_module_match_stub`): emit Device unconditionally,
+				// then conditionally copy Serial and ModuleBay matcher
+				// fields when present on the rich Module. Vendors that
+				// omit transceiver serial in ENTITY-MIB (some Aruba
+				// and low-end OEMs) still populate the bay, so the
+				// (Device, ModuleBay) path alone must keep the ref
+				// resolvable.
 				//
-				// If Serial is missing, the stub would be ambiguous if
-				// multiple modules share the same bay-name shape — and
-				// the bay matcher alone would still resolve in the
-				// common case. We clear the ref entirely instead of
-				// shipping an ambiguous one (preserves the prior
-				// d5d252d guard).
-				if e.Module.Serial == nil || *e.Module.Serial == "" {
+				// Only when BOTH Serial AND ModuleBay are unusable do
+				// we drop the ref entirely — at that point the stub
+				// carries no identifier and the reconciler would fall
+				// into creation mode and fail the
+				// "module_bay required, module_type required"
+				// validation (we also strip ModuleType).
+				devStub := stubFor(e.Module.Device)
+				stub := &diode.Module{Device: devStub}
+				if e.Module.Serial != nil && *e.Module.Serial != "" {
+					stub.Serial = e.Module.Serial
+				}
+				if e.Module.ModuleBay != nil {
+					stub.ModuleBay = &diode.ModuleBay{
+						Device:   devStub,
+						Name:     e.Module.ModuleBay.Name,
+						Position: e.Module.ModuleBay.Position,
+					}
+				}
+				if stub.Serial == nil && stub.ModuleBay == nil {
+					// Unresolvable: drop the ref so the reconciler
+					// doesn't try to create a Module without the
+					// required validation fields.
 					e.Module = nil
 				} else {
-					devStub := stubFor(e.Module.Device)
-					stub := &diode.Module{
-						Device: devStub,
-						Serial: e.Module.Serial,
-					}
-					if e.Module.ModuleBay != nil {
-						bayStub := &diode.ModuleBay{
-							Device:   devStub,
-							Name:     e.Module.ModuleBay.Name,
-							Position: e.Module.ModuleBay.Position,
-						}
-						stub.ModuleBay = bayStub
-					}
 					e.Module = stub
 				}
 			}
