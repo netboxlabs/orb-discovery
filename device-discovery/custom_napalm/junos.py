@@ -2,7 +2,7 @@
 """
 Juniper Junos NAPALM driver subclass.
 
-Adds two optional extension methods on top of upstream NAPALM Junos:
+Adds three optional extension methods on top of upstream NAPALM Junos:
 
 - ``get_interfaces_vlans()``: per-interface VLAN classification from the
   ``<get-ethernet-switching-interface-information>`` RPC, tolerating both
@@ -12,6 +12,8 @@ Adds two optional extension methods on top of upstream NAPALM Junos:
   ``<get-virtual-chassis-information>`` RPC, returning the vendor-neutral
   payload consumed by ``device_discovery.translate_chassis``. Standalone
   EX/QFX devices (no VC configured) return ``None``.
+- ``get_modules()``: Module / module-bay discovery for Junos modular
+  chassis + VC-of-modular.
 
 Both fetch via PyEZ NETCONF RPC and target EX / QFX switching products.
 

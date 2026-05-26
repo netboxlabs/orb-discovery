@@ -1,10 +1,11 @@
 # Copyright 2026 NetBox Labs Inc
 """
-Cisco NX-OS-SSH NAPALM driver subclass adding ``get_interfaces_vlans()``.
+Cisco NX-OS-SSH NAPALM driver subclass adding ``get_interfaces_vlans()`` and ``get_modules()``.
 
 Fetches ``show interface switchport`` over SSH (Netmiko), parses via
 ntc-templates ``cisco_nxos`` platform, and reuses the shared NX-OS
 field mapper so output is byte-identical with the NX-API path.
+``get_modules()`` adds Module / module-bay discovery for Nexus modular chassis via SSH + ntc-templates.
 """
 
 import logging

@@ -1,9 +1,10 @@
 # Copyright 2026 NetBox Labs Inc
 """
-Cisco NX-OS NAPALM driver subclass adding ``get_interfaces_vlans()``.
+Cisco NX-OS NAPALM driver subclass adding ``get_interfaces_vlans()`` and ``get_modules()``.
 
 Fetches structured switchport data via NX-API (JSON) and maps each row
 through the shared NX-OS field-normalizer + generic classifier.
+``get_modules()`` adds Module / module-bay discovery for Nexus modular chassis via NX-API.
 """
 
 import logging

@@ -1,11 +1,12 @@
 # Copyright 2026 NetBox Labs Inc
 """
-IOS NAPALM driver subclass adding ``get_interfaces_vlans()``.
+IOS NAPALM driver subclass adding ``get_interfaces_vlans()`` and ``get_modules()``.
 
 Parses ``show interfaces switchport`` via ntc-templates, normalizes each
 row into a :class:`custom_napalm._vlan.SwitchportInfo`, and delegates to
 the generic classifier. The classifier handles voice promotion, DTP
 fallback, wildcard signaling, and clamping — none of that is duplicated here.
+``get_modules()`` adds Module / module-bay discovery for modular IOS-XE chassis.
 """
 
 import logging
