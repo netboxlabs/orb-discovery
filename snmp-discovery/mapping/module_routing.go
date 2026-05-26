@@ -11,6 +11,7 @@ package mapping
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -162,11 +163,15 @@ func buildIfaceModuleMap(
 // AliasMapFromOIDs parses entAliasMappingTable rows into a flat
 // entPhysicalIndex -> ifIndex map (decimal strings). Mirrors the parse
 // rules in chassis_routing.go:152-179 (drop malformed suffixes; drop
-// non-ifEntry.ifIndex values) but emits the simpler shape the module
-// path consumes — the chassis router does its own per-ifIndex
-// candidate ranking, so first-occurrence-wins here is harmless.
+// non-ifEntry.ifIndex values).
+//
+// When multiple rows resolve to the same entPhysicalIndex, the lowest
+// ifIndex wins — deterministic across runs. Map iteration order in Go
+// is randomized, so first-occurrence-wins would otherwise flip between
+// invocations. Mirrors chassis_routing.go's sorted candidate selection
+// (chassis_routing.go:202).
 func AliasMapFromOIDs(oids ObjectIDValueMap) map[string]string {
-	out := make(map[string]string)
+	candidates := make(map[string][]int)
 	for oid, v := range oids {
 		if !strings.HasPrefix(oid, oidEntAliasMappingIdent) {
 			continue
@@ -184,13 +189,17 @@ func AliasMapFromOIDs(oids ObjectIDValueMap) map[string]string {
 		if !strings.HasPrefix(val, oidIfEntryIfIndexNoDot) {
 			continue
 		}
-		ifIdx := strings.TrimPrefix(val, oidIfEntryIfIndexNoDot)
-		if _, err := strconv.Atoi(ifIdx); err != nil {
+		ifIdxStr := strings.TrimPrefix(val, oidIfEntryIfIndexNoDot)
+		ifIdx, err := strconv.Atoi(ifIdxStr)
+		if err != nil {
 			continue
 		}
-		if _, exists := out[entIdx]; !exists {
-			out[entIdx] = ifIdx
-		}
+		candidates[entIdx] = append(candidates[entIdx], ifIdx)
+	}
+	out := make(map[string]string, len(candidates))
+	for entIdx, ifIdxs := range candidates {
+		sort.Ints(ifIdxs)
+		out[entIdx] = strconv.Itoa(ifIdxs[0])
 	}
 	return out
 }

@@ -242,6 +242,25 @@ func TestAliasMapFromOIDs_ParsesEntAliasMappingRows(t *testing.T) {
 	assert.Len(t, m, 2)
 }
 
+// TestAliasMapFromOIDs_DeterministicWhenMultipleAliasRowsShareEntIndex —
+// when multiple entAliasMappingTable rows resolve to the same
+// entPhysicalIndex, AliasMapFromOIDs must pick deterministically. We
+// pick the lowest ifIndex, mirroring chassis_routing.go's sorted
+// resolution. Running 50x confirms map-iteration order can't flip it.
+func TestAliasMapFromOIDs_DeterministicWhenMultipleAliasRowsShareEntIndex(t *testing.T) {
+	oids := ObjectIDValueMap{
+		// Two rows for entPhysicalIndex 203 — different logical idx,
+		// different ifIndex. Result must always be the lower ifIndex.
+		".1.3.6.1.2.1.47.1.3.2.1.2.203.0": Value{Value: ".1.3.6.1.2.1.2.2.1.1.10201"},
+		".1.3.6.1.2.1.47.1.3.2.1.2.203.1": Value{Value: ".1.3.6.1.2.1.2.2.1.1.10101"},
+	}
+	for i := 0; i < 50; i++ {
+		m := AliasMapFromOIDs(oids)
+		require.Equal(t, "10101", m["203"],
+			"AliasMapFromOIDs must deterministically pick the lowest ifIndex")
+	}
+}
+
 // TestIfNameByIfIndex_InvertsRunnerMap — inversion plus nil-Name skip.
 func TestIfNameByIfIndex_InvertsRunnerMap(t *testing.T) {
 	n1 := strPtr("Gi1/0/1")
