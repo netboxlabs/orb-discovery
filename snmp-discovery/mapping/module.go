@@ -70,7 +70,7 @@ type ModuleEntry struct {
 	EntIndex     string     // own entPhysicalIndex
 	BayEntIndex  string     // parent class=5 container entPhysicalIndex
 	BayName      string     // entPhysicalName of the bay
-	BayPosition  string     // entPhysicalParentRelPos of the module
+	BayPosition  string     // entPhysicalParentRelPos of the BAY (chassis slot number — NOT the module's own parentRelPos, which is almost always "1")
 	Name         string     // entPhysicalName
 	Serial       string     // entPhysicalSerialNum
 	Model        string     // entPhysicalModelName
@@ -316,11 +316,13 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 		}
 		bayHasChild[bayIdx] = true
 		bay := byIdx[bayIdx]
+		// Position is the BAY's parentRelPos (chassis slot), not the
+		// module's own (which is almost always "1" inside its bay).
 		entry := ModuleEntry{
 			EntIndex:     r.EntIndex,
 			BayEntIndex:  bayIdx,
 			BayName:      bay.Name,
-			BayPosition:  r.ParentRel,
+			BayPosition:  bay.ParentRel,
 			Name:         r.Name,
 			Serial:       r.Serial,
 			Model:        r.Model,

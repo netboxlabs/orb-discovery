@@ -261,3 +261,24 @@ func TestExtractModuleInventory_EmptyBayHarvested(t *testing.T) {
 	require.Len(t, inv.Modules, 1)
 	assert.Equal(t, "101", inv.Modules[0].EntIndex)
 }
+
+// TestExtractModuleInventory_BayPositionFromBayRow — BayPosition must
+// reflect the chassis slot number (the bay's own entPhysicalParentRelPos),
+// NOT the module's parentRelPos within its bay (which is almost always
+// "1" on real hardware). Real Cat 9404R reports module ParentRel=1 and
+// bay ParentRel=<slot>; sourcing position from the module produced
+// "Slot 1" for every linecard regardless of physical slot.
+func TestExtractModuleInventory_BayPositionFromBayRow(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	rows := []fixtureRow{
+		{"1", "0", "3", "1", "Chassis", "FOO", "C9404R", "Chassis", ""},
+		// Bay in slot 5 of the chassis — bay.ParentRel=5.
+		{"200", "1", "5", "5", "Slot 5", "", "", "Slot 5", ""},
+		// Module within the bay — module.ParentRel=1 (always "1" on real HW).
+		{"201", "200", "9", "1", "Linecard 5", "JAE5", "C9400-LC-48U", "", ""},
+	}
+	inv := extractModuleInventory(buildOIDs(rows), logger)
+	require.Len(t, inv.Modules, 1)
+	assert.Equal(t, "5", inv.Modules[0].BayPosition,
+		"BayPosition must come from the bay row's ParentRel, not the module's")
+}
