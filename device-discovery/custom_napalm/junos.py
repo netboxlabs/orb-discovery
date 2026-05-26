@@ -36,6 +36,7 @@ XML parsing notes
 """
 
 import logging
+import re
 
 from jnpr.junos.exception import RpcError
 from lxml import etree
@@ -279,16 +280,29 @@ def _junos_get_chassis_members_impl(driver) -> dict | None:
     return to_payload(members, domain=None)
 
 
+# Word-boundary match so a transceiver-describing word ("SFP+-10G-SR")
+# is recognised while a linecard's port-count description ("12x10GE-SFPP",
+# "MRATE-12xQSFPP-XGE") — which merely names the ports it hosts — is NOT.
+_JUNOS_OPTIC_DESCR_RE = re.compile(
+    r"\b(?:sfp|qsfp|xfp|transceiver|optic)\b", re.IGNORECASE
+)
+
+
 def classify_module_type_junos(part_number: str, description: str) -> str:
     """
     Map a Junos chassis-inventory row to a ModuleType.
 
-    Optic PIDs win first. Routing Engine descriptions map to supervisor
-    (Junos uses RE rather than "supervisor" terminology). PSU / fan
-    are classified so they don't fall through to ``linecard``, but
-    are filtered upstream and never reach Diode emission.
+    Optic PIDs win first. Juniper transceivers often carry an internal
+    part-number (e.g. ``740-021308``) instead of an MSA prefix, with the
+    optic type only in the description — a word-boundary keyword check
+    catches those before the RE / PSU / fan hints. Routing Engine
+    descriptions map to supervisor (Junos uses RE rather than "supervisor"
+    terminology). PSU / fan are classified so they don't fall through to
+    ``linecard``, but are filtered upstream and never reach Diode emission.
     """
     if is_optic_pid(part_number):
+        return "transceiver"
+    if _JUNOS_OPTIC_DESCR_RE.search(description or ""):
         return "transceiver"
     descr_lower = (description or "").lower()
     if "routing engine" in descr_lower or descr_lower.startswith("re-"):

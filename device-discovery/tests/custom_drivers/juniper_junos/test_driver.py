@@ -20,9 +20,36 @@ from unittest.mock import MagicMock
 import pytest
 from jnpr.junos.exception import RpcError
 
-from custom_napalm.junos import JunOSDriver, _junos_get_chassis_members_impl
+from custom_napalm.junos import (
+    JunOSDriver,
+    _junos_get_chassis_members_impl,
+    classify_module_type_junos,
+)
 from tests.custom_drivers.base_test import BaseDriverTest
 from tests.custom_drivers.mock_device import FakePyEZDevice
+
+
+@pytest.mark.parametrize("part_number,description,expected", [
+    # Juniper optic with internal 740-series part-number (NOT an MSA prefix);
+    # the optic type lives only in the description.
+    ("740-021308", "SFP+-10G-SR", "transceiver"),
+    ("740-013111", "SFP+-10GBASE-LR", "transceiver"),
+    ("740-046565", "QSFP+ 40G", "transceiver"),
+    ("740-058732", "XFP-10G-LR", "transceiver"),
+    ("740-099999", "100G Transceiver", "transceiver"),
+    # MSA-prefixed part still wins via is_optic_pid.
+    ("SFP-10G-LR", "SFP+-10G-LR", "transceiver"),
+    # Routing Engine stays supervisor.
+    ("740-031116", "RE-S-1800x4", "supervisor"),
+    # Plain MPC linecard must NOT false-match the optic keyword check, even
+    # though its description embeds "QSFPP" (it hosts SFP ports, it is not one).
+    ("750-068369", "MPC7E 3D MRATE-12xQSFPP-XGE-XLGE-CGE", "linecard"),
+    # PIC linecard whose description embeds "SFPP" — must stay linecard.
+    ("BUILTIN", "12x10GE OTN+12x10GE-SFPP", "linecard"),
+])
+def test_classify_module_type_junos(part_number, description, expected):
+    """740-series optics classify via description keywords; port-count descriptions don't false-match."""
+    assert classify_module_type_junos(part_number, description) == expected
 
 
 class TestJunOSDriver(BaseDriverTest):

@@ -20,6 +20,11 @@ from custom_napalm._modules import is_optic_pid
     ("XENPAK-10GB-LR", True),
     ("XFP-10G-LR", True),
     ("CVR-X2-SFP", True),
+    ("SFP28-25G-SR", True),
+    ("SFP56-50G-LR", True),
+    ("QSFP56-200G-FR4", True),
+    ("OSFP-400G-DR4", True),
+    ("OSPF-PROCESS", False),  # OSPF, not OSFP — typo-guard must not false-match
     ("C9400-LC-48U", False),
     ("C9400-SUP-1", False),
     ("DCS-7500R-36CQ", False),
