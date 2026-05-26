@@ -56,6 +56,11 @@ class TestJunOSDriver(BaseDriverTest):
         """Skip: inherited from napalm.junos.junos.JunOSDriver."""
         pytest.skip("inherited from napalm.junos.junos.JunOSDriver")
 
+    def test_junos_driver_exposes_get_modules(self) -> None:
+        """get_modules() must exist on JunOSDriver after this batch lands."""
+        assert hasattr(JunOSDriver, "get_modules")
+        assert callable(getattr(JunOSDriver, "get_modules"))
+
 
 def test_chassis_members_rpc_error_logs_debug_not_warning(caplog):
     """

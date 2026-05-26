@@ -1,0 +1,40 @@
+{
+  "members": {
+    "0": {
+      "bays": [
+        {
+          "name": "FPC 0",
+          "position": "0",
+          "module": {
+            "model": "750-070000",
+            "serial": "VCM01FPC0",
+            "description": "EX9200-40XS",
+            "type": "linecard",
+            "sub_bays": []
+          }
+        }
+      ],
+      "interfaces_by_bay": {
+        "FPC 0": ["xe-0/0/0"]
+      }
+    },
+    "1": {
+      "bays": [
+        {
+          "name": "FPC 0",
+          "position": "0",
+          "module": {
+            "model": "750-070000",
+            "serial": "VCM02FPC0",
+            "description": "EX9200-40XS",
+            "type": "linecard",
+            "sub_bays": []
+          }
+        }
+      ],
+      "interfaces_by_bay": {
+        "FPC 0": ["xe-1/0/0"]
+      }
+    }
+  }
+}

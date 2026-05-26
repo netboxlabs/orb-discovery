@@ -1,0 +1,34 @@
+<multi-routing-engine-results xmlns:junos="http://xml.juniper.net/junos/*/junos">
+<multi-routing-engine-item>
+<re-name>fpc0</re-name>
+<chassis-inventory>
+<chassis junos:style="inventory">
+<name>Chassis</name>
+<serial-number>VC1MEM0001</serial-number>
+<description>EX9214</description>
+<chassis-module>
+<name>FPC 0</name>
+<part-number>750-070000</part-number>
+<serial-number>VCM01FPC0</serial-number>
+<description>EX9200-40XS</description>
+</chassis-module>
+</chassis>
+</chassis-inventory>
+</multi-routing-engine-item>
+<multi-routing-engine-item>
+<re-name>fpc1</re-name>
+<chassis-inventory>
+<chassis junos:style="inventory">
+<name>Chassis</name>
+<serial-number>VC1MEM0002</serial-number>
+<description>EX9214</description>
+<chassis-module>
+<name>FPC 0</name>
+<part-number>750-070000</part-number>
+<serial-number>VCM02FPC0</serial-number>
+<description>EX9200-40XS</description>
+</chassis-module>
+</chassis>
+</chassis-inventory>
+</multi-routing-engine-item>
+</multi-routing-engine-results>
