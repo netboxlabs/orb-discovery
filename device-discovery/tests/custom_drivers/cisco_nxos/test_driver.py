@@ -39,3 +39,8 @@ class TestNXOSDriver(BaseDriverTest):
     def test_get_vlans(self, scenario):
         """Skip: inherited from napalm.nxos.nxos.NXOSDriver."""
         pytest.skip("inherited from napalm.nxos.nxos.NXOSDriver")
+
+    def test_nxos_driver_exposes_get_modules(self) -> None:
+        """get_modules() must exist on NXOSDriver after this batch lands."""
+        assert hasattr(NXOSDriver, "get_modules")
+        assert callable(getattr(NXOSDriver, "get_modules"))
