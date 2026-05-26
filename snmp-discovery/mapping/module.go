@@ -9,6 +9,7 @@ import (
 	"context"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -273,14 +274,24 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 	}
 
 	// Process class=9 rows in EntIndex-ascending order so dedup
-	// "first occurrence wins" is deterministic.
+	// "first occurrence wins" is deterministic. ENTITY-MIB indexes are
+	// numeric — a lex sort would put "10" before "9" and pick the wrong
+	// dedup winner, so compare as integers with a lex tiebreaker for
+	// any non-numeric edge cases.
 	classNineIdxs := make([]string, 0, len(byIdx))
 	for _, r := range byIdx {
 		if r.Class == entPhysicalClassModule {
 			classNineIdxs = append(classNineIdxs, r.EntIndex)
 		}
 	}
-	sort.Strings(classNineIdxs)
+	sort.Slice(classNineIdxs, func(i, j int) bool {
+		ai, errI := strconv.Atoi(classNineIdxs[i])
+		aj, errJ := strconv.Atoi(classNineIdxs[j])
+		if errI != nil || errJ != nil || ai == aj {
+			return classNineIdxs[i] < classNineIdxs[j]
+		}
+		return ai < aj
+	})
 	seenSerial := make(map[string]struct{})
 
 	// bayHasChild tracks class=5 rows that gained at least one class=9

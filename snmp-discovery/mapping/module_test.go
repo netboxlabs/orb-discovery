@@ -308,3 +308,28 @@ func TestExtractModuleInventory_ChassisRootedModuleSurvives(t *testing.T) {
 	assert.Equal(t, "7", m.BayPosition,
 		"synthesized bay position falls back to module's ParentRel")
 }
+
+// TestExtractModuleInventory_DedupUsesNumericEntIndexOrder — ENTITY-MIB
+// EntIndex values are numeric. A lexicographic sort on the string form
+// orders "10" before "9", which would pick the wrong dedup winner under
+// the "first occurrence wins" contract. The dedup pass must sort
+// numerically so EntIndex 9 wins over EntIndex 10 when they share a
+// serial.
+func TestExtractModuleInventory_DedupUsesNumericEntIndexOrder(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	// fixtureRow order: EntIndex, ContainedIn, Class, ParentRel, Name,
+	// Serial, Model, Descr, VendorType.
+	rows := []fixtureRow{
+		{"1", "0", "3", "1", "Chassis", "CHSER01", "C9404R", "Chassis", ""},
+		{"100", "1", "5", "1", "Slot 1", "", "", "Slot 1", ""},
+		{"200", "1", "5", "2", "Slot 2", "", "", "Slot 2", ""},
+		// EntIndex 9 — should win in numeric order.
+		{"9", "100", "9", "1", "Linecard 9", "DUPE-SER-01", "C9400-LC-48U", "First card", ""},
+		// EntIndex 10 — same serial; should lose in numeric order.
+		{"10", "200", "9", "1", "Linecard 10", "DUPE-SER-01", "C9400-LC-48U", "Second card", ""},
+	}
+	inv := extractModuleInventory(buildOIDs(rows), logger)
+	require.Len(t, inv.Modules, 1, "duplicate serial collapsed")
+	assert.Equal(t, "9", inv.Modules[0].EntIndex,
+		"EntIndex 9 wins under numeric sort (lex would pick 10)")
+}
