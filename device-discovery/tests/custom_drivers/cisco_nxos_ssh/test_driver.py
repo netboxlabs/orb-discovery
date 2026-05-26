@@ -39,3 +39,8 @@ class TestNXOSSSHDriver(BaseDriverTest):
     def test_get_vlans(self, scenario):
         """Skip: inherited from napalm.nxos_ssh.nxos_ssh.NXOSSSHDriver."""
         pytest.skip("inherited from napalm.nxos_ssh.nxos_ssh.NXOSSSHDriver")
+
+    def test_nxos_ssh_driver_exposes_get_modules(self) -> None:
+        """get_modules() must exist on NXOSSSHDriver after this batch lands."""
+        assert hasattr(NXOSSSHDriver, "get_modules")
+        assert callable(getattr(NXOSSSHDriver, "get_modules"))
