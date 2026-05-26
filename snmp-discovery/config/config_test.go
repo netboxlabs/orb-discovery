@@ -506,13 +506,16 @@ options:
 }
 
 func TestPolicyOptions_DiscoverModulesParsed(t *testing.T) {
+	// YAML wire format stays as literal strings (that's what we test);
+	// expected outputs use the package constants so the test fails
+	// loudly if a constant value ever drifts.
 	cases := []struct {
 		in  string
 		out string
 	}{
-		{"off", "off"},
-		{"linecards", "linecards"},
-		{"full", "full"},
+		{"off", DiscoverModulesOff},
+		{"linecards", DiscoverModulesLinecards},
+		{"full", DiscoverModulesFull},
 	}
 	for _, c := range cases {
 		t.Run(c.in, func(t *testing.T) {
