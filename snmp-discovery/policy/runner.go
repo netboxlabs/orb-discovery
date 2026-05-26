@@ -558,7 +558,13 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 	// attachment (Interfaces would appear BEFORE the Modules they reference).
 	// Fix: partition-and-prepend. Find the first non-Device/non-VC index in
 	// entitiesForTarget and splice moduleEntities there.
-	{
+	//
+	// Early-exit on mode=off so the default-path target poll skips the
+	// ChassisInventoryFromOIDs re-parse + the entAliasMappingTable scan
+	// entirely (both iterate the full oids map). Without this gate,
+	// every target paid the scan cost even though TranslateModulesWithAlias
+	// would short-circuit before emitting anything.
+	if r.config.Options.ModuleDiscoveryMode() != config.DiscoverModulesOff {
 		// TODO(orb-discovery): double-parse — TranslateAsStack already
 		// ran extractInventory internally; ChassisInventoryFromOIDs
 		// runs it again here. Cheap parse on string maps (no SNMP work
