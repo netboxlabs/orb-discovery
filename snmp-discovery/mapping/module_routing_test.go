@@ -366,3 +366,101 @@ func TestChassisInventoryFromOIDs_WrapsExtractInventory(t *testing.T) {
 	assert.Equal(t, 1, inv.Members[0].ID,
 		"master member ID is lowest present in fixture (parentRelPos=1)")
 }
+
+// --- AttachIfaceModules tests ---
+
+// TestAttachIfaceModules_TopLevelInterface — sanity: the existing happy
+// path (an *diode.Interface directly in the slice) still attaches the
+// module. Guards against regression after the helper extraction.
+func TestAttachIfaceModules_TopLevelInterface(t *testing.T) {
+	iface := &diode.Interface{Name: strPtr("GigabitEthernet1/0/1")}
+	mod := &diode.Module{Serial: strPtr("XCVR-TOP")}
+	entities := []diode.Entity{iface}
+	ifaceModuleMap := map[string]*diode.Module{"10101": mod}
+	ifIndexByIface := map[*diode.Interface]int{iface: 10101}
+
+	AttachIfaceModules(entities, ifaceModuleMap, ifIndexByIface)
+
+	require.NotNil(t, iface.Module, "top-level Interface must get its Module set")
+	assert.Equal(t, "XCVR-TOP", *iface.Module.Serial)
+}
+
+// TestAttachIfaceModules_NestedInterfaceInIPAddress — codex P2
+// regression. MapObjectIDsToEntity drops interfaces referenced by
+// IPAddress.AssignedObject from the top-level entity slice (the L3
+// routed-port case in mapping.go's getAssignedInterfaces filter). The
+// runner's previous attach loop only iterated *diode.Interface entries
+// and silently missed these, leaving Interface.Module nil. The helper
+// must reach through IPAddress.AssignedObject.
+func TestAttachIfaceModules_NestedInterfaceInIPAddress(t *testing.T) {
+	iface := &diode.Interface{Name: strPtr("TenGigabitEthernet2/0/1"), Module: nil}
+	ip := &diode.IPAddress{
+		Address:        strPtr("10.0.0.1/24"),
+		AssignedObject: iface,
+	}
+	mod := &diode.Module{Serial: strPtr("FNS00000001")}
+	// Note: ONLY the IPAddress sits in entities — the routed iface has
+	// no standalone counterpart in the slice (the very case this fix
+	// addresses).
+	entities := []diode.Entity{ip}
+	ifaceModuleMap := map[string]*diode.Module{"10101": mod}
+	ifIndexByIface := map[*diode.Interface]int{iface: 10101}
+
+	AttachIfaceModules(entities, ifaceModuleMap, ifIndexByIface)
+
+	require.NotNil(t, iface.Module,
+		"Interface inside IPAddress.AssignedObject must get its Module set")
+	assert.Equal(t, "FNS00000001", *iface.Module.Serial)
+}
+
+// TestAttachIfaceModules_NestedInterfaceInMACAddress — mirror of the
+// IPAddress case. MACAddress.AssignedObject carries an *diode.Interface
+// on this codebase (chassis.go:484 walks it during member-rerouting).
+// The helper must reach through that shape too so an interface visible
+// ONLY via a MAC ref still gets its module attached.
+func TestAttachIfaceModules_NestedInterfaceInMACAddress(t *testing.T) {
+	iface := &diode.Interface{Name: strPtr("TenGigabitEthernet2/0/2"), Module: nil}
+	mac := &diode.MACAddress{
+		MacAddress:     strPtr("00:11:22:33:44:55"),
+		AssignedObject: iface,
+	}
+	mod := &diode.Module{Serial: strPtr("FNS00000002")}
+	entities := []diode.Entity{mac}
+	ifaceModuleMap := map[string]*diode.Module{"10102": mod}
+	ifIndexByIface := map[*diode.Interface]int{iface: 10102}
+
+	AttachIfaceModules(entities, ifaceModuleMap, ifIndexByIface)
+
+	require.NotNil(t, iface.Module,
+		"Interface inside MACAddress.AssignedObject must get its Module set")
+	assert.Equal(t, "FNS00000002", *iface.Module.Serial)
+}
+
+// TestAttachIfaceModules_MissIfIndexLeavesModuleNil — when an interface
+// pointer is not present in ifIndexByIface (e.g. came in via a path the
+// registry didn't track) the helper skips it silently. Interface.Module
+// remains nil — no panic, no fabricated lookup.
+func TestAttachIfaceModules_MissIfIndexLeavesModuleNil(t *testing.T) {
+	iface := &diode.Interface{Name: strPtr("unknown")}
+	entities := []diode.Entity{iface}
+	ifaceModuleMap := map[string]*diode.Module{"10101": {Serial: strPtr("X")}}
+	ifIndexByIface := map[*diode.Interface]int{} // iface missing
+
+	AttachIfaceModules(entities, ifaceModuleMap, ifIndexByIface)
+
+	assert.Nil(t, iface.Module, "interface absent from ifIndexByIface stays untouched")
+}
+
+// TestAttachIfaceModules_EmptyMapsAreNoOp — defensive: nil/empty inputs
+// must not panic and must not mutate entities. The runner can call this
+// unconditionally without guarding on map size.
+func TestAttachIfaceModules_EmptyMapsAreNoOp(t *testing.T) {
+	iface := &diode.Interface{Name: strPtr("Gi1/0/1")}
+	entities := []diode.Entity{iface}
+
+	AttachIfaceModules(entities, nil, nil)
+	assert.Nil(t, iface.Module)
+
+	AttachIfaceModules(entities, map[string]*diode.Module{}, map[*diode.Interface]int{})
+	assert.Nil(t, iface.Module)
+}

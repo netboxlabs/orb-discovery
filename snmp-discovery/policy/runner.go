@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -584,22 +583,12 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 		// Order-safe because modules now precede interfaces in the slice.
 		// Key by ifIndex (globally unique in the SNMP walk space) — keying
 		// by Interface.Name would collide on VC members that reuse the same
-		// canonical name locally.
-		if len(ifaceModuleMap) > 0 {
-			for _, e := range entitiesForTarget {
-				iface, ok := e.(*diode.Interface)
-				if !ok {
-					continue
-				}
-				idx, hasIdx := ifIndexByIface[iface]
-				if !hasIdx {
-					continue
-				}
-				if mod, hit := ifaceModuleMap[strconv.Itoa(idx)]; hit {
-					iface.Module = mod
-				}
-			}
-		}
+		// canonical name locally. AttachIfaceModules also walks
+		// IPAddress.AssignedObject / MACAddress.AssignedObject so L3
+		// routed-port interfaces (filtered out of the top-level entity
+		// slice by MapObjectIDsToEntity.getAssignedInterfaces) still get
+		// their module set.
+		mapping.AttachIfaceModules(entitiesForTarget, ifaceModuleMap, ifIndexByIface)
 	}
 
 	entities = append(entities, entitiesForTarget...)

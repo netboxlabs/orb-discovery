@@ -278,3 +278,62 @@ func MemberDevicesFromEntities(
 	}
 	return out
 }
+
+// AttachIfaceModules sets Interface.Module on each transceiver-owning
+// interface referenced by entities. It walks three referrer shapes:
+//
+//   - *diode.Interface directly in the slice (physical ports emitted as
+//     top-level entities).
+//   - *diode.IPAddress whose AssignedObject is a *diode.Interface (the
+//     L3 routed-port case — MapObjectIDsToEntity filters such interfaces
+//     out of the top-level slice via getAssignedInterfaces, so they
+//     surface ONLY through this nested reference).
+//   - *diode.MACAddress whose AssignedObject is a *diode.Interface
+//     (mirrors the IP path; chassis.go:484 already walks this shape for
+//     member-rerouting).
+//
+// For each found interface we look up its ifIndex in ifIndexByIface (the
+// registry-derived pointer->ifIndex map) and use the decimal ifIndex to
+// pick the module from ifaceModuleMap. Lookups that miss are skipped:
+// partial coverage is normal (interfaces with no transceiver, ifIndexes
+// absent from entAliasMappingTable, etc.).
+//
+// Idempotent: re-running won't change a value already set. Defensive
+// against nil maps so the runner can call it unconditionally.
+func AttachIfaceModules(
+	entities []diode.Entity,
+	ifaceModuleMap map[string]*diode.Module,
+	ifIndexByIface map[*diode.Interface]int,
+) {
+	if len(ifaceModuleMap) == 0 || len(ifIndexByIface) == 0 {
+		return
+	}
+	attach := func(iface *diode.Interface) {
+		if iface == nil {
+			return
+		}
+		idx, hasIdx := ifIndexByIface[iface]
+		if !hasIdx {
+			return
+		}
+		mod, hit := ifaceModuleMap[strconv.Itoa(idx)]
+		if !hit {
+			return
+		}
+		iface.Module = mod
+	}
+	for _, e := range entities {
+		switch v := e.(type) {
+		case *diode.Interface:
+			attach(v)
+		case *diode.IPAddress:
+			if iface, ok := v.AssignedObject.(*diode.Interface); ok {
+				attach(iface)
+			}
+		case *diode.MACAddress:
+			if iface, ok := v.AssignedObject.(*diode.Interface); ok {
+				attach(iface)
+			}
+		}
+	}
+}
