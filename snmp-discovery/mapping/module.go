@@ -345,12 +345,18 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 		bay := byIdx[bayIdx]
 		// Position is the BAY's parentRelPos (chassis slot), not the
 		// module's own (which is almost always "1" inside its bay).
-		// When the bay was synthesized from the module itself, fall back
-		// to the module's own Name + ParentRel so the bay has identifiers.
+		// When the bay was synthesized from the module itself, derive a
+		// distinct name ("Slot <parentRel>") so NetBox doesn't display a
+		// bay sharing the module's exact label; fall back to module Name
+		// only if ParentRel is empty.
 		bayName := bay.Name
 		bayPos := bay.ParentRel
 		if synthesizedBay {
-			bayName = r.Name
+			if r.ParentRel != "" {
+				bayName = "Slot " + r.ParentRel
+			} else {
+				bayName = r.Name
+			}
 			bayPos = r.ParentRel
 		}
 		entry := ModuleEntry{

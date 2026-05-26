@@ -301,8 +301,10 @@ func TestExtractModuleInventory_ChassisRootedModuleSurvives(t *testing.T) {
 	assert.Equal(t, "100", m.EntIndex)
 	assert.Equal(t, "100", m.BayEntIndex,
 		"synthesized bay self-references the module")
-	assert.Equal(t, "Linecard 7", m.BayName,
-		"synthesized bay name falls back to module name")
+	// Prefix "Slot " telegraphs synthetic nature so NetBox UI doesn't show
+	// a bay and module sharing the identical "Linecard 7" label.
+	assert.Equal(t, "Slot 7", m.BayName,
+		"synthesized bay name uses Slot + ParentRel to differ from module name")
 	assert.Equal(t, "7", m.BayPosition,
 		"synthesized bay position falls back to module's ParentRel")
 }
