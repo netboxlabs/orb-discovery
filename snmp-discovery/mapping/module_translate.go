@@ -239,7 +239,11 @@ func emitModuleBay(device *diode.Device, m ModuleEntry) *diode.ModuleBay {
 // Sharing vendorFromDevice with the metrics path keeps the label and
 // the emitted entity identical strings.
 func emitModule(device *diode.Device, bay *diode.ModuleBay, m ModuleEntry, defaults *config.Defaults) *diode.Module {
-	model := modelOrUnknown(m.Model)
+	// Mirrors classifyModule's Model -> VendorType -> Unknown fallback so
+	// the emitted ModuleType label matches the classification. Aruba CX
+	// populates entPhysicalVendorType where Cisco populates ModelName;
+	// using Model alone would emit "Unknown" for valid Aruba hardware.
+	model := modelOrVendorType(m.Model, m.VendorType)
 	mfgName := resolveModuleManufacturer(device, defaults)
 	moduleType := &diode.ModuleType{
 		Model: &model,
@@ -279,13 +283,19 @@ func vendorFromDevice(d *diode.Device) string {
 	return "Unknown"
 }
 
-// modelOrUnknown trims model and substitutes "Unknown" for the empty
-// string. Diode rejects empty strings for required ModuleType.Model.
-func modelOrUnknown(m string) string {
-	if m == "" {
-		return "Unknown"
+// modelOrVendorType prefers a non-blank trimmed model, falling back to
+// the trimmed vendorType, and finally "Unknown". Parallels
+// classifyModule so the emitted ModuleType.Model matches the type
+// classification for vendors (e.g. Aruba CX) that populate
+// entPhysicalVendorType instead of entPhysicalModelName.
+func modelOrVendorType(model, vendorType string) string {
+	if v := strings.TrimSpace(model); v != "" {
+		return v
 	}
-	return m
+	if v := strings.TrimSpace(vendorType); v != "" {
+		return v
+	}
+	return "Unknown"
 }
 
 // vendorFromDefaults returns the policy-level device manufacturer or

@@ -545,3 +545,36 @@ func TestSpliceModulesAfterDevices(t *testing.T) {
 		assert.Same(t, iface, out[2])
 	})
 }
+
+// TestTranslateModules_ModuleTypeModel_FallsBackToVendorTypeWhenModelBlank
+// — Aruba CX populates entPhysicalVendorType instead of entPhysicalModelName.
+// The emitted ModuleType.Model must mirror classifyModule's
+// Model -> VendorType -> Unknown fallback so the type label matches the
+// classification (and so NetBox doesn't see "Unknown" for valid hardware).
+func TestTranslateModules_ModuleTypeModel_FallsBackToVendorTypeWhenModelBlank(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	// fixtureRow order: EntIndex, ContainedIn, Class, ParentRel, Name,
+	// Serial, Model, Descr, VendorType.
+	rows := []fixtureRow{
+		{"1", "0", "3", "1", "Chassis", "FCAR2401", "ArubaCX-8400", "Aruba 8400 Chassis", "aruba-8400"},
+		{"100", "1", "5", "1", "Slot 1", "", "", "Slot 1", ""},
+		// Aruba CX shape: Model blank, VendorType populated.
+		{"101", "100", "9", "1", "Linecard 1", "ARSER01", "", "Aruba line card", "aruba-jl363a"},
+	}
+	dev := &diode.Device{Name: strPtr("aruba")}
+	memberDevices := map[int]*diode.Device{0: dev}
+
+	entities, _ := TranslateModules(buildOIDs(rows), nil, memberDevices, modeLinecards(), nil, logger)
+
+	var modules []*diode.Module
+	for _, e := range entities {
+		if m, ok := e.(*diode.Module); ok {
+			modules = append(modules, m)
+		}
+	}
+	require.Len(t, modules, 1)
+	require.NotNil(t, modules[0].ModuleType)
+	require.NotNil(t, modules[0].ModuleType.Model)
+	assert.Equal(t, "aruba-jl363a", *modules[0].ModuleType.Model,
+		"blank Model must fall back to VendorType, not Unknown")
+}
