@@ -562,9 +562,11 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 		// TODO(orb-discovery): double-parse — TranslateAsStack already
 		// ran extractInventory internally; ChassisInventoryFromOIDs
 		// runs it again here. Cheap parse on string maps (no SNMP work
-		// repeated), so left as-is for now. Refactor by threading the
-		// inventory out of TranslateAsStack would touch many test files
-		// — defer until the runner gets a broader cleanup.
+		// repeated), so left as-is for now. Refactor fallout:
+		// TranslateAsStack call sites in mapping/chassis_test.go (9 sites)
+		// would need to accept a pre-parsed inventory parameter; this
+		// caller would then pass it directly instead of re-deriving via
+		// ChassisInventoryFromOIDs. Defer until a broader runner cleanup.
 		chassisInv := mapping.ChassisInventoryFromOIDs(oids, r.logger)
 		memberDevices := mapping.MemberDevicesFromEntities(entitiesForTarget, chassisInv)
 		aliasMap := mapping.AliasMapFromOIDs(oids)
