@@ -237,24 +237,26 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 	}
 
 	// walkParents climbs the containedIn chain. Returns the nearest
-	// class=5 bay EntIndex and the nearest class=9 module ancestor
-	// EntIndex (both "" when absent). A `seen` set guards against
-	// malformed-MIB cycles — without it a self-referential or mutually
-	// referential containedIn pair would loop forever.
-	walkParents := func(start row) (bayIdx string, parentModuleIdx string, ok bool) {
+	// class=5 bay EntIndex, the nearest class=9 module ancestor
+	// EntIndex (both "" when absent), and whether a class=3 chassis was
+	// reached (used by extractModuleInventory to synthesize a bay for
+	// chassis-rooted modules on fixed-FRU switches). A `seen` set guards
+	// against malformed-MIB cycles — without it a self-referential or
+	// mutually referential containedIn pair would loop forever.
+	walkParents := func(start row) (bayIdx string, parentModuleIdx string, reachedChassis bool, ok bool) {
 		cur := start.ContainedIn
 		seen := make(map[string]struct{})
 		for cur != "" && cur != "0" {
 			if _, dup := seen[cur]; dup {
 				logger.Debug("module: containment cycle detected",
 					"ent", start.EntIndex, "at", cur)
-				return "", "", false
+				return "", "", false, false
 			}
 			seen[cur] = struct{}{}
 			parent, exists := byIdx[cur]
 			if !exists {
 				// Broken chain — orphan.
-				return "", "", false
+				return "", "", false, false
 			}
 			if bayIdx == "" && parent.Class == entPhysicalClassContainer {
 				bayIdx = cur
@@ -262,9 +264,12 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 			if parentModuleIdx == "" && parent.Class == entPhysicalClassModule {
 				parentModuleIdx = cur
 			}
+			if parent.Class == entPhysicalClassChassis {
+				reachedChassis = true
+			}
 			cur = parent.ContainedIn
 		}
-		return bayIdx, parentModuleIdx, true
+		return bayIdx, parentModuleIdx, reachedChassis, true
 	}
 
 	// Process class=9 rows in EntIndex-ascending order so dedup
@@ -284,8 +289,8 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 
 	for _, idx := range classNineIdxs {
 		r := byIdx[idx]
-		bayIdx, parentModuleIdx, chainOK := walkParents(r)
-		if !chainOK || bayIdx == "" {
+		bayIdx, parentModuleIdx, reachedChassis, chainOK := walkParents(r)
+		if !chainOK {
 			logger.Warn("module discovery: orphan module dropped",
 				"ent", r.EntIndex,
 				"model", r.Model,
@@ -296,6 +301,28 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 				))
 			}
 			continue
+		}
+		// Fixed-FRU switches sometimes report modules directly under
+		// chassis with no class=5 container — synthesize a bay so the
+		// module is still emitted. Self-referential BayEntIndex is fine;
+		// the downstream Diode emission only needs a stable identifier.
+		synthesizedBay := false
+		if bayIdx == "" {
+			if !reachedChassis {
+				// No class=5 AND no chassis — truly orphan.
+				logger.Warn("module discovery: orphan module dropped",
+					"ent", r.EntIndex,
+					"model", r.Model,
+					"reason", "orphan_containment")
+				if c := metrics.GetModulesDropped(); c != nil {
+					c.Add(context.Background(), 1, metric.WithAttributes(
+						attribute.String("reason", "orphan_containment"),
+					))
+				}
+				continue
+			}
+			bayIdx = r.EntIndex
+			synthesizedBay = true
 		}
 		if r.Serial != "" {
 			key := strings.ToLower(strings.TrimSpace(r.Serial))
@@ -318,11 +345,19 @@ func extractModuleInventory(oids ObjectIDValueMap, logger *slog.Logger) ModuleIn
 		bay := byIdx[bayIdx]
 		// Position is the BAY's parentRelPos (chassis slot), not the
 		// module's own (which is almost always "1" inside its bay).
+		// When the bay was synthesized from the module itself, fall back
+		// to the module's own Name + ParentRel so the bay has identifiers.
+		bayName := bay.Name
+		bayPos := bay.ParentRel
+		if synthesizedBay {
+			bayName = r.Name
+			bayPos = r.ParentRel
+		}
 		entry := ModuleEntry{
 			EntIndex:     r.EntIndex,
 			BayEntIndex:  bayIdx,
-			BayName:      bay.Name,
-			BayPosition:  bay.ParentRel,
+			BayName:      bayName,
+			BayPosition:  bayPos,
 			Name:         r.Name,
 			Serial:       r.Serial,
 			Model:        r.Model,

@@ -282,3 +282,27 @@ func TestExtractModuleInventory_BayPositionFromBayRow(t *testing.T) {
 	assert.Equal(t, "5", inv.Modules[0].BayPosition,
 		"BayPosition must come from the bay row's ParentRel, not the module's")
 }
+
+// TestExtractModuleInventory_ChassisRootedModuleSurvives — some fixed-FRU
+// switches report modules directly under the chassis with no class=5
+// container in between. The previous "no class=5 ancestor -> drop"
+// behaviour silently lost these. Synthesize a self-referential bay so
+// the module is still emitted.
+func TestExtractModuleInventory_ChassisRootedModuleSurvives(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	rows := []fixtureRow{
+		{"1", "0", "3", "1", "Fixed Switch", "FOO", "C9300", "Chassis", ""},
+		// Linecard sits directly under chassis (no class=5 bay row).
+		{"100", "1", "9", "7", "Linecard 7", "JAE7", "C9300-LC", "", ""},
+	}
+	inv := extractModuleInventory(buildOIDs(rows), logger)
+	require.Len(t, inv.Modules, 1, "chassis-rooted module must survive")
+	m := inv.Modules[0]
+	assert.Equal(t, "100", m.EntIndex)
+	assert.Equal(t, "100", m.BayEntIndex,
+		"synthesized bay self-references the module")
+	assert.Equal(t, "Linecard 7", m.BayName,
+		"synthesized bay name falls back to module name")
+	assert.Equal(t, "7", m.BayPosition,
+		"synthesized bay position falls back to module's ParentRel")
+}
