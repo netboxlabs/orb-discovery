@@ -339,12 +339,19 @@ def _aruba_get_modules_impl(driver) -> dict | None:
     """Standalone + VSF-of-modular discovery for Aruba CX via pyaoscx REST."""
     try:
         subs = driver._get("system/subsystems?attributes=product_info&depth=2")
-        ifaces = driver._get("system/interfaces?attributes=name,hw_intf_info&depth=2")
     except Exception as e:
-        logger.warning("aruba.get_modules: REST fetch failed: %s", e)
+        logger.warning("aruba.get_modules: subsystems fetch failed: %s", e)
         return None
     if not isinstance(subs, dict) or not subs:
         return None
+
+    # Optics are enrichment sub-bays — a failed interface fetch must not
+    # discard the chassis module bays, so degrade to no optics on error.
+    try:
+        ifaces = driver._get("system/interfaces?attributes=name,hw_intf_info&depth=2")
+    except Exception as e:
+        logger.warning("aruba.get_modules: interfaces fetch failed, emitting without optics: %s", e)
+        ifaces = {}
 
     # VSF member set (None-bucket when standalone / single member).
     members = _aruba_vsf_member_ids(driver)
