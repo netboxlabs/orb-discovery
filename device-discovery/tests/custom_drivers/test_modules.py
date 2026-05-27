@@ -24,6 +24,10 @@ from custom_napalm._modules import is_optic_pid
     ("SFP56-50G-LR", True),
     ("QSFP56-200G-FR4", True),
     ("OSFP-400G-DR4", True),
+    ("QDD-400G-DR4-S", True),  # Cisco 400G QSFP-DD PIDs start with QDD-, not QSFP-DD
+    ("QDD-400G-FR4-S", True),
+    ("QDD-2X100-CWDM4-S", True),
+    ("QDDX-NOTANOPTIC", False),  # prefix needs the dash — QDDX- != QDD-
     ("OSPF-PROCESS", False),  # OSPF, not OSFP — typo-guard must not false-match
     ("C9400-LC-48U", False),
     ("C9400-SUP-1", False),

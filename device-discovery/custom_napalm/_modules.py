@@ -104,6 +104,7 @@ _OPTIC_PREFIXES = (
     "QSFP28",
     "QSFP56-",
     "QSFP-DD",
+    "QDD-",  # Cisco 400G QSFP-DD optics (QDD-400G-DR4-S) — not a QSFP-DD literal prefix
     "OSFP-",
     "GLC-",
     "X2-",

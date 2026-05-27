@@ -52,7 +52,8 @@ def _flatten_nxos_rows(payload: dict) -> list[dict]:
 # ---- module discovery (NX-API JSON path) ---------------------------------
 
 _NXOS_PORT_RE = re.compile(r"^Ethernet(\d+)(?:/\d+)+$", re.IGNORECASE)
-_NXOS_SUP_PID_RE = re.compile(r"^N\d+K[-A-Z0-9]*-SUP", re.IGNORECASE)
+# K is optional: Nexus 7700 sups are N77-SUP2E/SUP3E (no K), while N9K-/N7K- have it.
+_NXOS_SUP_PID_RE = re.compile(r"^N\d+K?[-A-Z0-9]*-SUP", re.IGNORECASE)
 _NXOS_SLOT_RE = re.compile(r"^Slot\s+(\d+)$", re.IGNORECASE)
 
 

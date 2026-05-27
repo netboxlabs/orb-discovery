@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 
 _NXOS_SSH_PORT_RE = re.compile(r"^Ethernet(\d+)(?:/\d+)+$", re.IGNORECASE)
 _NXOS_SSH_SLOT_RE = re.compile(r"^Slot\s+(\d+)$", re.IGNORECASE)
-_NXOS_SSH_SUP_PID_RE = re.compile(r"^N\d+K[-A-Z0-9]*-SUP", re.IGNORECASE)
+# K is optional: Nexus 7700 sups are N77-SUP2E/SUP3E (no K), while N9K-/N7K- have it.
+_NXOS_SSH_SUP_PID_RE = re.compile(r"^N\d+K?[-A-Z0-9]*-SUP", re.IGNORECASE)
 
 
 def classify_module_type_nexus_ssh(pid: str, name: str) -> str:
