@@ -280,11 +280,14 @@ def _junos_get_chassis_members_impl(driver) -> dict | None:
     return to_payload(members, domain=None)
 
 
-# Word-boundary match so a transceiver-describing word ("SFP+-10G-SR")
-# is recognised while a linecard's port-count description ("12x10GE-SFPP",
-# "MRATE-12xQSFPP-XGE") — which merely names the ports it hosts — is NOT.
+# sfp/qsfp/xfp followed by +, -, a digit, or a word boundary — matches optic
+# forms SFP+, SFP-, SFP28, QSFP28, QSFP-DD, XFP-, etc. The lookahead rejects
+# the doubled-P port-density notation (SFPP / QSFPP) that appears in line-card
+# descriptions like "12x10GE-SFPP" / "MRATE-12xQSFPP-XGE" (they host SFP ports,
+# they are not optics). transceiver/optic stay whole-word matches.
 _JUNOS_OPTIC_DESCR_RE = re.compile(
-    r"\b(?:sfp|qsfp|xfp|transceiver|optic)\b", re.IGNORECASE
+    r"\b(?:sfp|qsfp|xfp)(?=[-+0-9]|\b)|\b(?:transceiver|optic)\b",
+    re.IGNORECASE,
 )
 
 

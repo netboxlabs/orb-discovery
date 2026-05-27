@@ -37,6 +37,14 @@ from tests.custom_drivers.mock_device import FakePyEZDevice
     ("740-046565", "QSFP+ 40G", "transceiver"),
     ("740-058732", "XFP-10G-LR", "transceiver"),
     ("740-099999", "100G Transceiver", "transceiver"),
+    # 25G/100G optics: the digit right after sfp/qsfp is a word char, so the
+    # old \bsfp\b regex missed these and dropped them to linecard (the bug).
+    ("740-061405", "SFP28-25G-SR", "transceiver"),
+    ("740-058734", "QSFP28-100G-LR4", "transceiver"),
+    ("740-021309", "SFP-10GBASE-LR", "transceiver"),
+    ("740-058735", "QSFP-DD-400G-DR4", "transceiver"),
+    ("740-099998", "100G optic", "transceiver"),
+    ("740-031117", "RE-S-1800x4 Routing Engine", "supervisor"),
     # MSA-prefixed part still wins via is_optic_pid.
     ("SFP-10G-LR", "SFP+-10G-LR", "transceiver"),
     # Routing Engine stays supervisor.
@@ -46,6 +54,9 @@ from tests.custom_drivers.mock_device import FakePyEZDevice
     ("750-068369", "MPC7E 3D MRATE-12xQSFPP-XGE-XLGE-CGE", "linecard"),
     # PIC linecard whose description embeds "SFPP" — must stay linecard.
     ("BUILTIN", "12x10GE OTN+12x10GE-SFPP", "linecard"),
+    # Doubled-P port-density guards (must NOT regress to transceiver).
+    ("750-068369", "MPC7E 3D MRATE-12xQSFPP-XGE-XLGE-CGE", "linecard"),
+    ("750-099999", "12x10GE OTN+12x10GE-SFPP", "linecard"),
 ])
 def test_classify_module_type_junos(part_number, description, expected):
     """740-series optics classify via description keywords; port-count descriptions don't false-match."""
