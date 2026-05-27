@@ -73,7 +73,10 @@
       ],
       "interfaces_by_bay": {
         "Linecard1": ["Ethernet1/1", "Ethernet1/2"],
-        "Linecard2": ["Ethernet2/1"]
+        "Linecard2": ["Ethernet2/1"],
+        "Ethernet1/1": ["Ethernet1/1"],
+        "Ethernet1/2": ["Ethernet1/2"],
+        "Ethernet2/1": ["Ethernet2/1"]
       }
     }
   }

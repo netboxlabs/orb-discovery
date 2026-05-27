@@ -206,6 +206,10 @@ def _eos_attach_transceivers(xcvr_slots: dict, lc_bays: dict[str, _ModuleBay]) -
             ),
         ))
         interfaces_by_bay.setdefault(parent_name, []).append(ifname)
+        # Self-route the optic under its own sub-bay name so the translator's
+        # deepest-wins logic links the interface to the transceiver (not the
+        # parent linecard) in full mode. Mirrors ios.py:_attach_transceivers.
+        interfaces_by_bay[ifname] = [ifname]
     return interfaces_by_bay
 
 

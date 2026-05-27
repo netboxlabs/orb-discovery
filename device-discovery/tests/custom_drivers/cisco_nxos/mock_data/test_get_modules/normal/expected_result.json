@@ -84,7 +84,10 @@
       ],
       "interfaces_by_bay": {
         "3": ["Ethernet3/1", "Ethernet3/2"],
-        "4": ["Ethernet4/1"]
+        "4": ["Ethernet4/1"],
+        "Ethernet3/1": ["Ethernet3/1"],
+        "Ethernet3/2": ["Ethernet3/2"],
+        "Ethernet4/1": ["Ethernet4/1"]
       }
     }
   }
