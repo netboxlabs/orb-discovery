@@ -21,7 +21,7 @@
                   "type": "linecard",
                   "sub_bays": [
                     {
-                      "name": "Xcvr 0",
+                      "name": "xe-0/0/0",
                       "position": "0",
                       "module": {
                         "model": "740-021308",
@@ -38,7 +38,10 @@
           }
         }
       ],
-      "interfaces_by_bay": {}
+      "interfaces_by_bay": {
+        "FPC 0": ["xe-0/0/0", "xe-0/0/0.0"],
+        "xe-0/0/0": ["xe-0/0/0"]
+      }
     }
   }
 }

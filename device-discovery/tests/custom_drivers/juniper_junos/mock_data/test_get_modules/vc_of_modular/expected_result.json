@@ -21,7 +21,7 @@
                   "type": "linecard",
                   "sub_bays": [
                     {
-                      "name": "Xcvr 0",
+                      "name": "xe-0/0/0",
                       "position": "0",
                       "module": {
                         "model": "SFP-10G-SR",
@@ -39,7 +39,8 @@
         }
       ],
       "interfaces_by_bay": {
-        "FPC 0": ["xe-0/0/0"]
+        "FPC 0": ["xe-0/0/0"],
+        "xe-0/0/0": ["xe-0/0/0"]
       }
     },
     "1": {
@@ -63,7 +64,7 @@
                   "type": "linecard",
                   "sub_bays": [
                     {
-                      "name": "Xcvr 0",
+                      "name": "xe-12/0/0",
                       "position": "0",
                       "module": {
                         "model": "SFP-10G-SR",
@@ -81,7 +82,8 @@
         }
       ],
       "interfaces_by_bay": {
-        "FPC 12": ["xe-12/0/0"]
+        "FPC 12": ["xe-12/0/0"],
+        "xe-12/0/0": ["xe-12/0/0"]
       }
     }
   }

@@ -335,8 +335,57 @@ def _junos_extract_module_from_elem(elem) -> _ModuleEntry | None:
     return _ModuleEntry(model=part, serial=serial, type=mtype, description=descr)
 
 
-def _junos_walk_sub_bays(parent_elem, *, depth: int) -> list[_ModuleBay]:
-    """Recurse into chassis-sub-module / chassis-sub-sub-module children."""
+def _junos_optic_bay_name(
+    position: str,
+    *,
+    fpc: int | None,
+    pic: int | None,
+    coord_to_ifname: dict[tuple[int, int, int], str],
+    self_routes: list[tuple[int, str]],
+) -> str:
+    """
+    Name an Xcvr sub-bay by its canonical ifname when correlated, else "Xcvr N".
+
+    The (fpc,pic,port) coordinate is matched against the ``show interfaces
+    terse`` rows. The translator looks up ``interfaces_by_bay[bay.name]`` — there is never
+    an ``"Xcvr N"`` entry (and it would be ambiguous across PICs anyway), so
+    a transceiver named ``"Xcvr 0"`` never receives its interface in full
+    mode. Naming the sub-bay by the canonical ifname + self-routing it lets
+    the translator's deepest-wins logic link the interface to the optic —
+    parity with the eos/nxos drivers. When no terse row matches (port not in
+    terse output), keep ``"Xcvr N"`` and do NOT self-route.
+
+    Records ``(fpc, ifname)`` in ``self_routes`` so the caller can route the
+    self-route into the member that owns that FPC (preserving VC offset-FPC
+    member mapping).
+    """
+    port = _maybe_int(position)
+    if fpc is None or pic is None or port is None:
+        return f"Xcvr {position}"
+    ifname = coord_to_ifname.get((fpc, pic, port))
+    if not ifname:
+        return f"Xcvr {position}"
+    self_routes.append((fpc, ifname))
+    return ifname
+
+
+def _junos_walk_sub_bays(
+    parent_elem,
+    *,
+    depth: int,
+    fpc: int | None,
+    pic: int | None,
+    coord_to_ifname: dict[tuple[int, int, int], str],
+    self_routes: list[tuple[int, str]],
+) -> list[_ModuleBay]:
+    """
+    Recurse into chassis-sub-module / chassis-sub-sub-module children.
+
+    Threads FPC + PIC context and the (fpc,pic,port)→ifname map so each Xcvr
+    can name its sub-bay by the canonical ifname (see _junos_optic_bay_name).
+    At depth 2 the child is a PIC (parse its position into ``pic``); at depth
+    3 it is an Xcvr (the leaf optic).
+    """
     if depth > 3:
         return []
     tag = "chassis-sub-module" if depth == 2 else "chassis-sub-sub-module"
@@ -347,73 +396,132 @@ def _junos_walk_sub_bays(parent_elem, *, depth: int) -> list[_ModuleBay]:
             continue
         # PIC N / Xcvr N — position is the trailing integer.
         position = name.split()[-1] if name.split() else name
+        # At depth 2 this child is a PIC: parse its slot so the optic leaf
+        # below knows its (fpc,pic,port) coordinate.
+        child_pic = _maybe_int(position) if depth == 2 else pic
         module = _junos_extract_module_from_elem(child)
         if module is None:
+            # Serial-less intermediate container (e.g. a built-in PIC/MIC
+            # with a part-number but empty serial): _validate_bay would drop
+            # it anyway, but its optic CHILDREN do have serials. Recurse and
+            # HOIST those children to the nearest emittable ancestor (the FPC)
+            # rather than dropping the whole subtree. A serial-less LEAF (no
+            # recursable children) stays skipped. Hoisting up a level keeps
+            # the optics within MAX_BAY_DEPTH.
+            hoisted = _junos_walk_sub_bays(
+                child, depth=depth + 1, fpc=fpc, pic=child_pic,
+                coord_to_ifname=coord_to_ifname, self_routes=self_routes,
+            )
+            if hoisted:
+                out.extend(hoisted)
             continue
-        module.sub_bays = _junos_walk_sub_bays(child, depth=depth + 1)
-        out.append(_ModuleBay(name=name, position=position, module=module))
+        module.sub_bays = _junos_walk_sub_bays(
+            child, depth=depth + 1, fpc=fpc, pic=child_pic,
+            coord_to_ifname=coord_to_ifname, self_routes=self_routes,
+        )
+        # At depth 3 the child is the Xcvr optic — name it by canonical ifname
+        # when its coordinate correlates to a terse row (self-routed there).
+        if depth == 3:
+            bay_name = _junos_optic_bay_name(
+                position, fpc=fpc, pic=pic,
+                coord_to_ifname=coord_to_ifname, self_routes=self_routes,
+            )
+        else:
+            bay_name = name
+        out.append(_ModuleBay(name=bay_name, position=position, module=module))
     return out
 
 
-def _junos_parse_chassis(chassis_elem) -> list[_ModuleBay]:
-    """Top-level: enumerate FPC / Routing Engine modules under one <chassis>."""
+def _junos_parse_chassis(
+    chassis_elem,
+    coord_to_ifname: dict[tuple[int, int, int], str],
+    self_routes: list[tuple[int, str]],
+) -> list[_ModuleBay]:
+    """
+    Top-level: enumerate FPC / Routing Engine modules under one <chassis>.
+
+    For each FPC bay at slot F, threads ``fpc=F`` into the sub-bay walk so
+    optic sub-bays can be named by their canonical ifname. ``self_routes``
+    accumulates ``(fpc, ifname)`` pairs the caller routes into the owning
+    member's interfaces_by_bay.
+    """
     bays: list[_ModuleBay] = []
     for module_elem in _find_children(chassis_elem, "chassis-module"):
         name = _text(_find_child(module_elem, "name")).strip()
         if not name:
             continue
         position = name.split()[-1] if name.split() else name
+        # Only FPC bays carry optics with (fpc,pic,port) coords; a Routing
+        # Engine bay's position is not an FPC slot, so leave fpc=None there.
+        fpc = _maybe_int(position) if name.startswith("FPC ") else None
         module = _junos_extract_module_from_elem(module_elem)
         if module is None:
             continue
-        module.sub_bays = _junos_walk_sub_bays(module_elem, depth=2)
+        module.sub_bays = _junos_walk_sub_bays(
+            module_elem, depth=2, fpc=fpc, pic=None,
+            coord_to_ifname=coord_to_ifname, self_routes=self_routes,
+        )
         bays.append(_ModuleBay(name=name, position=position, module=module))
     return bays
 
 
-def _junos_collect_interfaces_by_bay(
-    driver, fpc_to_member: dict[int, int] | None
+# Junos ifname: <media>-<fpc>/<pic>/<port>(.unit)? — e.g. xe-0/1/3, et-12/0/0.
+_JUNOS_IFNAME_RE = re.compile(r"^[a-z]+-(\d+)/(\d+)/(\d+)(?:\.\d+)?$")
+
+
+def _junos_terse_coords(raw: str) -> dict[tuple[int, int, int], str]:
+    """
+    Parse ``show interfaces terse`` into a (fpc,pic,port)→base-ifname map.
+
+    The base ifname strips any ``.unit`` so an optic correlates to the
+    physical interface (``xe-0/1/3``) rather than a logical unit
+    (``xe-0/1/3.0``). The first physical match for a coordinate wins; later
+    logical-unit lines for the same physical port don't overwrite it.
+    """
+    coords: dict[tuple[int, int, int], str] = {}
+    for line in (raw or "").splitlines():
+        token = line.split(" ", 1)[0].strip()
+        m = _JUNOS_IFNAME_RE.match(token)
+        if not m:
+            continue
+        fpc, pic, port = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        base = token.split(".", 1)[0]
+        coords.setdefault((fpc, pic, port), base)
+    return coords
+
+
+def _junos_terse_fpc_ifnames(
+    raw: str, fpc_to_member: dict[int, int] | None
 ) -> dict[int | None, dict[str, list[str]]]:
     """
-    Run ``show interfaces terse``; group ifnames by (member_id, bay_name).
+    Group terse ifnames by (member_id, ``"FPC <slot>"``) for the FPC linecard.
 
-    In Junos, the ifname like ``ge-1/0/3`` encodes (FPC slot 1, PIC 0,
-    port 3). The leading integer is the GLOBAL FPC slot in both modes —
-    it is NOT the VC member id. Real Junos VCs use offset FPC numbering
-    (member 0: FPC 0-11, member 1: FPC 12-23, ...), so ``xe-12/0/0`` is
-    member 1's line card, not member 12.
+    In Junos the ifname like ``ge-1/0/3`` encodes (FPC slot 1, PIC 0, port
+    3). The leading integer is the GLOBAL FPC slot in both modes — it is NOT
+    the VC member id. Real Junos VCs use offset FPC numbering (member 0: FPC
+    0-11, member 1: FPC 12-23, ...), so ``xe-12/0/0`` is member 1's line
+    card, not member 12.
 
-    ``fpc_to_member is None`` selects standalone mode: a single chassis
-    keyed ``None``. ``fpc_to_member`` (FPC slot -> VC member id, derived
-    from each member's chassis-inventory) selects VC mode: each interface
-    is routed to the member that owns its FPC; an interface whose FPC is
-    in no member's inventory (e.g. an empty FPC slot) is SKIPPED rather
-    than attached to a phantom member.
+    ``fpc_to_member is None`` selects standalone mode: a single chassis keyed
+    ``None``. ``fpc_to_member`` (FPC slot -> VC member id) selects VC mode:
+    each interface is routed to the member that owns its FPC; an interface
+    whose FPC is in no member's inventory (empty slot) is SKIPPED rather than
+    attached to a phantom member.
 
-    In BOTH modes the returned bay key is the ACTUAL ``"FPC <slot>"``,
-    matching the ``name`` field on the top-level ``_ModuleBay``. The
-    translator (``translate_modules.py:296``) keys ``interfaces_by_bay``
-    lookups by ``bay_data["name"]``, so a mismatched key silently
-    produces zero interface-to-module links.
+    The returned bay key is the ACTUAL ``"FPC <slot>"``, matching the ``name``
+    field on the top-level ``_ModuleBay``. The translator keys
+    ``interfaces_by_bay`` lookups by ``bay_data["name"]``, so a mismatched key
+    silently produces zero interface-to-module links.
     """
-    try:
-        raw = driver.device.cli("show interfaces terse")
-    except Exception as e:
-        logger.warning("junos.get_modules: show interfaces terse failed: %s", e)
-        return {}
     vc_mode = fpc_to_member is not None
     ifaces_by_member: dict[int | None, dict[str, list[str]]] = {}
     for line in (raw or "").splitlines():
         token = line.split(" ", 1)[0].strip()
         # Junos ifname pattern: <media>-<num>/<num>/<num>(.unit)?
-        if not token or "-" not in token:
-            continue
-        if "/" not in token:
+        if not token or "-" not in token or "/" not in token:
             continue
         try:
-            tail = token.split("-", 1)[1]
-            first = tail.split("/", 1)[0]
-            slot = int(first)
+            slot = int(token.split("-", 1)[1].split("/", 1)[0])
         except (ValueError, IndexError):
             continue
         if vc_mode:
@@ -427,6 +535,39 @@ def _junos_collect_interfaces_by_bay(
         bay_name = f"FPC {slot}"
         ifaces_by_member.setdefault(member_key, {}).setdefault(bay_name, []).append(token)
     return ifaces_by_member
+
+
+def _junos_fetch_terse(driver) -> str:
+    """Run ``show interfaces terse``; return raw text ("" on failure)."""
+    try:
+        return driver.device.cli("show interfaces terse") or ""
+    except Exception as e:
+        logger.warning("junos.get_modules: show interfaces terse failed: %s", e)
+        return ""
+
+
+def _junos_merge_self_routes(
+    ifaces_by_member: dict[int | None, dict[str, list[str]]],
+    self_routes: list[tuple[int, str]],
+    fpc_to_member: dict[int, int] | None,
+) -> None:
+    """
+    Add ``ifname -> [ifname]`` self-routes into the owning member's bucket.
+
+    Each self-route carries the optic's FPC. In standalone mode every route
+    lands in the ``None`` bucket; in VC mode it routes to
+    ``fpc_to_member[fpc]`` so an optic on FPC 12 lands in member 1 (offset-FPC
+    member mapping preserved). The translator's deepest-wins logic then links
+    the interface to the transceiver rather than the FPC linecard.
+    """
+    for fpc, ifname in self_routes:
+        if fpc_to_member is None:
+            member_key: int | None = None
+        else:
+            member_key = fpc_to_member.get(fpc)
+            if member_key is None:
+                continue
+        ifaces_by_member.setdefault(member_key, {})[ifname] = [ifname]
 
 
 def _junos_fpc_to_member(member_bays: dict[int, list[_ModuleBay]]) -> dict[int, int]:
@@ -456,6 +597,11 @@ def _junos_modules_from_vc(driver, rpc_root) -> dict | None:
     own ``<chassis-inventory><chassis>`` subtree and an ``<re-name>``
     (``fpcN``) whose trailing integer is the dispatch member id.
     """
+    # Parse terse FIRST so the chassis walk can name optic sub-bays by their
+    # canonical ifname (the coord map doesn't depend on fpc_to_member).
+    raw = _junos_fetch_terse(driver)
+    coord_to_ifname = _junos_terse_coords(raw)
+    self_routes: list[tuple[int, str]] = []
     member_bays: dict[int, list[_ModuleBay]] = {}
     for item in _find_children(rpc_root, "multi-routing-engine-item"):
         re_name = _text(_find_child(item, "re-name")).strip()
@@ -471,13 +617,14 @@ def _junos_modules_from_vc(driver, rpc_root) -> dict | None:
         chassis = _find_child(ci, "chassis")
         if chassis is None:
             continue
-        bays = _junos_parse_chassis(chassis)
+        bays = _junos_parse_chassis(chassis, coord_to_ifname, self_routes)
         if bays:
             member_bays[member_id] = bays
     if not member_bays:
         return None
     fpc_to_member = _junos_fpc_to_member(member_bays)
-    ifaces_by_member = _junos_collect_interfaces_by_bay(driver, fpc_to_member)
+    ifaces_by_member = _junos_terse_fpc_ifnames(raw, fpc_to_member)
+    _junos_merge_self_routes(ifaces_by_member, self_routes, fpc_to_member)
     return _modules_to_payload({
         member_id: _MemberModules(
             bays=bays,
@@ -497,10 +644,15 @@ def _junos_modules_from_standalone(driver, rpc_root) -> dict | None:
     chassis = _find_child(rpc_root, "chassis")
     if chassis is None:
         return None
-    bays = _junos_parse_chassis(chassis)
+    # Parse terse FIRST so optic sub-bays can be named by canonical ifname.
+    raw = _junos_fetch_terse(driver)
+    coord_to_ifname = _junos_terse_coords(raw)
+    self_routes: list[tuple[int, str]] = []
+    bays = _junos_parse_chassis(chassis, coord_to_ifname, self_routes)
     if not bays:
         return None
-    ifaces_by_member = _junos_collect_interfaces_by_bay(driver, None)
+    ifaces_by_member = _junos_terse_fpc_ifnames(raw, None)
+    _junos_merge_self_routes(ifaces_by_member, self_routes, None)
     return _modules_to_payload({
         None: _MemberModules(
             bays=bays,
