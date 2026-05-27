@@ -368,20 +368,29 @@ def _junos_parse_chassis(chassis_elem) -> list[_ModuleBay]:
     return bays
 
 
-def _junos_collect_interfaces_by_bay(driver, vc_mode: bool) -> dict[int | None, dict[str, list[str]]]:
+def _junos_collect_interfaces_by_bay(
+    driver, fpc_to_member: dict[int, int] | None
+) -> dict[int | None, dict[str, list[str]]]:
     """
     Run ``show interfaces terse``; group ifnames by (member_id, bay_name).
 
     In Junos, the ifname like ``ge-1/0/3`` encodes (FPC slot 1, PIC 0,
-    port 3). For VC-of-modular, the FIRST integer is the VC member id;
-    for standalone, the FIRST integer is the FPC slot of the single
-    chassis. We treat both the same: the leading integer is the bay
-    grouping key, and the member dimension is set by ``vc_mode``.
+    port 3). The leading integer is the GLOBAL FPC slot in both modes —
+    it is NOT the VC member id. Real Junos VCs use offset FPC numbering
+    (member 0: FPC 0-11, member 1: FPC 12-23, ...), so ``xe-12/0/0`` is
+    member 1's line card, not member 12.
 
-    The returned bay key MUST match the ``name`` field on the top-level
-    ``_ModuleBay`` (``"FPC <slot>"``) — the translator
-    (``translate_modules.py:296``) keys ``interfaces_by_bay`` lookups by
-    ``bay_data["name"]``. Using a bare slot string here silently
+    ``fpc_to_member is None`` selects standalone mode: a single chassis
+    keyed ``None``. ``fpc_to_member`` (FPC slot -> VC member id, derived
+    from each member's chassis-inventory) selects VC mode: each interface
+    is routed to the member that owns its FPC; an interface whose FPC is
+    in no member's inventory (e.g. an empty FPC slot) is SKIPPED rather
+    than attached to a phantom member.
+
+    In BOTH modes the returned bay key is the ACTUAL ``"FPC <slot>"``,
+    matching the ``name`` field on the top-level ``_ModuleBay``. The
+    translator (``translate_modules.py:296``) keys ``interfaces_by_bay``
+    lookups by ``bay_data["name"]``, so a mismatched key silently
     produces zero interface-to-module links.
     """
     try:
@@ -389,6 +398,7 @@ def _junos_collect_interfaces_by_bay(driver, vc_mode: bool) -> dict[int | None, 
     except Exception as e:
         logger.warning("junos.get_modules: show interfaces terse failed: %s", e)
         return {}
+    vc_mode = fpc_to_member is not None
     ifaces_by_member: dict[int | None, dict[str, list[str]]] = {}
     for line in (raw or "").splitlines():
         token = line.split(" ", 1)[0].strip()
@@ -403,13 +413,36 @@ def _junos_collect_interfaces_by_bay(driver, vc_mode: bool) -> dict[int | None, 
             slot = int(first)
         except (ValueError, IndexError):
             continue
-        # In VC mode each member is itself an FPC slot 0 from its own
-        # perspective; in standalone mode the leading integer IS the
-        # FPC slot of the single chassis.
-        member_key: int | None = slot if vc_mode else None
-        bay_name = "FPC 0" if vc_mode else f"FPC {slot}"
+        if vc_mode:
+            member_key = fpc_to_member.get(slot)
+            # FPC not in any member's inventory (empty slot / parse gap):
+            # don't attach to a phantom member.
+            if member_key is None:
+                continue
+        else:
+            member_key = None
+        bay_name = f"FPC {slot}"
         ifaces_by_member.setdefault(member_key, {}).setdefault(bay_name, []).append(token)
     return ifaces_by_member
+
+
+def _junos_fpc_to_member(member_bays: dict[int, list[_ModuleBay]]) -> dict[int, int]:
+    """
+    Map global FPC slot -> VC member id from each member's chassis bays.
+
+    ``bay.position`` is the trailing FPC integer (``_junos_parse_chassis``
+    sets it via ``name.split()[-1]``). Gate on "FPC " so a Routing Engine
+    bay (position like "0") is never mistaken for an FPC slot.
+    """
+    fpc_to_member: dict[int, int] = {}
+    for member_id, bays in member_bays.items():
+        for bay in bays:
+            if bay.name.startswith("FPC "):
+                try:
+                    fpc_to_member[int(bay.position)] = member_id
+                except (ValueError, TypeError):
+                    continue
+    return fpc_to_member
 
 
 def _junos_modules_from_vc(driver, rpc_root) -> dict | None:
@@ -440,7 +473,8 @@ def _junos_modules_from_vc(driver, rpc_root) -> dict | None:
             member_bays[member_id] = bays
     if not member_bays:
         return None
-    ifaces_by_member = _junos_collect_interfaces_by_bay(driver, vc_mode=True)
+    fpc_to_member = _junos_fpc_to_member(member_bays)
+    ifaces_by_member = _junos_collect_interfaces_by_bay(driver, fpc_to_member)
     return _modules_to_payload({
         member_id: _MemberModules(
             bays=bays,
@@ -463,7 +497,7 @@ def _junos_modules_from_standalone(driver, rpc_root) -> dict | None:
     bays = _junos_parse_chassis(chassis)
     if not bays:
         return None
-    ifaces_by_member = _junos_collect_interfaces_by_bay(driver, vc_mode=False)
+    ifaces_by_member = _junos_collect_interfaces_by_bay(driver, None)
     return _modules_to_payload({
         None: _MemberModules(
             bays=bays,

@@ -11,6 +11,18 @@
 <part-number>750-070000</part-number>
 <serial-number>VCM01FPC0</serial-number>
 <description>EX9200-40XS</description>
+<chassis-sub-module>
+<name>PIC 0</name>
+<part-number>BUILTIN</part-number>
+<serial-number>BUILTIN</serial-number>
+<description>40x10GE-SFPP</description>
+<chassis-sub-sub-module>
+<name>Xcvr 0</name>
+<part-number>SFP-10G-SR</part-number>
+<serial-number>OPTM01P0X0</serial-number>
+<description>SFP+-10G-SR</description>
+</chassis-sub-sub-module>
+</chassis-sub-module>
 </chassis-module>
 </chassis>
 </chassis-inventory>
@@ -23,10 +35,22 @@
 <serial-number>VC1MEM0002</serial-number>
 <description>EX9214</description>
 <chassis-module>
-<name>FPC 0</name>
+<name>FPC 12</name>
 <part-number>750-070000</part-number>
-<serial-number>VCM02FPC0</serial-number>
+<serial-number>VCM02FPC12</serial-number>
 <description>EX9200-40XS</description>
+<chassis-sub-module>
+<name>PIC 0</name>
+<part-number>BUILTIN</part-number>
+<serial-number>BUILTIN</serial-number>
+<description>40x10GE-SFPP</description>
+<chassis-sub-sub-module>
+<name>Xcvr 0</name>
+<part-number>SFP-10G-SR</part-number>
+<serial-number>OPTM02P0X0</serial-number>
+<description>SFP+-10G-SR</description>
+</chassis-sub-sub-module>
+</chassis-sub-module>
 </chassis-module>
 </chassis>
 </chassis-inventory>
