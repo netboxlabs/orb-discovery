@@ -81,6 +81,21 @@ def classify_module_type_nexus(pid: str, name: str) -> str:
     return "linecard"
 
 
+def _nxos_unquote(value: object) -> str:
+    """
+    Strip whitespace then surrounding double-quotes from an NX-API field.
+
+    Cisco NX-API `show inventory` returns name/desc values with embedded
+    literal quotes (e.g. the JSON value is `"Slot 1"` including the quote
+    characters). Whitespace-only stripping leaves the quotes, so slot /
+    optic regexes never match. Strip both.
+    """
+    s = str(value or "").strip()
+    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+        s = s[1:-1].strip()
+    return s
+
+
 def _flatten_table(payload: dict | None, table_key: str, row_key: str) -> list[dict]:
     """Normalize NX-API TABLE_x / ROW_x envelopes (single-row scalar vs list)."""
     if not payload or table_key not in payload:
@@ -109,10 +124,10 @@ def _nxos_parse_inventory(
     inv_by_slot: dict[str, dict[str, str]] = {}
     transceivers_by_ifname: dict[str, _ModuleEntry] = {}
     for row in inv_rows:
-        name = str(row.get("name") or "").strip()
-        pid = str(row.get("productid") or "").strip()
-        sn = str(row.get("serialnum") or "").strip()
-        descr = str(row.get("desc") or "").strip()
+        name = _nxos_unquote(row.get("name"))
+        pid = _nxos_unquote(row.get("productid"))
+        sn = _nxos_unquote(row.get("serialnum"))
+        descr = _nxos_unquote(row.get("desc"))
         if not (pid and sn):
             continue
         slot_match = _NXOS_SLOT_RE.match(name)
@@ -139,7 +154,7 @@ def _nxos_xbar_slots(xbar_rows: list[dict]) -> list[str]:
     """
     slots: list[str] = []
     for row in xbar_rows:
-        slot = str(row.get("xbarinf") or row.get("xbar") or "").strip()
+        slot = _nxos_unquote(row.get("xbarinf") or row.get("xbar"))
         if slot:
             slots.append(slot)
     return slots
@@ -158,7 +173,7 @@ def _nxos_build_slot_bays(
     """
     bays_by_slot: dict[str, _ModuleBay] = {}
     slots = [
-        str(row.get("modinf") or row.get("modules") or "").strip()
+        _nxos_unquote(row.get("modinf") or row.get("modules"))
         for row in sm_rows
     ]
     slots.extend(_nxos_xbar_slots(xbar_rows))
