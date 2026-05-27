@@ -46,8 +46,15 @@ from tests.custom_drivers.mock_device import FakePyEZDevice
     ("750-068369", "MPC7E 3D MRATE-12xQSFPP-XGE-XLGE-CGE", "FPC 0", "linecard"),
     # Routing Engine maps to supervisor (Junos uses RE terminology).
     ("740-031116", "RE-S-1800x4 Routing Engine", "Routing Engine 0", "supervisor"),
+    # RE classification is name-based for robustness: even an empty/terse
+    # description maps to supervisor when the element is named "Routing Engine N".
+    ("740-x", "RE-S-2X00x6", "Routing Engine 0", "supervisor"),
     # A non-MSA element NOT named Xcvr falls through to linecard (name-gating).
     ("750-xxxx", "some linecard", "FPC 2", "linecard"),
+    # A Midplane-like FRU classifies as linecard (the default) — but the parse
+    # gate skips it at the top level, so this never reaches Diode emission.
+    # The gate is the real protection; the classifier is secondary.
+    ("711-x", "Midplane", "Midplane", "linecard"),
 ])
 def test_classify_module_type_junos(part_number, description, name, expected):
     """Optics classify by the Xcvr element name (or MSA part); descriptions never gate."""

@@ -298,6 +298,10 @@ def classify_module_type_junos(part_number: str, description: str, name: str = "
         return "transceiver"
     if name.strip().lower().startswith("xcvr"):
         return "transceiver"
+    # Name-based RE detection (robust against terse/absent descriptions),
+    # consistent with Xcvr name-gating; description check stays as fallback.
+    if name.strip().lower().startswith("routing engine"):
+        return "supervisor"
     descr_lower = (description or "").lower()
     if "routing engine" in descr_lower or descr_lower.startswith("re-"):
         return "supervisor"
@@ -441,6 +445,13 @@ def _junos_parse_chassis(
     for module_elem in _find_children(chassis_elem, "chassis-module"):
         name = _text(_find_child(module_elem, "name")).strip()
         if not name:
+            continue
+        # Only FPC line cards and Routing Engines are slot bays we emit.
+        # get-chassis-inventory also lists chassis infrastructure FRUs at the
+        # top level (Midplane / CB / SCB / FPM / PEM / PDM / Fan Tray); those
+        # are not module bays and would otherwise default to a bogus linecard.
+        lname = name.lower()
+        if not (lname.startswith("fpc ") or lname.startswith("routing engine ")):
             continue
         position = name.split()[-1] if name.split() else name
         # Only FPC bays carry optics with (fpc,pic,port) coords; a Routing
