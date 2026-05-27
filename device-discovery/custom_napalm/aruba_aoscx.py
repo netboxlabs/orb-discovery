@@ -24,6 +24,21 @@ from napalm.base.helpers import mac as normalize_mac
 from pyaoscx.session import Session
 
 from custom_napalm._chassis import ChassisMember, normalize_role, to_payload
+from custom_napalm._modules import (
+    MemberModules as _MemberModules,
+)
+from custom_napalm._modules import (
+    ModuleBay as _ModuleBay,
+)
+from custom_napalm._modules import (
+    ModuleEntry as _ModuleEntry,
+)
+from custom_napalm._modules import (
+    is_optic_pid,
+)
+from custom_napalm._modules import (
+    to_payload as _modules_to_payload,
+)
 from custom_napalm._vlan import (
     SwitchportInfo,
     classify_switchport,
@@ -181,6 +196,169 @@ def _sanitize_config(text: str) -> str:
     text = _SECRET_RE.sub(r'\1"<redacted>"', text)
     text = _COMMUNITY_NAME_RE.sub(r'\1"<redacted>"', text)
     return text
+
+
+# ---------------------------------------------------------------------------
+# Module / module bay discovery
+# ---------------------------------------------------------------------------
+
+_ARUBA_ADDR_RE = re.compile(r"^(\d+)")  # leading int of a subsystem addr "1/3" -> member 1
+
+# Only these subsystem types ever emit a module bay. Anything else
+# (power_supply, fan, chassis, mm_fan, unknown) is NOT a bay — never
+# default an unrecognized subsystem to linecard.
+_ARUBA_SUPERVISOR_TYPES = frozenset({"management_module"})
+_ARUBA_LINECARD_TYPES = frozenset({"line_card", "fabric_module"})
+
+
+def classify_module_type_aruba(subsystem_type: str, pid: str) -> str:
+    """
+    Classify an AOS-CX subsystem entry — whitelist only.
+
+    management_module -> supervisor; line_card / fabric_module -> linecard.
+    An optic PID -> transceiver (for the DOM-derived sub-bays). EVERYTHING
+    ELSE (power_supply, fan, chassis, anything unrecognized) -> "other",
+    which the impl filters out BEFORE building a bay, so PSU/fan/unknown
+    subsystems can never become bogus module bays.
+    """
+    if pid and is_optic_pid(pid):
+        return "transceiver"
+    t = (subsystem_type or "").lower()
+    if t in _ARUBA_SUPERVISOR_TYPES:
+        return "supervisor"
+    if t in _ARUBA_LINECARD_TYPES:
+        return "linecard"
+    return "other"  # power_supply / fan / chassis / unknown — not emitted
+
+
+def _aruba_member_of(addr: str) -> int | None:
+    """Member id = leading integer of a subsystem addr ('1/3' -> 1)."""
+    m = _ARUBA_ADDR_RE.match(addr or "")
+    return int(m.group(1)) if m else None
+
+
+def _aruba_vsf_member_ids(driver) -> set[int]:
+    """
+    Derive the VSF member-id set from the chassis-members payload.
+
+    `_aoscx_get_chassis_members_impl(driver)` returns the canonical
+    chassis envelope `{"members": [<member dict>, ...], "domain": ...}`
+    (members is a LIST, each dict carries an int "id" — see
+    `_chassis.to_payload` / `ChassisMember.to_dict`) or None on a
+    standalone (non-VSF) device. Extract the int member ids; an empty
+    set means standalone (single None-bucket).
+    """
+    try:
+        payload = _aoscx_get_chassis_members_impl(driver)
+    except Exception:
+        return set()
+    if not isinstance(payload, dict):
+        return set()
+    out: set[int] = set()
+    for m in (payload.get("members") or []):
+        if not isinstance(m, dict):
+            continue
+        try:
+            out.add(int(m["id"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _aruba_optics_by_slot(ifaces) -> dict[str, list[tuple[str, _ModuleEntry]]]:
+    """
+    Build optic sub-bay entries per line-card slot from interface hw_intf_info.
+
+    AOS-CX populates hw_intf_info.product_number / .serial_number (plus a
+    `pluggable`/`connector` marker) for an inserted transceiver; copper /
+    empty ports omit those keys.
+    """
+    optics_by_slot: dict[str, list[tuple[str, _ModuleEntry]]] = {}
+    if not isinstance(ifaces, dict):
+        return optics_by_slot
+    for ifname, idata in ifaces.items():
+        if not isinstance(idata, dict):
+            continue
+        hw = idata.get("hw_intf_info") or {}
+        pid = str(hw.get("product_number") or "").strip()
+        sn = str(hw.get("serial_number") or "").strip()
+        if not (pid and sn and is_optic_pid(pid)):
+            continue
+        parts = ifname.split("/")
+        if len(parts) < 2:
+            continue
+        slot = f"{parts[0]}/{parts[1]}"  # member/slot
+        optics_by_slot.setdefault(slot, []).append(
+            (ifname, _ModuleEntry(model=pid, serial=sn, type="transceiver", description="")),
+        )
+    return optics_by_slot
+
+
+def _aruba_build_bays(
+    subs: dict,
+    optics_by_slot: dict[str, list[tuple[str, _ModuleEntry]]],
+    members: set[int],
+    vsf: bool,
+) -> tuple[dict[int | None, list[_ModuleBay]], dict[int | None, dict[str, list[str]]]]:
+    """Assemble per-member module bays (with optic sub-bays) from subsystem entries."""
+    bays_by_member: dict[int | None, list[_ModuleBay]] = {}
+    ifaces_by_member: dict[int | None, dict[str, list[str]]] = {}
+    for key, entry in subs.items():
+        if "," not in key or not isinstance(entry, dict):
+            continue
+        stype, addr = key.split(",", 1)
+        stype = stype.strip()
+        addr = addr.strip()
+        pinfo = entry.get("product_info") or {}
+        pid = str(pinfo.get("part_number") or "").strip()
+        sn = str(pinfo.get("serial_number") or "").strip()
+        descr = str(pinfo.get("product_name") or "").strip()
+        mtype = classify_module_type_aruba(stype, pid)
+        if mtype == "other":
+            continue  # power_supply / fan / chassis / unknown — never a bay
+        if not (pid and sn):
+            continue  # empty slot (no module) — skipped (envelope drops module-less bays)
+        member = _aruba_member_of(addr) if vsf else None
+        if vsf and member not in members:
+            logger.warning("aruba.get_modules: subsystem member %s not in VSF set", member)
+            continue
+        sub_bays: list[_ModuleBay] = []
+        for ifname, optic in optics_by_slot.get(addr, []):
+            sub_bays.append(_ModuleBay(name=ifname, position=ifname, module=optic))
+            ifaces_by_member.setdefault(member, {}).setdefault(addr, []).append(ifname)
+            ifaces_by_member[member][ifname] = [ifname]  # self-route (batch-2 pattern)
+        bay = _ModuleBay(
+            name=addr, position=addr,
+            module=_ModuleEntry(model=pid, serial=sn, type=mtype, description=descr, sub_bays=sub_bays),
+        )
+        bays_by_member.setdefault(member, []).append(bay)
+    return bays_by_member, ifaces_by_member
+
+
+def _aruba_get_modules_impl(driver) -> dict | None:
+    """Standalone + VSF-of-modular discovery for Aruba CX via pyaoscx REST."""
+    try:
+        subs = driver._get("system/subsystems?attributes=product_info&depth=2")
+        ifaces = driver._get("system/interfaces?attributes=name,hw_intf_info&depth=2")
+    except Exception as e:
+        logger.warning("aruba.get_modules: REST fetch failed: %s", e)
+        return None
+    if not isinstance(subs, dict) or not subs:
+        return None
+
+    # VSF member set (None-bucket when standalone / single member).
+    members = _aruba_vsf_member_ids(driver)
+    vsf = len(members) >= 2
+
+    optics_by_slot = _aruba_optics_by_slot(ifaces)
+    bays_by_member, ifaces_by_member = _aruba_build_bays(subs, optics_by_slot, members, vsf)
+
+    if not bays_by_member:
+        return None
+    return _modules_to_payload({
+        member: _MemberModules(bays=bays, interfaces_by_bay=ifaces_by_member.get(member, {}))
+        for member, bays in bays_by_member.items()
+    })
 
 
 class AOSCXDriver(_napalm_base.NetworkDriver):
@@ -480,6 +658,16 @@ class AOSCXDriver(_napalm_base.NetworkDriver):
             info = _aoscx_iface_to_switchport_info(intf)
             result[name] = classify_switchport(info)
         return result
+
+    def get_modules(self) -> dict | None:
+        """
+        Return Module / module bay inventory for an Aruba CX modular chassis.
+
+        Standalone (8400/6400) collapses to the None member; VSF-of-modular
+        dispatches per member from the member-addressed subsystem keys.
+        Returns None for fixed switches (no line_card subsystems).
+        """
+        return _aruba_get_modules_impl(self)
 
 
 # ---------------------------------------------------------------------------
