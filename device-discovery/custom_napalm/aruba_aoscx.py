@@ -265,6 +265,30 @@ def _aruba_vsf_member_ids(driver) -> set[int]:
     return out
 
 
+def _aruba_subsystem_member_ids(subs: dict) -> set[int]:
+    """
+    Member ids that own a module-bearing subsystem slot, from the addresses.
+
+    The subsystem keys (`<type>,<member>/<slot>`) are authoritative for which
+    members physically own slots, so they back-stop VSF detection when the
+    vsf_members roster fetch fails or comes back empty.
+    """
+    out: set[int] = set()
+    for key, entry in subs.items():
+        if "," not in key or not isinstance(entry, dict):
+            continue
+        stype, addr = key.split(",", 1)
+        pinfo = entry.get("product_info") or {}
+        pid = str(pinfo.get("part_number") or "").strip()
+        sn = str(pinfo.get("serial_number") or "").strip()
+        if classify_module_type_aruba(stype.strip(), pid) == "other" or not (pid and sn):
+            continue
+        mid = _aruba_member_of(addr.strip())
+        if mid is not None:
+            out.add(mid)
+    return out
+
+
 def _aruba_optics_by_slot(ifaces) -> dict[str, list[tuple[str, _ModuleEntry]]]:
     """
     Build optic sub-bay entries per line-card slot from interface hw_intf_info.
@@ -353,8 +377,10 @@ def _aruba_get_modules_impl(driver) -> dict | None:
         logger.warning("aruba.get_modules: interfaces fetch failed, emitting without optics: %s", e)
         ifaces = {}
 
-    # VSF member set (None-bucket when standalone / single member).
-    members = _aruba_vsf_member_ids(driver)
+    # VSF member set (None-bucket when standalone / single member). Union the
+    # vsf_members roster with the members implied by the subsystem addresses so
+    # a failed roster fetch can't collapse a real VSF down to a single chassis.
+    members = _aruba_vsf_member_ids(driver) | _aruba_subsystem_member_ids(subs)
     vsf = len(members) >= 2
 
     optics_by_slot = _aruba_optics_by_slot(ifaces)
