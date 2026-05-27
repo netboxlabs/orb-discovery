@@ -29,38 +29,29 @@ from tests.custom_drivers.base_test import BaseDriverTest
 from tests.custom_drivers.mock_device import FakePyEZDevice
 
 
-@pytest.mark.parametrize("part_number,description,expected", [
-    # Juniper optic with internal 740-series part-number (NOT an MSA prefix);
-    # the optic type lives only in the description.
-    ("740-021308", "SFP+-10G-SR", "transceiver"),
-    ("740-013111", "SFP+-10GBASE-LR", "transceiver"),
-    ("740-046565", "QSFP+ 40G", "transceiver"),
-    ("740-058732", "XFP-10G-LR", "transceiver"),
-    ("740-099999", "100G Transceiver", "transceiver"),
-    # 25G/100G optics: the digit right after sfp/qsfp is a word char, so the
-    # old \bsfp\b regex missed these and dropped them to linecard (the bug).
-    ("740-061405", "SFP28-25G-SR", "transceiver"),
-    ("740-058734", "QSFP28-100G-LR4", "transceiver"),
-    ("740-021309", "SFP-10GBASE-LR", "transceiver"),
-    ("740-058735", "QSFP-DD-400G-DR4", "transceiver"),
-    ("740-099998", "100G optic", "transceiver"),
-    ("740-031117", "RE-S-1800x4 Routing Engine", "supervisor"),
-    # MSA-prefixed part still wins via is_optic_pid.
-    ("SFP-10G-LR", "SFP+-10G-LR", "transceiver"),
-    # Routing Engine stays supervisor.
-    ("740-031116", "RE-S-1800x4", "supervisor"),
-    # Plain MPC linecard must NOT false-match the optic keyword check, even
-    # though its description embeds "QSFPP" (it hosts SFP ports, it is not one).
-    ("750-068369", "MPC7E 3D MRATE-12xQSFPP-XGE-XLGE-CGE", "linecard"),
-    # PIC linecard whose description embeds "SFPP" — must stay linecard.
-    ("BUILTIN", "12x10GE OTN+12x10GE-SFPP", "linecard"),
-    # Doubled-P port-density guards (must NOT regress to transceiver).
-    ("750-068369", "MPC7E 3D MRATE-12xQSFPP-XGE-XLGE-CGE", "linecard"),
-    ("750-099999", "12x10GE OTN+12x10GE-SFPP", "linecard"),
+@pytest.mark.parametrize("part_number,description,name,expected", [
+    # Junos reports transceivers as "Xcvr N" leaf elements — the element NAME
+    # is the optic signal, NOT the description (which can advertise port caps).
+    ("740-021308", "SFP+-10G-SR", "Xcvr 0", "transceiver"),
+    ("740-061405", "SFP28-25G-SR", "Xcvr 0", "transceiver"),
+    ("740-058734", "QSFP28-100G-LR4", "Xcvr 1", "transceiver"),
+    # MSA-prefixed part still wins via is_optic_pid regardless of name.
+    ("QSFP-100G-LR4", "", "Xcvr 0", "transceiver"),
+    # codex-3 regression (the bug): FPC/PIC descriptions advertise PORT
+    # CAPABILITIES ("48x SFP/SFP+ ports", "4x 40GE QSFP+") that the old
+    # description regex false-matched as transceiver, dropping the linecard
+    # bay + its interfaces in linecards mode. Name-gating keeps them linecard.
+    ("750-054576", "48x SFP/SFP+ ports", "PIC 0", "linecard"),
+    ("750-054576", "4x 40GE QSFP+", "PIC 1", "linecard"),
+    ("750-068369", "MPC7E 3D MRATE-12xQSFPP-XGE-XLGE-CGE", "FPC 0", "linecard"),
+    # Routing Engine maps to supervisor (Junos uses RE terminology).
+    ("740-031116", "RE-S-1800x4 Routing Engine", "Routing Engine 0", "supervisor"),
+    # A non-MSA element NOT named Xcvr falls through to linecard (name-gating).
+    ("750-xxxx", "some linecard", "FPC 2", "linecard"),
 ])
-def test_classify_module_type_junos(part_number, description, expected):
-    """740-series optics classify via description keywords; port-count descriptions don't false-match."""
-    assert classify_module_type_junos(part_number, description) == expected
+def test_classify_module_type_junos(part_number, description, name, expected):
+    """Optics classify by the Xcvr element name (or MSA part); descriptions never gate."""
+    assert classify_module_type_junos(part_number, description, name) == expected
 
 
 class TestJunOSDriver(BaseDriverTest):

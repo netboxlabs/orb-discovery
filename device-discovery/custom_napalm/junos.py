@@ -280,32 +280,23 @@ def _junos_get_chassis_members_impl(driver) -> dict | None:
     return to_payload(members, domain=None)
 
 
-# sfp/qsfp/xfp followed by +, -, a digit, or a word boundary — matches optic
-# forms SFP+, SFP-, SFP28, QSFP28, QSFP-DD, XFP-, etc. The lookahead rejects
-# the doubled-P port-density notation (SFPP / QSFPP) that appears in line-card
-# descriptions like "12x10GE-SFPP" / "MRATE-12xQSFPP-XGE" (they host SFP ports,
-# they are not optics). transceiver/optic stay whole-word matches.
-_JUNOS_OPTIC_DESCR_RE = re.compile(
-    r"\b(?:sfp|qsfp|xfp)(?=[-+0-9]|\b)|\b(?:transceiver|optic)\b",
-    re.IGNORECASE,
-)
-
-
-def classify_module_type_junos(part_number: str, description: str) -> str:
+def classify_module_type_junos(part_number: str, description: str, name: str = "") -> str:
     """
     Map a Junos chassis-inventory row to a ModuleType.
 
-    Optic PIDs win first. Juniper transceivers often carry an internal
-    part-number (e.g. ``740-021308``) instead of an MSA prefix, with the
-    optic type only in the description — a word-boundary keyword check
-    catches those before the RE / PSU / fan hints. Routing Engine
-    descriptions map to supervisor (Junos uses RE rather than "supervisor"
-    terminology). PSU / fan are classified so they don't fall through to
-    ``linecard``, but are filtered upstream and never reach Diode emission.
+    Optic signal is the element NAME (Junos reports transceivers as
+    "Xcvr N" leaf elements) plus MSA part-number prefixes — NOT the
+    description, because FPC/PIC descriptions advertise port capabilities
+    ("48x SFP/SFP+ ports", "4x 40GE QSFP+") that would false-match an
+    SFP/QSFP keyword check and drop the linecard bay in linecards mode.
+    Routing Engine descriptions map to supervisor (Junos uses RE rather
+    than "supervisor" terminology). PSU / fan are classified so they don't
+    fall through to ``linecard``, but are filtered upstream and never reach
+    Diode emission.
     """
     if is_optic_pid(part_number):
         return "transceiver"
-    if _JUNOS_OPTIC_DESCR_RE.search(description or ""):
+    if name.strip().lower().startswith("xcvr"):
         return "transceiver"
     descr_lower = (description or "").lower()
     if "routing engine" in descr_lower or descr_lower.startswith("re-"):
@@ -324,12 +315,13 @@ def _junos_extract_module_from_elem(elem) -> _ModuleEntry | None:
     Returns None when the element has no part-number AND no serial-number
     (Junos sometimes reports placeholder entries with both fields empty).
     """
+    name = _text(_find_child(elem, "name")).strip()
     part = _text(_find_child(elem, "part-number")).strip()
     serial = _text(_find_child(elem, "serial-number")).strip()
     descr = _text(_find_child(elem, "description")).strip()
     if not (part and serial):
         return None
-    mtype = classify_module_type_junos(part, descr)
+    mtype = classify_module_type_junos(part, descr, name)
     if mtype in ("psu", "fan"):
         return None  # filtered — not emitted
     return _ModuleEntry(model=part, serial=serial, type=mtype, description=descr)
