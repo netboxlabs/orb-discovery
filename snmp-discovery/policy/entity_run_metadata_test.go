@@ -258,6 +258,35 @@ func TestAnnotateEntitiesWithRunID_StampsVirtualChassis(t *testing.T) {
 	assert.Equal(t, "run-123", vc.Metadata["run_id"])
 }
 
+func TestAnnotateDeviceWithSourceMatch_VirtualMachine(t *testing.T) {
+	vm := &diode.VirtualMachine{Name: stringPtr("vyos-edge-1")}
+	annotateDeviceWithSourceMatch([]diode.Entity{vm}, 42)
+	require.NotNil(t, vm.Metadata, "expected Metadata to be populated by source_match annotation")
+	sm, ok := vm.Metadata["source_match"].(diode.Metadata)
+	require.True(t, ok, "source_match: got %T, want diode.Metadata", vm.Metadata["source_match"])
+	assert.Equal(t, 42, sm["netbox_id"])
+}
+
+func TestAnnotateEntitiesWithRunID_VirtualMachineTopLevel(t *testing.T) {
+	vm := &diode.VirtualMachine{Name: stringPtr("vyos-edge-1")}
+	annotateEntitiesWithRunID([]diode.Entity{vm}, "run-xyz")
+	require.NotNil(t, vm.Metadata, "expected Metadata on top-level VM")
+	assert.Equal(t, "run-xyz", vm.Metadata["run_id"])
+}
+
+func TestAnnotateEntitiesWithRunID_VMInterfaceTopLevel(t *testing.T) {
+	// A VMInterface with NO attached IP must still get a run_id stamp,
+	// and the nested VM ref must also get stamped (one annotator pass
+	// reaches both via the new walker).
+	vm := &diode.VirtualMachine{Name: stringPtr("vyos-edge-1")}
+	vmIface := &diode.VMInterface{Name: stringPtr("eth0"), VirtualMachine: vm}
+	annotateEntitiesWithRunID([]diode.Entity{vmIface}, "run-xyz")
+	require.NotNil(t, vmIface.Metadata, "top-level VMInterface must get Metadata")
+	assert.Equal(t, "run-xyz", vmIface.Metadata["run_id"])
+	require.NotNil(t, vm.Metadata, "nested VM via VMInterface.VirtualMachine must get Metadata")
+	assert.Equal(t, "run-xyz", vm.Metadata["run_id"])
+}
+
 // Helper function for tests
 func int64Ptr(v int64) *int64 {
 	return &v

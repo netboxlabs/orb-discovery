@@ -39,6 +39,12 @@ func annotateDeviceWithSourceMatch(entities []diode.Entity, netboxID int) {
 			if v != nil {
 				setDeviceSourceMatch(v.Master, netboxID, seen)
 			}
+		case *diode.VirtualMachine:
+			// VM-target path (TransformToVirtualMachine output): stamp
+			// netbox_id source_match on the top-level VirtualMachine so
+			// target.NetboxID-based re-discovery resolves the existing
+			// NetBox VM row instead of creating a new one.
+			setVMSourceMatch(v, netboxID, seen)
 		}
 	}
 }
@@ -65,6 +71,26 @@ func setDeviceSourceMatch(d *diode.Device, netboxID int, seen map[unsafe.Pointer
 	d.Metadata["source_match"] = diode.Metadata{"netbox_id": netboxID}
 }
 
+// setVMSourceMatch mirrors setDeviceSourceMatch for the VM-target
+// path. The top-level entity emitted by TransformToVirtualMachine is
+// a *diode.VirtualMachine; this helper stamps the same source_match
+// shape so Diode's resolver finds the existing NetBox row on
+// re-discovery.
+func setVMSourceMatch(vm *diode.VirtualMachine, netboxID int, seen map[unsafe.Pointer]struct{}) {
+	if vm == nil {
+		return
+	}
+	p := unsafe.Pointer(vm)
+	if _, ok := seen[p]; ok {
+		return
+	}
+	seen[p] = struct{}{}
+	if vm.Metadata == nil {
+		vm.Metadata = make(diode.Metadata)
+	}
+	vm.Metadata["source_match"] = diode.Metadata{"netbox_id": netboxID}
+}
+
 // annotateEntitiesWithRunID sets per-entity Diode metadata key "run_id" on each entity
 // in the batch and on nested Device, Interface, IPAddress, and VLAN references.
 func annotateEntitiesWithRunID(entities []diode.Entity, runID string) {
@@ -81,6 +107,10 @@ func annotateEntitiesWithRunID(entities []diode.Entity, runID string) {
 			annotateVLAN(v, runID, seen)
 		case *diode.VirtualChassis:
 			annotateVirtualChassis(v, runID, seen)
+		case *diode.VirtualMachine:
+			annotateVirtualMachine(v, runID, seen)
+		case *diode.VMInterface:
+			annotateVMInterface(v, runID, seen)
 		}
 	}
 }
@@ -144,7 +174,10 @@ func annotateIPAddress(ip *diode.IPAddress, runID string, seen map[unsafe.Pointe
 		case *diode.FHRPGroup:
 			mergeRunID(&a.Metadata, runID)
 		case *diode.VMInterface:
-			mergeRunID(&a.Metadata, runID)
+			// VM-target path: walk fully so the nested VirtualMachine /
+			// Parent / Bridge / VLAN refs reached via an IP-assigned
+			// VMInterface also get a run_id stamp.
+			annotateVMInterface(a, runID, seen)
 		}
 	}
 	if ip.NatInside != nil {
@@ -183,4 +216,46 @@ func annotateVLAN(vlan *diode.VLAN, runID string, seen map[unsafe.Pointer]struct
 	}
 	seen[p] = struct{}{}
 	mergeRunID(&vlan.Metadata, runID)
+}
+
+// annotateVirtualMachine stamps run_id on the VM and recurses into
+// nested refs that carry their own Metadata (PrimaryIp4/6 — which can
+// reach an IP-assigned VMInterface via annotateIPAddress, which is
+// fine because the walker dedup-set breaks the cycle).
+func annotateVirtualMachine(vm *diode.VirtualMachine, runID string, seen map[unsafe.Pointer]struct{}) {
+	if vm == nil {
+		return
+	}
+	p := unsafe.Pointer(vm)
+	if _, ok := seen[p]; ok {
+		return
+	}
+	seen[p] = struct{}{}
+	mergeRunID(&vm.Metadata, runID)
+	annotateIPAddress(vm.PrimaryIp4, runID, seen)
+	annotateIPAddress(vm.PrimaryIp6, runID, seen)
+}
+
+// annotateVMInterface stamps run_id on the VMInterface and recurses
+// into nested refs (VirtualMachine, Parent, Bridge, UntaggedVlan,
+// QinqSvlan, TaggedVlans). Mirrors annotateInterface for the
+// Device-rooted graph.
+func annotateVMInterface(vmIface *diode.VMInterface, runID string, seen map[unsafe.Pointer]struct{}) {
+	if vmIface == nil {
+		return
+	}
+	p := unsafe.Pointer(vmIface)
+	if _, ok := seen[p]; ok {
+		return
+	}
+	seen[p] = struct{}{}
+	mergeRunID(&vmIface.Metadata, runID)
+	annotateVirtualMachine(vmIface.VirtualMachine, runID, seen)
+	annotateVMInterface(vmIface.Parent, runID, seen)
+	annotateVMInterface(vmIface.Bridge, runID, seen)
+	annotateVLAN(vmIface.UntaggedVlan, runID, seen)
+	annotateVLAN(vmIface.QinqSvlan, runID, seen)
+	for _, vlan := range vmIface.TaggedVlans {
+		annotateVLAN(vlan, runID, seen)
+	}
 }
