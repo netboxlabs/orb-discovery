@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
-
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/mapping"
 )
@@ -24,9 +23,9 @@ func TestTransformToVirtualMachine_DeviceToVM(t *testing.T) {
 		Tenant:      &diode.Tenant{Name: sp("NetOps")},
 		Description: sp("VyOS edge router"),
 		Comments:    sp("ingest"),
-		DeviceType:  &diode.DeviceType{Model: sp("CSR")},     // must be dropped
-		Location:    &diode.Location{Name: sp("rack-1")},     // must be dropped
-		AssetTag:    sp("asset-1"),                           // must be dropped
+		DeviceType:  &diode.DeviceType{Model: sp("CSR")}, // must be dropped
+		Location:    &diode.Location{Name: sp("rack-1")}, // must be dropped
+		AssetTag:    sp("asset-1"),                       // must be dropped
 	}
 	out := mapping.TransformToVirtualMachine(
 		[]diode.Entity{dev},
@@ -122,8 +121,8 @@ func TestTransformToVirtualMachine_InterfaceToVMInterface(t *testing.T) {
 		Mode:              sp("access"),
 		UntaggedVlan:      &diode.VLAN{Vid: ip64(10)},
 		Vrf:               &diode.VRF{Name: sp("default")},
-		Speed:             ip64(1000000),       // must be dropped (no VMInterface.Speed)
-		Type:              sp("1000base-t"),    // must be dropped
+		Speed:             ip64(1000000),                       // must be dropped (no VMInterface.Speed)
+		Type:              sp("1000base-t"),                    // must be dropped
 		Lag:               &diode.Interface{Name: sp("bond0")}, // must be dropped
 	}
 	out := mapping.TransformToVirtualMachine(

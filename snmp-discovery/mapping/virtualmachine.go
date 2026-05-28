@@ -2,7 +2,6 @@ package mapping
 
 import (
 	"github.com/netboxlabs/diode-sdk-go/diode"
-
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
 )
 
@@ -18,17 +17,17 @@ import (
 // Mappings:
 //   - *diode.Device           -> *diode.VirtualMachine
 //   - *diode.Interface        -> *diode.VMInterface (with VirtualMachine
-//                                ref); Parent/Bridge remapped to the
-//                                corresponding VMInterface by identity
-//                                (with name fallback).
+//     ref); Parent/Bridge remapped to the
+//     corresponding VMInterface by identity
+//     (with name fallback).
 //   - *diode.IPAddress        -> *diode.IPAddress with AssignedObject
-//                                rewritten from *Interface to
-//                                *VMInterface (identity-first lookup
-//                                in the iface map, with a name
-//                                fallback). Non-*Interface refs
-//                                (*FHRPGroup, etc.) and nil refs pass
-//                                through unchanged. IPAddress entity
-//                                is mutated in place.
+//     rewritten from *Interface to
+//     *VMInterface (identity-first lookup
+//     in the iface map, with a name
+//     fallback). Non-*Interface refs
+//     (*FHRPGroup, etc.) and nil refs pass
+//     through unchanged. IPAddress entity
+//     is mutated in place.
 //   - *diode.VLAN             -> passthrough.
 //   - *diode.VirtualChassis,
 //     *diode.Device with

@@ -684,10 +684,11 @@ func TestPruneNestedRefsVM_StubsNestedVMAndVMInterfaceRefs(t *testing.T) {
 }
 
 func TestPruneNestedRefsVM_NoOpOnEmptyOrNil(t *testing.T) {
-	// Must not panic.
-	PruneNestedRefsVM(nil, nil)
-	PruneNestedRefsVM([]diode.Entity{}, nil)
-	PruneNestedRefsVM([]diode.Entity{&diode.VirtualMachine{Name: strPtr("v")}}, nil)
+	assert.NotPanics(t, func() { PruneNestedRefsVM(nil, nil) })
+	assert.NotPanics(t, func() { PruneNestedRefsVM([]diode.Entity{}, nil) })
+	assert.NotPanics(t, func() {
+		PruneNestedRefsVM([]diode.Entity{&diode.VirtualMachine{Name: strPtr("v")}}, nil)
+	})
 }
 
 // Regression: if two top-level VMInterfaces share the same Name, the
