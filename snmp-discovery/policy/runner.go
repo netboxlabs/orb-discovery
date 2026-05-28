@@ -371,17 +371,37 @@ func (r *Runner) runWithMetadata(target config.Target, parentTarget string) {
 		return
 	}
 
+	// VM-target rewrite: when defaults.Type == VirtualMachine, transform
+	// the Device-rooted entity graph into a VirtualMachine-rooted one
+	// (Device->VM, Interface->VMInterface, IPs re-anchored, VLANs
+	// passthrough, chassis/VC/modules dropped). The annotate / prune
+	// helpers below have sibling VM-aware branches that handle the
+	// resulting graph. Default behaviour (Type unset or "device") is
+	// unchanged.
+	def := r.resolveTargetDefaults(target)
+	isVM := strings.EqualFold(def.Type, config.TargetTypeVirtualMachine)
+	if isVM {
+		entities = mapping.TransformToVirtualMachine(entities, def)
+		r.logger.Debug("transformed entities to VirtualMachine graph",
+			"host", target.Host, "policy", policyName, "entity_count", len(entities))
+	}
+
 	if target.NetboxID != nil {
 		annotateDeviceWithSourceMatch(entities, *target.NetboxID)
 	}
 	annotateEntitiesWithRunID(entities, run.ID)
 	r.logEntitiesForIngestion(entities)
 
-	// Strip nested Device/Interface refs to matcher-only stubs to shrink
-	// the wire payload. Runs after annotation so the annotators can walk
-	// the rich shared graph with their unsafe.Pointer dedup intact —
-	// otherwise every stub would need its own metadata pass.
-	mapping.PruneNestedRefs(entities, mapping.CurrentDeviceFrom(entities))
+	// Strip nested refs to matcher-only stubs to shrink the wire
+	// payload. Runs after annotation so the annotators can walk the
+	// rich shared graph with their unsafe.Pointer dedup intact —
+	// otherwise every stub would need its own metadata pass. VM-target
+	// path uses the sibling helpers introduced for OBS-1380.
+	if isVM {
+		mapping.PruneNestedRefsVM(entities, mapping.CurrentVirtualMachineFrom(entities))
+	} else {
+		mapping.PruneNestedRefs(entities, mapping.CurrentDeviceFrom(entities))
+	}
 
 	resp, err := r.client.Ingest(r.ctx, entities, diode.WithIngestMetadata(diode.Metadata{
 		"policy_name": policyName,
