@@ -346,6 +346,27 @@ func TestMergeDefaults_PolicyDeviceModelManufacturerPlatformSurviveNilOverride(t
 	assert.Equal(t, "policy-plat", merged.Device.Platform)
 }
 
+func TestMergeDefaults_TypeAndCluster(t *testing.T) {
+	policyDef := &Defaults{Type: TargetTypeDevice, Cluster: ""}
+	override := &Defaults{Type: TargetTypeVirtualMachine, Cluster: "proxmox-a"}
+	merged := MergeDefaults(policyDef, override)
+	assert.Equal(t, TargetTypeVirtualMachine, merged.Type)
+	assert.Equal(t, "proxmox-a", merged.Cluster)
+
+	// Empty override Type must not clobber a non-empty policy Type.
+	merged2 := MergeDefaults(&Defaults{Type: TargetTypeVirtualMachine, Cluster: "proxmox-a"}, &Defaults{})
+	assert.Equal(t, TargetTypeVirtualMachine, merged2.Type)
+	assert.Equal(t, "proxmox-a", merged2.Cluster)
+
+	// Override Cluster wins over policy Cluster when both set.
+	merged3 := MergeDefaults(
+		&Defaults{Type: TargetTypeVirtualMachine, Cluster: "policy-cluster"},
+		&Defaults{Cluster: "override-cluster"},
+	)
+	assert.Equal(t, TargetTypeVirtualMachine, merged3.Type)
+	assert.Equal(t, "override-cluster", merged3.Cluster)
+}
+
 func TestTargetNetboxID_parsed(t *testing.T) {
 	input := `
 host: "192.168.1.1"

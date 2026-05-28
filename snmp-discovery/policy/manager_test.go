@@ -1352,6 +1352,101 @@ func TestManagerApplyDefaults_CreateUnknownVlans(t *testing.T) {
 	})
 }
 
+func TestManager_ParsePolicies_RejectsInvalidType(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
+	require.NoError(t, err)
+
+	raw := []byte(`
+policies:
+  bad-type:
+    config:
+      defaults:
+        type: KitchenSink
+    scope:
+      targets:
+        - host: 192.0.2.1
+      authentication:
+        protocol_version: SNMPv2c
+        community: public
+`)
+	_, err = manager.ParsePolicies(raw)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid defaults.type")
+	assert.Contains(t, err.Error(), "KitchenSink")
+}
+
+func TestManager_ParsePolicies_TypeCaseInsensitiveNormalizedLowercase(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
+	require.NoError(t, err)
+
+	raw := []byte(`
+policies:
+  ok:
+    config:
+      defaults:
+        type: VirtualMachine
+    scope:
+      targets:
+        - host: 192.0.2.1
+      authentication:
+        protocol_version: SNMPv2c
+        community: public
+`)
+	policies, err := manager.ParsePolicies(raw)
+	require.NoError(t, err)
+	assert.Equal(t, config.TargetTypeVirtualMachine, policies["ok"].Config.Defaults.Type)
+}
+
+func TestManager_ParsePolicies_TypeEmptyDefaultsToDevice(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
+	require.NoError(t, err)
+
+	raw := []byte(`
+policies:
+  ok:
+    config: {}
+    scope:
+      targets:
+        - host: 192.0.2.1
+      authentication:
+        protocol_version: SNMPv2c
+        community: public
+`)
+	policies, err := manager.ParsePolicies(raw)
+	require.NoError(t, err)
+	assert.Equal(t, config.TargetTypeDevice, policies["ok"].Config.Defaults.Type)
+}
+
+func TestManager_ParsePolicies_RejectsInvalidOverrideType(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
+	manager, err := policy.NewManager(context.Background(), logger, nil, nil)
+	require.NoError(t, err)
+
+	raw := []byte(`
+policies:
+  bad-override:
+    config:
+      defaults:
+        type: VirtualMachine
+    scope:
+      authentication:
+        protocol_version: SNMPv2c
+        community: public
+      targets:
+        - host: 192.0.2.1
+          override_defaults:
+            type: BadOverride
+`)
+	_, err = manager.ParsePolicies(raw)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "target 192.0.2.1")
+	assert.Contains(t, err.Error(), "override_defaults.type")
+	assert.Contains(t, err.Error(), "BadOverride")
+}
+
 func TestManager_ParsePolicies_RejectsInvalidDiscoverModules(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: false}))
 	manager, err := policy.NewManager(context.Background(), logger, nil, nil)

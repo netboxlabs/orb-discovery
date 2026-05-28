@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -120,6 +121,20 @@ func (m *Manager) applyDefaults(policy *config.Policy) {
 		policy.Config.Defaults.Site = "undefined"
 	}
 
+	// Normalize defaults.Type and any override Type to lowercase so
+	// the runner can compare against the TargetTypeDevice /
+	// TargetTypeVirtualMachine constants without case-sensitivity.
+	// Empty resolves to Device for backward compatibility.
+	policy.Config.Defaults.Type = strings.ToLower(strings.TrimSpace(policy.Config.Defaults.Type))
+	if policy.Config.Defaults.Type == "" {
+		policy.Config.Defaults.Type = config.TargetTypeDevice
+	}
+	for i := range policy.Scope.Targets {
+		if policy.Scope.Targets[i].OverrideDefaults != nil {
+			policy.Scope.Targets[i].OverrideDefaults.Type = strings.ToLower(strings.TrimSpace(policy.Scope.Targets[i].OverrideDefaults.Type))
+		}
+	}
+
 	if policy.Config.Options.CreateUnknownVlans == nil {
 		trueVal := true
 		policy.Config.Options.CreateUnknownVlans = &trueVal
@@ -201,6 +216,35 @@ func (m *Manager) validatePolicy(policy config.Policy) error {
 		} else if !hasPolicyAuth {
 			// Target has no auth and there's no policy-level fallback
 			return fmt.Errorf("target %s: no authentication configured and no policy-level fallback available", target.Host)
+		}
+	}
+
+	// Reject unknown defaults.type values at parse time so operators
+	// get an immediate error rather than silently degrading at scan
+	// time. Comparison is case-insensitive (applyDefaults runs AFTER
+	// validation, so the raw user input is what we see here).
+	rawType := strings.ToLower(strings.TrimSpace(policy.Config.Defaults.Type))
+	if rawType != "" &&
+		rawType != config.TargetTypeDevice &&
+		rawType != config.TargetTypeVirtualMachine {
+		return fmt.Errorf(
+			"invalid defaults.type %q (allowed: %s, %s)",
+			policy.Config.Defaults.Type,
+			config.TargetTypeDevice, config.TargetTypeVirtualMachine,
+		)
+	}
+	for _, target := range policy.Scope.Targets {
+		if target.OverrideDefaults == nil || target.OverrideDefaults.Type == "" {
+			continue
+		}
+		rawOverride := strings.ToLower(strings.TrimSpace(target.OverrideDefaults.Type))
+		if rawOverride != config.TargetTypeDevice &&
+			rawOverride != config.TargetTypeVirtualMachine {
+			return fmt.Errorf(
+				"target %s: invalid override_defaults.type %q (allowed: %s, %s)",
+				target.Host, target.OverrideDefaults.Type,
+				config.TargetTypeDevice, config.TargetTypeVirtualMachine,
+			)
 		}
 	}
 

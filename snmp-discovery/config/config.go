@@ -2,6 +2,16 @@ package config
 
 import "time"
 
+// TargetType selects how a target is ingested into NetBox.
+// TargetTypeDevice (default, empty/"device") emits a dcim.Device graph.
+// TargetTypeVirtualMachine ("virtualmachine") emits a
+// virtualization.VirtualMachine graph. Stored lowercase; user input is
+// case-insensitive (see manager.applyDefaults).
+const (
+	TargetTypeDevice         = "device"
+	TargetTypeVirtualMachine = "virtualmachine"
+)
+
 // Status represents the status of the snmp-discovery service
 type Status struct {
 	StartTime     time.Time `json:"start_time"`
@@ -91,6 +101,8 @@ type Defaults struct {
 	VLAN                     VLANDefaults       `yaml:"vlan,omitempty"`
 	InterfacePatterns        []InterfacePattern `yaml:"interface_patterns,omitempty"`
 	InterfaceExcludePatterns []string           `yaml:"interface_exclude_patterns,omitempty"`
+	Type                     string             `yaml:"type,omitempty"`    // TargetTypeDevice | TargetTypeVirtualMachine; default Device
+	Cluster                  string             `yaml:"cluster,omitempty"` // optional VM cluster name; ignored when Type == TargetTypeDevice
 }
 
 // MergeDefaults merges target-level override defaults with policy-level defaults
@@ -196,6 +208,14 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 	// Override InterfaceExcludePatterns if provided
 	if len(overrideDefaults.InterfaceExcludePatterns) > 0 {
 		merged.InterfaceExcludePatterns = overrideDefaults.InterfaceExcludePatterns
+	}
+
+	// Override Type / Cluster if provided.
+	if overrideDefaults.Type != "" {
+		merged.Type = overrideDefaults.Type
+	}
+	if overrideDefaults.Cluster != "" {
+		merged.Cluster = overrideDefaults.Cluster
 	}
 
 	return &merged
