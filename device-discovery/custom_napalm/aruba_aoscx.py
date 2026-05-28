@@ -318,9 +318,31 @@ def _aruba_optics_by_slot(ifaces) -> dict[str, list[tuple[str, _ModuleEntry]]]:
     return optics_by_slot
 
 
+def _aruba_ifaces_by_slot(ifaces) -> dict[str, list[str]]:
+    """
+    Map "<member>/<slot>" -> every physical-port ifname on that slot.
+
+    Lets every bay claim ALL its ports (copper + optic), so linecard-mode
+    discovery attaches non-transceiver ports to the parent Module — not
+    just the ones with optics. Filters out non-slot ifnames (vlanN, lagN,
+    mgmt, ...) by requiring the first two `/`-segments to be digits.
+    """
+    out: dict[str, list[str]] = {}
+    if not isinstance(ifaces, dict):
+        return out
+    for ifname in ifaces:
+        parts = ifname.split("/")
+        if len(parts) < 3 or not parts[0].isdigit() or not parts[1].isdigit():
+            continue
+        slot = f"{parts[0]}/{parts[1]}"
+        out.setdefault(slot, []).append(ifname)
+    return out
+
+
 def _aruba_build_bays(
     subs: dict,
     optics_by_slot: dict[str, list[tuple[str, _ModuleEntry]]],
+    ifaces_by_slot: dict[str, list[str]],
     members: set[int],
     vsf: bool,
 ) -> tuple[dict[int | None, list[_ModuleBay]], dict[int | None, dict[str, list[str]]]]:
@@ -346,11 +368,16 @@ def _aruba_build_bays(
         if vsf and member not in members:
             logger.warning("aruba.get_modules: subsystem member %s not in VSF set", member)
             continue
+        # Claim every port on this slot for the parent bay; optic sub-bays
+        # below add per-ifname self-routes so deepest-match-wins routes the
+        # transceiver port to the sub-bay while copper ports stay on parent.
+        slot_ifaces = ifaces_by_slot.get(addr, [])
+        if slot_ifaces:
+            ifaces_by_member.setdefault(member, {})[addr] = list(slot_ifaces)
         sub_bays: list[_ModuleBay] = []
         for ifname, optic in optics_by_slot.get(addr, []):
             sub_bays.append(_ModuleBay(name=ifname, position=ifname, module=optic))
-            ifaces_by_member.setdefault(member, {}).setdefault(addr, []).append(ifname)
-            ifaces_by_member[member][ifname] = [ifname]  # self-route (batch-2 pattern)
+            ifaces_by_member.setdefault(member, {})[ifname] = [ifname]  # self-route (sub-bay key)
         bay = _ModuleBay(
             name=addr, position=addr,
             module=_ModuleEntry(model=pid, serial=sn, type=mtype, description=descr, sub_bays=sub_bays),
@@ -384,7 +411,10 @@ def _aruba_get_modules_impl(driver) -> dict | None:
     vsf = len(members) >= 2
 
     optics_by_slot = _aruba_optics_by_slot(ifaces)
-    bays_by_member, ifaces_by_member = _aruba_build_bays(subs, optics_by_slot, members, vsf)
+    ifaces_by_slot = _aruba_ifaces_by_slot(ifaces)
+    bays_by_member, ifaces_by_member = _aruba_build_bays(
+        subs, optics_by_slot, ifaces_by_slot, members, vsf,
+    )
 
     if not bays_by_member:
         return None
