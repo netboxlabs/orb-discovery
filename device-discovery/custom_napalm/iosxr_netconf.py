@@ -16,6 +16,7 @@ from lxml import etree as ETREE
 from napalm.iosxr_netconf.iosxr_netconf import (
     IOSXRNETCONFDriver as _UpstreamIOSXRNetconfDriver,
 )
+from ncclient import NCClientError
 
 from custom_napalm._modules import (
     MemberModules as _MemberModules,
@@ -63,6 +64,15 @@ _IOSXR_RP_RE = re.compile(r"^(?P<rack>\d+)/(?:RP|RSP)\d+/CPU\d+$")
 _IOSXR_LC_RE = re.compile(r"^(?P<rack>\d+)/\d+/CPU\d+$")
 _IOSXR_FAB_RE = re.compile(r"^(?P<rack>\d+)/(?:FC|SC)\d+$")
 _IOSXR_PORT_RE = re.compile(r"^(?P<rack>\d+)/(?P<slot>\d+)/\d+(?::\d+)?$")
+
+# Real ASR9k inventory NAMEs vary between bare ("0/RSP0/CPU0") and prefixed
+# ("module 0/RSP0/CPU0") forms; strip the optional prefix before the regexes.
+_IOSXR_NAME_PREFIX_RE = re.compile(r"^(?:module|slot|port|card)\s+(?=\d)", re.IGNORECASE)
+
+
+def _iosxr_netconf_strip_inventory_prefix(name: str) -> str:
+    """Strip XR inventory-object prefix ('module 0/...', 'Slot 0/0', ...)."""
+    return _IOSXR_NAME_PREFIX_RE.sub("", name or "")
 
 
 def classify_module_type_iosxr_netconf(pid: str, name: str) -> str:
@@ -127,7 +137,7 @@ def _iosxr_netconf_build_top_bays(rows: list[dict]) -> dict[int, list[_ModuleBay
     """First pass: emit one top-level bay per slot row with PID + SN."""
     bays_by_rack: dict[int, list[_ModuleBay]] = {}
     for row in rows:
-        name = row.get("name") or ""
+        name = _iosxr_netconf_strip_inventory_prefix(row.get("name") or "")
         pid = row.get("pid") or ""
         sn = row.get("sn") or ""
         descr = row.get("descr") or ""
@@ -153,7 +163,7 @@ def _iosxr_netconf_collect_slot_ports(rows: list[dict], slot_prefix: str) -> tup
     slot_ifaces: list[str] = []
     sub_bays: list[_ModuleBay] = []
     for row in rows:
-        rname = row.get("name") or ""
+        rname = _iosxr_netconf_strip_inventory_prefix(row.get("name") or "")
         if not _IOSXR_PORT_RE.match(rname):
             continue
         if not rname.startswith(slot_prefix):
@@ -205,7 +215,11 @@ def _iosxr_netconf_get_modules_impl(driver) -> dict | None:
     """
     try:
         reply = driver.device.get(filter=("subtree", _INV_FILTER))
-    except Exception as e:
+    except NCClientError as e:
+        # Narrow catch: NCClientError covers all ncclient transport / operation /
+        # RPC failures but lets programming errors (AttributeError, TypeError) on
+        # `driver.device` propagate so they're not silently masked as transport
+        # errors in tests or development.
         logger.warning("iosxr_netconf.get_modules: NETCONF get failed: %s", e)
         return None
     xml_text = getattr(reply, "xml", None) or getattr(reply, "data_xml", None) or ""

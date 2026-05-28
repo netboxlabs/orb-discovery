@@ -54,6 +54,16 @@ _IOSXR_FAB_RE = re.compile(r"^(?P<rack>\d+)/(?:FC|SC)\d+$")
 # Port-slot pattern (used to attach optic sub-bays + non-optic port ifnames).
 _IOSXR_PORT_RE = re.compile(r"^(?P<rack>\d+)/(?P<slot>\d+)/\d+(?::\d+)?$")
 
+# Real ASR9k show inventory varies between bare ("0/RSP0/CPU0") and prefixed
+# ("module 0/RSP0/CPU0") NAME forms across XR releases. Strip the optional
+# inventory-object prefix so the slot regexes above see the bare identifier.
+_IOSXR_NAME_PREFIX_RE = re.compile(r"^(?:module|slot|port|card)\s+(?=\d)", re.IGNORECASE)
+
+
+def _iosxr_strip_inventory_prefix(name: str) -> str:
+    """Strip XR inventory-object prefix ('module 0/...', 'Slot 0/0', ...)."""
+    return _IOSXR_NAME_PREFIX_RE.sub("", name or "")
+
 
 def classify_module_type_iosxr(pid: str, name: str) -> str:
     """
@@ -93,7 +103,9 @@ def _iosxr_build_top_bays(rows: list[dict]) -> dict[int, list[_ModuleBay]]:
     """First pass: build top-level slot bays keyed by rack id."""
     bays_by_rack: dict[int, list[_ModuleBay]] = {}
     for row in rows:
-        name = (row.get("name") or "").strip().strip('"')
+        name = _iosxr_strip_inventory_prefix(
+            (row.get("name") or "").strip().strip('"'),
+        )
         pid = (row.get("pid") or "").strip()
         sn = (row.get("sn") or "").strip()
         descr = (row.get("descr") or "").strip().strip('"')
@@ -152,7 +164,9 @@ def _iosxr_collect_slot_ports(
     slot_ifaces: list[str] = []
     sub_bays: list[_ModuleBay] = []
     for row in rows:
-        rname = (row.get("name") or "").strip().strip('"')
+        rname = _iosxr_strip_inventory_prefix(
+            (row.get("name") or "").strip().strip('"'),
+        )
         if not _IOSXR_PORT_RE.match(rname):
             continue
         if not rname.startswith(slot_prefix):
