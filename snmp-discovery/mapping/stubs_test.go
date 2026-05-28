@@ -689,3 +689,34 @@ func TestPruneNestedRefsVM_NoOpOnEmptyOrNil(t *testing.T) {
 	PruneNestedRefsVM([]diode.Entity{}, nil)
 	PruneNestedRefsVM([]diode.Entity{&diode.VirtualMachine{Name: strPtr("v")}}, nil)
 }
+
+// Regression: if two top-level VMInterfaces share the same Name, the
+// stubForIface owner-rewrite must not silently rebind a nested ref to
+// the first match — mirrors PruneNestedRefs's ambiguity handling for
+// stacks (PruneNestedRefs's `len(tops) == 1` guard).
+func TestPruneNestedRefsVM_AmbiguousNameLeavesOwnerUnchanged(t *testing.T) {
+	vm := &diode.VirtualMachine{Name: strPtr("v1")}
+	dupA := &diode.VMInterface{Name: strPtr("dup"), VirtualMachine: vm}
+	dupB := &diode.VMInterface{Name: strPtr("dup"), VirtualMachine: vm}
+	// nested ref's pointer identity == dupB; if the prune rewires by
+	// name it would resolve to dupA (the first one inserted into the
+	// index) instead of preserving dupB.
+	parent := &diode.VMInterface{
+		Name:           strPtr("child"),
+		VirtualMachine: vm,
+		Parent:         dupB,
+	}
+	entities := []diode.Entity{vm, dupA, dupB, parent}
+
+	PruneNestedRefsVM(entities, vm)
+
+	require.NotNil(t, parent.Parent, "parent.Parent must remain set")
+	assert.Equal(t, "dup", *parent.Parent.Name,
+		"ambiguous-name parent ref must still resolve to the 'dup' identity, not be dropped")
+	// We don't assert which dup* the stub points at (the matcher cares
+	// only about Name + VirtualMachine matcher stub), but pointer
+	// equality between the stub and either rich top-level entity would
+	// reintroduce nested VirtualMachine back-edges.
+	assert.NotSame(t, dupA, parent.Parent, "parent.Parent must be a stub, not the rich dupA")
+	assert.NotSame(t, dupB, parent.Parent, "parent.Parent must be a stub, not the rich dupB")
+}

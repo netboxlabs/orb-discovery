@@ -220,15 +220,17 @@ func PruneNestedRefsVM(entities []diode.Entity, currentVM *diode.VirtualMachine)
 
 	vmStub := newVMMatchStub(currentVM)
 
-	// Build a name -> top-level VMInterface index for resolving nested
-	// Parent/Bridge refs (mirrors the ifaceByName index in
-	// PruneNestedRefs). Stores the first matching VMInterface per name.
-	vmIfaceByName := map[string]*diode.VMInterface{}
+	// Build a name -> top-level VMInterfaces index. Slice-valued to
+	// mirror PruneNestedRefs's ifaceByName treatment of cross-member
+	// duplicates: when a name is ambiguous (more than one top-level
+	// VMInterface shares it), the stubForIface owner-rewrite skips
+	// rather than silently rebinding to whichever entry happened to
+	// land in the map first. Single-VM walks have unique interface
+	// names so the unambiguous (len==1) branch is the common path.
+	vmIfaceByName := map[string][]*diode.VMInterface{}
 	for _, e := range entities {
 		if v, ok := e.(*diode.VMInterface); ok && v != nil && v.Name != nil {
-			if _, exists := vmIfaceByName[*v.Name]; !exists {
-				vmIfaceByName[*v.Name] = v
-			}
+			vmIfaceByName[*v.Name] = append(vmIfaceByName[*v.Name], v)
 		}
 	}
 
@@ -244,10 +246,13 @@ func PruneNestedRefsVM(entities []diode.Entity, currentVM *diode.VirtualMachine)
 		}
 		// Prefer the top-level VMInterface for this name (it's the
 		// authoritative entry — matches Device-prune's stubForIface).
+		// Only rewrite owner when the by-name lookup is unambiguous;
+		// duplicate names leave owner as `ref` so we don't silently
+		// repoint to a wrong sibling.
 		owner := ref
 		if ref.Name != nil {
-			if topLevel, ok := vmIfaceByName[*ref.Name]; ok && topLevel != nil {
-				owner = topLevel
+			if tops, ok := vmIfaceByName[*ref.Name]; ok && len(tops) == 1 && tops[0] != nil {
+				owner = tops[0]
 			}
 		}
 		stub := newVMInterfaceStub(owner, vmStub)

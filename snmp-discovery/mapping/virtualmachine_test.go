@@ -460,13 +460,14 @@ func TestTransformToVirtualMachine_ClusterTypeOmittedWhenUnset(t *testing.T) {
 }
 
 func TestTransformToVirtualMachine_PrimaryIPRebuilt(t *testing.T) {
-	dev := &diode.Device{Name: sp("vyos-edge-1")}
+	cluster := &diode.Cluster{Name: sp("vyos-cluster")}
+	dev := &diode.Device{Name: sp("vyos-edge-1"), Cluster: cluster}
 	primaryIface := &diode.Interface{Device: dev, Name: sp("eth0")}
 	primaryIP := &diode.IPAddress{Address: sp("192.0.2.1/24"), AssignedObject: primaryIface}
 	dev.PrimaryIp4 = primaryIP
 	out := mapping.TransformToVirtualMachine(
 		[]diode.Entity{dev, primaryIface},
-		&config.Defaults{Type: config.TargetTypeVirtualMachine},
+		&config.Defaults{Type: config.TargetTypeVirtualMachine, Cluster: "vyos-cluster"},
 	)
 	var vm *diode.VirtualMachine
 	var vmIface *diode.VMInterface
@@ -499,7 +500,7 @@ func TestTransformToVirtualMachine_PrimaryIPRebuilt(t *testing.T) {
 	}
 	stubVM := rebuiltAssigned.VirtualMachine
 	if stubVM == nil {
-		t.Fatal("VM.PrimaryIp4.AssignedObject.VirtualMachine: got nil, want Name-only stub")
+		t.Fatal("VM.PrimaryIp4.AssignedObject.VirtualMachine: got nil, want matcher stub")
 	}
 	if stubVM == vm {
 		t.Errorf("VM.PrimaryIp4.AssignedObject.VirtualMachine: aliased the rich VM, cycle still present")
@@ -507,8 +508,21 @@ func TestTransformToVirtualMachine_PrimaryIPRebuilt(t *testing.T) {
 	if stubVM.Name == nil || *stubVM.Name != "vyos-edge-1" {
 		t.Errorf("VM.PrimaryIp4.AssignedObject.VirtualMachine.Name: got %v, want vyos-edge-1", stubVM.Name)
 	}
-	if stubVM.PrimaryIp4 != nil || stubVM.PrimaryIp6 != nil {
-		t.Errorf("stubVM must carry no back-edges (PrimaryIp4/6 == nil); got %v / %v", stubVM.PrimaryIp4, stubVM.PrimaryIp6)
+	// The stub must carry NetBox VM-matcher fields (name+cluster) so
+	// the reconciler resolves to the right VM. Cluster was missing on
+	// the original name-only stub and broke matching when VM names
+	// were unique only within a cluster.
+	if stubVM.Cluster == nil {
+		t.Error("stubVM.Cluster: got nil, want matcher field carried from rich VM")
+	}
+	// Cycle-safety: stubVM.PrimaryIp4 may be a matcher IP, but its
+	// AssignedObject MUST be nil so the chain terminates one hop
+	// deeper. newIPMatchStub enforces this.
+	if stubVM.PrimaryIp4 != nil && stubVM.PrimaryIp4.AssignedObject != nil {
+		t.Errorf("stubVM.PrimaryIp4.AssignedObject: got %T, want nil (matcher-only IP, cycle must terminate)", stubVM.PrimaryIp4.AssignedObject)
+	}
+	if stubVM.PrimaryIp6 != nil && stubVM.PrimaryIp6.AssignedObject != nil {
+		t.Errorf("stubVM.PrimaryIp6.AssignedObject: got %T, want nil (matcher-only IP, cycle must terminate)", stubVM.PrimaryIp6.AssignedObject)
 	}
 }
 

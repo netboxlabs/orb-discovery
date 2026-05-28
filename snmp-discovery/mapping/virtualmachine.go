@@ -201,15 +201,21 @@ func TransformToVirtualMachine(entities []diode.Entity, defaults *config.Default
 				}
 			}
 			if vmIfRef != nil {
-				out.AssignedObject = &diode.VMInterface{
-					Name:           vmIfRef.Name,
-					VirtualMachine: &diode.VirtualMachine{Name: vm.Name},
-					// newMACMatchStub (from stubs.go) strips the MAC's
-					// AssignedObject so proto conversion can't recurse
-					// MAC -> AssignedObject -> ... even though the VM
-					// cycle itself is broken.
-					PrimaryMacAddress: newMACMatchStub(vmIfRef.PrimaryMacAddress),
-				}
+				// Use the shared newVMInterfaceStub + newVMMatchStub
+				// helpers so the cycle-break stub carries the same
+				// matcher fields (Cluster, Site, Tenant, Role,
+				// source_match) that the NetBox plugin VM matcher
+				// uses to resolve `name+cluster` etc. — mirroring how
+				// the Device path's detachForPrimaryIP keeps the full
+				// Device snapshot (with PrimaryIp4/6 cleared) rather
+				// than a name-only stub. The inner VM's PrimaryIp4
+				// runs through newIPMatchStub (AssignedObject=nil) so
+				// the cycle still terminates one hop deeper.
+				// newMACMatchStub on PrimaryMacAddress (inside
+				// newVMInterfaceStub) likewise strips the MAC's
+				// AssignedObject so proto conversion can't recurse
+				// MAC -> AssignedObject -> ...
+				out.AssignedObject = newVMInterfaceStub(vmIfRef, newVMMatchStub(vm))
 			} else {
 				// Unresolvable: clear rather than leak the dropped *Interface.
 				out.AssignedObject = nil
