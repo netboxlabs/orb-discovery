@@ -210,7 +210,12 @@ def _fxos_get_modules_impl(driver) -> dict | None:
         if not (mod_match or netmod_match):
             continue  # chassis / PSU / fan / unrecognized rows are not slot bays
         mtype = classify_module_type_fxos(pid, name)
-        if mtype in ("psu", "fan"):
+        if mtype in ("psu", "fan", "supervisor"):
+            # FXOS show inventory can list the MIO/supervisor as `Module N`
+            # with a FPR9K-SUP PID; the supervisor is the integrated Chassis
+            # row in our model, never a slot bay, so skip the row even when
+            # it appears under a Module name (would otherwise collide with
+            # a real security-module slot N).
             continue
         # Security modules emit bay name = slot number ("1"); network
         # modules keep their full NAME ("Network Module 1") since they share
