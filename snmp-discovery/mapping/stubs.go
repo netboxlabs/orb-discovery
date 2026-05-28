@@ -79,8 +79,15 @@ func newMACMatchStub(mac *diode.MACAddress) *diode.MACAddress {
 //
 // Metadata.source_match (e.g. netbox_id) is the diode-netbox-plugin's
 // PK-based match path, so it must not diverge between rich and stub.
-// Annotation metadata such as run_id is intentionally NOT copied —
-// stubs are matcher-only.
+// Annotation metadata such as run_id is NOT copied here at stub
+// construction — but note that the run_id annotation walker
+// (annotateEntitiesWithRunID) DOES reach cycle-break stubs embedded at
+// rich Device.PrimaryIp4.AssignedObject.Device because that chain is
+// traversed before PruneNestedRefs runs. Diode ignores run_id on
+// matcher refs (matching uses Name / Site / Tenant / source_match /
+// asset_tag / primary_ip), so the leaked run_id is inert payload, not
+// a correctness issue. The "stubs are matcher-only" property holds
+// for everything that matters to NetBox resolution.
 func newDeviceStub(d *diode.Device) *diode.Device {
 	if d == nil {
 		return nil

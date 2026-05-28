@@ -371,49 +371,11 @@ func (r *Runner) runWithMetadata(target config.Target, parentTarget string) {
 		return
 	}
 
-	// source_match annotation MUST happen on the Device-rooted graph
-	// BEFORE the VM-target transform runs. Reason: deviceToVM
-	// (virtualmachine.go) builds the cycle-break stub for
-	// VM.PrimaryIp4.AssignedObject.VirtualMachine via newVMMatchStub,
-	// which captures Metadata["source_match"] by value at construction
-	// time. Annotating after the transform would leave the rich
-	// top-level VM correctly stamped but the embedded cycle-break stub
-	// missing source_match — breaking the NetBox plugin matcher path
-	// under `target.netbox_id` rediscovery. The Device→VM Metadata
-	// carry in deviceToVM (`Metadata: d.Metadata`) propagates the
-	// stamp forward into the VM.
 	def := r.resolveTargetDefaults(target)
-	isVM := strings.EqualFold(def.Type, config.TargetTypeVirtualMachine)
-	if target.NetboxID != nil {
-		annotateDeviceWithSourceMatch(entities, *target.NetboxID)
-	}
-
-	// VM-target rewrite: when defaults.Type == VirtualMachine, transform
-	// the Device-rooted entity graph into a VirtualMachine-rooted one
-	// (Device->VM, Interface->VMInterface, IPs re-anchored, VLANs
-	// passthrough, chassis/VC/modules dropped). The annotate / prune
-	// helpers below have sibling VM-aware branches that handle the
-	// resulting graph. Default behaviour (Type unset or "device") is
-	// unchanged.
-	if isVM {
-		entities = mapping.TransformToVirtualMachine(entities, def)
-		r.logger.Debug("transformed entities to VirtualMachine graph",
-			"host", target.Host, "policy", policyName, "entity_count", len(entities))
-	}
-
-	annotateEntitiesWithRunID(entities, run.ID)
-	r.logEntitiesForIngestion(entities)
-
-	// Strip nested refs to matcher-only stubs to shrink the wire
-	// payload. Runs after annotation so the annotators can walk the
-	// rich shared graph with their unsafe.Pointer dedup intact —
-	// otherwise every stub would need its own metadata pass. VM-target
-	// path uses the sibling helpers introduced for OBS-1380.
-	if isVM {
-		mapping.PruneNestedRefsVM(entities, mapping.CurrentVirtualMachineFrom(entities))
-	} else {
-		mapping.PruneNestedRefs(entities, mapping.CurrentDeviceFrom(entities))
-	}
+	entities = prepareEntitiesForIngest(
+		r.logger, entities, target, def, run.ID, policyName,
+		r.logEntitiesForIngestion,
+	)
 
 	resp, err := r.client.Ingest(r.ctx, entities, diode.WithIngestMetadata(diode.Metadata{
 		"policy_name": policyName,
