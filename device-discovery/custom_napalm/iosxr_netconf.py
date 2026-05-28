@@ -63,11 +63,18 @@ _INV_FILTER = f"""
 _IOSXR_RP_RE = re.compile(r"^(?P<rack>\d+)/(?:RP|RSP)\d+/CPU\d+$")
 _IOSXR_LC_RE = re.compile(r"^(?P<rack>\d+)/\d+/CPU\d+$")
 _IOSXR_FAB_RE = re.compile(r"^(?P<rack>\d+)/(?:FC|SC)\d+$")
-_IOSXR_PORT_RE = re.compile(r"^(?P<rack>\d+)/(?P<slot>\d+)/\d+(?::\d+)?$")
+_IOSXR_PORT_RE = re.compile(
+    r"^(?P<rack>\d+)/(?P<slot>\d+)/"
+    r"(?:[A-Za-z]*\d+/)?"
+    r"\d+(?::\d+)?$",
+)
 
-# Real ASR9k inventory NAMEs vary between bare ("0/RSP0/CPU0") and prefixed
-# ("module 0/RSP0/CPU0") forms; strip the optional prefix before the regexes.
-_IOSXR_NAME_PREFIX_RE = re.compile(r"^(?:module|slot|port|card)\s+(?=\d)", re.IGNORECASE)
+# Strip leading inventory-object prefix; allow one or more words before the
+# rack digit so forms like "module mau 0/1/CPU0/2" reduce to "0/1/CPU0/2".
+_IOSXR_NAME_PREFIX_RE = re.compile(
+    r"^(?:(?:module|slot|port|card|mau)\s+)+(?=\d)",
+    re.IGNORECASE,
+)
 
 
 def _iosxr_netconf_strip_inventory_prefix(name: str) -> str:

@@ -51,13 +51,25 @@ _IOSXR_PARSE_ERRORS = (TextFSMError, ParsingException)
 _IOSXR_RP_RE = re.compile(r"^(?P<rack>\d+)/(?:RP|RSP)\d+/CPU\d+$")
 _IOSXR_LC_RE = re.compile(r"^(?P<rack>\d+)/\d+/CPU\d+$")
 _IOSXR_FAB_RE = re.compile(r"^(?P<rack>\d+)/(?:FC|SC)\d+$")
-# Port-slot pattern (used to attach optic sub-bays + non-optic port ifnames).
-_IOSXR_PORT_RE = re.compile(r"^(?P<rack>\d+)/(?P<slot>\d+)/\d+(?::\d+)?$")
+# Port-slot pattern. Accepts both the 3-tuple form (`0/0/0`) and the 4-tuple
+# form (`0/0/CPU0/2`, `0/0/0/14`) — the latter appears for transceiver
+# positions on many ASR9k releases. Optional `:<sub>` suffix covers breakout
+# ports.
+_IOSXR_PORT_RE = re.compile(
+    r"^(?P<rack>\d+)/(?P<slot>\d+)/"
+    r"(?:[A-Za-z]*\d+/)?"
+    r"\d+(?::\d+)?$",
+)
 
-# Real ASR9k show inventory varies between bare ("0/RSP0/CPU0") and prefixed
-# ("module 0/RSP0/CPU0") NAME forms across XR releases. Strip the optional
-# inventory-object prefix so the slot regexes above see the bare identifier.
-_IOSXR_NAME_PREFIX_RE = re.compile(r"^(?:module|slot|port|card)\s+(?=\d)", re.IGNORECASE)
+# Strip the optional XR inventory-object prefix so the slot regexes see the
+# bare identifier. Real show inventory varies across XR releases between
+# bare ("0/RSP0/CPU0"), single-prefix ("module 0/RSP0/CPU0"), and
+# multi-prefix ("module mau 0/1/CPU0/2") forms; allow one or more prefix
+# words before the leading digit.
+_IOSXR_NAME_PREFIX_RE = re.compile(
+    r"^(?:(?:module|slot|port|card|mau)\s+)+(?=\d)",
+    re.IGNORECASE,
+)
 
 
 def _iosxr_strip_inventory_prefix(name: str) -> str:
