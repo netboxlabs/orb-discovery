@@ -456,7 +456,7 @@ class FakePyEZDevice:
 
 
 class FakeIOSXRDevice:
-    """
+    r"""
     Drop-in replacement for napalm.pyIOSXR.IOSXR.
 
     Intercepts the pyIOSXR private API `_execute_show(cmd)` (which returns
@@ -471,6 +471,7 @@ class FakeIOSXRDevice:
 
     A missing file returns "" — silent, no error — so optional commands
     the driver might call don't crash the fake.
+
     """
 
     _SANITIZE_RE = re.compile(r"[^\w-]+")
