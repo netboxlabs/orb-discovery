@@ -564,3 +564,128 @@ func strDerefSafe(p *string) string {
 	}
 	return *p
 }
+
+// --- VM-rooted prune helpers ---
+
+func TestCurrentVirtualMachineFrom_NilWhenAbsent(t *testing.T) {
+	if got := CurrentVirtualMachineFrom(nil); got != nil {
+		t.Errorf("got %v, want nil", got)
+	}
+	dev := &diode.Device{Name: strPtr("d1")}
+	if got := CurrentVirtualMachineFrom([]diode.Entity{dev}); got != nil {
+		t.Errorf("Device-only slice should return nil; got %v", got)
+	}
+}
+
+func TestCurrentVirtualMachineFrom_ReturnsFirstVM(t *testing.T) {
+	vm1 := &diode.VirtualMachine{Name: strPtr("a")}
+	vm2 := &diode.VirtualMachine{Name: strPtr("b")}
+	got := CurrentVirtualMachineFrom([]diode.Entity{vm1, vm2})
+	if got != vm1 {
+		t.Errorf("got %p, want %p (first)", got, vm1)
+	}
+}
+
+func TestNewVMMatchStub_KeepsMatcherFieldsAndSourceMatch(t *testing.T) {
+	vm := &diode.VirtualMachine{
+		Name:        strPtr("vyos-edge-1"),
+		Site:        &diode.Site{Name: strPtr("Lab Site")},
+		Cluster:     &diode.Cluster{Name: strPtr("proxmox-a")},
+		Tenant:      &diode.Tenant{Name: strPtr("NetOps")},
+		Role:        &diode.DeviceRole{Name: strPtr("Router")},
+		Description: strPtr("rich"),
+		Metadata:    diode.Metadata{"source_match": diode.Metadata{"netbox_id": 42}, "run_id": "x"},
+	}
+	stub := newVMMatchStub(vm)
+	require.NotNil(t, stub)
+	assert.NotSame(t, vm, stub, "stub must be a new pointer")
+	assert.Equal(t, "vyos-edge-1", *stub.Name)
+	assert.Equal(t, "Lab Site", *stub.Site.Name)
+	assert.Equal(t, "proxmox-a", *stub.Cluster.Name, "Cluster is a matcher field for plugin VM resolution")
+	assert.Equal(t, "NetOps", *stub.Tenant.Name)
+	assert.Equal(t, "Router", *stub.Role.Name)
+	assert.Nil(t, stub.Description, "rich-only field must be dropped")
+	// source_match carries; run_id does NOT (matcher-only stub).
+	sm, ok := stub.Metadata["source_match"].(diode.Metadata)
+	require.True(t, ok)
+	assert.Equal(t, 42, sm["netbox_id"])
+	_, hasRun := stub.Metadata["run_id"]
+	assert.False(t, hasRun, "stub must NOT carry run_id")
+}
+
+func TestNewVMInterfaceStub_KeepsNameVMRefAndMACStub(t *testing.T) {
+	vmStub := &diode.VirtualMachine{Name: strPtr("vyos-edge-1")}
+	mac := &diode.MACAddress{MacAddress: strPtr("aa:bb:cc:dd:ee:ff"), AssignedObject: &diode.Interface{Name: strPtr("nope")}}
+	src := &diode.VMInterface{
+		Name:              strPtr("eth0"),
+		VirtualMachine:    &diode.VirtualMachine{Name: strPtr("rich")},
+		Description:       strPtr("WAN"),
+		PrimaryMacAddress: mac,
+	}
+	stub := newVMInterfaceStub(src, vmStub)
+	require.NotNil(t, stub)
+	assert.NotSame(t, src, stub)
+	assert.Equal(t, "eth0", *stub.Name)
+	assert.Same(t, vmStub, stub.VirtualMachine, "VirtualMachine ref must be the provided stub")
+	assert.Nil(t, stub.Description, "rich-only field must be dropped")
+	require.NotNil(t, stub.PrimaryMacAddress)
+	assert.NotSame(t, mac, stub.PrimaryMacAddress, "PrimaryMacAddress must itself be a matcher-only stub")
+	assert.Nil(t, stub.PrimaryMacAddress.AssignedObject, "MAC stub must strip AssignedObject")
+}
+
+func TestPruneNestedRefsVM_StubsNestedVMAndVMInterfaceRefs(t *testing.T) {
+	vm := &diode.VirtualMachine{
+		Name:        strPtr("vyos-edge-1"),
+		Description: strPtr("rich-top-level"),
+		Site:        &diode.Site{Name: strPtr("Dell Lab Site")},
+		Cluster:     &diode.Cluster{Name: strPtr("proxmox-a")},
+		Tenant:      &diode.Tenant{Name: strPtr("NetOps")},
+		Metadata:    diode.Metadata{"source_match": diode.Metadata{"netbox_id": 42}},
+	}
+	parent := &diode.VMInterface{Name: strPtr("bond0"), VirtualMachine: vm}
+	vmIface := &diode.VMInterface{
+		Name:           strPtr("eth0"),
+		VirtualMachine: vm,
+		Parent:         parent,
+	}
+	ip := &diode.IPAddress{Address: strPtr("192.0.2.1/24"), AssignedObject: vmIface}
+	entities := []diode.Entity{vm, parent, vmIface, ip}
+
+	PruneNestedRefsVM(entities, CurrentVirtualMachineFrom(entities))
+
+	// Top-level VM still rich.
+	assert.Equal(t, "rich-top-level", *vm.Description, "top-level VM should retain rich fields")
+	// Top-level VMInterfaces still rich (Name etc.); the nested VM ref
+	// inside each got stubbed.
+	assert.NotSame(t, vm, parent.VirtualMachine, "top-level VMInterface.VirtualMachine should be a stub")
+	assert.NotSame(t, vm, vmIface.VirtualMachine, "top-level VMInterface.VirtualMachine should be a stub")
+
+	// Nested VM stub: matcher fields + source_match preserved; rich-only fields dropped.
+	stub := vmIface.VirtualMachine
+	assert.Equal(t, "vyos-edge-1", *stub.Name)
+	assert.Equal(t, "Dell Lab Site", *stub.Site.Name)
+	assert.Equal(t, "proxmox-a", *stub.Cluster.Name, "Cluster matcher field required for plugin VM resolution")
+	assert.Equal(t, "NetOps", *stub.Tenant.Name)
+	sm, ok := stub.Metadata["source_match"].(diode.Metadata)
+	require.True(t, ok)
+	assert.Equal(t, 42, sm["netbox_id"])
+	assert.Nil(t, stub.Description, "rich-only field on nested VM stub must be dropped")
+
+	// VMInterface.Parent stubbed (Name matcher only, VM is the same VM stub).
+	require.NotNil(t, vmIface.Parent)
+	assert.NotSame(t, parent, vmIface.Parent, "VMInterface.Parent should be a stub")
+	assert.Equal(t, "bond0", *vmIface.Parent.Name)
+
+	// IPAddress.AssignedObject stubbed to a matcher-only VMInterface.
+	assigned, ok := ip.AssignedObject.(*diode.VMInterface)
+	require.True(t, ok, "IPAddress.AssignedObject should be *VMInterface; got %T", ip.AssignedObject)
+	assert.NotSame(t, vmIface, assigned, "IPAddress.AssignedObject should be a stub, not the rich pointer")
+	assert.Equal(t, "eth0", *assigned.Name)
+}
+
+func TestPruneNestedRefsVM_NoOpOnEmptyOrNil(t *testing.T) {
+	// Must not panic.
+	PruneNestedRefsVM(nil, nil)
+	PruneNestedRefsVM([]diode.Entity{}, nil)
+	PruneNestedRefsVM([]diode.Entity{&diode.VirtualMachine{Name: strPtr("v")}}, nil)
+}

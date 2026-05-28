@@ -142,6 +142,145 @@ func CurrentDeviceFrom(entities []diode.Entity) *diode.Device {
 	return nil
 }
 
+// CurrentVirtualMachineFrom returns the first *diode.VirtualMachine in
+// the slice, or nil. Mirrors CurrentDeviceFrom for the VM-target path
+// added by TransformToVirtualMachine — when a target is flagged as a
+// VM, the runner threads this into PruneNestedRefsVM instead of
+// PruneNestedRefs.
+func CurrentVirtualMachineFrom(entities []diode.Entity) *diode.VirtualMachine {
+	for _, e := range entities {
+		if vm, ok := e.(*diode.VirtualMachine); ok {
+			return vm
+		}
+	}
+	return nil
+}
+
+// newVMMatchStub returns a VirtualMachine populated with matcher
+// fields (Name, Site, Cluster, Tenant, Role, PrimaryIp4/6 matcher
+// stubs) plus metadata.source_match when present on the source. Used
+// wherever a VirtualMachine appears as a nested reference
+// (VMInterface.VirtualMachine, and the stub assigned to a stubbed
+// VMInterface used by IPAddress.AssignedObject). Cluster is included
+// because the NetBox plugin VM matcher uses (name, cluster) and
+// (name, cluster, tenant) — omitting it would fail to resolve the
+// right VM when cluster is the discriminating field.
+func newVMMatchStub(vm *diode.VirtualMachine) *diode.VirtualMachine {
+	if vm == nil {
+		return nil
+	}
+	stub := &diode.VirtualMachine{
+		Name:       vm.Name,
+		Site:       vm.Site,
+		Cluster:    vm.Cluster,
+		Tenant:     vm.Tenant,
+		Role:       vm.Role,
+		PrimaryIp4: newIPMatchStub(vm.PrimaryIp4),
+		PrimaryIp6: newIPMatchStub(vm.PrimaryIp6),
+	}
+	if sm, ok := vm.Metadata["source_match"]; ok {
+		stub.Metadata = diode.Metadata{"source_match": sm}
+	}
+	return stub
+}
+
+// newVMInterfaceStub returns a VMInterface populated with matcher
+// fields and a stubbed VirtualMachine ref. Used for
+// IPAddress.AssignedObject and for VMInterface.Parent / .Bridge
+// during VM-rooted pruning. PrimaryMacAddress is preserved (via
+// newMACMatchStub) so the stub keeps the unique_primary_mac_address
+// matcher precedence and resolves to the same VMInterface as the rich
+// top-level entity.
+func newVMInterfaceStub(iface *diode.VMInterface, vmStub *diode.VirtualMachine) *diode.VMInterface {
+	if iface == nil {
+		return nil
+	}
+	return &diode.VMInterface{
+		Name:              iface.Name,
+		VirtualMachine:    vmStub,
+		PrimaryMacAddress: newMACMatchStub(iface.PrimaryMacAddress),
+	}
+}
+
+// PruneNestedRefsVM is the VM-rooted analog of PruneNestedRefs. Walks
+// entities once and replaces nested VirtualMachine and VMInterface
+// references with matcher-only stubs. Top-level rich VirtualMachine
+// and top-level VMInterface entities are left unchanged — only nested
+// references *to* them are rewritten.
+//
+// Call from the runner AFTER annotateDeviceWithSourceMatch and
+// annotateEntitiesWithRunID, BEFORE Ingest, matching the
+// PruneNestedRefs call ordering.
+//
+// No-op if entities is empty or currentVM is nil.
+func PruneNestedRefsVM(entities []diode.Entity, currentVM *diode.VirtualMachine) {
+	if len(entities) == 0 || currentVM == nil {
+		return
+	}
+
+	vmStub := newVMMatchStub(currentVM)
+
+	// Build a name -> top-level VMInterface index for resolving nested
+	// Parent/Bridge refs (mirrors the ifaceByName index in
+	// PruneNestedRefs). Stores the first matching VMInterface per name.
+	vmIfaceByName := map[string]*diode.VMInterface{}
+	for _, e := range entities {
+		if v, ok := e.(*diode.VMInterface); ok && v != nil && v.Name != nil {
+			if _, exists := vmIfaceByName[*v.Name]; !exists {
+				vmIfaceByName[*v.Name] = v
+			}
+		}
+	}
+
+	// Cache stubs per source VMInterface so Parent/Bridge/IP-assigned
+	// references to the same iface share one stub and pruning is O(N).
+	stubCache := map[*diode.VMInterface]*diode.VMInterface{}
+	stubForIface := func(ref *diode.VMInterface) *diode.VMInterface {
+		if ref == nil {
+			return nil
+		}
+		if cached, ok := stubCache[ref]; ok {
+			return cached
+		}
+		// Prefer the top-level VMInterface for this name (it's the
+		// authoritative entry — matches Device-prune's stubForIface).
+		owner := ref
+		if ref.Name != nil {
+			if topLevel, ok := vmIfaceByName[*ref.Name]; ok && topLevel != nil {
+				owner = topLevel
+			}
+		}
+		stub := newVMInterfaceStub(owner, vmStub)
+		stubCache[ref] = stub
+		return stub
+	}
+
+	for _, e := range entities {
+		switch v := e.(type) {
+		case *diode.VMInterface:
+			if v == nil {
+				continue
+			}
+			if v.VirtualMachine == currentVM {
+				v.VirtualMachine = vmStub
+			}
+			if v.Parent != nil {
+				v.Parent = stubForIface(v.Parent)
+			}
+			if v.Bridge != nil {
+				v.Bridge = stubForIface(v.Bridge)
+			}
+		case *diode.IPAddress:
+			if v == nil {
+				continue
+			}
+			if vmIf, ok := v.AssignedObject.(*diode.VMInterface); ok && vmIf != nil {
+				v.AssignedObject = stubForIface(vmIf)
+			}
+		}
+	}
+}
+
 // PruneNestedRefs walks entities once and replaces nested Device and
 // Interface references with matcher-only stubs. Top-level rich Device
 // entities are left unchanged — only nested references *to* them on
