@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
+	"github.com/netboxlabs/orb-discovery/snmp-discovery/mapping"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -285,6 +287,51 @@ func TestAnnotateEntitiesWithRunID_VMInterfaceTopLevel(t *testing.T) {
 	assert.Equal(t, "run-xyz", vmIface.Metadata["run_id"])
 	require.NotNil(t, vm.Metadata, "nested VM via VMInterface.VirtualMachine must get Metadata")
 	assert.Equal(t, "run-xyz", vm.Metadata["run_id"])
+}
+
+// Runner-level ordering invariant: when target.NetboxID is set on a VM
+// target, source_match must end up on every reference NetBox uses to
+// resolve the VM — including the cycle-break stub embedded at
+// vm.PrimaryIp4.AssignedObject.VirtualMachine. Mirrors the runner's
+// production sequence: annotateDeviceWithSourceMatch BEFORE
+// TransformToVirtualMachine.
+func TestVMTargetSourceMatchPropagatesThroughTransform(t *testing.T) {
+	dev := &diode.Device{Name: stringPtr("vyos-edge-1")}
+	primaryIface := &diode.Interface{Device: dev, Name: stringPtr("eth0")}
+	dev.PrimaryIp4 = &diode.IPAddress{Address: stringPtr("192.0.2.1/24"), AssignedObject: primaryIface}
+
+	// Production sequence (runner.go): source_match FIRST, then transform.
+	entities := []diode.Entity{dev, primaryIface}
+	annotateDeviceWithSourceMatch(entities, 42)
+	entities = mapping.TransformToVirtualMachine(
+		entities,
+		&config.Defaults{Type: config.TargetTypeVirtualMachine, Cluster: "vyos-cluster"},
+	)
+
+	var vm *diode.VirtualMachine
+	for _, e := range entities {
+		if v, ok := e.(*diode.VirtualMachine); ok {
+			vm = v
+		}
+	}
+	require.NotNil(t, vm, "missing VM after transform")
+
+	// Top-level VM has source_match (carried from Device via Metadata pointer share).
+	sm, ok := vm.Metadata["source_match"].(diode.Metadata)
+	require.True(t, ok, "vm.Metadata[source_match]: got %T, want diode.Metadata", vm.Metadata["source_match"])
+	assert.Equal(t, 42, sm["netbox_id"])
+
+	// Cycle-break stub at vm.PrimaryIp4.AssignedObject.VirtualMachine
+	// carries the same source_match (newVMMatchStub captures it at
+	// construction time — would be missing if annotation ran AFTER the
+	// transform).
+	require.NotNil(t, vm.PrimaryIp4, "vm.PrimaryIp4: got nil, want rebuilt snapshot")
+	stubIface, ok := vm.PrimaryIp4.AssignedObject.(*diode.VMInterface)
+	require.True(t, ok, "vm.PrimaryIp4.AssignedObject: got %T, want *VMInterface", vm.PrimaryIp4.AssignedObject)
+	require.NotNil(t, stubIface.VirtualMachine, "cycle-break stub: missing VirtualMachine ref")
+	stubSM, ok := stubIface.VirtualMachine.Metadata["source_match"].(diode.Metadata)
+	require.True(t, ok, "cycle-break stub.Metadata[source_match]: missing — newVMMatchStub did not capture it from rich VM")
+	assert.Equal(t, 42, stubSM["netbox_id"])
 }
 
 // Helper function for tests

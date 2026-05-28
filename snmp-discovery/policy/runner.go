@@ -371,6 +371,23 @@ func (r *Runner) runWithMetadata(target config.Target, parentTarget string) {
 		return
 	}
 
+	// source_match annotation MUST happen on the Device-rooted graph
+	// BEFORE the VM-target transform runs. Reason: deviceToVM
+	// (virtualmachine.go) builds the cycle-break stub for
+	// VM.PrimaryIp4.AssignedObject.VirtualMachine via newVMMatchStub,
+	// which captures Metadata["source_match"] by value at construction
+	// time. Annotating after the transform would leave the rich
+	// top-level VM correctly stamped but the embedded cycle-break stub
+	// missing source_match — breaking the NetBox plugin matcher path
+	// under `target.netbox_id` rediscovery. The Device→VM Metadata
+	// carry in deviceToVM (`Metadata: d.Metadata`) propagates the
+	// stamp forward into the VM.
+	def := r.resolveTargetDefaults(target)
+	isVM := strings.EqualFold(def.Type, config.TargetTypeVirtualMachine)
+	if target.NetboxID != nil {
+		annotateDeviceWithSourceMatch(entities, *target.NetboxID)
+	}
+
 	// VM-target rewrite: when defaults.Type == VirtualMachine, transform
 	// the Device-rooted entity graph into a VirtualMachine-rooted one
 	// (Device->VM, Interface->VMInterface, IPs re-anchored, VLANs
@@ -378,17 +395,12 @@ func (r *Runner) runWithMetadata(target config.Target, parentTarget string) {
 	// helpers below have sibling VM-aware branches that handle the
 	// resulting graph. Default behaviour (Type unset or "device") is
 	// unchanged.
-	def := r.resolveTargetDefaults(target)
-	isVM := strings.EqualFold(def.Type, config.TargetTypeVirtualMachine)
 	if isVM {
 		entities = mapping.TransformToVirtualMachine(entities, def)
 		r.logger.Debug("transformed entities to VirtualMachine graph",
 			"host", target.Host, "policy", policyName, "entity_count", len(entities))
 	}
 
-	if target.NetboxID != nil {
-		annotateDeviceWithSourceMatch(entities, *target.NetboxID)
-	}
 	annotateEntitiesWithRunID(entities, run.ID)
 	r.logEntitiesForIngestion(entities)
 

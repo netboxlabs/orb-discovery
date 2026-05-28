@@ -513,7 +513,10 @@ func TestTransformToVirtualMachine_PrimaryIPRebuilt(t *testing.T) {
 	// the original name-only stub and broke matching when VM names
 	// were unique only within a cluster.
 	if stubVM.Cluster == nil {
-		t.Error("stubVM.Cluster: got nil, want matcher field carried from rich VM")
+		t.Fatal("stubVM.Cluster: got nil, want matcher field carried from rich VM")
+	}
+	if stubVM.Cluster.Name == nil || *stubVM.Cluster.Name != "vyos-cluster" {
+		t.Errorf("stubVM.Cluster.Name: got %v, want vyos-cluster", stubVM.Cluster.Name)
 	}
 	// Cycle-safety: stubVM.PrimaryIp4 may be a matcher IP, but its
 	// AssignedObject MUST be nil so the chain terminates one hop
@@ -574,6 +577,65 @@ func TestTransformToVirtualMachine_PrimaryIPNilAssignmentPreserved(t *testing.T)
 	}
 	if vm.PrimaryIp4.AssignedObject != nil {
 		t.Errorf("VM.PrimaryIp4.AssignedObject: got %T, want nil (passthrough)", vm.PrimaryIp4.AssignedObject)
+	}
+}
+
+// When source_match is stamped on the source Device BEFORE the
+// transform (the runner's pre-transform ordering), it must propagate
+// onto the rich VM (via deviceToVM's Metadata carry) AND onto the
+// cycle-break VM stub embedded at vm.PrimaryIp4.AssignedObject.
+// VirtualMachine. newVMMatchStub captures source_match by value at
+// stub-construction time, so any post-transform stamp would miss this
+// embedded stub even if it reached the top-level VM.
+func TestTransformToVirtualMachine_PrimaryIPStubCarriesSourceMatchWhenStampedPreTransform(t *testing.T) {
+	dev := &diode.Device{Name: sp("vyos-edge-1")}
+	primaryIface := &diode.Interface{Device: dev, Name: sp("eth0")}
+	dev.PrimaryIp4 = &diode.IPAddress{Address: sp("192.0.2.1/24"), AssignedObject: primaryIface}
+	// Simulate the runner's pre-transform annotateDeviceWithSourceMatch
+	// step: stamp source_match on the Device's Metadata. deviceToVM
+	// pointer-shares Metadata so the VM picks it up.
+	dev.Metadata = diode.Metadata{
+		"source_match": diode.Metadata{"netbox_id": 42},
+	}
+
+	out := mapping.TransformToVirtualMachine(
+		[]diode.Entity{dev, primaryIface},
+		&config.Defaults{Type: config.TargetTypeVirtualMachine, Cluster: "vyos-cluster"},
+	)
+
+	var vm *diode.VirtualMachine
+	for _, e := range out {
+		if v, ok := e.(*diode.VirtualMachine); ok {
+			vm = v
+		}
+	}
+	if vm == nil {
+		t.Fatal("missing VM in transform output")
+	}
+	if sm, ok := vm.Metadata["source_match"]; !ok || sm == nil {
+		t.Fatalf("vm.Metadata[source_match]: got %v, want propagated from Device", sm)
+	}
+	if vm.PrimaryIp4 == nil {
+		t.Fatal("vm.PrimaryIp4: got nil, want rebuilt snapshot")
+	}
+	stubIface, ok := vm.PrimaryIp4.AssignedObject.(*diode.VMInterface)
+	if !ok {
+		t.Fatalf("vm.PrimaryIp4.AssignedObject: got %T, want *VMInterface", vm.PrimaryIp4.AssignedObject)
+	}
+	if stubIface.VirtualMachine == nil {
+		t.Fatal("cycle-break VM stub: got nil")
+	}
+	stubVM := stubIface.VirtualMachine
+	sm, ok := stubVM.Metadata["source_match"]
+	if !ok {
+		t.Fatal("cycle-break stub.Metadata[source_match]: missing — newVMMatchStub failed to capture it from rich VM")
+	}
+	smMap, ok := sm.(diode.Metadata)
+	if !ok {
+		t.Fatalf("cycle-break stub.Metadata[source_match]: got %T, want diode.Metadata", sm)
+	}
+	if smMap["netbox_id"] != 42 {
+		t.Errorf("cycle-break stub.Metadata[source_match].netbox_id: got %v, want 42", smMap["netbox_id"])
 	}
 }
 

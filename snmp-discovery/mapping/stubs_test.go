@@ -691,16 +691,32 @@ func TestPruneNestedRefsVM_NoOpOnEmptyOrNil(t *testing.T) {
 }
 
 // Regression: if two top-level VMInterfaces share the same Name, the
-// stubForIface owner-rewrite must not silently rebind a nested ref to
-// the first match — mirrors PruneNestedRefs's ambiguity handling for
-// stacks (PruneNestedRefs's `len(tops) == 1` guard).
+// stubForIface owner-rewrite must NOT silently rebind a nested ref to
+// whichever entry happened to land in the by-name index first. Mirrors
+// PruneNestedRefs's `len(tops) == 1` guard for cross-member duplicates.
+//
+// Discriminator: dupA and dupB carry distinct PrimaryMacAddress values.
+// newVMInterfaceStub copies PrimaryMacAddress (via newMACMatchStub) from
+// its `owner` argument. With the guard, owner stays as the original
+// `ref` pointer (== dupB), so the stub's MAC must reflect dupB's MAC,
+// NOT dupA's. A first-wins map (the buggy shape) would yield dupA's MAC.
 func TestPruneNestedRefsVM_AmbiguousNameLeavesOwnerUnchanged(t *testing.T) {
 	vm := &diode.VirtualMachine{Name: strPtr("v1")}
-	dupA := &diode.VMInterface{Name: strPtr("dup"), VirtualMachine: vm}
-	dupB := &diode.VMInterface{Name: strPtr("dup"), VirtualMachine: vm}
+	dupAMac := "aa:aa:aa:aa:aa:aa"
+	dupBMac := "bb:bb:bb:bb:bb:bb"
+	dupA := &diode.VMInterface{
+		Name:              strPtr("dup"),
+		VirtualMachine:    vm,
+		PrimaryMacAddress: &diode.MACAddress{MacAddress: &dupAMac},
+	}
+	dupB := &diode.VMInterface{
+		Name:              strPtr("dup"),
+		VirtualMachine:    vm,
+		PrimaryMacAddress: &diode.MACAddress{MacAddress: &dupBMac},
+	}
 	// nested ref's pointer identity == dupB; if the prune rewires by
 	// name it would resolve to dupA (the first one inserted into the
-	// index) instead of preserving dupB.
+	// index) instead of preserving dupB's identity.
 	parent := &diode.VMInterface{
 		Name:           strPtr("child"),
 		VirtualMachine: vm,
@@ -713,10 +729,15 @@ func TestPruneNestedRefsVM_AmbiguousNameLeavesOwnerUnchanged(t *testing.T) {
 	require.NotNil(t, parent.Parent, "parent.Parent must remain set")
 	assert.Equal(t, "dup", *parent.Parent.Name,
 		"ambiguous-name parent ref must still resolve to the 'dup' identity, not be dropped")
-	// We don't assert which dup* the stub points at (the matcher cares
-	// only about Name + VirtualMachine matcher stub), but pointer
-	// equality between the stub and either rich top-level entity would
-	// reintroduce nested VirtualMachine back-edges.
 	assert.NotSame(t, dupA, parent.Parent, "parent.Parent must be a stub, not the rich dupA")
 	assert.NotSame(t, dupB, parent.Parent, "parent.Parent must be a stub, not the rich dupB")
+
+	// The discriminating assertion: the stub MUST carry dupB's MAC,
+	// because the guard leaves owner = ref (== dupB) when the by-name
+	// lookup is ambiguous. A first-wins map would produce dupA's MAC.
+	require.NotNil(t, parent.Parent.PrimaryMacAddress,
+		"parent.Parent.PrimaryMacAddress must be populated from the unambiguous owner")
+	require.NotNil(t, parent.Parent.PrimaryMacAddress.MacAddress)
+	assert.Equal(t, dupBMac, *parent.Parent.PrimaryMacAddress.MacAddress,
+		"guard must leave owner = the original ref (dupB), not silently rebind to dupA")
 }
