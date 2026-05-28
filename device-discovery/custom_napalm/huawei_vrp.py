@@ -406,11 +406,14 @@ def classify_module_type_vrp(board: str, model: str) -> str:
 
 def _vrp_get_modules_impl(driver) -> dict | None:
     """
-    Standalone modular slot-bay discovery for Huawei CE12800 / NE40E.
+    Standalone modular slot-bay discovery for Huawei CE12800.
 
     Joins `display device` (slot + board type) with `display esn`
-    (slot -> serial). No optic sub-bays (no display transceiver template);
-    no CSS-of-modular dispatch (documented limitation).
+    (slot -> serial). Scoped to the CloudEngine `Device status:` 8-column
+    layout that the `huawei_vrp_display_device` ntc-template parses. NE40E
+    `display device` uses a different 6-column layout the template does
+    not match, so NE40E returns no modules in v1 (documented limitation
+    alongside no optic sub-bays and no CSS-of-modular dispatch).
     """
     try:
         dev_raw = driver.device.send_command("display device")
