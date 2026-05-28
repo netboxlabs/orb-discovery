@@ -3,8 +3,8 @@
 from pathlib import Path
 
 import pytest
-from custom_napalm.iosxr_netconf import IOSXRNETCONFDriver
 
+from custom_napalm.iosxr_netconf import IOSXRNETCONFDriver
 from tests.custom_drivers.base_test import BaseDriverTest
 from tests.custom_drivers.mock_device import FakeNetconfConn
 
