@@ -101,8 +101,9 @@ type Defaults struct {
 	VLAN                     VLANDefaults       `yaml:"vlan,omitempty"`
 	InterfacePatterns        []InterfacePattern `yaml:"interface_patterns,omitempty"`
 	InterfaceExcludePatterns []string           `yaml:"interface_exclude_patterns,omitempty"`
-	Type                     string             `yaml:"type,omitempty"`    // TargetTypeDevice | TargetTypeVirtualMachine; default Device
-	Cluster                  string             `yaml:"cluster,omitempty"` // optional VM cluster name; ignored when Type == TargetTypeDevice
+	Type                     string             `yaml:"type,omitempty"`         // TargetTypeDevice | TargetTypeVirtualMachine; default Device
+	Cluster                  string             `yaml:"cluster,omitempty"`      // optional VM cluster name; ignored when Type == TargetTypeDevice
+	ClusterType              string             `yaml:"cluster_type,omitempty"` // optional VM cluster type (NetBox virtualization.ClusterType); required to auto-create a Cluster
 }
 
 // MergeDefaults merges target-level override defaults with policy-level defaults
@@ -210,12 +211,15 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 		merged.InterfaceExcludePatterns = overrideDefaults.InterfaceExcludePatterns
 	}
 
-	// Override Type / Cluster if provided.
+	// Override Type / Cluster / ClusterType if provided.
 	if overrideDefaults.Type != "" {
 		merged.Type = overrideDefaults.Type
 	}
 	if overrideDefaults.Cluster != "" {
 		merged.Cluster = overrideDefaults.Cluster
+	}
+	if overrideDefaults.ClusterType != "" {
+		merged.ClusterType = overrideDefaults.ClusterType
 	}
 
 	return &merged

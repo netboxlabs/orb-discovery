@@ -365,6 +365,20 @@ func TestMergeDefaults_TypeAndCluster(t *testing.T) {
 	)
 	assert.Equal(t, TargetTypeVirtualMachine, merged3.Type)
 	assert.Equal(t, "override-cluster", merged3.Cluster)
+
+	// ClusterType merges and follows the same override-wins rule.
+	merged4 := MergeDefaults(
+		&Defaults{Type: TargetTypeVirtualMachine, ClusterType: "policy-type"},
+		&Defaults{ClusterType: "override-type"},
+	)
+	assert.Equal(t, "override-type", merged4.ClusterType)
+
+	// Empty override ClusterType must not clobber a non-empty policy ClusterType.
+	merged5 := MergeDefaults(
+		&Defaults{Type: TargetTypeVirtualMachine, ClusterType: "policy-type"},
+		&Defaults{},
+	)
+	assert.Equal(t, "policy-type", merged5.ClusterType)
 }
 
 func TestTargetNetboxID_parsed(t *testing.T) {

@@ -415,6 +415,50 @@ func TestTransformToVirtualMachine_ClusterOnlyWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestTransformToVirtualMachine_ClusterTypeSetWhenConfigured(t *testing.T) {
+	// When defaults.cluster_type is set alongside defaults.cluster,
+	// the emitted Cluster carries a Type — required by NetBox's
+	// virtualization.cluster model for on-the-fly cluster creation.
+	dev := &diode.Device{Name: sp("vyos-edge-1")}
+	out := mapping.TransformToVirtualMachine(
+		[]diode.Entity{dev},
+		&config.Defaults{
+			Type:        config.TargetTypeVirtualMachine,
+			Cluster:     "proxmox-a",
+			ClusterType: "Proxmox",
+		},
+	)
+	vm := out[0].(*diode.VirtualMachine)
+	if vm.Cluster == nil || vm.Cluster.Name == nil || *vm.Cluster.Name != "proxmox-a" {
+		t.Fatalf("VM.Cluster: got %v, want Name=proxmox-a", vm.Cluster)
+	}
+	if vm.Cluster.Type == nil || vm.Cluster.Type.Name == nil || *vm.Cluster.Type.Name != "Proxmox" {
+		t.Errorf("VM.Cluster.Type: got %v, want Name=Proxmox (required by NetBox for cluster auto-create)", vm.Cluster.Type)
+	}
+}
+
+func TestTransformToVirtualMachine_ClusterTypeOmittedWhenUnset(t *testing.T) {
+	// defaults.cluster set, defaults.cluster_type unset: Cluster is
+	// emitted as reference-only (no Type). This relies on the cluster
+	// already existing in NetBox — the Diode reconciler resolves by
+	// name without needing a Type for an existing cluster.
+	dev := &diode.Device{Name: sp("vyos-edge-1")}
+	out := mapping.TransformToVirtualMachine(
+		[]diode.Entity{dev},
+		&config.Defaults{
+			Type:    config.TargetTypeVirtualMachine,
+			Cluster: "pre-existing-cluster",
+		},
+	)
+	vm := out[0].(*diode.VirtualMachine)
+	if vm.Cluster == nil || vm.Cluster.Name == nil || *vm.Cluster.Name != "pre-existing-cluster" {
+		t.Fatalf("VM.Cluster: got %v, want Name=pre-existing-cluster", vm.Cluster)
+	}
+	if vm.Cluster.Type != nil {
+		t.Errorf("VM.Cluster.Type: got %v, want nil when defaults.cluster_type is empty", vm.Cluster.Type)
+	}
+}
+
 func TestTransformToVirtualMachine_PrimaryIPRebuilt(t *testing.T) {
 	dev := &diode.Device{Name: sp("vyos-edge-1")}
 	primaryIface := &diode.Interface{Device: dev, Name: sp("eth0")}

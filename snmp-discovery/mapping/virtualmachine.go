@@ -288,7 +288,19 @@ func deviceToVM(d *diode.Device, defaults *config.Defaults) *diode.VirtualMachin
 	}
 	if defaults != nil && defaults.Cluster != "" {
 		cluster := defaults.Cluster
-		vm.Cluster = &diode.Cluster{Name: &cluster}
+		c := &diode.Cluster{Name: &cluster}
+		// NetBox's virtualization.Cluster requires a ClusterType FK
+		// when the cluster doesn't already exist. Without a Type set
+		// here, the Diode reconciler rejects every changeset with
+		// "virtualization.cluster: type: Field type is required".
+		// Operators who want on-the-fly cluster creation set
+		// defaults.cluster_type alongside defaults.cluster; operators
+		// referencing an existing NetBox cluster can omit cluster_type.
+		if defaults.ClusterType != "" {
+			ct := defaults.ClusterType
+			c.Type = &diode.ClusterType{Name: &ct}
+		}
+		vm.Cluster = c
 	}
 	return vm
 }
