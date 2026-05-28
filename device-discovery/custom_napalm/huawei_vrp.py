@@ -385,7 +385,10 @@ def classify_module_type_vrp(board: str, model: str) -> str:
 
     MPU (main processing unit) -> supervisor; LPU (line) / SFU (fabric) ->
     linecard; PWR/FAN -> psu/fan (not emitted). Board-type token is the
-    primary signal (CE-MPUA, CE-L36CQ-FD, CE-SFU08D, ...).
+    primary signal (CE-MPUA, CE-L36CQ-FD, CE-SFU08D, ...). Unknown board
+    types (e.g. CMU monitoring units) classify as `other` and the emit loop
+    drops them — defaulting to linecard would mis-discover non-forwarding
+    auxiliary FRUs as NetBox linecards.
     """
     b = (board or "").upper()
     if is_optic_pid(model):
@@ -398,7 +401,7 @@ def classify_module_type_vrp(board: str, model: str) -> str:
         return "psu"
     if "FAN" in b:
         return "fan"
-    return "linecard"
+    return "other"
 
 
 def _vrp_get_modules_impl(driver) -> dict | None:
@@ -443,7 +446,7 @@ def _vrp_get_modules_impl(driver) -> dict | None:
         if not serial:
             continue  # serial-less slot is dropped by _validate_bay anyway
         mtype = classify_module_type_vrp(board, board)
-        if mtype in ("psu", "fan"):
+        if mtype in ("psu", "fan", "other"):
             continue
         bays.append(_ModuleBay(
             name=slot, position=slot,
