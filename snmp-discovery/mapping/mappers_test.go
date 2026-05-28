@@ -1138,7 +1138,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 					OID:    "1.3.6.1.2.1.2.2.1.4.1",
 					Index:  "1",
 					Parent: "1.3.6.1.2.1.2.2.1.4",
-					Value:  "2147483647",
+					Value:  "65536",
 					Type:   mapping.Integer,
 				},
 			},
@@ -1167,7 +1167,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 			defaults: nil,
 			expectedEntity: &diode.Interface{
 				Name: mapping.StringPtr("eth0"),
-				Mtu:  int64Ptr(2147483647), // MTU should be set when value is at maximum valid range
+				Mtu:  int64Ptr(65536), // MTU should be set when value is at NetBox's maximum (65536)
 			},
 			expectError: false,
 		},
@@ -1226,7 +1226,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "mapping with MTU just above maximum should result in nil MTU",
+			name: "mapping with MTU just above NetBox's maximum (65537) should result in nil MTU",
 			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
 				"1.3.6.1.2.1.2.2.1.1.1": {
 					OID:    "1.3.6.1.2.1.2.2.1.1.1",
@@ -1246,7 +1246,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 					OID:    "1.3.6.1.2.1.2.2.1.4.1",
 					Index:  "1",
 					Parent: "1.3.6.1.2.1.2.2.1.4",
-					Value:  "2147483648",
+					Value:  "65537",
 					Type:   mapping.Integer,
 				},
 			},
@@ -1275,7 +1275,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 			defaults: nil,
 			expectedEntity: &diode.Interface{
 				Name: mapping.StringPtr("eth0"),
-				Mtu:  nil, // MTU should be nil when value is just above maximum
+				Mtu:  nil, // MTU should be nil when value is just above NetBox's maximum (65536)
 			},
 			expectError: false,
 		},

@@ -21,10 +21,15 @@ const (
 	maxInterfaceSpeed = 2147483647
 )
 
-// MTU constants
+// MTU constants. The upper bound matches NetBox's own
+// PositiveIntegerField(MaxValueValidator(65536)) on dcim.Interface.mtu and
+// virtualization.VMInterface.mtu — values outside [1, 65536] are rejected
+// by the reconciler, which would drop the entire interface (and its IPs /
+// MACs) from a change-set. We skip the field instead so the rest of the
+// entity still ingests.
 const (
 	minInterfaceMTU = 1
-	maxInterfaceMTU = 2147483647
+	maxInterfaceMTU = 65536
 )
 
 // IPAddressMapper is a struct that maps IP addresses to entities
@@ -837,9 +842,11 @@ func (m *InterfaceMapper) Map(values map[ObjectIDIndex]*ObjectIDValue, mappingEn
 						m.logger.Debug("mtu is zero, skipping", "value", value.Value)
 						continue
 					}
-					// Check if MTU is within valid range (1 to 2147483647 inclusive) and not overflowing int32
+					// Check if MTU is within NetBox's accepted range (1 to 65536 inclusive).
+					// Values outside this range are skipped (field left unset) rather
+					// than dropping the whole interface in the reconciler.
 					if mtu < minInterfaceMTU || mtu > maxInterfaceMTU {
-						m.logger.Warn("interface MTU is outside valid range (1-2147483647) or overflows int32", "mtu", mtu,
+						m.logger.Warn("interface MTU is outside valid range (1-65536), skipping field", "mtu", mtu,
 							"value", value.Value, "mapping_id", propertyMappingEntry.OID, "interface_index", objectID)
 						continue
 					}
