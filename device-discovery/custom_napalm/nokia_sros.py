@@ -656,6 +656,9 @@ def _nokia_sros_get_modules_impl(driver) -> dict | None:
     except NCClientError as e:
         logger.warning("nokia_sros.get_modules: card RPC failed: %s", e)
         return None
+    if getattr(reply, "data_xml", None) is None:
+        logger.warning("nokia_sros.get_modules: card RPC returned empty data_xml")
+        return None
     try:
         state = _parse_xml(reply.data_xml).find(".//state_ns:state", _NSMAP)
     except etree.XMLSyntaxError as e:
@@ -672,12 +675,15 @@ def _nokia_sros_get_modules_impl(driver) -> dict | None:
     interfaces_by_bay: dict[str, list[str]] = {}
     try:
         tx_reply = driver.conn.get(filter=_FILTER_PORTS_TRANSCEIVER)
-        tx_state = _parse_xml(tx_reply.data_xml).find(".//state_ns:state", _NSMAP)
-        if tx_state is not None:
-            tx_rows = _nokia_sros_transceiver_rows_from_state_xml(tx_state)
-            interfaces_by_bay = _nokia_sros_attach_transceiver_sub_bays(
-                tx_rows, mda_bays_by_path,
-            )
+        if getattr(tx_reply, "data_xml", None) is None:
+            logger.warning("nokia_sros.get_modules: transceiver RPC returned empty data_xml")
+        else:
+            tx_state = _parse_xml(tx_reply.data_xml).find(".//state_ns:state", _NSMAP)
+            if tx_state is not None:
+                tx_rows = _nokia_sros_transceiver_rows_from_state_xml(tx_state)
+                interfaces_by_bay = _nokia_sros_attach_transceiver_sub_bays(
+                    tx_rows, mda_bays_by_path,
+                )
     except (NCClientError, etree.XMLSyntaxError) as e:
         # Non-fatal: cards-only payload still ships.
         logger.warning("nokia_sros.get_modules: transceiver RPC failed: %s", e)

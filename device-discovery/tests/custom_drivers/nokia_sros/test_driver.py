@@ -31,3 +31,53 @@ def test_driver_exposes_get_modules():
     from custom_napalm.nokia_sros import SROSDriver
     assert hasattr(SROSDriver, "get_modules")
     assert callable(SROSDriver.get_modules)
+
+
+# ---------------------------------------------------------------------------
+# Transceiver attachment — port-id form coverage
+# ---------------------------------------------------------------------------
+
+
+def _build_mda_bay_map():
+    """Construct a single MDA bay map for transceiver-attachment unit tests."""
+    from custom_napalm._modules import ModuleBay, ModuleEntry
+    parent = ModuleBay(
+        name="1", position="1",
+        module=ModuleEntry(model="IOM", serial="SN-IOM-1", type="linecard"),
+    )
+    mda = ModuleBay(
+        name="1/1", position="1/1",
+        module=ModuleEntry(model="MDA", serial="SN-MDA-1", type="linecard"),
+    )
+    parent.module.sub_bays.append(mda)
+    return {"1/1": mda}, parent
+
+
+def test_attach_transceiver_classic_3_segment_port_id():
+    """Classic slot/mda/port (1/1/1) → MDA path 1/1, attaches under correct bay."""
+    from custom_napalm.nokia_sros import _nokia_sros_attach_transceiver_sub_bays
+    mda_map, _ = _build_mda_bay_map()
+    rows = [{"port_id": "1/1/1", "model": "SFP-10G-LR", "sn": "OPT1"}]
+    ifaces = _nokia_sros_attach_transceiver_sub_bays(rows, mda_map)
+    assert ifaces == {"1/1": ["1/1/1"], "1/1/1": ["1/1/1"]}
+    assert mda_map["1/1"].module.sub_bays[0].name == "1/1/1"
+
+
+def test_attach_transceiver_fp4_c_cage_port_id():
+    """FP4 connector-cage port-id (1/1/c2/1) routes to MDA path 1/1."""
+    from custom_napalm.nokia_sros import _nokia_sros_attach_transceiver_sub_bays
+    mda_map, _ = _build_mda_bay_map()
+    rows = [{"port_id": "1/1/c2/1", "model": "QSFP28-SR4", "sn": "OPT2"}]
+    ifaces = _nokia_sros_attach_transceiver_sub_bays(rows, mda_map)
+    assert ifaces == {"1/1": ["1/1/c2/1"], "1/1/c2/1": ["1/1/c2/1"]}
+    assert mda_map["1/1"].module.sub_bays[0].name == "1/1/c2/1"
+
+
+def test_attach_transceiver_unknown_mda_path_dropped():
+    """A port-id whose slot/mda doesn't match any known MDA is silently dropped."""
+    from custom_napalm.nokia_sros import _nokia_sros_attach_transceiver_sub_bays
+    mda_map, _ = _build_mda_bay_map()
+    rows = [{"port_id": "9/9/1", "model": "SFP-X", "sn": "OPT3"}]
+    ifaces = _nokia_sros_attach_transceiver_sub_bays(rows, mda_map)
+    assert ifaces == {}
+    assert mda_map["1/1"].module.sub_bays == []
