@@ -27,6 +27,7 @@ import napalm.base as _napalm_base
 from lxml import etree
 from napalm.base import models
 from napalm.base.helpers import convert
+from ncclient import NCClientError
 
 from custom_napalm._modules import (
     MemberModules as _MemberModules,
@@ -630,7 +631,11 @@ def _nokia_sros_attach_transceiver_sub_bays(
             name=port_id, position=port_id,
             module=_ModuleEntry(model=model, serial=sn, type="transceiver", description=""),
         ))
+        # Emit BOTH the MDA-path key (linecards mode → interface routes to
+        # MDA module) and the per-port key (full mode → deepest-bay-wins
+        # routes interface to its specific transceiver sub-bay).
         interfaces_by_bay.setdefault(mda_path, []).append(port_id)
+        interfaces_by_bay[port_id] = [port_id]
     return interfaces_by_bay
 
 
@@ -642,14 +647,18 @@ def _nokia_sros_get_modules_impl(driver) -> dict | None:
     Returns None if no card survives validation; the transceiver pass is
     non-fatal — a card-only envelope still ships if the second RPC fails.
     """
+    # Narrow except scope: ncclient transport / RPC errors and lxml parse
+    # errors are recoverable (return None / log + continue). Programming
+    # errors (AttributeError on driver.conn=None, ImportError) propagate
+    # so they surface as bugs instead of being silently masked.
     try:
         reply = driver.conn.get(filter=_FILTER_MODULES)
-    except Exception as e:
+    except NCClientError as e:
         logger.warning("nokia_sros.get_modules: card RPC failed: %s", e)
         return None
     try:
         state = _parse_xml(reply.data_xml).find(".//state_ns:state", _NSMAP)
-    except Exception as e:
+    except etree.XMLSyntaxError as e:
         logger.warning("nokia_sros.get_modules: card XML parse failed: %s", e)
         return None
     if state is None:
@@ -669,7 +678,8 @@ def _nokia_sros_get_modules_impl(driver) -> dict | None:
             interfaces_by_bay = _nokia_sros_attach_transceiver_sub_bays(
                 tx_rows, mda_bays_by_path,
             )
-    except Exception as e:
+    except (NCClientError, etree.XMLSyntaxError) as e:
+        # Non-fatal: cards-only payload still ships.
         logger.warning("nokia_sros.get_modules: transceiver RPC failed: %s", e)
 
     return _modules_to_payload({

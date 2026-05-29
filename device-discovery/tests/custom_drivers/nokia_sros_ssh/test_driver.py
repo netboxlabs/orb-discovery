@@ -122,21 +122,22 @@ def test_driver_exposes_get_modules():
 
 
 def test_get_modules_parity_with_netconf():
-    """SR-12 envelope MUST be identical between NETCONF and SSH drivers."""
-    import json
-    netconf_path = (
-        Path(__file__).parents[1]
-        / "nokia_sros"
-        / "mock_data"
-        / "test_get_modules"
-        / "sr12_full"
-        / "expected_result.json"
-    )
-    ssh_path = (
-        Path(__file__).parent
-        / "mock_data"
-        / "test_get_modules"
-        / "sr12_full"
-        / "expected_result.json"
-    )
-    assert json.loads(netconf_path.read_text()) == json.loads(ssh_path.read_text())
+    """Run both drivers against the sr12_full fixtures; assert envelopes match."""
+    from custom_napalm.nokia_sros import SROSDriver
+    from tests.custom_drivers.mock_device import FakeNetconfConn
+
+    netconf_mock = Path(__file__).parents[1] / "nokia_sros" / "mock_data" / "test_get_modules" / "sr12_full"
+    netconf_drv = object.__new__(SROSDriver)
+    netconf_drv.hostname = netconf_drv.username = netconf_drv.password = "test"
+    netconf_drv.timeout = 60
+    netconf_drv.conn = FakeNetconfConn(netconf_mock)
+    netconf_envelope = netconf_drv.get_modules()
+
+    ssh_mock = Path(__file__).parent / "mock_data" / "test_get_modules" / "sr12_full"
+    ssh_drv = object.__new__(SROSSSHDriver)
+    ssh_drv.hostname = ssh_drv.username = ssh_drv.password = "test"
+    ssh_drv.timeout = 60
+    ssh_drv.device = FakeCLIDevice(ssh_mock)
+    ssh_envelope = ssh_drv.get_modules()
+
+    assert netconf_envelope == ssh_envelope

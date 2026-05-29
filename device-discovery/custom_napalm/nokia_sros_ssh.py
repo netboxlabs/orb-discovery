@@ -196,10 +196,13 @@ def _nokia_sros_ssh_split_blocks(text: str) -> list[str]:
 
 
 def _nokia_sros_ssh_extract_fields(block: str) -> dict[str, str]:
-    """Extract 'Label : Value' rows from a single block."""
+    # SR-OS prints labels in mixed case across releases — classic CLI uses
+    # title-case ("Card Type"), MD-CLI and SR-OS 19R8+ use sentence-case
+    # ("Card type"). Store lower-cased keys so lookups can normalise too.
+    """Extract 'Label : Value' rows. Keys are lower-cased for case-insensitive lookup."""
     out: dict[str, str] = {}
     for m in _NOKIA_SROS_FIELD_RE.finditer(block or ""):
-        out[m.group("label").strip()] = m.group("value").strip()
+        out[m.group("label").strip().lower()] = m.group("value").strip()
     return out
 
 
@@ -210,6 +213,11 @@ def _nokia_sros_ssh_parse_cards(text: str) -> list[dict]:
     for block in _nokia_sros_ssh_split_blocks(text):
         hdr = _NOKIA_SROS_CARD_HDR_RE.search(block)
         if hdr is not None:
+            if pending_slot is not None:
+                logger.warning(
+                    "nokia_sros_ssh: card %s header had no field block — dropping",
+                    pending_slot,
+                )
             pending_slot = hdr.group("slot")
             continue
         if pending_slot is None:
@@ -217,9 +225,9 @@ def _nokia_sros_ssh_parse_cards(text: str) -> list[dict]:
         fields = _nokia_sros_ssh_extract_fields(block)
         rows.append({
             "slot": pending_slot,
-            "equipped_type": fields.get("Card Type", ""),
-            "pid": fields.get("Part Number", ""),
-            "sn": fields.get("Serial Number", ""),
+            "equipped_type": fields.get("card type", ""),
+            "pid": fields.get("part number", ""),
+            "sn": fields.get("serial number", ""),
         })
         pending_slot = None
     return rows
@@ -232,6 +240,11 @@ def _nokia_sros_ssh_parse_mdas(text: str) -> list[dict]:
     for block in _nokia_sros_ssh_split_blocks(text):
         hdr = _NOKIA_SROS_MDA_HDR_RE.search(block)
         if hdr is not None:
+            if pending is not None:
+                logger.warning(
+                    "nokia_sros_ssh: mda %s/%s header had no field block — dropping",
+                    pending[0], pending[1],
+                )
             pending = (hdr.group("slot"), hdr.group("mda"))
             continue
         if pending is None:
@@ -241,9 +254,9 @@ def _nokia_sros_ssh_parse_mdas(text: str) -> list[dict]:
         rows.append({
             "parent_slot": parent_slot,
             "mda_slot": mda_slot,
-            "equipped_type": fields.get("MDA Type", ""),
-            "pid": fields.get("Part Number", ""),
-            "sn": fields.get("Serial Number", ""),
+            "equipped_type": fields.get("mda type", ""),
+            "pid": fields.get("part number", ""),
+            "sn": fields.get("serial number", ""),
         })
         pending = None
     return rows
@@ -260,8 +273,8 @@ def _nokia_sros_ssh_parse_port_transceiver(text: str) -> dict | None:
         if pending_port is None:
             continue
         fields = _nokia_sros_ssh_extract_fields(block)
-        model = fields.get("Model", "")
-        sn = fields.get("Serial Number", "")
+        model = fields.get("model", "")
+        sn = fields.get("serial number", "")
         if not (model and sn):
             pending_port = None
             continue
@@ -269,7 +282,7 @@ def _nokia_sros_ssh_parse_port_transceiver(text: str) -> dict | None:
             "port_id": pending_port,
             "model": model,
             "sn": sn,
-            "pid": fields.get("Part Number", ""),
+            "pid": fields.get("part number", ""),
         }
     return None
 
@@ -360,7 +373,12 @@ def _nokia_sros_ssh_attach_transceivers(
             name=port_id, position=port_id,
             module=_ModuleEntry(model=model, serial=sn, type="transceiver", description=""),
         ))
+        # Emit BOTH the MDA-path key (so linecards mode routes the interface
+        # to the MDA module) and the per-port key (so full mode's
+        # deepest-bay-wins routing attaches the interface to its specific
+        # transceiver sub-bay).
         interfaces_by_bay.setdefault(mda_path, []).append(port_id)
+        interfaces_by_bay[port_id] = [port_id]
     return interfaces_by_bay
 
 
@@ -380,6 +398,32 @@ def _nokia_sros_ssh_assemble(
     return _modules_to_payload({
         None: _MemberModules(bays=bays, interfaces_by_bay=interfaces_by_bay),
     })
+
+
+def _nokia_sros_ssh_collect_transceivers(driver, mda_rows: list[dict]) -> list[dict]:
+    """Iterate `show port slot/mda/N detail` for each MDA and return transceiver rows."""
+    transceiver_rows: list[dict] = []
+    for row in mda_rows:
+        slot = row.get("parent_slot") or ""
+        mda = row.get("mda_slot") or ""
+        if not (slot and mda):
+            continue
+        for port_n in range(1, 49):
+            cmd = f"show port {slot}/{mda}/{port_n} detail"
+            try:
+                raw = driver.device.send_command(cmd)
+            except Exception:
+                continue
+            if not raw or not raw.strip():
+                continue
+            # SR-OS returns "MINOR: CLI Port id 1/1/49 was not found..." for
+            # non-existent port ids — Netmiko doesn't raise, so guard here.
+            if "MINOR:" in raw or "Error:" in raw:
+                continue
+            tx = _nokia_sros_ssh_parse_port_transceiver(raw)
+            if tx is not None:
+                transceiver_rows.append(tx)
+    return transceiver_rows
 
 
 def _nokia_sros_ssh_get_modules_impl(driver) -> dict | None:
@@ -408,24 +452,7 @@ def _nokia_sros_ssh_get_modules_impl(driver) -> dict | None:
 
     card_rows = _nokia_sros_ssh_parse_cards(card_raw or "")
     mda_rows = _nokia_sros_ssh_parse_mdas(mda_raw or "")
-
-    transceiver_rows: list[dict] = []
-    for row in mda_rows:
-        slot = row.get("parent_slot") or ""
-        mda = row.get("mda_slot") or ""
-        if not (slot and mda):
-            continue
-        for port_n in range(1, 49):
-            cmd = f"show port {slot}/{mda}/{port_n} detail"
-            try:
-                raw = driver.device.send_command(cmd)
-            except Exception:
-                continue
-            if not raw or not raw.strip():
-                continue
-            tx = _nokia_sros_ssh_parse_port_transceiver(raw)
-            if tx is not None:
-                transceiver_rows.append(tx)
+    transceiver_rows = _nokia_sros_ssh_collect_transceivers(driver, mda_rows)
 
     return _nokia_sros_ssh_assemble(card_rows, mda_rows, transceiver_rows)
 
