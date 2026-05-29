@@ -40,30 +40,24 @@ def test_options_discover_modules_rejects_unknown_value():
 
 
 def test_prefix_parameters_accepts_scope_fields():
-    """PrefixParameters carries the four NetBox Prefix scope fields."""
+    """PrefixParameters carries scope_site and scope_location."""
     from device_discovery.policy.models import PrefixParameters
 
     p = PrefixParameters(
         scope_site="DC-East",
         scope_location="Floor-3",
-        scope_region="EMEA",
-        scope_site_group="MainGroup",
     )
     assert p.scope_site == "DC-East"
     assert p.scope_location == "Floor-3"
-    assert p.scope_region == "EMEA"
-    assert p.scope_site_group == "MainGroup"
 
 
 def test_prefix_parameters_scope_fields_default_to_none():
-    """All four scope fields default to None — back-compat for existing configs."""
+    """Both scope fields default to None — back-compat for existing configs."""
     from device_discovery.policy.models import PrefixParameters
 
     p = PrefixParameters()
     assert p.scope_site is None
     assert p.scope_location is None
-    assert p.scope_region is None
-    assert p.scope_site_group is None
 
 
 def test_prefix_parameters_inherits_ipam_fields():

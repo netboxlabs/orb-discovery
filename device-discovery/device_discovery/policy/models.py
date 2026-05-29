@@ -117,8 +117,6 @@ class PrefixParameters(IpamParameters):
 
     scope_site: str | None = Field(default=None, description="Prefix scope site, optional")
     scope_location: str | None = Field(default=None, description="Prefix scope location, optional")
-    scope_region: str | None = Field(default=None, description="Prefix scope region, optional")
-    scope_site_group: str | None = Field(default=None, description="Prefix scope site group, optional")
 
 
 class Defaults(BaseModel):
@@ -219,14 +217,12 @@ class Options(BaseModel):
     propagate_defaults_to_prefix_scope: bool = Field(
         default=False,
         description=(
-            "When True, an unset defaults.prefix.scope_site falls back "
-            "to defaults.site (unless defaults.site is the literal "
-            "placeholder 'undefined'), and unset scope_location falls "
-            "back to defaults.location. scope_region / scope_site_group "
-            "are always explicit-only (no top-level field to inherit "
-            "from). Explicit defaults.prefix.scope_* always wins. "
-            "Default False preserves the no-cascade behavior — see "
-            "orb-agent#100."
+            "When True AND no explicit defaults.prefix.scope_* is set, "
+            "defaults.site cascades to Prefix.scope_site (unless it's "
+            "the literal placeholder 'undefined') and defaults.location "
+            "cascades to Prefix.scope_location. Any explicit "
+            "defaults.prefix.scope_* skips the cascade wholesale. "
+            "Default False preserves the no-cascade behavior."
         ),
     )
 

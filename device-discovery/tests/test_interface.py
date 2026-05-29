@@ -697,16 +697,14 @@ def test_prefix_emission_no_defaults_scope_empty(sample_diode_device):
     )
     prefix = _extract_prefix(entities)
     assert prefix is not None
-    # scope_* are Site / Location / Region / SiteGroup proto messages; empty
+    # scope_site / scope_location are Site / Location proto messages; empty
     # means their .name is "" (no scope attached).
     assert prefix.scope_site.name == ""
     assert prefix.scope_location.name == ""
-    assert prefix.scope_region.name == ""
-    assert prefix.scope_site_group.name == ""
 
 
 def test_prefix_emission_explicit_scope_site(sample_diode_device):
-    """Explicit defaults.prefix.scope_site → emitted scope_site, others empty."""
+    """Explicit defaults.prefix.scope_site → emitted scope_site, location empty."""
     from device_discovery.interface import build_interface_entities
     from device_discovery.policy.models import Defaults, Options, PrefixParameters
 
@@ -722,12 +720,10 @@ def test_prefix_emission_explicit_scope_site(sample_diode_device):
     assert prefix is not None
     assert prefix.scope_site.name == "DC-East"
     assert prefix.scope_location.name == ""
-    assert prefix.scope_region.name == ""
-    assert prefix.scope_site_group.name == ""
 
 
-def test_prefix_emission_all_four_scope_fields_explicit(sample_diode_device):
-    """All four explicit scope_* set → most-specific wins (location > site > site_group > region)."""
+def test_prefix_emission_both_scope_fields_explicit(sample_diode_device):
+    """Both explicit scope_* set → most-specific wins (location > site)."""
     from device_discovery.interface import build_interface_entities
     from device_discovery.policy.models import Defaults, Options, PrefixParameters
 
@@ -737,8 +733,6 @@ def test_prefix_emission_all_four_scope_fields_explicit(sample_diode_device):
         prefix=PrefixParameters(
             scope_site="DC-East",
             scope_location="Floor-3",
-            scope_region="EMEA",
-            scope_site_group="MainGroup",
         ),
     )
     options = Options()
@@ -749,10 +743,7 @@ def test_prefix_emission_all_four_scope_fields_explicit(sample_diode_device):
     prefix = _extract_prefix(entities)
     # Protobuf scope is a oneof — only the most-specific value is on the wire.
     assert prefix.scope_location.name == "Floor-3"
-    # The other three are unset (default-instance messages, falsy .name).
     assert not prefix.scope_site.name
-    assert not prefix.scope_region.name
-    assert not prefix.scope_site_group.name
 
 
 def test_prefix_emission_cascade_off_blocks_defaults_site(sample_diode_device):

@@ -277,27 +277,23 @@ def _resolve_prefix_scope_kwargs(
     """
     Pick a single Prefix scope_* kwarg honoring the protobuf oneof.
 
-    Reads the four explicit scope fields off ``defaults.prefix`` and, when
+    Reads the two explicit scope fields off ``defaults.prefix`` and, when
     ``options.propagate_defaults_to_prefix_scope`` is True, falls back to
     ``defaults.site`` (skipping the "undefined" placeholder) and
     ``defaults.location``. Explicit per-prefix scope always wins over the
     cascade.
 
-    Diode ``Prefix.scope_{site,location,region,site_group}`` is a protobuf
-    oneof, so only one value travels on the wire — picks the most-specific
-    non-empty candidate (location > site > site_group > region) so callers
-    don't accidentally clobber a granular scope with a broader one.
+    ``Prefix.scope_{site,location}`` is a protobuf oneof, so only one value
+    travels on the wire — picks the most-specific non-empty candidate
+    (location > site) so callers don't accidentally clobber a granular
+    scope with a broader one.
     """
     prefix_scope_site: str | None = None
     prefix_scope_location: str | None = None
-    prefix_scope_region: str | None = None
-    prefix_scope_site_group: str | None = None
 
     if defaults.prefix:
         prefix_scope_site = defaults.prefix.scope_site or None
         prefix_scope_location = defaults.prefix.scope_location or None
-        prefix_scope_region = defaults.prefix.scope_region or None
-        prefix_scope_site_group = defaults.prefix.scope_site_group or None
 
     # Opt-in cascade: defaults.site / defaults.location → Prefix scope.
     # Any explicit defaults.prefix.scope_* puts the operator in "explicit
@@ -306,12 +302,7 @@ def _resolve_prefix_scope_kwargs(
     # oneof precedence over an operator's explicit less-specific choice
     # (e.g. explicit scope_site). The literal "undefined" placeholder for
     # defaults.site is treated as no-value (see Defaults model).
-    any_explicit_prefix_scope = any((
-        prefix_scope_site,
-        prefix_scope_location,
-        prefix_scope_region,
-        prefix_scope_site_group,
-    ))
+    any_explicit_prefix_scope = bool(prefix_scope_site or prefix_scope_location)
     if (
         options
         and options.propagate_defaults_to_prefix_scope
@@ -326,8 +317,6 @@ def _resolve_prefix_scope_kwargs(
     for scope_name, scope_val in (
         ("scope_location", prefix_scope_location),
         ("scope_site", prefix_scope_site),
-        ("scope_site_group", prefix_scope_site_group),
-        ("scope_region", prefix_scope_region),
     ):
         if scope_val:
             scope_kwargs[scope_name] = scope_val
