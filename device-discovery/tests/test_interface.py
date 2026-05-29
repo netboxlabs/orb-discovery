@@ -15,6 +15,7 @@ from device_discovery.policy.models import (
     InterfacePattern,
     IpamParameters,
     ObjectParameters,
+    PrefixParameters,
     VlanParameters,
 )
 from device_discovery.translate import translate_device
@@ -67,7 +68,7 @@ def sample_defaults():
         device=DeviceParameters(comments="testing", tags=["devtag"]),
         interface=ObjectParameters(description="testing", tags=["inttag"]),
         ipaddress=IpamParameters(description="ip test", tags=["iptag"]),
-        prefix=IpamParameters(description="prefix test", tags=["prefixtag"]),
+        prefix=PrefixParameters(description="prefix test", tags=["prefixtag"]),
         vlan=VlanParameters(comments="test"),
     )
 

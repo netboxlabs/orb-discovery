@@ -112,6 +112,38 @@ class IpamParameters(ObjectParameters):
     vrf: str | VrfParameters | None = Field(default=None, description="IPAM VRF, optional")
 
 
+class PrefixParameters(IpamParameters):
+    """
+    Prefix-specific defaults.
+
+    Adds the four NetBox 4.2+ Prefix scope fields (scope_site,
+    scope_location, scope_region, scope_site_group). IPAddress has no
+    scope in NetBox (it inherits the site via the assigned interface
+    → device → site chain), so these fields stay off IpamParameters
+    and only appear here.
+    """
+
+    scope_site: str | None = Field(
+        default=None,
+        description=(
+            "NetBox Prefix scope: site, optional. Explicit-only by default; "
+            "opt-in cascade via options.propagate_defaults_to_prefix_scope."
+        ),
+    )
+    scope_location: str | None = Field(
+        default=None,
+        description="NetBox Prefix scope: location, optional.",
+    )
+    scope_region: str | None = Field(
+        default=None,
+        description="NetBox Prefix scope: region, optional. Cascade does not apply (no top-level region default exists).",
+    )
+    scope_site_group: str | None = Field(
+        default=None,
+        description="NetBox Prefix scope: site_group, optional. Cascade does not apply (no top-level site_group default exists).",
+    )
+
+
 class Defaults(BaseModel):
     """Model for default configuration."""
 
@@ -151,7 +183,7 @@ class Defaults(BaseModel):
     ipaddress: IpamParameters | None = Field(
         default=None, description="IP Address parameters, optional"
     )
-    prefix: IpamParameters | None = Field(
+    prefix: PrefixParameters | None = Field(
         default=None, description="Prefix parameters, optional"
     )
     vlan: VlanParameters | None = Field(
@@ -205,6 +237,19 @@ class Options(BaseModel):
             "and any psu/fan a driver classifies explicitly); transceiver "
             "sub-bays are dropped. 'full' adds the per-port transceiver "
             "sub-bays."
+        ),
+    )
+    propagate_defaults_to_prefix_scope: bool = Field(
+        default=False,
+        description=(
+            "When True, an unset defaults.prefix.scope_site falls back "
+            "to defaults.site (unless defaults.site is the literal "
+            "placeholder 'undefined'), and unset scope_location falls "
+            "back to defaults.location. scope_region / scope_site_group "
+            "are always explicit-only (no top-level field to inherit "
+            "from). Explicit defaults.prefix.scope_* always wins. "
+            "Default False preserves the no-cascade behavior — see "
+            "orb-agent#100."
         ),
     )
 
