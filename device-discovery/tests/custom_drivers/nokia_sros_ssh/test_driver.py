@@ -2,7 +2,11 @@
 
 from pathlib import Path
 
-from custom_napalm.nokia_sros_ssh import SROSSSHDriver, _parse_port_hw_mac_addresses
+from custom_napalm.nokia_sros_ssh import (
+    SROSSSHDriver,
+    _nokia_sros_ssh_parse_port_list,
+    _parse_port_hw_mac_addresses,
+)
 from tests.custom_drivers.base_test import BaseDriverTest
 from tests.custom_drivers.mock_device import FakeCLIDevice
 
@@ -121,23 +125,79 @@ def test_driver_exposes_get_modules():
     assert callable(SROSSSHDriver.get_modules)
 
 
-def test_get_modules_parity_with_netconf():
-    """Run both drivers against the sr12_full fixtures; assert envelopes match."""
+def _run_both_drivers(scenario: str):
+    """Construct one NETCONF and one SSH driver against the named scenario."""
     from custom_napalm.nokia_sros import SROSDriver
     from tests.custom_drivers.mock_device import FakeNetconfConn
 
-    netconf_mock = Path(__file__).parents[1] / "nokia_sros" / "mock_data" / "test_get_modules" / "sr12_full"
+    netconf_mock = Path(__file__).parents[1] / "nokia_sros" / "mock_data" / "test_get_modules" / scenario
     netconf_drv = object.__new__(SROSDriver)
     netconf_drv.hostname = netconf_drv.username = netconf_drv.password = "test"
     netconf_drv.timeout = 60
     netconf_drv.conn = FakeNetconfConn(netconf_mock)
-    netconf_envelope = netconf_drv.get_modules()
 
-    ssh_mock = Path(__file__).parent / "mock_data" / "test_get_modules" / "sr12_full"
+    ssh_mock = Path(__file__).parent / "mock_data" / "test_get_modules" / scenario
     ssh_drv = object.__new__(SROSSSHDriver)
     ssh_drv.hostname = ssh_drv.username = ssh_drv.password = "test"
     ssh_drv.timeout = 60
     ssh_drv.device = FakeCLIDevice(ssh_mock)
-    ssh_envelope = ssh_drv.get_modules()
 
-    assert netconf_envelope == ssh_envelope
+    return netconf_drv.get_modules(), ssh_drv.get_modules()
+
+
+def test_get_modules_parity_with_netconf_sr12():
+    """SR-12 envelope MUST match between NETCONF and SSH drivers."""
+    netconf, ssh = _run_both_drivers("sr12_full")
+    assert netconf == ssh
+
+
+def test_get_modules_parity_with_netconf_sr7s():
+    """SR-7s IMM envelope (depth-3 via integrated MDA) MUST match across transports."""
+    netconf, ssh = _run_both_drivers("sr7s_imm")
+    assert netconf == ssh
+
+
+def test_get_modules_parity_with_netconf_sr1():
+    """SR-1 fixed-config envelope is None on both transports."""
+    netconf, ssh = _run_both_drivers("sr1_fixed")
+    assert netconf is None
+    assert ssh is None
+
+
+# ---------------------------------------------------------------------------
+# _nokia_sros_ssh_parse_port_list — port-id regex unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_parse_port_list_classic_three_segment():
+    """Standard slot/mda/port form is matched."""
+    text = """\
+===============================================================================
+Ports on Slot 1
+===============================================================================
+1/1/1         Up    Yes  Up      9212
+1/2/1         Up    Yes  Up      9212
+===============================================================================
+"""
+    assert _nokia_sros_ssh_parse_port_list(text) == ["1/1/1", "1/2/1"]
+
+
+def test_parse_port_list_connector_cage_four_segment():
+    """FP4 IMM connector-cage form slot/mda/c<N>/port is matched."""
+    text = """\
+1/1/c2/1      Up    Yes  Up      9212
+1/1/c3/1      Up    Yes  Up      9212
+"""
+    assert _nokia_sros_ssh_parse_port_list(text) == ["1/1/c2/1", "1/1/c3/1"]
+
+
+def test_parse_port_list_last_line_no_trailing_whitespace():
+    """A port-id terminating at EOL (no trailing whitespace) is still matched."""
+    text = "1/1/1\n2/1/1"
+    assert _nokia_sros_ssh_parse_port_list(text) == ["1/1/1", "2/1/1"]
+
+
+def test_parse_port_list_empty_input_returns_empty():
+    """Empty / None input never raises — empty list result."""
+    assert _nokia_sros_ssh_parse_port_list("") == []
+    assert _nokia_sros_ssh_parse_port_list(None) == []  # type: ignore[arg-type]

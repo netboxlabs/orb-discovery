@@ -174,11 +174,14 @@ _NOKIA_SROS_FIELD_RE = re.compile(
 _NOKIA_SROS_CARD_HDR_RE = re.compile(r"Card\s+(?P<slot>[A-Za-z0-9]+)\s+Detail")
 # "MDA 1/1 Detail".
 _NOKIA_SROS_MDA_HDR_RE = re.compile(r"MDA\s+(?P<slot>\d+)/(?P<mda>\d+)\s+Detail")
-# "Port 1/1/1".
-_NOKIA_SROS_PORT_HDR_RE = re.compile(r"Port\s+(?P<port>\d+/\d+/\d+)")
-# `show port` summary lines start with a port id at column 0 (after stripping
-# leading whitespace): "1/1/1   Up   Yes   ...".
-_NOKIA_SROS_PORT_LIST_RE = re.compile(r"^\s*(?P<port>\d+/\d+/\d+)\s", re.MULTILINE)
+# Port id can be the classic 3-segment "1/1/1" form (slot/mda/port) or the
+# 4-segment connector-cage "1/1/c2/1" form used by FP4 IMM cards on SR-7s.
+# The lookahead anchor allows the port id to be the last token on the line.
+_NOKIA_SROS_PORT_ID_RE = r"\d+/\d+/(?:c\d+/)?\d+"
+_NOKIA_SROS_PORT_HDR_RE = re.compile(rf"Port\s+(?P<port>{_NOKIA_SROS_PORT_ID_RE})")
+_NOKIA_SROS_PORT_LIST_RE = re.compile(
+    rf"^\s*(?P<port>{_NOKIA_SROS_PORT_ID_RE})(?=\s|$)", re.MULTILINE,
+)
 
 
 def classify_module_type_nokia_sros_ssh(equipped_type: str) -> str:
@@ -408,14 +411,32 @@ def _nokia_sros_ssh_parse_port_list(text: str) -> list[str]:
     return _NOKIA_SROS_PORT_LIST_RE.findall(text or "")
 
 
-def _nokia_sros_ssh_collect_transceivers(driver, mda_rows: list[dict]) -> list[dict]:
-    """Issue `show port` once + a `show port X/Y/Z detail` per known MDA port."""
-    if not mda_rows:
-        return []
+def _nokia_sros_ssh_fetch_port_ids(driver, mda_count: int) -> list[str]:
+    """Issue `show port`, parse port-ids. Warn if MDAs exist but no ports parse."""
     try:
         port_list_raw = driver.device.send_command("show port")
     except Exception as e:
         logger.warning("nokia_sros_ssh.get_modules: show port failed: %s", e)
+        return []
+    port_ids = _nokia_sros_ssh_parse_port_list(port_list_raw or "")
+    if not port_ids:
+        # Operators denying `show port` via AAA while permitting individual
+        # `show port X/Y/Z detail` will see a silently empty transceiver pass
+        # otherwise. Surface the gap so it's diagnosable from logs.
+        logger.warning(
+            "nokia_sros_ssh.get_modules: no ports parsed from `show port` despite "
+            "%d MDA(s) — transceiver pass skipped",
+            mda_count,
+        )
+    return port_ids
+
+
+def _nokia_sros_ssh_collect_transceivers(driver, mda_rows: list[dict]) -> list[dict]:
+    """Issue `show port` once + a `show port X/Y/Z detail` per known MDA port."""
+    if not mda_rows:
+        return []
+    port_ids = _nokia_sros_ssh_fetch_port_ids(driver, len(mda_rows))
+    if not port_ids:
         return []
     known_mda_paths = {
         f"{row.get('parent_slot')}/{row.get('mda_slot')}"
@@ -423,7 +444,7 @@ def _nokia_sros_ssh_collect_transceivers(driver, mda_rows: list[dict]) -> list[d
         if row.get("parent_slot") and row.get("mda_slot")
     }
     transceiver_rows: list[dict] = []
-    for port_id in _nokia_sros_ssh_parse_port_list(port_list_raw or ""):
+    for port_id in port_ids:
         parts = port_id.split("/")
         if len(parts) < 3:
             continue
@@ -433,9 +454,7 @@ def _nokia_sros_ssh_collect_transceivers(driver, mda_rows: list[dict]) -> list[d
             raw = driver.device.send_command(f"show port {port_id} detail")
         except Exception:
             continue
-        if not raw or not raw.strip():
-            continue
-        if "MINOR:" in raw or "Error:" in raw:
+        if not raw or not raw.strip() or "MINOR:" in raw or "Error:" in raw:
             continue
         tx = _nokia_sros_ssh_parse_port_transceiver(raw)
         if tx is not None:
