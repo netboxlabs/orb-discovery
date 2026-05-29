@@ -19,6 +19,19 @@ from napalm.base.helpers import mac as normalize_mac
 from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
+from custom_napalm._modules import (
+    MemberModules as _MemberModules,
+)
+from custom_napalm._modules import (
+    ModuleBay as _ModuleBay,
+)
+from custom_napalm._modules import (
+    ModuleEntry as _ModuleEntry,
+)
+from custom_napalm._modules import (
+    to_payload as _modules_to_payload,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -142,6 +155,279 @@ def _parse_port_hw_mac_addresses(text: str) -> dict[str, str]:
                 mac_raw, port_id,
             )
     return result
+
+
+# ---------------------------------------------------------------------------
+# get_modules — module / module bay discovery via SSH CLI
+# ---------------------------------------------------------------------------
+
+# SR-OS CLI uses === separator lines between blocks. Field rows are
+# "<label> <whitespace> : <value>". Parsers split on the separator first,
+# then regex-extract labeled fields per block.
+
+_NOKIA_SROS_SEP_RE = re.compile(r"^=+\s*$", re.MULTILINE)
+_NOKIA_SROS_FIELD_RE = re.compile(
+    r"^\s*(?P<label>[A-Za-z][\w \-/.()]*?)\s*:\s*(?P<value>.+?)\s*$",
+    re.MULTILINE,
+)
+# "Card 1 Detail" or "Card A Detail".
+_NOKIA_SROS_CARD_HDR_RE = re.compile(r"Card\s+(?P<slot>[A-Za-z0-9]+)\s+Detail")
+# "MDA 1/1 Detail".
+_NOKIA_SROS_MDA_HDR_RE = re.compile(r"MDA\s+(?P<slot>\d+)/(?P<mda>\d+)\s+Detail")
+# "Port 1/1/1".
+_NOKIA_SROS_PORT_HDR_RE = re.compile(r"Port\s+(?P<port>\d+/\d+/\d+)")
+
+
+def classify_module_type_nokia_sros_ssh(equipped_type: str) -> str:
+    """Same classifier as the NETCONF driver (Approach A duplication)."""
+    et = (equipped_type or "").strip().lower()
+    if et.startswith(("iom", "imm")):
+        return "linecard"
+    if et.startswith("cpm"):
+        return "supervisor"
+    if et.startswith("sfm"):
+        return "linecard"
+    return "other"
+
+
+def _nokia_sros_ssh_split_blocks(text: str) -> list[str]:
+    """Split CLI output on === separator lines into per-block sections."""
+    return [b for b in _NOKIA_SROS_SEP_RE.split(text or "") if b.strip()]
+
+
+def _nokia_sros_ssh_extract_fields(block: str) -> dict[str, str]:
+    """Extract 'Label : Value' rows from a single block."""
+    out: dict[str, str] = {}
+    for m in _NOKIA_SROS_FIELD_RE.finditer(block or ""):
+        out[m.group("label").strip()] = m.group("value").strip()
+    return out
+
+
+def _nokia_sros_ssh_parse_cards(text: str) -> list[dict]:
+    """Parse `show card detail`. Header and field rows straddle a `===` separator."""
+    rows: list[dict] = []
+    pending_slot: str | None = None
+    for block in _nokia_sros_ssh_split_blocks(text):
+        hdr = _NOKIA_SROS_CARD_HDR_RE.search(block)
+        if hdr is not None:
+            pending_slot = hdr.group("slot")
+            continue
+        if pending_slot is None:
+            continue
+        fields = _nokia_sros_ssh_extract_fields(block)
+        rows.append({
+            "slot": pending_slot,
+            "equipped_type": fields.get("Card Type", ""),
+            "pid": fields.get("Part Number", ""),
+            "sn": fields.get("Serial Number", ""),
+        })
+        pending_slot = None
+    return rows
+
+
+def _nokia_sros_ssh_parse_mdas(text: str) -> list[dict]:
+    """Parse `show mda detail`. Same header/fields-across-blocks pattern as cards."""
+    rows: list[dict] = []
+    pending: tuple[str, str] | None = None
+    for block in _nokia_sros_ssh_split_blocks(text):
+        hdr = _NOKIA_SROS_MDA_HDR_RE.search(block)
+        if hdr is not None:
+            pending = (hdr.group("slot"), hdr.group("mda"))
+            continue
+        if pending is None:
+            continue
+        fields = _nokia_sros_ssh_extract_fields(block)
+        parent_slot, mda_slot = pending
+        rows.append({
+            "parent_slot": parent_slot,
+            "mda_slot": mda_slot,
+            "equipped_type": fields.get("MDA Type", ""),
+            "pid": fields.get("Part Number", ""),
+            "sn": fields.get("Serial Number", ""),
+        })
+        pending = None
+    return rows
+
+
+def _nokia_sros_ssh_parse_port_transceiver(text: str) -> dict | None:
+    """Parse one `show port X/Y/Z detail`. Header/fields straddle a `===` separator."""
+    pending_port: str | None = None
+    for block in _nokia_sros_ssh_split_blocks(text):
+        hdr = _NOKIA_SROS_PORT_HDR_RE.search(block)
+        if hdr is not None:
+            pending_port = hdr.group("port")
+            continue
+        if pending_port is None:
+            continue
+        fields = _nokia_sros_ssh_extract_fields(block)
+        model = fields.get("Model", "")
+        sn = fields.get("Serial Number", "")
+        if not (model and sn):
+            pending_port = None
+            continue
+        return {
+            "port_id": pending_port,
+            "model": model,
+            "sn": sn,
+            "pid": fields.get("Part Number", ""),
+        }
+    return None
+
+
+def _nokia_sros_ssh_slot_sort_key(slot: str) -> tuple[int, int | str]:
+    """Stable order: letter slots (CPM-A/B) first, then numeric (Approach A duplicate)."""
+    if slot.isalpha():
+        return (0, slot)
+    try:
+        return (1, int(slot))
+    except ValueError:
+        return (2, slot)
+
+
+def _nokia_sros_ssh_build_card_bays(
+    card_rows: list[dict],
+) -> tuple[list[_ModuleBay], dict[str, _ModuleBay]]:
+    """Build top-level card bays + a slot -> bay map. Sorted for stable output."""
+    bays: list[_ModuleBay] = []
+    bays_by_slot: dict[str, _ModuleBay] = {}
+    for row in card_rows:
+        slot = row.get("slot") or ""
+        pid = row.get("pid") or ""
+        sn = row.get("sn") or ""
+        et = row.get("equipped_type") or ""
+        if not (slot and pid and sn):
+            continue
+        mtype = classify_module_type_nokia_sros_ssh(et)
+        if mtype == "other":
+            continue
+        bay = _ModuleBay(
+            name=slot, position=slot,
+            module=_ModuleEntry(model=pid, serial=sn, type=mtype, description=et),
+        )
+        bays.append(bay)
+        bays_by_slot[slot] = bay
+    bays.sort(key=lambda b: _nokia_sros_ssh_slot_sort_key(b.name))
+    return bays, bays_by_slot
+
+
+def _nokia_sros_ssh_attach_mdas(
+    mda_rows: list[dict],
+    bays_by_slot: dict[str, _ModuleBay],
+) -> dict[str, _ModuleBay]:
+    """Nest MDA sub-bays under their parent card. Returns mda-path -> bay map."""
+    mda_bays_by_path: dict[str, _ModuleBay] = {}
+    for row in mda_rows:
+        parent_slot = row.get("parent_slot") or ""
+        mda_slot = row.get("mda_slot") or ""
+        pid = row.get("pid") or ""
+        sn = row.get("sn") or ""
+        et = row.get("equipped_type") or ""
+        if not (parent_slot and mda_slot and pid and sn):
+            continue
+        parent_bay = bays_by_slot.get(parent_slot)
+        if parent_bay is None or parent_bay.module is None:
+            continue
+        mda_bay = _ModuleBay(
+            name=f"{parent_slot}/{mda_slot}",
+            position=f"{parent_slot}/{mda_slot}",
+            module=_ModuleEntry(model=pid, serial=sn, type="linecard", description=et),
+        )
+        parent_bay.module.sub_bays.append(mda_bay)
+        mda_bays_by_path[f"{parent_slot}/{mda_slot}"] = mda_bay
+    return mda_bays_by_path
+
+
+def _nokia_sros_ssh_attach_transceivers(
+    transceiver_rows: list[dict],
+    mda_bays_by_path: dict[str, _ModuleBay],
+) -> dict[str, list[str]]:
+    """Attach transceivers under their parent MDA. Returns interfaces_by_bay."""
+    interfaces_by_bay: dict[str, list[str]] = {}
+    for row in transceiver_rows:
+        port_id = row.get("port_id") or ""
+        model = row.get("model") or ""
+        sn = row.get("sn") or ""
+        if not (port_id and model and sn):
+            continue
+        parts = port_id.split("/")
+        if len(parts) < 3:
+            continue
+        mda_path = f"{parts[0]}/{parts[1]}"
+        mda_bay = mda_bays_by_path.get(mda_path)
+        if mda_bay is None or mda_bay.module is None:
+            continue
+        mda_bay.module.sub_bays.append(_ModuleBay(
+            name=port_id, position=port_id,
+            module=_ModuleEntry(model=model, serial=sn, type="transceiver", description=""),
+        ))
+        interfaces_by_bay.setdefault(mda_path, []).append(port_id)
+    return interfaces_by_bay
+
+
+def _nokia_sros_ssh_assemble(
+    card_rows: list[dict],
+    mda_rows: list[dict],
+    transceiver_rows: list[dict],
+) -> dict | None:
+    """Build the canonical envelope from parsed CLI rows."""
+    bays, bays_by_slot = _nokia_sros_ssh_build_card_bays(card_rows)
+    if not bays:
+        return None
+    mda_bays_by_path = _nokia_sros_ssh_attach_mdas(mda_rows, bays_by_slot)
+    interfaces_by_bay = _nokia_sros_ssh_attach_transceivers(
+        transceiver_rows, mda_bays_by_path,
+    )
+    return _modules_to_payload({
+        None: _MemberModules(bays=bays, interfaces_by_bay=interfaces_by_bay),
+    })
+
+
+def _nokia_sros_ssh_get_modules_impl(driver) -> dict | None:
+    """
+    Module discovery for Nokia SR-OS via SSH CLI.
+
+    Issues `show chassis|card|mda detail` then iterates each parsed MDA's
+    port range, issuing `show port slot/mda/N detail` to pick up optics.
+    FakeCLIDevice returns "" for missing files so the scan is cheap in
+    tests; real hardware enumerates only valid port ids.
+    """
+    try:
+        driver.device.send_command("show chassis detail")
+    except Exception as e:
+        logger.warning("nokia_sros_ssh.get_modules: show chassis failed: %s", e)
+    try:
+        card_raw = driver.device.send_command("show card detail")
+    except Exception as e:
+        logger.warning("nokia_sros_ssh.get_modules: show card failed: %s", e)
+        return None
+    try:
+        mda_raw = driver.device.send_command("show mda detail")
+    except Exception as e:
+        logger.warning("nokia_sros_ssh.get_modules: show mda failed: %s", e)
+        mda_raw = ""
+
+    card_rows = _nokia_sros_ssh_parse_cards(card_raw or "")
+    mda_rows = _nokia_sros_ssh_parse_mdas(mda_raw or "")
+
+    transceiver_rows: list[dict] = []
+    for row in mda_rows:
+        slot = row.get("parent_slot") or ""
+        mda = row.get("mda_slot") or ""
+        if not (slot and mda):
+            continue
+        for port_n in range(1, 49):
+            cmd = f"show port {slot}/{mda}/{port_n} detail"
+            try:
+                raw = driver.device.send_command(cmd)
+            except Exception:
+                continue
+            if not raw or not raw.strip():
+                continue
+            tx = _nokia_sros_ssh_parse_port_transceiver(raw)
+            if tx is not None:
+                transceiver_rows.append(tx)
+
+    return _nokia_sros_ssh_assemble(card_rows, mda_rows, transceiver_rows)
 
 
 class SROSSSHDriver(_napalm_base.NetworkDriver):
@@ -333,3 +619,7 @@ class SROSSSHDriver(_napalm_base.NetworkDriver):
     def get_vlans(self) -> dict:
         """Nokia SR-OS uses a service-based architecture — no traditional VLAN table."""
         return {}
+
+    def get_modules(self) -> dict | None:
+        """Return per-chassis module / module bay inventory or None."""
+        return _nokia_sros_ssh_get_modules_impl(self)

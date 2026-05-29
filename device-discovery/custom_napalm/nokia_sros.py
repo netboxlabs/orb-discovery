@@ -539,8 +539,18 @@ def _nokia_sros_transceiver_rows_from_state_xml(state_root: etree._Element) -> l
     return rows
 
 
+def _nokia_sros_slot_sort_key(slot: str) -> tuple[int, int | str]:
+    """Stable order for SR-OS chassis slots: letter slots (CPM-A/B) first, then numeric."""
+    if slot.isalpha():
+        return (0, slot)
+    try:
+        return (1, int(slot))
+    except ValueError:
+        return (2, slot)
+
+
 def _nokia_sros_build_card_bays(rows: list[dict]) -> list[_ModuleBay]:
-    """First pass: emit one top-level bay per card row."""
+    """First pass: emit one top-level bay per card row, sorted for stable output."""
     bays: list[_ModuleBay] = []
     for row in rows:
         if row.get("kind") != "card":
@@ -561,6 +571,7 @@ def _nokia_sros_build_card_bays(rows: list[dict]) -> list[_ModuleBay]:
                 model=pid, serial=sn, type=mtype, description=et,
             ),
         ))
+    bays.sort(key=lambda b: _nokia_sros_slot_sort_key(b.name))
     return bays
 
 
