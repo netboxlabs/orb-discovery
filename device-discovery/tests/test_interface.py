@@ -848,3 +848,37 @@ def test_prefix_emission_cascade_skips_undefined_site_placeholder(sample_diode_d
     )
     prefix = _extract_prefix(entities)
     assert prefix.scope_site.name == ""  # not "undefined"
+
+
+def test_prefix_emission_legacy_ipam_parameters_assignment_does_not_crash(sample_diode_device):
+    """
+    Back-compat regression for in-process callers assigning a bare IpamParameters.
+
+    Pydantic does not validate field assignment after construction, so a
+    library caller could do `defaults.prefix = IpamParameters(role="x")`
+    without coercion to PrefixParameters. The scope reads in
+    _resolve_prefix_scope_kwargs must tolerate the missing attributes
+    rather than crashing the entire discovery cycle with AttributeError.
+    """
+    from device_discovery.interface import build_interface_entities
+    from device_discovery.policy.models import Defaults, IpamParameters, Options
+
+    interfaces = {"Eth1/1": {"is_enabled": True, "speed": 10000, "mtu": 1500, "mac_address": "", "description": ""}}
+    interfaces_ip = {"Eth1/1": {"ipv4": {"192.0.2.1": {"prefix_length": 24}}}}
+    defaults = Defaults()
+    # Legacy in-process pattern: bypass Pydantic validation and assign a
+    # plain IpamParameters. Missing scope_site / scope_location attributes
+    # must not raise.
+    defaults.prefix = IpamParameters(role="customer-edge")
+    options = Options()
+
+    # Must not raise AttributeError on the scope reads.
+    entities = build_interface_entities(
+        sample_diode_device, interfaces, interfaces_ip, defaults, options=options,
+    )
+    prefix = _extract_prefix(entities)
+    assert prefix is not None
+    assert prefix.scope_site.name == ""
+    assert prefix.scope_location.name == ""
+    # Non-scope IpamParameters fields still flow through (role inherited).
+    assert prefix.role.name == "customer-edge"

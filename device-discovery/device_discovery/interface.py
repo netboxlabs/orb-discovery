@@ -292,8 +292,13 @@ def _resolve_prefix_scope_kwargs(
     prefix_scope_location: str | None = None
 
     if defaults.prefix:
-        prefix_scope_site = defaults.prefix.scope_site or None
-        prefix_scope_location = defaults.prefix.scope_location or None
+        # getattr fallback so a caller that bypasses Pydantic and assigns
+        # a bare IpamParameters (missing scope_*) to defaults.prefix
+        # post-construction doesn't crash with AttributeError mid-discovery.
+        # Normal YAML / Pydantic-validation paths get PrefixParameters with
+        # the attributes already present — getattr is the no-op fast path.
+        prefix_scope_site = getattr(defaults.prefix, "scope_site", None) or None
+        prefix_scope_location = getattr(defaults.prefix, "scope_location", None) or None
 
     # Opt-in cascade: defaults.site / defaults.location → Prefix scope.
     # Any explicit defaults.prefix.scope_* puts the operator in "explicit
