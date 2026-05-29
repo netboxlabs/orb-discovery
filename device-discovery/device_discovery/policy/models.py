@@ -113,35 +113,12 @@ class IpamParameters(ObjectParameters):
 
 
 class PrefixParameters(IpamParameters):
-    """
-    Prefix-specific defaults.
+    """Model for prefix-specific parameters."""
 
-    Adds the four NetBox 4.2+ Prefix scope fields (scope_site,
-    scope_location, scope_region, scope_site_group). IPAddress has no
-    scope in NetBox (it inherits the site via the assigned interface
-    → device → site chain), so these fields stay off IpamParameters
-    and only appear here.
-    """
-
-    scope_site: str | None = Field(
-        default=None,
-        description=(
-            "NetBox Prefix scope: site, optional. Explicit-only by default; "
-            "opt-in cascade via options.propagate_defaults_to_prefix_scope."
-        ),
-    )
-    scope_location: str | None = Field(
-        default=None,
-        description="NetBox Prefix scope: location, optional.",
-    )
-    scope_region: str | None = Field(
-        default=None,
-        description="NetBox Prefix scope: region, optional. Cascade does not apply (no top-level region default exists).",
-    )
-    scope_site_group: str | None = Field(
-        default=None,
-        description="NetBox Prefix scope: site_group, optional. Cascade does not apply (no top-level site_group default exists).",
-    )
+    scope_site: str | None = Field(default=None, description="Prefix scope site, optional")
+    scope_location: str | None = Field(default=None, description="Prefix scope location, optional")
+    scope_region: str | None = Field(default=None, description="Prefix scope region, optional")
+    scope_site_group: str | None = Field(default=None, description="Prefix scope site group, optional")
 
 
 class Defaults(BaseModel):
