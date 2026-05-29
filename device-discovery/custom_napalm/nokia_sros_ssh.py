@@ -174,10 +174,12 @@ _NOKIA_SROS_FIELD_RE = re.compile(
 _NOKIA_SROS_CARD_HDR_RE = re.compile(r"Card\s+(?P<slot>[A-Za-z0-9]+)\s+Detail")
 # "MDA 1/1 Detail".
 _NOKIA_SROS_MDA_HDR_RE = re.compile(r"MDA\s+(?P<slot>\d+)/(?P<mda>\d+)\s+Detail")
-# Port id can be the classic 3-segment "1/1/1" form (slot/mda/port) or the
-# 4-segment connector-cage "1/1/c2/1" form used by FP4 IMM cards on SR-7s.
-# The lookahead anchor allows the port id to be the last token on the line.
-_NOKIA_SROS_PORT_ID_RE = r"\d+/\d+/(?:c\d+/)?\d+"
+# Port id forms emitted by SR-OS `show port`:
+#   classic 3-segment "1/1/1"           — slot/mda/port
+#   FP4 connector-cage "1/1/c2/1"       — slot/mda/c<N>/port (SR-7s IMM)
+#   breakout sub-port "1/1/1[1]" or "1/1/c2/1[1]" — QSFP/QSFP28 broken out
+# The lookahead anchor allows the port id to be the last token on a line.
+_NOKIA_SROS_PORT_ID_RE = r"\d+/\d+/(?:c\d+/)?\d+(?:\[\d+\])?"
 _NOKIA_SROS_PORT_HDR_RE = re.compile(rf"Port\s+(?P<port>{_NOKIA_SROS_PORT_ID_RE})")
 _NOKIA_SROS_PORT_LIST_RE = re.compile(
     rf"^\s*(?P<port>{_NOKIA_SROS_PORT_ID_RE})(?=\s|$)", re.MULTILINE,
@@ -452,7 +454,11 @@ def _nokia_sros_ssh_collect_transceivers(driver, mda_rows: list[dict]) -> list[d
             continue
         try:
             raw = driver.device.send_command(f"show port {port_id} detail")
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "nokia_sros_ssh.get_modules: show port %s detail failed: %s",
+                port_id, e,
+            )
             continue
         if not raw or not raw.strip() or "MINOR:" in raw or "Error:" in raw:
             continue
@@ -471,6 +477,9 @@ def _nokia_sros_ssh_get_modules_impl(driver) -> dict | None:
     FakeCLIDevice returns "" for missing files so the scan is cheap in
     tests; real hardware enumerates only valid port ids.
     """
+    # `show chassis detail` doesn't feed the envelope (cards / MDAs carry all
+    # the data we need) but issuing it once primes the CLI session and
+    # surfaces auth / connectivity failures early.
     try:
         driver.device.send_command("show chassis detail")
     except Exception as e:

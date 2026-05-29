@@ -201,3 +201,19 @@ def test_parse_port_list_empty_input_returns_empty():
     """Empty / None input never raises — empty list result."""
     assert _nokia_sros_ssh_parse_port_list("") == []
     assert _nokia_sros_ssh_parse_port_list(None) == []  # type: ignore[arg-type]
+
+
+def test_parse_port_list_breakout_subports():
+    """QSFP/QSFP28 breakout sub-port form `slot/mda/port[N]` is matched."""
+    text = """\
+1/1/1[1]      Up    Yes  Up      9212
+1/1/1[2]      Up    Yes  Up      9212
+1/1/c2/1[1]   Up    Yes  Up      9212
+"""
+    assert _nokia_sros_ssh_parse_port_list(text) == ["1/1/1[1]", "1/1/1[2]", "1/1/c2/1[1]"]
+
+
+def test_parse_port_list_ignores_line_internal_port_ids():
+    """A port-id inside a description column (not at line start) is NOT matched."""
+    text = "Description    : To 1/1/1 from peer\n1/1/2         Up"
+    assert _nokia_sros_ssh_parse_port_list(text) == ["1/1/2"]
