@@ -24,3 +24,10 @@ class TestSROSDriver(BaseDriverTest):
         driver.R19 = False
         driver.conn = FakeNetconfConn(mock_dir)
         return driver
+
+
+def test_driver_exposes_get_modules():
+    """Driver MUST expose a callable get_modules method."""
+    from custom_napalm.nokia_sros import SROSDriver
+    assert hasattr(SROSDriver, "get_modules")
+    assert callable(SROSDriver.get_modules)

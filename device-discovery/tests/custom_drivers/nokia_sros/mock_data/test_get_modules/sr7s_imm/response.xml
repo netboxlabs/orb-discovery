@@ -1,0 +1,36 @@
+<rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <data>
+    <state xmlns="urn:nokia.com:sros:ns:yang:sr:state">
+      <chassis>
+        <hardware-data>
+          <part-number>3HE15000AA</part-number>
+          <serial-number>NS-SR7S-001</serial-number>
+        </hardware-data>
+      </chassis>
+      <card>
+        <slot-number>A</slot-number>
+        <equipped-type>cpm-7s</equipped-type>
+        <hardware-data>
+          <part-number>3HE15016AA</part-number>
+          <serial-number>NS-7S-CPMA-001</serial-number>
+        </hardware-data>
+      </card>
+      <card>
+        <slot-number>1</slot-number>
+        <equipped-type>imm36-100g-qsfp28</equipped-type>
+        <hardware-data>
+          <part-number>3HE15576AA</part-number>
+          <serial-number>NS-7S-IMM1-001</serial-number>
+        </hardware-data>
+      </card>
+      <card>
+        <slot-number>2</slot-number>
+        <equipped-type>imm36-100g-qsfp28</equipped-type>
+        <hardware-data>
+          <part-number>3HE15576AA</part-number>
+          <serial-number>NS-7S-IMM2-001</serial-number>
+        </hardware-data>
+      </card>
+    </state>
+  </data>
+</rpc-reply>
