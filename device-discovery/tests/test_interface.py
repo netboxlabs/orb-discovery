@@ -812,6 +812,36 @@ def test_prefix_emission_explicit_beats_cascade(sample_diode_device):
     assert prefix.scope_site.name == "DC-West"
 
 
+def test_prefix_emission_explicit_scope_blocks_cross_field_cascade(sample_diode_device):
+    """
+    Cross-field regression: any explicit defaults.prefix.scope_* skips the entire cascade.
+
+    Without this guard, an operator who explicitly sets scope_site would
+    have it silently overridden by a cascaded scope_location (more
+    specific → wins the oneof precedence). The cascade is skipped
+    wholesale when any explicit prefix scope is set.
+    """
+    from device_discovery.interface import build_interface_entities
+    from device_discovery.policy.models import Defaults, Options, PrefixParameters
+
+    interfaces = {"Eth1/1": {"is_enabled": True, "speed": 10000, "mtu": 1500, "mac_address": "", "description": ""}}
+    interfaces_ip = {"Eth1/1": {"ipv4": {"192.0.2.1": {"prefix_length": 24}}}}
+    defaults = Defaults(
+        site="DC-East",
+        location="Floor-3",  # would cascade to scope_location and win precedence
+        prefix=PrefixParameters(scope_site="DC-West"),  # explicit scope_site — operator's choice
+    )
+    options = Options(propagate_defaults_to_prefix_scope=True)
+
+    entities = build_interface_entities(
+        sample_diode_device, interfaces, interfaces_ip, defaults, options=options,
+    )
+    prefix = _extract_prefix(entities)
+    # Explicit scope_site wins; scope_location is NOT cascaded because explicit mode.
+    assert prefix.scope_site.name == "DC-West"
+    assert not prefix.scope_location.name
+
+
 def test_prefix_emission_cascade_skips_undefined_site_placeholder(sample_diode_device):
     """The literal 'undefined' default for defaults.site is not cascaded — it's a placeholder, not a real site."""
     from device_discovery.interface import build_interface_entities

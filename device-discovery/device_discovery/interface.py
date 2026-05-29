@@ -300,12 +300,26 @@ def _resolve_prefix_scope_kwargs(
         prefix_scope_site_group = defaults.prefix.scope_site_group or None
 
     # Opt-in cascade: defaults.site / defaults.location → Prefix scope.
-    # Explicit defaults.prefix.scope_* always wins. The literal "undefined"
-    # placeholder for defaults.site is treated as no-value (see Defaults model).
-    if options and options.propagate_defaults_to_prefix_scope:
-        if not prefix_scope_site and defaults.site and defaults.site != "undefined":
+    # Any explicit defaults.prefix.scope_* puts the operator in "explicit
+    # mode" and the cascade is skipped wholesale — otherwise a cascaded
+    # more-specific scope (e.g. cascaded scope_location) could win the
+    # oneof precedence over an operator's explicit less-specific choice
+    # (e.g. explicit scope_site). The literal "undefined" placeholder for
+    # defaults.site is treated as no-value (see Defaults model).
+    any_explicit_prefix_scope = any((
+        prefix_scope_site,
+        prefix_scope_location,
+        prefix_scope_region,
+        prefix_scope_site_group,
+    ))
+    if (
+        options
+        and options.propagate_defaults_to_prefix_scope
+        and not any_explicit_prefix_scope
+    ):
+        if defaults.site and defaults.site != "undefined":
             prefix_scope_site = defaults.site
-        if not prefix_scope_location and defaults.location:
+        if defaults.location:
             prefix_scope_location = defaults.location
 
     scope_kwargs: dict[str, str] = {}
