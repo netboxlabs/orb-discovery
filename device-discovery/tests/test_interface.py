@@ -743,6 +743,9 @@ def test_prefix_emission_both_scope_fields_explicit(sample_diode_device):
     prefix = _extract_prefix(entities)
     # Protobuf scope is a oneof — only the most-specific value is on the wire.
     assert prefix.scope_location.name == "Floor-3"
+    # Site is embedded inside the Location for NetBox uniqueness (locations
+    # are unique within site, not globally).
+    assert prefix.scope_location.site.name == "DC-East"
     assert not prefix.scope_site.name
 
 
@@ -780,6 +783,9 @@ def test_prefix_emission_cascade_on_inherits_site_and_location(sample_diode_devi
     prefix = _extract_prefix(entities)
     # location is more specific than site → it wins under the oneof precedence rule.
     assert prefix.scope_location.name == "Floor-3"
+    # Site is embedded so NetBox can disambiguate "Floor-3 in DC-East" from
+    # any other site's "Floor-3" — locations are unique within site, not globally.
+    assert prefix.scope_location.site.name == "DC-East"
     assert not prefix.scope_site.name
 
 
@@ -882,3 +888,33 @@ def test_prefix_emission_legacy_ipam_parameters_assignment_does_not_crash(sample
     assert prefix.scope_location.name == ""
     # Non-scope IpamParameters fields still flow through (role inherited).
     assert prefix.role.name == "customer-edge"
+
+
+def test_prefix_emission_scope_location_alone_emits_without_site(sample_diode_device):
+    """
+    Explicit scope_location alone (no scope_site) emits bare Location.
+
+    When the operator only sets scope_location and we have no site context
+    (neither explicit scope_site nor a cascade site to embed), we pass a
+    bare Location(name=...) — the operator owns the ambiguity. We do NOT
+    fabricate a site or fall back to defaults.site without the cascade
+    flag.
+    """
+    from device_discovery.interface import build_interface_entities
+    from device_discovery.policy.models import Defaults, Options, PrefixParameters
+
+    interfaces = {"Eth1/1": {"is_enabled": True, "speed": 10000, "mtu": 1500, "mac_address": "", "description": ""}}
+    interfaces_ip = {"Eth1/1": {"ipv4": {"192.0.2.1": {"prefix_length": 24}}}}
+    defaults = Defaults(
+        site="DC-East",  # set but cascade is off — must NOT leak into Location
+        prefix=PrefixParameters(scope_location="Floor-3"),  # explicit, no scope_site
+    )
+    options = Options()  # cascade off
+
+    entities = build_interface_entities(
+        sample_diode_device, interfaces, interfaces_ip, defaults, options=options,
+    )
+    prefix = _extract_prefix(entities)
+    assert prefix.scope_location.name == "Floor-3"
+    # No site embedded — operator didn't provide one and cascade is off.
+    assert prefix.scope_location.site.name == ""

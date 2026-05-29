@@ -8,7 +8,7 @@ import re
 from collections.abc import Iterable
 
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
-from netboxlabs.diode.sdk.ingester import Device, Entity, Interface, IPAddress, Prefix
+from netboxlabs.diode.sdk.ingester import Device, Entity, Interface, IPAddress, Location, Prefix
 
 from device_discovery.defaults import DEFAULT_INTERFACE_PATTERNS
 from device_discovery.policy.models import Defaults, Options
@@ -318,14 +318,22 @@ def _resolve_prefix_scope_kwargs(
         if defaults.location:
             prefix_scope_location = defaults.location
 
-    scope_kwargs: dict[str, str] = {}
+    # NetBox Locations are unique within their parent site, not globally —
+    # emit Location(name=..., site=...) when a site is available so the
+    # Diode plugin can disambiguate "Floor-1 in DC-East" from "Floor-1 in
+    # DC-West". Mirrors translate_device's Location(name=..., site=...).
+    scope_kwargs: dict[str, str | Location] = {}
     for scope_name, scope_val in (
         ("scope_location", prefix_scope_location),
         ("scope_site", prefix_scope_site),
     ):
-        if scope_val:
+        if not scope_val:
+            continue
+        if scope_name == "scope_location" and prefix_scope_site:
+            scope_kwargs[scope_name] = Location(name=scope_val, site=prefix_scope_site)
+        else:
             scope_kwargs[scope_name] = scope_val
-            break
+        break
     return scope_kwargs
 
 
