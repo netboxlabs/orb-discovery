@@ -165,6 +165,23 @@ class Defaults(BaseModel):
         default=None, description="VLAN parameters, optional"
     )
 
+    @field_validator("prefix", mode="before")
+    @classmethod
+    def coerce_ipam_to_prefix_parameters(cls, v: object) -> object:
+        """
+        Coerce a bare IpamParameters to PrefixParameters for back-compat.
+
+        Legacy in-process callers used to build ``Defaults(prefix=
+        IpamParameters(role="x"))`` before PrefixParameters existed.
+        Without this coercion Pydantic raises ValidationError because
+        IpamParameters isn't a PrefixParameters subclass. Round-trip
+        through model_dump → dict so the matching fields land on the
+        new model.
+        """
+        if isinstance(v, IpamParameters) and not isinstance(v, PrefixParameters):
+            return v.model_dump()
+        return v
+
 
 class Options(BaseModel):
     """Model for discovery options."""

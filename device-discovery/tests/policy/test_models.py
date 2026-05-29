@@ -92,6 +92,21 @@ def test_defaults_prefix_back_compat_no_scope():
     assert d.prefix.scope_site is None
 
 
+def test_defaults_prefix_coerces_legacy_ipam_parameters_at_construction():
+    """Back-compat for callers passing a bare IpamParameters (the previous public shape)."""
+    from device_discovery.policy.models import Defaults, IpamParameters, PrefixParameters
+
+    # Pre-PrefixParameters callers built defaults like this:
+    d = Defaults(prefix=IpamParameters(role="customer-edge", tags=["legacy"]))
+    # Coerced to PrefixParameters via the field validator; matching fields land.
+    assert isinstance(d.prefix, PrefixParameters)
+    assert d.prefix.role == "customer-edge"
+    assert d.prefix.tags == ["legacy"]
+    # scope_* default to None — IpamParameters carries no scope state to copy.
+    assert d.prefix.scope_site is None
+    assert d.prefix.scope_location is None
+
+
 def test_options_propagate_defaults_to_prefix_scope_defaults_false():
     """The new Options flag defaults to False (no cascade)."""
     from device_discovery.policy.models import Options
