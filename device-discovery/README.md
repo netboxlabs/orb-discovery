@@ -55,6 +55,49 @@ policies:
         username: ${USER}
         password: ${PASSWORD}
 ```
+
+### Prefix scope (NetBox 4.2+)
+
+Discovered prefixes can carry an explicit NetBox scope. The four `scope_*` fields under `defaults.prefix` map 1:1 to the NetBox Prefix scope model. The protobuf carries a *single* scope per prefix (NetBox's scope is a `oneof`) — when more than one is set, the most-specific wins: `scope_location` > `scope_site` > `scope_site_group` > `scope_region`.
+
+```yaml
+policies:
+  discovery_scoped:
+    config:
+      defaults:
+        site: DC-East                  # device / location scope (existing field)
+        prefix:
+          scope_site: DC-East          # NetBox Prefix scope, explicit
+          # OR scope_location / scope_region / scope_site_group — only the
+          # most-specific one set on the prefix ends up on the wire.
+    scope:
+      - hostname: 192.168.0.32/30
+        username: ${USER}
+        password: ${PASSWORD}
+```
+
+For single-site agents that want every emitted prefix scoped to `defaults.site` (and `defaults.location` if set) automatically, flip the opt-in:
+
+```yaml
+policies:
+  discovery_cascaded:
+    config:
+      defaults:
+        site: DC-East
+        location: Floor-3
+      options:
+        propagate_defaults_to_prefix_scope: true
+        # → defaults.location wins by precedence; emitted Prefix carries
+        #   scope_location="Floor-3". Explicit defaults.prefix.scope_*
+        #   still wins over the cascade if set.
+    scope:
+      - hostname: 192.168.0.32/30
+        username: ${USER}
+        password: ${PASSWORD}
+```
+
+Default is **off** — agents that manage prefixes spanning multiple sites (see [orb-agent#100](https://github.com/netboxlabs/orb-agent/issues/100)) should leave both knobs unset to keep emitted prefix scope empty so NetBox preserves the existing scope value.
+
 ## Run device-discovery
 device-discovery can be run by installing it with pip
 ```sh
