@@ -113,3 +113,30 @@ Hardware Mac       : aa:bb:cc:dd:ee:1
 ===============================================================================
 """
     assert _parse_port_hw_mac_addresses(text) == {"1/1/1": "AA:BB:CC:DD:EE:01"}
+
+
+def test_driver_exposes_get_modules():
+    """SSH driver MUST expose a callable get_modules method."""
+    assert hasattr(SROSSSHDriver, "get_modules")
+    assert callable(SROSSSHDriver.get_modules)
+
+
+def test_get_modules_parity_with_netconf():
+    """SR-12 envelope MUST be identical between NETCONF and SSH drivers."""
+    import json
+    netconf_path = (
+        Path(__file__).parents[1]
+        / "nokia_sros"
+        / "mock_data"
+        / "test_get_modules"
+        / "sr12_full"
+        / "expected_result.json"
+    )
+    ssh_path = (
+        Path(__file__).parent
+        / "mock_data"
+        / "test_get_modules"
+        / "sr12_full"
+        / "expected_result.json"
+    )
+    assert json.loads(netconf_path.read_text()) == json.loads(ssh_path.read_text())
