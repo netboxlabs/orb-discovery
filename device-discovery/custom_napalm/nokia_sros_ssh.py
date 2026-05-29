@@ -176,6 +176,9 @@ _NOKIA_SROS_CARD_HDR_RE = re.compile(r"Card\s+(?P<slot>[A-Za-z0-9]+)\s+Detail")
 _NOKIA_SROS_MDA_HDR_RE = re.compile(r"MDA\s+(?P<slot>\d+)/(?P<mda>\d+)\s+Detail")
 # "Port 1/1/1".
 _NOKIA_SROS_PORT_HDR_RE = re.compile(r"Port\s+(?P<port>\d+/\d+/\d+)")
+# `show port` summary lines start with a port id at column 0 (after stripping
+# leading whitespace): "1/1/1   Up   Yes   ...".
+_NOKIA_SROS_PORT_LIST_RE = re.compile(r"^\s*(?P<port>\d+/\d+/\d+)\s", re.MULTILINE)
 
 
 def classify_module_type_nokia_sros_ssh(equipped_type: str) -> str:
@@ -400,29 +403,43 @@ def _nokia_sros_ssh_assemble(
     })
 
 
+def _nokia_sros_ssh_parse_port_list(text: str) -> list[str]:
+    """Extract port ids (slot/mda/port) from `show port` summary output."""
+    return _NOKIA_SROS_PORT_LIST_RE.findall(text or "")
+
+
 def _nokia_sros_ssh_collect_transceivers(driver, mda_rows: list[dict]) -> list[dict]:
-    """Iterate `show port slot/mda/N detail` for each MDA and return transceiver rows."""
+    """Issue `show port` once + a `show port X/Y/Z detail` per known MDA port."""
+    if not mda_rows:
+        return []
+    try:
+        port_list_raw = driver.device.send_command("show port")
+    except Exception as e:
+        logger.warning("nokia_sros_ssh.get_modules: show port failed: %s", e)
+        return []
+    known_mda_paths = {
+        f"{row.get('parent_slot')}/{row.get('mda_slot')}"
+        for row in mda_rows
+        if row.get("parent_slot") and row.get("mda_slot")
+    }
     transceiver_rows: list[dict] = []
-    for row in mda_rows:
-        slot = row.get("parent_slot") or ""
-        mda = row.get("mda_slot") or ""
-        if not (slot and mda):
+    for port_id in _nokia_sros_ssh_parse_port_list(port_list_raw or ""):
+        parts = port_id.split("/")
+        if len(parts) < 3:
             continue
-        for port_n in range(1, 49):
-            cmd = f"show port {slot}/{mda}/{port_n} detail"
-            try:
-                raw = driver.device.send_command(cmd)
-            except Exception:
-                continue
-            if not raw or not raw.strip():
-                continue
-            # SR-OS returns "MINOR: CLI Port id 1/1/49 was not found..." for
-            # non-existent port ids — Netmiko doesn't raise, so guard here.
-            if "MINOR:" in raw or "Error:" in raw:
-                continue
-            tx = _nokia_sros_ssh_parse_port_transceiver(raw)
-            if tx is not None:
-                transceiver_rows.append(tx)
+        if f"{parts[0]}/{parts[1]}" not in known_mda_paths:
+            continue
+        try:
+            raw = driver.device.send_command(f"show port {port_id} detail")
+        except Exception:
+            continue
+        if not raw or not raw.strip():
+            continue
+        if "MINOR:" in raw or "Error:" in raw:
+            continue
+        tx = _nokia_sros_ssh_parse_port_transceiver(raw)
+        if tx is not None:
+            transceiver_rows.append(tx)
     return transceiver_rows
 
 

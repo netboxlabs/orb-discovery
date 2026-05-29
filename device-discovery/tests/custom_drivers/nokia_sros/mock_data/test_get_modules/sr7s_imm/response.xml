@@ -22,6 +22,14 @@
           <part-number>3HE15576AA</part-number>
           <serial-number>NS-7S-IMM1-001</serial-number>
         </hardware-data>
+        <mda>
+          <mda-slot>1</mda-slot>
+          <equipped-type>imm36-100g-qsfp28</equipped-type>
+          <hardware-data>
+            <part-number>3HE15576AA</part-number>
+            <serial-number>NS-7S-IMM1-MDA-001</serial-number>
+          </hardware-data>
+        </mda>
       </card>
       <card>
         <slot-number>2</slot-number>
@@ -30,7 +38,24 @@
           <part-number>3HE15576AA</part-number>
           <serial-number>NS-7S-IMM2-001</serial-number>
         </hardware-data>
+        <mda>
+          <mda-slot>1</mda-slot>
+          <equipped-type>imm36-100g-qsfp28</equipped-type>
+          <hardware-data>
+            <part-number>3HE15576AA</part-number>
+            <serial-number>NS-7S-IMM2-MDA-001</serial-number>
+          </hardware-data>
+        </mda>
       </card>
+      <port>
+        <port-id>1/1/1</port-id>
+        <transceiver>
+          <model>QSFP-100G-SR4</model>
+          <serial-number>OPTIC-7S-001</serial-number>
+          <part-number>3HE07854AA</part-number>
+          <vendor-manufacture-code>NOKIA</vendor-manufacture-code>
+        </transceiver>
+      </port>
     </state>
   </data>
 </rpc-reply>
