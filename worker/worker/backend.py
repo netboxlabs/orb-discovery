@@ -23,10 +23,11 @@ class Backend:
         """
         Construct the Backend.
 
-        Worker passes ``ingest_callback`` at construction starting with the
-        minor release this docstring ships in. Older worker versions
-        construct ``Backend()`` with zero args; integrations that override
-        ``__init__`` should accept ``**kwargs`` so both paths keep working.
+        The worker constructs the Backend with no arguments and assigns
+        ``ingest_callback`` afterwards, once its dependencies are ready — so
+        ``__init__`` does not receive it from the current worker. The
+        parameter and ``**kwargs`` stay accepted for forward-compatibility
+        and for integrations that pass them directly.
 
         Args:
         ----

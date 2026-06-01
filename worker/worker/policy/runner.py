@@ -116,7 +116,7 @@ class PolicyRunner:
         # is now assigned, so the callback is safe to build and attach. The
         # consumer reads `backend.ingest_callback` lazily at trigger time, so
         # post-construction assignment is correct.
-        backend.ingest_callback = self._build_ingest_callback(self.name)
+        backend.ingest_callback = self._build_ingest_callback()
 
         self.scheduler.start()
 
@@ -143,7 +143,7 @@ class PolicyRunner:
         if active_policies:
             active_policies.add(1, {"policy": self.name})
 
-    def _build_ingest_callback(self, policy_name: str):
+    def _build_ingest_callback(self):
         """
         Build a closure used to ingest entities outside the scheduled run() cycle.
 

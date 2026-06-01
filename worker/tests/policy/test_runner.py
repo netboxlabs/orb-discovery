@@ -603,7 +603,8 @@ def test_run_chunk_ingestion_error(
         with caplog.at_level("ERROR"):
             policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
-        # Should call ingest once and fail on first chunk error (it raises IngestRejected immediately)
+        # Both chunks are sent; the second chunk's response carries errors, raising
+        # IngestRejected — so ingest is called twice.
         assert mock_diode_client.ingest.call_count == 2
 
         # Should log the error

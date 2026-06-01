@@ -1,6 +1,11 @@
 #!/usr/bin/env python
 # Copyright 2026 NetBox Labs Inc
-"""Exception hierarchy raised by the worker ingest callback."""
+"""
+Exception hierarchy raised by worker ingestion.
+
+Covers both the scheduled run() path (via PolicyRunner._send_entities)
+and the ingest callback.
+"""
 
 
 class IngestError(Exception):
