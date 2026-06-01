@@ -270,3 +270,46 @@ def test_classify_xcm_ssh_as_linecard():
     from custom_napalm.nokia_sros_ssh import classify_module_type_nokia_sros_ssh
     assert classify_module_type_nokia_sros_ssh("xcm-x20") == "linecard"
     assert classify_module_type_nokia_sros_ssh("XCM-X20") == "linecard"
+
+
+def test_parse_port_transceiver_accepts_model_number_label():
+    """Real SR-OS prints `Model Number :` in Transceiver Data — must be matched."""
+    from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_parse_port_transceiver
+    text = """\
+===============================================================================
+Port 1/1/1
+===============================================================================
+Description                    : To-Spine-A
+Transceiver Data
+   Model Number                : SFP-10G-LR
+   Serial Number               : OPTIC10G0001
+   Part Number                 : 3HE04823AA
+===============================================================================
+"""
+    assert _nokia_sros_ssh_parse_port_transceiver(text) == {
+        "port_id": "1/1/1",
+        "model": "SFP-10G-LR",
+        "sn": "OPTIC10G0001",
+        "pid": "3HE04823AA",
+    }
+
+
+def test_parse_port_transceiver_accepts_bare_model_label():
+    """Legacy / abbreviated SR-OS outputs print `Model :` — still accepted."""
+    from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_parse_port_transceiver
+    text = """\
+===============================================================================
+Port 2/1/1
+===============================================================================
+Transceiver Data
+   Model                       : QSFP-100G-SR4
+   Serial Number               : OPTIC100G0001
+   Part Number                 : 3HE04824AA
+===============================================================================
+"""
+    assert _nokia_sros_ssh_parse_port_transceiver(text) == {
+        "port_id": "2/1/1",
+        "model": "QSFP-100G-SR4",
+        "sn": "OPTIC100G0001",
+        "pid": "3HE04824AA",
+    }

@@ -4,7 +4,7 @@ Port 1/2/1
 Description                    : To-Spine-A
 Port State                     : Up
 Transceiver Data
-   Model                       : QSFP-100G-SR4
+   Model Number                : QSFP-100G-SR4
    Serial Number               : OPTIC100G0001
    Part Number                 : 3HE04824AA
 ===============================================================================

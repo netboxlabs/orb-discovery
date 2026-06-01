@@ -288,7 +288,10 @@ def _nokia_sros_ssh_parse_port_transceiver(text: str) -> dict | None:
         if pending_port is None:
             continue
         fields = _nokia_sros_ssh_extract_fields(block)
-        model = fields.get("model", "")
+        # Real SR-OS Transceiver Data labels the MSA PID as "Model Number"
+        # (per Nokia command reference); some older outputs and the test
+        # fixtures use the shorter "Model" label. Accept both.
+        model = fields.get("model number") or fields.get("model") or ""
         sn = fields.get("serial number", "")
         if not (model and sn):
             pending_port = None
