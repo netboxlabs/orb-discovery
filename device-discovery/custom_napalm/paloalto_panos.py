@@ -164,9 +164,11 @@ def _parse_chassis_inventory_xml(xml_text: str) -> list[dict]:
     """
     Parse `<show><chassis><inventory></inventory></chassis></show>` response.
 
-    Walks ``chassis/slots/entry/*`` and returns one row per slot. Empty
-    / malformed entries are silently skipped — the canonical envelope drops
-    empty bays.
+    Walks ``chassis/slots/entry/*`` and returns one row per ``<entry>``,
+    with empty strings for any missing child element. Filtering of rows
+    that lack a usable PID or serial happens downstream in
+    ``_panos_build_bays``; this layer is intentionally permissive so the
+    PA-5450 Base Card row (blank ``<slot>``) reaches the builder.
     """
     rows: list[dict] = []
     try:

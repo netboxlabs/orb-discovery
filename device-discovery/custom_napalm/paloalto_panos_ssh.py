@@ -106,11 +106,11 @@ def _panos_ssh_token_from_sku(part_number: str) -> str:
     return ""
 
 
-# `show chassis inventory` text-table row regex. PAN-OS prints fixed-width
-# columns but the HW Rev column can be multi-token across releases
-# (`1.0`, `1.0a`, `Rev 1.0`). The middle of the row is lazy-matched and the
-# PID is anchored to the `PA-` prefix so the regex still locks on the right
-# columns even when HW Rev expands.
+# `show chassis inventory` text-table row regex. The regex captures only
+# the three driver-relevant columns (Slot / PID / Serial) and stops; the
+# trailing Ports / Revision / Power(w) columns are left for finditer to
+# skip when it advances to the next `^` anchor. The PID is anchored to
+# the `PA-` prefix so header / separator lines never mis-match.
 _PANOS_INVENTORY_ROW_RE = re.compile(
     # Real PAN-OS `show chassis inventory` column layout (per Palo Alto KB
     # kA14u000000wlKJCAY):
