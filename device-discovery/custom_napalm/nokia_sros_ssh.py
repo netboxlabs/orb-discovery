@@ -170,17 +170,24 @@ _NOKIA_SROS_FIELD_RE = re.compile(
     r"^\s*(?P<label>[A-Za-z][\w \-/.()]*?)\s*:\s*(?P<value>.+?)\s*$",
     re.MULTILINE,
 )
-# "Card 1 Detail" or "Card A Detail".
-_NOKIA_SROS_CARD_HDR_RE = re.compile(r"Card\s+(?P<slot>[A-Za-z0-9]+)\s+Detail")
-# "MDA 1/1 Detail".
-_NOKIA_SROS_MDA_HDR_RE = re.compile(r"MDA\s+(?P<slot>\d+)/(?P<mda>\d+)\s+Detail")
+# Card/MDA/Port detail headers — `Detail` keyword is mixed-case across SR-OS
+# releases (classic CLI `Detail`, MD-CLI `detail`); match case-insensitively
+# to cover both. Same applies to the `Card`/`MDA`/`Port` keyword.
+_NOKIA_SROS_CARD_HDR_RE = re.compile(
+    r"Card\s+(?P<slot>[A-Za-z0-9]+)\s+Detail", re.IGNORECASE,
+)
+_NOKIA_SROS_MDA_HDR_RE = re.compile(
+    r"MDA\s+(?P<slot>\d+)/(?P<mda>\d+)\s+Detail", re.IGNORECASE,
+)
 # Port id forms emitted by SR-OS `show port`:
 #   classic 3-segment "1/1/1"           — slot/mda/port
 #   FP4 connector-cage "1/1/c2/1"       — slot/mda/c<N>/port (SR-7s IMM)
 #   breakout sub-port "1/1/1[1]" or "1/1/c2/1[1]" — QSFP/QSFP28 broken out
 # The lookahead anchor allows the port id to be the last token on a line.
 _NOKIA_SROS_PORT_ID_RE = r"\d+/\d+/(?:c\d+/)?\d+(?:\[\d+\])?"
-_NOKIA_SROS_PORT_HDR_RE = re.compile(rf"Port\s+(?P<port>{_NOKIA_SROS_PORT_ID_RE})")
+_NOKIA_SROS_PORT_HDR_RE = re.compile(
+    rf"Port\s+(?P<port>{_NOKIA_SROS_PORT_ID_RE})", re.IGNORECASE,
+)
 _NOKIA_SROS_PORT_LIST_RE = re.compile(
     rf"^\s*(?P<port>{_NOKIA_SROS_PORT_ID_RE})(?=\s|$)", re.MULTILINE,
 )
@@ -189,7 +196,7 @@ _NOKIA_SROS_PORT_LIST_RE = re.compile(
 def classify_module_type_nokia_sros_ssh(equipped_type: str) -> str:
     """Same classifier as the NETCONF driver (Approach A duplication)."""
     et = (equipped_type or "").strip().lower()
-    if et.startswith(("iom", "imm")):
+    if et.startswith(("iom", "imm", "xcm")):
         return "linecard"
     if et.startswith("cpm"):
         return "supervisor"

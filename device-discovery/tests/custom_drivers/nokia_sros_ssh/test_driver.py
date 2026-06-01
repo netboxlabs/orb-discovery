@@ -217,3 +217,56 @@ def test_parse_port_list_ignores_line_internal_port_ids():
     """A port-id inside a description column (not at line start) is NOT matched."""
     text = "Description    : To 1/1/1 from peer\n1/1/2         Up"
     assert _nokia_sros_ssh_parse_port_list(text) == ["1/1/2"]
+
+
+def test_parse_cards_case_insensitive_detail_header():
+    """`Card N detail` (MD-CLI lower-case) matches the same as `Card N Detail`."""
+    from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_parse_cards
+    text = """\
+===============================================================================
+Card 1 detail
+===============================================================================
+Slot                           : 1
+Card Type                      : iom4-e
+Serial Number                  : NS-IOM1-001
+Part Number                    : 3HE09576AA
+===============================================================================
+"""
+    rows = _nokia_sros_ssh_parse_cards(text)
+    assert rows == [{
+        "slot": "1",
+        "equipped_type": "iom4-e",
+        "pid": "3HE09576AA",
+        "sn": "NS-IOM1-001",
+    }]
+
+
+def test_parse_mdas_case_insensitive_detail_header():
+    """`MDA 4/1 detail` (MD-CLI lower-case) matches the same as `MDA 4/1 Detail`."""
+    from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_parse_mdas
+    text = """\
+===============================================================================
+MDA 4/1 detail
+===============================================================================
+Slot                           : 4
+MDA                            : 1
+MDA Type                       : me10-10gb-sfp+
+Serial Number                  : NS-MDA-004
+Part Number                    : 3HE09579AA
+===============================================================================
+"""
+    rows = _nokia_sros_ssh_parse_mdas(text)
+    assert rows == [{
+        "parent_slot": "4",
+        "mda_slot": "1",
+        "equipped_type": "me10-10gb-sfp+",
+        "pid": "3HE09579AA",
+        "sn": "NS-MDA-004",
+    }]
+
+
+def test_classify_xcm_ssh_as_linecard():
+    """SSH classifier handles XCM (7950 XRS forwarding card) too."""
+    from custom_napalm.nokia_sros_ssh import classify_module_type_nokia_sros_ssh
+    assert classify_module_type_nokia_sros_ssh("xcm-x20") == "linecard"
+    assert classify_module_type_nokia_sros_ssh("XCM-X20") == "linecard"

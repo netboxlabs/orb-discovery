@@ -105,3 +105,21 @@ def test_attach_transceiver_unknown_mda_path_dropped():
     ifaces = _nokia_sros_attach_transceiver_sub_bays(rows, mda_map)
     assert ifaces == {}
     assert mda_map["1/1"].module.sub_bays == []
+
+
+def test_classify_xcm_as_linecard():
+    """7950 XRS forwarding cards (XCM) classify as linecard, not 'other'."""
+    from custom_napalm.nokia_sros import classify_module_type_nokia_sros
+    assert classify_module_type_nokia_sros("xcm-x20") == "linecard"
+    assert classify_module_type_nokia_sros("XCM-X20") == "linecard"
+    assert classify_module_type_nokia_sros("xcm-4q-xma") == "linecard"
+
+
+def test_classify_known_prefixes():
+    """Regression coverage for the full classifier prefix table."""
+    from custom_napalm.nokia_sros import classify_module_type_nokia_sros
+    assert classify_module_type_nokia_sros("iom4-e") == "linecard"
+    assert classify_module_type_nokia_sros("imm36-100g-qsfp28") == "linecard"
+    assert classify_module_type_nokia_sros("cpm5") == "supervisor"
+    assert classify_module_type_nokia_sros("sfm-7") == "linecard"
+    assert classify_module_type_nokia_sros("psu-ac") == "other"

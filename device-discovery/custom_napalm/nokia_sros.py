@@ -461,13 +461,13 @@ def classify_module_type_nokia_sros(equipped_type: str) -> str:
     """
     Classify a Nokia SR-OS card / MDA by its equipped-type string.
 
-      iom*, imm*  -> linecard
-      cpm*        -> supervisor
-      sfm*        -> linecard (no separate fabric type today)
-      anything else -> "other" (envelope drops on emit)
+      iom*, imm*, xcm*  -> linecard  (XCM = 7950 XRS forwarding card)
+      cpm*              -> supervisor
+      sfm*              -> linecard (no separate fabric type today)
+      anything else     -> "other" (envelope drops on emit)
     """
     et = (equipped_type or "").strip().lower()
-    if et.startswith(("iom", "imm")):
+    if et.startswith(("iom", "imm", "xcm")):
         return "linecard"
     if et.startswith("cpm"):
         return "supervisor"
