@@ -13,3 +13,9 @@ class TestPANOSDriver(BaseDriverTest):
     driver_cls = PANOSDriver
     fake_device_cls = FakeXmlDevice
     mock_data_root = Path(__file__).parent / "mock_data"
+
+
+def test_driver_exposes_get_modules():
+    """PANOSDriver MUST expose a callable get_modules method."""
+    assert hasattr(PANOSDriver, "get_modules")
+    assert callable(PANOSDriver.get_modules)
