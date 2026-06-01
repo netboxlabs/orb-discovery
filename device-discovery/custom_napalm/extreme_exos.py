@@ -275,7 +275,7 @@ class ExosDriver(_napalm_base.NetworkDriver):
             if m:
                 hostname = m.group(1)
 
-            m = re.search(r"^System Type\s*:\s*(\S+)", ver_output, re.M)
+            m = re.search(r"^System Type\s*:\s*(.+?)\s*$", ver_output, re.M)
             if m:
                 model = m.group(1)
 
