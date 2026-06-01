@@ -626,7 +626,7 @@ def _comware_is_modular(model: str) -> bool:
 
 def _comware_classify_module(device_name: str) -> str:
     """
-    Classify a Comware SKU into a NetBox module type.
+    Classify a Comware SKU into a module type.
 
     Returns ``"supervisor"`` / ``"linecard"`` per ``_COMWARE_MODULE_CLASSIFIER``,
     or ``"other"`` when nothing matches. Empty / whitespace input returns

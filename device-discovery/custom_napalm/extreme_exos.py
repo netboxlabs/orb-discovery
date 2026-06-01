@@ -294,7 +294,7 @@ def _exos_is_modular(model: str) -> bool:
 
 def _exos_classify_module(hw_type: str) -> str:
     """
-    Classify an EXOS ``Hw Module Type`` value into a NetBox module type.
+    Classify an EXOS ``Hw Module Type`` value into a module type.
 
     Returns ``"supervisor"`` / ``"linecard"`` per ``_EXOS_MODULE_CLASSIFIER``
     or ``"other"`` for SKUs that match no documented prefix. Empty input
