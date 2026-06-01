@@ -106,12 +106,23 @@ def test_panos_sku_classifier_tables_in_sync():
 
 
 def test_panos_sku_classifier_ordering_invariant():
-    """Classifier table must place NPC before NC — direct tuple-order assertion."""
+    """Any classifier token that is a substring of another must appear AFTER the longer one."""
     from custom_napalm.paloalto_panos import _PANOS_SKU_CLASSIFIER
     tokens = [t for t, _ in _PANOS_SKU_CLASSIFIER]
-    npc_idx = tokens.index("NPC")
-    nc_idx = tokens.index("NC")
-    assert npc_idx < nc_idx, (
-        f"NC must follow NPC in classifier ordering (NPC at {npc_idx}, NC at {nc_idx}) — "
-        "otherwise a SKU like PA-7000-100G-NPC-A could match the NC rule via substring."
-    )
+    for i, shorter in enumerate(tokens):
+        for j, longer in enumerate(tokens):
+            if i == j or shorter not in longer or shorter == longer:
+                continue
+            # shorter is a strict substring of longer → longer must come first
+            assert j < i, (
+                f"Ordering violation: {longer!r} (index {j}) contains "
+                f"{shorter!r} (index {i}) as substring — the longer/more-specific "
+                f"token must be checked first."
+            )
+
+
+def test_panos_modular_prefixes_in_sync():
+    """The XML and SSH model-prefix tables must stay tuple-equal (Approach A guard)."""
+    from custom_napalm.paloalto_panos import _MODULAR_PANOS_PREFIXES
+    from custom_napalm.paloalto_panos_ssh import _MODULAR_PANOS_PREFIXES_SSH
+    assert _MODULAR_PANOS_PREFIXES == _MODULAR_PANOS_PREFIXES_SSH

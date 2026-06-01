@@ -105,7 +105,10 @@ _PANOS_INVENTORY_ROW_RE = re.compile(
     r"(?P<type>\S+)\s+"
     r".+?\s+"
     r"(?P<pid>PA-\S+)\s+"
-    r"(?P<sn>[A-Za-z0-9]+)\s*$",
+    # Serial accepts alphanumerics, hyphens, and dots — covers documented
+    # 12-digit PA-7000/PA-5450 serials AND hyphenated / vendor-prefixed
+    # forms that show up on some PAN-OS variants.
+    r"(?P<sn>[A-Za-z0-9.\-]+)\s*$",
     re.MULTILINE,
 )
 
