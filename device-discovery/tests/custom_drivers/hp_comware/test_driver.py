@@ -5,8 +5,11 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from custom_napalm.hp_comware import (
+    _COMWARE_MODULE_CLASSIFIER,
     ComwareDriver,
+    _comware_classify_module,
     _comware_get_chassis_members_impl,
+    _comware_is_modular,
     _normalize_irf_mac,
     _parse_comware_irf,
 )
@@ -184,3 +187,84 @@ def test_chassis_members_manuinfo_failure_drops_members_logs_warning(caplog):
     warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert any("display device manuinfo failed" in r.message for r in warning_records)
     assert any(r.exc_info is not None and r.exc_info[0] is RuntimeError for r in warning_records)
+
+
+# --- get_modules attribute test ---------------------------------------------
+
+
+def test_driver_exposes_get_modules():
+    """ComwareDriver MUST expose a callable get_modules method."""
+    assert hasattr(ComwareDriver, "get_modules")
+    assert callable(ComwareDriver.get_modules)
+
+
+# --- classifier unit tests ---------------------------------------------------
+
+
+def test_classifier_recognises_every_documented_prefix():
+    """Every SKU prefix in _COMWARE_MODULE_CLASSIFIER classifies to its declared type."""
+    for prefix, expected_type in _COMWARE_MODULE_CLASSIFIER:
+        sku = f"{prefix}1ABC"
+        assert _comware_classify_module(sku) == expected_type, (
+            f"prefix {prefix!r} mis-classified"
+        )
+
+
+def test_classifier_lsum_beats_lsu_supervisor_precedence():
+    """LSUM (supervisor) MUST be checked before LSU (linecard)."""
+    assert _comware_classify_module("LSUM1SUPXD0") == "supervisor"
+    assert _comware_classify_module("LSU1FX48A") == "linecard"
+
+
+def test_classifier_case_insensitive():
+    """Classifier is case-insensitive (real output is uppercase; defensive)."""
+    assert _comware_classify_module("lsxm2mpud0") == "supervisor"
+    assert _comware_classify_module("lsxs1fab320a") == "linecard"
+
+
+def test_classifier_unknown_returns_other():
+    """SKUs that match no prefix classify as 'other' (dropped by impl)."""
+    assert _comware_classify_module("XYZ-UNKNOWN") == "other"
+    assert _comware_classify_module("") == "other"
+    assert _comware_classify_module("   ") == "other"
+
+
+def test_classifier_ordering_invariant_longer_before_shorter():
+    """Tokens that are substrings of other tokens MUST appear first in the table."""
+    prefixes = [p for p, _ in _COMWARE_MODULE_CLASSIFIER]
+    for i, short in enumerate(prefixes):
+        for j, longer in enumerate(prefixes):
+            if i == j or len(longer) <= len(short):
+                continue
+            if longer.startswith(short):
+                assert j < i, (
+                    f"ordering bug: longer prefix {longer!r} must appear "
+                    f"before shorter prefix {short!r}"
+                )
+
+
+# --- family detection unit tests --------------------------------------------
+
+
+def test_is_modular_accepts_documented_families():
+    """All four modular families resolve to True."""
+    assert _comware_is_modular("S7503E")
+    assert _comware_is_modular("S10508")
+    assert _comware_is_modular("S12508X-AF")
+    assert _comware_is_modular("S12916-AF")
+
+
+def test_is_modular_handles_vendor_prefixed_models():
+    """Vendor-prefixed model strings still resolve correctly."""
+    assert _comware_is_modular("H3C S12508X-AF")
+    assert _comware_is_modular("HPE FlexFabric S12500")
+    assert _comware_is_modular("HP S10508")
+
+
+def test_is_modular_rejects_fixed_families():
+    """Fixed pizza-box families return False."""
+    assert not _comware_is_modular("S5500-28C-EI")
+    assert not _comware_is_modular("S5800-32F")
+    assert not _comware_is_modular("S6800-54QF")
+    assert not _comware_is_modular("")
+    assert not _comware_is_modular("Unknown")

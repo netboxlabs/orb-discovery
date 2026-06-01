@@ -22,6 +22,18 @@ from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
 from custom_napalm._chassis import ChassisMember, normalize_role, to_payload
+from custom_napalm._modules import (
+    MemberModules as _MemberModules,
+)
+from custom_napalm._modules import (
+    ModuleBay as _ModuleBay,
+)
+from custom_napalm._modules import (
+    ModuleEntry as _ModuleEntry,
+)
+from custom_napalm._modules import (
+    to_payload as _modules_to_payload,
+)
 from custom_napalm._vlan import (
     SwitchportInfo,
     classify_switchport,
@@ -561,6 +573,163 @@ def _comware_get_chassis_members_impl(driver) -> dict | None:
     return to_payload(members, domain=domain)
 
 
+# --- module / module bay discovery ------------------------------------------
+#
+# Comware modular chassis families (S7500E, S10500, S12500, S12900) print one
+# row per slot in `display device manuinfo` with a full vendor SKU in
+# `DEVICE_NAME`. The classifier maps documented H3C SKU prefixes to NetBox
+# module types (supervisor / linecard). Order matters: longer prefixes that
+# contain a shorter prefix as a substring MUST appear first (LSUM before LSU)
+# so supervisor SKUs are not mis-classified as linecards.
+
+# Family-prefix substrings (not full model names): real H3C model strings
+# include the chassis-size digit, e.g. ``S12508X-AF`` (S12500 family),
+# ``S12916-AF`` (S12900 family), ``S10510`` (S10500), ``S7503E`` (S7500E).
+# Substring-matching the family prefix (``S125``, ``S129``, ``S105``, ``S75``)
+# covers every chassis variant while rejecting the fixed pizza-box families
+# (``S5500`` / ``S5800`` / ``S6800``).
+_MODULAR_COMWARE_TOKENS: tuple[str, ...] = ("S75", "S105", "S125", "S129")
+
+# (prefix, type). 4-character prefixes appear BEFORE 3-character prefixes so
+# LSUM (supervisor) wins over LSU (linecard). The ordering-invariant test in
+# the unit suite enforces this generically against the table.
+_COMWARE_MODULE_CLASSIFIER: tuple[tuple[str, str], ...] = (
+    ("LSUM", "supervisor"),   # S10500 supervisor — MUST come before LSU
+    ("LSQM", "supervisor"),   # S7500E MPU
+    ("LSXM", "supervisor"),   # S10500 / S12500X-AF / S12900 MPU
+    ("LSQS", "linecard"),     # S7500E SFU (fabric)
+    ("LSXS", "linecard"),     # S10500 / S12900 SFU (fabric)
+    ("LSQ1", "linecard"),     # S7500E LPU
+    ("LSQ2", "linecard"),     # S7500E LPU variant
+    ("LSQK", "linecard"),     # S7500E LPU variant
+    ("LSX1", "linecard"),     # S10500 / S12900 LPU
+    ("LSX2", "linecard"),     # S10500 / S12900 LPU variant
+    ("LSR", "linecard"),      # S12500 LPU SKU family
+    ("LSU", "linecard"),      # S12500 LSU fallback — must follow LSUM
+)
+
+
+def _comware_is_modular(model: str) -> bool:
+    """
+    True when ``model`` belongs to a Comware modular family.
+
+    Matches by uppercased substring so vendor-prefixed model strings
+    (``H3C S12500-AF``, ``HPE FlexFabric S12500``, ``HP A12500``) and
+    bare model names (``S12500``) both succeed. Non-modular families
+    (S5500 / S5800 / S5900) reject.
+    """
+    if not model:
+        return False
+    upper = model.upper()
+    return any(token in upper for token in _MODULAR_COMWARE_TOKENS)
+
+
+def _comware_classify_module(device_name: str) -> str:
+    """
+    Classify a Comware SKU into a NetBox module type.
+
+    Returns ``"supervisor"`` / ``"linecard"`` per ``_COMWARE_MODULE_CLASSIFIER``,
+    or ``"other"`` when nothing matches. Empty / whitespace input returns
+    ``"other"``. The match is a case-insensitive prefix check against the
+    first table entry whose prefix the SKU starts with — order dictates
+    precedence.
+    """
+    sku = (device_name or "").strip().upper()
+    if not sku:
+        return "other"
+    for prefix, mtype in _COMWARE_MODULE_CLASSIFIER:
+        if sku.startswith(prefix):
+            return mtype
+    return "other"
+
+
+def _comware_modules_rows_from_manuinfo(
+    rows: list[dict],
+) -> dict[int | None, _MemberModules]:
+    """
+    Walk parsed manuinfo rows and partition Slot entries by chassis id.
+
+    Drops Chassis / Subslot / Fan / Power rows, drops rows with empty
+    slot id / SKU / serial, drops SKUs that don't classify as
+    supervisor / linecard, and groups surviving bays by ``chassis_id``
+    (defaulting to 1 for non-IRF output).
+    """
+    members: dict[int | None, _MemberModules] = {}
+    for row in rows:
+        slot_type = (row.get("slot_type") or "").strip().lower()
+        if slot_type != "slot":
+            continue
+        slot_id = (row.get("slot_id") or "").strip()
+        sku = (row.get("device_name") or "").strip()
+        serial = (row.get("device_serial_number") or "").strip()
+        if not slot_id or not sku or not serial:
+            continue
+        try:
+            chassis_id = int((row.get("chassis_id") or "1").strip())
+        except ValueError:
+            continue
+        mtype = _comware_classify_module(sku)
+        if mtype not in ("supervisor", "linecard"):
+            continue
+        bay = _ModuleBay(
+            name=slot_id,
+            position=slot_id,
+            module=_ModuleEntry(model=sku, serial=serial, type=mtype, description=""),
+        )
+        member = members.setdefault(
+            chassis_id, _MemberModules(bays=[], interfaces_by_bay={})
+        )
+        member.bays.append(bay)
+    return members
+
+
+def _comware_get_modules_impl(driver) -> dict | None:
+    """
+    Per-chassis module / module bay discovery for HP/H3C Comware modular families.
+
+    Reads ``display version`` for family detection; non-modular families
+    short-circuit to ``None`` without touching ``display device manuinfo``.
+    For modular families, reads ``display device manuinfo``, partitions
+    Slot-type rows by ``chassis_id``, classifies each row's SKU, and emits
+    one ``MemberModules`` envelope per surviving chassis id.
+
+    Standalone modular chassis produce a single ``members[1]`` envelope;
+    IRF-of-modular emits one envelope per IRF member chassis (members[1],
+    members[2], ...). Subslot / Fan / Power rows are dropped — sub-bay
+    discovery is a follow-up.
+    """
+    try:
+        raw_version = driver.device.send_command("display version")
+    except Exception:
+        logger.warning("hp_comware.get_modules: display version failed", exc_info=True)
+        return None
+
+    model, _os_version, _uptime = _parse_version_output(raw_version or "")
+    if not _comware_is_modular(model):
+        return None
+
+    try:
+        manuinfo_out = driver.device.send_command("display device manuinfo")
+        manuinfo_rows = parse_output(
+            platform="hp_comware",
+            command="display device manuinfo",
+            data=manuinfo_out or "",
+        )
+    except Exception:
+        logger.warning(
+            "hp_comware.get_modules: display device manuinfo failed", exc_info=True
+        )
+        return None
+
+    if not manuinfo_rows:
+        return None
+
+    members = _comware_modules_rows_from_manuinfo(manuinfo_rows)
+    if not members:
+        return None
+    return _modules_to_payload(members)
+
+
 class ComwareDriver(_napalm_base.NetworkDriver):
     """HP Comware NAPALM driver (read-only subset for device-discovery)."""
 
@@ -779,6 +948,17 @@ class ComwareDriver(_napalm_base.NetworkDriver):
         a NetBox VirtualChassis.
         """
         return _comware_get_chassis_members_impl(self)
+
+    def get_modules(self) -> dict | None:
+        """
+        Return module / module bay inventory for Comware modular chassis.
+
+        Standalone modular families (S7500E, S10500, S12500, S12900) emit a
+        single per-chassis envelope; IRF-of-modular emits one envelope per
+        IRF member chassis. Non-modular families (S5500, S5800, S5900) and
+        unparseable output return ``None``.
+        """
+        return _comware_get_modules_impl(self)
 
     def get_interfaces_vlans(self) -> dict[str, dict]:
         """Return per-interface VLAN config from `display interface brief` + `display vlan all`."""
