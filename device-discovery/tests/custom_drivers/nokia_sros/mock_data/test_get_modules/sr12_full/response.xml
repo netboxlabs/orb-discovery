@@ -74,6 +74,9 @@
         </transceiver>
       </port>
       <port>
+        <port-id>1/1/2</port-id>
+      </port>
+      <port>
         <port-id>1/2/1</port-id>
         <transceiver>
           <model>QSFP-100G-SR4</model>
@@ -81,6 +84,9 @@
           <part-number>3HE04824AA</part-number>
           <vendor-manufacture-code>NOKIA</vendor-manufacture-code>
         </transceiver>
+      </port>
+      <port>
+        <port-id>2/1/1</port-id>
       </port>
     </state>
   </data>

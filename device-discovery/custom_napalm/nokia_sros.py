@@ -519,23 +519,33 @@ def _nokia_sros_rows_from_state_xml(state_root: etree._Element) -> list[dict]:
 
 
 def _nokia_sros_transceiver_rows_from_state_xml(state_root: etree._Element) -> list[dict]:
-    """Walk state/port[*]/transceiver and return per-port optic rows."""
+    """
+    Walk state/port[*] and return per-port rows.
+
+    Every discovered port emits a row regardless of transceiver presence —
+    copper / RJ45 / empty-cage ports also need a parent-bay routing entry.
+    Model and serial fields are populated only when a transceiver is
+    installed AND exposes both values; otherwise the row is port_id-only.
+    """
     rows: list[dict] = []
     for port in state_root.findall("state_ns:port", _NSMAP):
         port_id_el = port.find("state_ns:port-id", _NSMAP)
-        tx = port.find("state_ns:transceiver", _NSMAP)
-        if tx is None or port_id_el is None:
+        if port_id_el is None:
             continue
-        model_el = tx.find("state_ns:model", _NSMAP)
-        sn_el = tx.find("state_ns:serial-number", _NSMAP)
-        part_el = tx.find("state_ns:part-number", _NSMAP)
         port_id = (port_id_el.text or "").strip()
-        model = (model_el.text or "").strip() if model_el is not None else ""
-        sn = (sn_el.text or "").strip() if sn_el is not None else ""
-        if not model and part_el is not None:
-            model = (part_el.text or "").strip()
-        if not (port_id and model and sn):
+        if not port_id:
             continue
+        model = ""
+        sn = ""
+        tx = port.find("state_ns:transceiver", _NSMAP)
+        if tx is not None:
+            model_el = tx.find("state_ns:model", _NSMAP)
+            sn_el = tx.find("state_ns:serial-number", _NSMAP)
+            part_el = tx.find("state_ns:part-number", _NSMAP)
+            model = (model_el.text or "").strip() if model_el is not None else ""
+            sn = (sn_el.text or "").strip() if sn_el is not None else ""
+            if not model and part_el is not None:
+                model = (part_el.text or "").strip()
         rows.append({"port_id": port_id, "model": model, "sn": sn})
     return rows
 
@@ -612,13 +622,11 @@ def _nokia_sros_attach_transceiver_sub_bays(
     transceiver_rows: list[dict],
     mda_bays_by_path: dict[str, _ModuleBay],
 ) -> dict[str, list[str]]:
-    """Third pass: attach transceivers under their parent MDA. Returns interfaces_by_bay."""
+    """Route every port to its parent bays; emit transceiver sub-bay only when populated."""
     interfaces_by_bay: dict[str, list[str]] = {}
     for row in transceiver_rows:
         port_id = row.get("port_id") or ""
-        model = row.get("model") or ""
-        sn = row.get("sn") or ""
-        if not (port_id and model and sn):
+        if not port_id:
             continue
         parts = port_id.split("/")
         if len(parts) < 3:
@@ -627,20 +635,25 @@ def _nokia_sros_attach_transceiver_sub_bays(
         mda_bay = mda_bays_by_path.get(mda_path)
         if mda_bay is None or mda_bay.module is None:
             continue
-        mda_bay.module.sub_bays.append(_ModuleBay(
-            name=port_id, position=port_id,
-            module=_ModuleEntry(model=model, serial=sn, type="transceiver", description=""),
-        ))
-        # Emit three routing-key layers — the translator's deepest-bay-wins
-        # resolves them in `full` mode, and `linecards` mode short-circuits
-        # at depth 1 so only the card-slot key is consulted there:
+        # Routing layers are emitted for EVERY discovered port (copper,
+        # empty cage, optic-without-data, …) — get_interfaces() emits the
+        # physical port regardless of optic, so it needs a module to land
+        # on in both linecards and full modes:
         #   - card-slot key   -> linecards mode routing
         #   - mda-path key    -> full mode at MDA depth
-        #   - per-port key    -> full mode at transceiver depth
         card_slot = parts[0]
         interfaces_by_bay.setdefault(card_slot, []).append(port_id)
         interfaces_by_bay.setdefault(mda_path, []).append(port_id)
-        interfaces_by_bay[port_id] = [port_id]
+        # Transceiver sub-bay (and its per-port deepest-wins routing key)
+        # only emit when the optic exposes both model and serial.
+        model = row.get("model") or ""
+        sn = row.get("sn") or ""
+        if model and sn:
+            mda_bay.module.sub_bays.append(_ModuleBay(
+                name=port_id, position=port_id,
+                module=_ModuleEntry(model=model, serial=sn, type="transceiver", description=""),
+            ))
+            interfaces_by_bay[port_id] = [port_id]
     return interfaces_by_bay
 
 

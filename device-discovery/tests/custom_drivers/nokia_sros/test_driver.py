@@ -107,6 +107,28 @@ def test_attach_transceiver_unknown_mda_path_dropped():
     assert mda_map["1/1"].module.sub_bays == []
 
 
+def test_attach_transceiver_routes_optic_less_port_to_parent_bays():
+    """Copper/empty-cage ports still get parent routing; no transceiver sub-bay."""
+    from custom_napalm.nokia_sros import _nokia_sros_attach_transceiver_sub_bays
+    mda_map, _ = _build_mda_bay_map()
+    rows = [
+        {"port_id": "1/1/1", "model": "SFP-10G-LR", "sn": "OPT-A"},  # has optic
+        {"port_id": "1/1/2", "model": "", "sn": ""},                  # copper / empty cage
+    ]
+    ifaces = _nokia_sros_attach_transceiver_sub_bays(rows, mda_map)
+    # Both ports route to card-slot + mda-path; only the optic'd port has
+    # a per-port key AND a transceiver sub-bay.
+    assert ifaces == {
+        "1": ["1/1/1", "1/1/2"],
+        "1/1": ["1/1/1", "1/1/2"],
+        "1/1/1": ["1/1/1"],
+    }
+    sub_bays = mda_map["1/1"].module.sub_bays
+    assert len(sub_bays) == 1
+    assert sub_bays[0].name == "1/1/1"
+    assert sub_bays[0].module.type == "transceiver"
+
+
 def test_classify_xcm_as_linecard():
     """7950 XRS forwarding cards (XCM) classify as linecard, not 'other'."""
     from custom_napalm.nokia_sros import classify_module_type_nokia_sros

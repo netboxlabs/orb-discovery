@@ -56,6 +56,9 @@
           <vendor-manufacture-code>NOKIA</vendor-manufacture-code>
         </transceiver>
       </port>
+      <port>
+        <port-id>2/1/1</port-id>
+      </port>
     </state>
   </data>
 </rpc-reply>

@@ -334,7 +334,14 @@ def _nokia_sros_ssh_parse_mdas(text: str) -> list[dict]:
 
 
 def _nokia_sros_ssh_parse_port_transceiver(text: str) -> dict | None:
-    """Parse one `show port X/Y/Z detail`. Header/fields straddle a `===` separator."""
+    """
+    Parse one `show port X/Y/Z detail`. Header/fields straddle a `===` separator.
+
+    Returns a row dict with port_id always populated when the Port header is
+    found; model / sn are empty when the optic is absent or omits those
+    fields (copper port, empty cage, etc.). Returns None only when no
+    `Port X/Y/Z` header is parseable from the output at all.
+    """
     pending_port: str | None = None
     for block in _nokia_sros_ssh_split_blocks(text):
         hdr = _NOKIA_SROS_PORT_HDR_RE.search(block)
@@ -349,9 +356,6 @@ def _nokia_sros_ssh_parse_port_transceiver(text: str) -> dict | None:
         # fixtures use the shorter "Model" label. Accept both.
         model = fields.get("model number") or fields.get("model") or ""
         sn = fields.get("serial number", "")
-        if not (model and sn):
-            pending_port = None
-            continue
         return {
             "port_id": pending_port,
             "model": model,
@@ -428,13 +432,11 @@ def _nokia_sros_ssh_attach_transceivers(
     transceiver_rows: list[dict],
     mda_bays_by_path: dict[str, _ModuleBay],
 ) -> dict[str, list[str]]:
-    """Attach transceivers under their parent MDA. Returns interfaces_by_bay."""
+    """Route every port to its parent bays; emit transceiver sub-bay only when populated."""
     interfaces_by_bay: dict[str, list[str]] = {}
     for row in transceiver_rows:
         port_id = row.get("port_id") or ""
-        model = row.get("model") or ""
-        sn = row.get("sn") or ""
-        if not (port_id and model and sn):
+        if not port_id:
             continue
         parts = port_id.split("/")
         if len(parts) < 3:
@@ -443,20 +445,21 @@ def _nokia_sros_ssh_attach_transceivers(
         mda_bay = mda_bays_by_path.get(mda_path)
         if mda_bay is None or mda_bay.module is None:
             continue
-        mda_bay.module.sub_bays.append(_ModuleBay(
-            name=port_id, position=port_id,
-            module=_ModuleEntry(model=model, serial=sn, type="transceiver", description=""),
-        ))
-        # Emit three routing-key layers — the translator's deepest-bay-wins
-        # resolves them in `full` mode, and `linecards` mode short-circuits
-        # at depth 1 so only the card-slot key is consulted there:
-        #   - card-slot key   -> linecards mode routing
-        #   - mda-path key    -> full mode at MDA depth
-        #   - per-port key    -> full mode at transceiver depth
+        # Routing layers are emitted for EVERY discovered port (copper,
+        # empty cage, optic-without-data, …) — get_interfaces() emits the
+        # physical port regardless of optic, so it needs a module to land
+        # on in both linecards and full modes.
         card_slot = parts[0]
         interfaces_by_bay.setdefault(card_slot, []).append(port_id)
         interfaces_by_bay.setdefault(mda_path, []).append(port_id)
-        interfaces_by_bay[port_id] = [port_id]
+        model = row.get("model") or ""
+        sn = row.get("sn") or ""
+        if model and sn:
+            mda_bay.module.sub_bays.append(_ModuleBay(
+                name=port_id, position=port_id,
+                module=_ModuleEntry(model=model, serial=sn, type="transceiver", description=""),
+            ))
+            interfaces_by_bay[port_id] = [port_id]
     return interfaces_by_bay
 
 
@@ -551,6 +554,10 @@ def _nokia_sros_ssh_collect_transceivers(driver, mda_rows: list[dict]) -> list[d
             continue
         if f"{parts[0]}/{parts[1]}" not in known_mda_paths:
             continue
+        # Default routing-only row — emitted even when `show port X detail`
+        # is missing / errors out / has no Transceiver Data block, so the
+        # port still gets a parent-bay entry in interfaces_by_bay.
+        row: dict[str, str] = {"port_id": port_id, "model": "", "sn": ""}
         try:
             raw = driver.device.send_command(f"show port {port_id} detail")
         except Exception as e:
@@ -558,12 +565,13 @@ def _nokia_sros_ssh_collect_transceivers(driver, mda_rows: list[dict]) -> list[d
                 "nokia_sros_ssh.get_modules: show port %s detail failed: %s",
                 port_id, e,
             )
+            transceiver_rows.append(row)
             continue
-        if not raw or not raw.strip() or "MINOR:" in raw or "Error:" in raw:
-            continue
-        tx = _nokia_sros_ssh_parse_port_transceiver(raw)
-        if tx is not None:
-            transceiver_rows.append(tx)
+        if raw and raw.strip() and "MINOR:" not in raw and "Error:" not in raw:
+            parsed = _nokia_sros_ssh_parse_port_transceiver(raw)
+            if parsed is not None:
+                row = parsed
+        transceiver_rows.append(row)
     return transceiver_rows
 
 
