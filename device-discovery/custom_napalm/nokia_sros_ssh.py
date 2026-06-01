@@ -531,16 +531,19 @@ def _nokia_sros_ssh_parse_sfms(text: str) -> list[dict]:
 
 def _nokia_sros_ssh_fetch_and_parse_mdas(driver, card_rows: list[dict]) -> list[dict]:
     """
-    Issue `show mda <slot> detail` per linecard slot and merge parsed rows.
+    Issue `show mda <slot> detail` per IOM/IMM/XCM slot and merge parsed rows.
 
     Nokia SR-OS rejects `show mda detail` without a slot argument; the
     documented detail syntax is `show mda <slot>[/<mda>] detail`. We
-    iterate each linecard-classified card and concatenate the per-slot
-    parser output. CPM / SFM slots are skipped (they have no MDAs).
+    iterate cards whose equipped_type identifies them as MDA-carrying
+    linecards (IOM / IMM / XCM). CPMs (cpm*) and SFMs (sfm*) have no
+    MDAs — `show mda` on those slots returns an error and would generate
+    log noise / wasted round-trips.
     """
     all_rows: list[dict] = []
     for row in card_rows:
-        if classify_module_type_nokia_sros_ssh(row.get("equipped_type", "")) != "linecard":
+        et = (row.get("equipped_type") or "").strip().lower()
+        if not et.startswith(("iom", "imm", "xcm")):
             continue
         slot = row.get("slot") or ""
         if not slot:

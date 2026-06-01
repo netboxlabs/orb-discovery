@@ -356,6 +356,38 @@ B      cpm5                                                  up     up/standby
     }
 
 
+def test_fetch_mdas_skips_sfm_and_cpm_slots():
+    """SFM and CPM rows must not trigger `show mda <slot> detail` commands."""
+    from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_fetch_and_parse_mdas
+
+    class _FakeDevice:
+        def __init__(self) -> None:
+            self.commands: list[str] = []
+
+        def send_command(self, cmd: str) -> str:
+            self.commands.append(cmd)
+            return ""
+
+    class _FakeDriver:
+        def __init__(self) -> None:
+            self.device = _FakeDevice()
+
+    driver = _FakeDriver()
+    card_rows = [
+        {"slot": "1", "equipped_type": "iom4-e", "pid": "X", "sn": "Y"},
+        {"slot": "A", "equipped_type": "cpm5", "pid": "X", "sn": "Y"},
+        {"slot": "SFM 1", "equipped_type": "sfm5-12", "pid": "X", "sn": "Y"},
+        {"slot": "SFM 2", "equipped_type": "sfm5-12", "pid": "X", "sn": "Y"},
+        {"slot": "2", "equipped_type": "imm36-100g-qsfp28", "pid": "X", "sn": "Y"},
+    ]
+    _nokia_sros_ssh_fetch_and_parse_mdas(driver, card_rows)
+    # Only IOM (slot 1) and IMM (slot 2) should generate MDA commands.
+    assert driver.device.commands == [
+        "show mda 1 detail",
+        "show mda 2 detail",
+    ]
+
+
 def test_parse_sfms_real_sros_format():
     """`show sfm detail` accepts both `Fabric <N>` (real SR-OS) and `SFM <N>` headers."""
     from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_parse_sfms
