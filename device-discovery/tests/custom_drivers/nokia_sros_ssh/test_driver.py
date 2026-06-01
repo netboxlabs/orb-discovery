@@ -329,6 +329,33 @@ Hardware Data
     ]
 
 
+def test_parse_card_summary_single_type_row():
+    """When Equipped Type == Provisioned Type, SR-OS leaves the equipped column blank."""
+    from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_parse_card_summary
+    text = """\
+===============================================================================
+Card Summary
+===============================================================================
+Slot   Provisioned Type           Equipped Type              Admin  Oper
+-------------------------------------------------------------------------------
+1      iom5-e:he1200g+                                       up     up
+2      iom4-e                     iom4-e                     up     up
+A      cpm5                                                  up     up/active
+B      cpm5                                                  up     up/standby
+===============================================================================
+"""
+    summary = _nokia_sros_ssh_parse_card_summary(text)
+    assert summary == {
+        # single-type form: equipped column blank → falls back to provisioned
+        "1": "iom5-e:he1200g+",
+        # two-type form: equipped column populated → used directly
+        "2": "iom4-e",
+        # operational state suffix `/active` / `/standby` does not break parsing
+        "A": "cpm5",
+        "B": "cpm5",
+    }
+
+
 def test_parse_cards_summary_header_not_mismatched_as_slot():
     """`Card Summary` header must NOT be matched as slot='Summary'."""
     from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_parse_cards

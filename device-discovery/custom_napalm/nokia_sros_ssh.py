@@ -186,12 +186,20 @@ _NOKIA_SROS_MDA_HDR_RE = re.compile(
     r"^MDA\s+(?P<slot>\d+)/(?P<mda>\d+)(?:\s+Detail)?\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
-# `show card` summary-table rows: each row has slot, provisioned-type,
-# equipped-type, admin-state, oper-state. Used as the source of truth for
-# equipped_type since SR-OS per-card detail blocks may not repeat that
-# field (they expose Part/Serial inside a Hardware Data subsection).
+# `show card` summary-table rows. Real SR-OS variants:
+#   - Two-type:    "1   iom4-e            iom4-e            up   up"
+#   - Single-type: "1   iom5-e:he1200g+                     up   up"
+#       (Equipped Type column is blank when it matches Provisioned Type)
+#   - CPM oper-state suffix: "A   cpm5                      up   up/active"
+# The equipped-type group is optional and uses a negative lookahead so
+# `up` / `down` cannot be captured as the equipped type. State tokens
+# accept an optional `/<suffix>` (active / standby / etc.).
 _NOKIA_SROS_CARD_SUMMARY_RE = re.compile(
-    r"^(?P<slot>[A-Za-z]\d*|\d+)\s+(?P<prov>\S+)\s+(?P<equipped>\S+)\s+(?:up|down)\s+(?:up|down)",
+    r"^(?P<slot>[A-Za-z]\d*|\d+)\s+"
+    r"(?P<prov>\S+)"
+    r"(?:\s+(?P<equipped>(?!up\b|down\b)\S+))?"
+    r"\s+(?:up|down)(?:/\S+)?"
+    r"\s+(?:up|down)(?:/\S+)?",
     re.MULTILINE | re.IGNORECASE,
 )
 # Port id forms emitted by SR-OS `show port`:
@@ -246,7 +254,9 @@ def _nokia_sros_ssh_parse_card_summary(text: str) -> dict[str, str]:
     """
     summary: dict[str, str] = {}
     for m in _NOKIA_SROS_CARD_SUMMARY_RE.finditer(text or ""):
-        summary[m.group("slot")] = m.group("equipped")
+        # When `Equipped Type` is blank (same as `Provisioned Type`), the
+        # capture group is None; fall back to the provisioned-type token.
+        summary[m.group("slot")] = m.group("equipped") or m.group("prov")
     return summary
 
 
