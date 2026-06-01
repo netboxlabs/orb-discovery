@@ -117,13 +117,16 @@ _PANOS_INVENTORY_ROW_RE = re.compile(
     # Driver-relevant columns are Slot / Component (PID) / Serial — trailing
     # Ports/Revision/Power columns are skipped via the open-ended tail.
     #
-    # Slot accepts alphanumerics (PA-7000 line slots are numeric; PA-5450
-    # base / system slots may carry letter labels like `BSC` / `SYS`).
-    # PID matches PA-... AND the PAN-PA-... form Palo Alto's compatibility
-    # docs use for modular cards (PAN-PA-7000-100G-NPC-A, PAN-PA-5400-BC-A).
+    # Slot accepts alphanumerics OR may be empty: PA-5450 Base Card rows
+    # in real PAN-OS output (per Palo Alto KB kA14u000000bpuACAQ) print
+    # the Slot column blank before the numbered NC/DPC/MPC slots — the
+    # BC card has no slot id of its own. PA-7000 line slots are numeric;
+    # PA-5450 base / system slots may carry letter labels like `BSC` /
+    # `SYS`. PID matches PA-... AND the PAN-PA-... form Palo Alto's
+    # compatibility docs use (PAN-PA-7000-100G-NPC-A, PAN-PA-5400-BC-A).
     # Serial accepts alphanumerics, hyphens, and dots — covers documented
     # 12-digit PA-7000/PA-5450 serials AND vendor-prefixed forms.
-    r"^\s*(?P<slot>[A-Za-z0-9]+)\s+"
+    r"^\s*(?P<slot>[A-Za-z0-9]*)\s*"
     r"(?P<pid>(?:PAN-)?PA-\S+)\s+"
     r"(?P<sn>[A-Za-z0-9.\-]+)"
     # No end-of-line anchor — `\s` includes `\n` even under MULTILINE, so
@@ -153,16 +156,23 @@ def _panos_ssh_build_bays(rows: list[dict]) -> list[_ModuleBay]:
         slot = row.get("slot") or ""
         pid = row.get("pid") or ""
         sn = row.get("sn") or ""
-        if not (slot and pid and sn):
+        if not (pid and sn):
             continue
         mtype = classify_module_type_panos_ssh(pid)
         if mtype == "other":
             continue
+        token = _panos_ssh_token_from_sku(pid)
+        # PA-5450 Base Card prints with a blank Slot column in real PAN-OS
+        # output — synthesize a bay name from the SKU token so the bay
+        # still emits with a stable human-readable id.
+        if not slot:
+            slot = token
+        if not slot:
+            continue
         bays.append(_ModuleBay(
             name=slot, position=slot,
             module=_ModuleEntry(
-                model=pid, serial=sn, type=mtype,
-                description=_panos_ssh_token_from_sku(pid),
+                model=pid, serial=sn, type=mtype, description=token,
             ),
         ))
     return bays

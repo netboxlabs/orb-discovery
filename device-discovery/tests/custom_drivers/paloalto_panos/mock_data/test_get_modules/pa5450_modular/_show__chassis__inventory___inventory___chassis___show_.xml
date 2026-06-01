@@ -3,6 +3,12 @@
     <chassis>
       <slots>
         <entry>
+          <slot></slot>
+          <type>BC</type>
+          <part-number>PAN-PA-5400-BC-A</part-number>
+          <serial>007903555001</serial>
+        </entry>
+        <entry>
           <slot>1</slot>
           <type>NC</type>
           <part-number>PA-5400-NC-A</part-number>

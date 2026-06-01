@@ -121,6 +121,24 @@ def test_panos_sku_classifier_ordering_invariant():
             )
 
 
+def test_parse_chassis_inventory_text_accepts_empty_slot_for_bc_card():
+    """PA-5450 Base Card row prints with a blank Slot column — parser tolerates it."""
+    from custom_napalm.paloalto_panos_ssh import _parse_chassis_inventory_text
+    text = """\
+Slot  Component             Serial Number   Ports  Revision  Power(w)
+-----------------------------------------------------------------------
+      PAN-PA-5400-BC-A      007903555001    0      1.0       60
+1     PA-5400-NC-A          007903111001    16     1.0       300
+"""
+    rows = _parse_chassis_inventory_text(text)
+    assert rows == [
+        # Empty slot column on the BC row — parsed through; builder synthesizes
+        # the bay name from the SKU token downstream.
+        {"slot": "", "pid": "PAN-PA-5400-BC-A", "sn": "007903555001"},
+        {"slot": "1", "pid": "PA-5400-NC-A", "sn": "007903111001"},
+    ]
+
+
 def test_parse_chassis_inventory_text_accepts_pan_prefixed_pids_and_letter_slots():
     """Real PAN-OS column layout: Slot / Component / Serial / Ports / Revision / Power(w)."""
     from custom_napalm.paloalto_panos_ssh import _parse_chassis_inventory_text

@@ -174,11 +174,11 @@ def _parse_chassis_inventory_xml(xml_text: str) -> list[dict]:
         slot_el = entry.find("slot")
         pn_el = entry.find("part-number")
         sn_el = entry.find("serial")
-        slot = (slot_el.text or "").strip() if slot_el is not None else ""
-        if not slot:
-            continue
+        # Empty / missing <slot> is allowed at the parser layer — the
+        # builder synthesizes a bay name from the SKU token for cards like
+        # the PA-5450 Base Card that PAN-OS prints without a slot id.
         rows.append({
-            "slot": slot,
+            "slot": (slot_el.text or "").strip() if slot_el is not None else "",
             "pid": (pn_el.text or "").strip() if pn_el is not None else "",
             "sn": (sn_el.text or "").strip() if sn_el is not None else "",
         })
@@ -192,16 +192,23 @@ def _panos_build_bays(rows: list[dict]) -> list[_ModuleBay]:
         slot = row.get("slot") or ""
         pid = row.get("pid") or ""
         sn = row.get("sn") or ""
-        if not (slot and pid and sn):
+        if not (pid and sn):
             continue
         mtype = classify_module_type_panos(pid)
         if mtype == "other":
             continue
+        token = _panos_token_from_sku(pid)
+        # PA-5450 Base Card prints with a blank Slot column in real PAN-OS
+        # output — synthesize a bay name from the SKU token so the bay
+        # still emits with a stable human-readable id.
+        if not slot:
+            slot = token
+        if not slot:
+            continue
         bays.append(_ModuleBay(
             name=slot, position=slot,
             module=_ModuleEntry(
-                model=pid, serial=sn, type=mtype,
-                description=_panos_token_from_sku(pid),
+                model=pid, serial=sn, type=mtype, description=token,
             ),
         ))
     return bays
