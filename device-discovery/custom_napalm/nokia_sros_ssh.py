@@ -170,14 +170,29 @@ _NOKIA_SROS_FIELD_RE = re.compile(
     r"^\s*(?P<label>[A-Za-z][\w \-/.()]*?)\s*:\s*(?P<value>.+?)\s*$",
     re.MULTILINE,
 )
-# Card/MDA/Port detail headers — `Detail` keyword is mixed-case across SR-OS
-# releases (classic CLI `Detail`, MD-CLI `detail`); match case-insensitively
-# to cover both. Same applies to the `Card`/`MDA`/`Port` keyword.
+# Card / MDA detail headers vary across SR-OS releases:
+#   classic CLI: "Card 1" / "MDA 1/1"           (no "Detail" word)
+#   classic CLI: "Card 1 Detail" / "MDA 1/1 Detail"
+#   MD-CLI:      "Card 1 detail" / "MDA 1/1 detail"
+# The `Detail` keyword is optional; matching uses re.IGNORECASE so case
+# variants are covered. The slot pattern is restricted to a single letter
+# optionally followed by digits, OR all digits, so summary headers like
+# "Card Summary" are NOT mis-matched as slot="Summary".
 _NOKIA_SROS_CARD_HDR_RE = re.compile(
-    r"Card\s+(?P<slot>[A-Za-z0-9]+)\s+Detail", re.IGNORECASE,
+    r"^Card\s+(?P<slot>[A-Za-z]\d*|\d+)(?:\s+Detail)?\s*$",
+    re.IGNORECASE | re.MULTILINE,
 )
 _NOKIA_SROS_MDA_HDR_RE = re.compile(
-    r"MDA\s+(?P<slot>\d+)/(?P<mda>\d+)\s+Detail", re.IGNORECASE,
+    r"^MDA\s+(?P<slot>\d+)/(?P<mda>\d+)(?:\s+Detail)?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+# `show card` summary-table rows: each row has slot, provisioned-type,
+# equipped-type, admin-state, oper-state. Used as the source of truth for
+# equipped_type since SR-OS per-card detail blocks may not repeat that
+# field (they expose Part/Serial inside a Hardware Data subsection).
+_NOKIA_SROS_CARD_SUMMARY_RE = re.compile(
+    r"^(?P<slot>[A-Za-z]\d*|\d+)\s+(?P<prov>\S+)\s+(?P<equipped>\S+)\s+(?:up|down)\s+(?:up|down)",
+    re.MULTILINE | re.IGNORECASE,
 )
 # Port id forms emitted by SR-OS `show port`:
 #   classic 3-segment "1/1/1"           — slot/mda/port
@@ -221,8 +236,31 @@ def _nokia_sros_ssh_extract_fields(block: str) -> dict[str, str]:
     return out
 
 
+def _nokia_sros_ssh_parse_card_summary(text: str) -> dict[str, str]:
+    """
+    Parse the `Card Summary` table → slot -> equipped_type.
+
+    Real SR-OS `show card detail` includes a top-level Card Summary block
+    whose rows are the source of truth for the equipped_type — per-card
+    detail blocks may not repeat the type field.
+    """
+    summary: dict[str, str] = {}
+    for m in _NOKIA_SROS_CARD_SUMMARY_RE.finditer(text or ""):
+        summary[m.group("slot")] = m.group("equipped")
+    return summary
+
+
 def _nokia_sros_ssh_parse_cards(text: str) -> list[dict]:
-    """Parse `show card detail`. Header and field rows straddle a `===` separator."""
+    """
+    Parse `show card detail`: cross-reference summary table + per-card detail.
+
+    Real SR-OS output places `Equipped Type` in the summary table only;
+    the per-card detail block exposes Part / Serial under a `Hardware Data`
+    subsection. We merge the two sources, falling back to whichever has
+    the field. Card headers in the detail blocks read `Card N` (with the
+    `Detail` word optional and case-insensitive).
+    """
+    summary_types = _nokia_sros_ssh_parse_card_summary(text)
     rows: list[dict] = []
     pending_slot: str | None = None
     for block in _nokia_sros_ssh_split_blocks(text):
@@ -238,9 +276,17 @@ def _nokia_sros_ssh_parse_cards(text: str) -> list[dict]:
         if pending_slot is None:
             continue
         fields = _nokia_sros_ssh_extract_fields(block)
+        # Equipped type may live in the detail block (`Card Type` /
+        # `Equipped Type`) or only in the summary table. Detail wins
+        # when present, summary is the fallback.
+        equipped = (
+            fields.get("card type")
+            or fields.get("equipped type")
+            or summary_types.get(pending_slot, "")
+        )
         rows.append({
             "slot": pending_slot,
-            "equipped_type": fields.get("card type", ""),
+            "equipped_type": equipped,
             "pid": fields.get("part number", ""),
             "sn": fields.get("serial number", ""),
         })
@@ -427,6 +473,35 @@ def _nokia_sros_ssh_parse_port_list(text: str) -> list[str]:
     return _NOKIA_SROS_PORT_LIST_RE.findall(text or "")
 
 
+def _nokia_sros_ssh_fetch_and_parse_mdas(driver, card_rows: list[dict]) -> list[dict]:
+    """
+    Issue `show mda <slot> detail` per linecard slot and merge parsed rows.
+
+    Nokia SR-OS rejects `show mda detail` without a slot argument; the
+    documented detail syntax is `show mda <slot>[/<mda>] detail`. We
+    iterate each linecard-classified card and concatenate the per-slot
+    parser output. CPM / SFM slots are skipped (they have no MDAs).
+    """
+    all_rows: list[dict] = []
+    for row in card_rows:
+        if classify_module_type_nokia_sros_ssh(row.get("equipped_type", "")) != "linecard":
+            continue
+        slot = row.get("slot") or ""
+        if not slot:
+            continue
+        try:
+            raw = driver.device.send_command(f"show mda {slot} detail")
+        except Exception as e:
+            logger.warning(
+                "nokia_sros_ssh.get_modules: show mda %s detail failed: %s", slot, e,
+            )
+            continue
+        if not raw or not raw.strip() or "MINOR:" in raw or "Error:" in raw:
+            continue
+        all_rows.extend(_nokia_sros_ssh_parse_mdas(raw))
+    return all_rows
+
+
 def _nokia_sros_ssh_fetch_port_ids(driver, mda_count: int) -> list[str]:
     """Issue `show port`, parse port-ids. Warn if MDAs exist but no ports parse."""
     try:
@@ -503,14 +578,8 @@ def _nokia_sros_ssh_get_modules_impl(driver) -> dict | None:
     except Exception as e:
         logger.warning("nokia_sros_ssh.get_modules: show card failed: %s", e)
         return None
-    try:
-        mda_raw = driver.device.send_command("show mda detail")
-    except Exception as e:
-        logger.warning("nokia_sros_ssh.get_modules: show mda failed: %s", e)
-        mda_raw = ""
-
     card_rows = _nokia_sros_ssh_parse_cards(card_raw or "")
-    mda_rows = _nokia_sros_ssh_parse_mdas(mda_raw or "")
+    mda_rows = _nokia_sros_ssh_fetch_and_parse_mdas(driver, card_rows)
     transceiver_rows = _nokia_sros_ssh_collect_transceivers(driver, mda_rows)
 
     return _nokia_sros_ssh_assemble(card_rows, mda_rows, transceiver_rows)

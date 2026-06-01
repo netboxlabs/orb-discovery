@@ -294,6 +294,57 @@ Transceiver Data
     }
 
 
+def test_parse_cards_real_sros_format_uses_summary_for_equipped_type():
+    """Equipped type comes from summary; part/serial from Hardware Data subsection."""
+    from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_parse_cards
+    text = """\
+===============================================================================
+Card Summary
+===============================================================================
+Slot   Provisioned Type           Equipped Type              Admin  Oper
+                                                             State  State
+-------------------------------------------------------------------------------
+1      iom4-e                     iom4-e                     up     up
+A      cpm5                       cpm5                       up     up
+===============================================================================
+Card 1
+===============================================================================
+Hardware Data
+-------------------------------------------------------------------------------
+   Part number                   : 3HE09576AA
+   Serial number                 : NS-IOM1-001
+===============================================================================
+Card A
+===============================================================================
+Hardware Data
+-------------------------------------------------------------------------------
+   Part number                   : 3HE07016AA
+   Serial number                 : NS-CPMA-001
+===============================================================================
+"""
+    rows = _nokia_sros_ssh_parse_cards(text)
+    assert rows == [
+        {"slot": "1", "equipped_type": "iom4-e", "pid": "3HE09576AA", "sn": "NS-IOM1-001"},
+        {"slot": "A", "equipped_type": "cpm5", "pid": "3HE07016AA", "sn": "NS-CPMA-001"},
+    ]
+
+
+def test_parse_cards_summary_header_not_mismatched_as_slot():
+    """`Card Summary` header must NOT be matched as slot='Summary'."""
+    from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_parse_cards
+    text = """\
+===============================================================================
+Card Summary
+===============================================================================
+1      iom4-e                     iom4-e                     up     up
+===============================================================================
+"""
+    # No `Card N` per-card detail block → no rows emitted (summary alone is
+    # not enough; we need Part/Serial from Hardware Data).
+    rows = _nokia_sros_ssh_parse_cards(text)
+    assert rows == []
+
+
 def test_parse_port_transceiver_accepts_bare_model_label():
     """Legacy / abbreviated SR-OS outputs print `Model :` — still accepted."""
     from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_parse_port_transceiver
