@@ -9,7 +9,7 @@ from apscheduler.triggers.date import DateTrigger
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2
 
 from worker.backend import Backend
-from worker.exceptions import IngestRejected, IngestUnavailable
+from worker.exceptions import IngestError, IngestRejected
 from worker.models import Config, DiodeConfig, Metadata, Policy, Status
 from worker.policy.run import RunStatus, RunStore
 from worker.policy.runner import PolicyRunner
@@ -118,8 +118,8 @@ def mock_backend():
 
 
 def _extract_callback(mock_backend_class):
-    """Recover the ingest_callback closure that PolicyRunner.setup passed to backend_class()."""
-    return mock_backend_class.call_args.kwargs["ingest_callback"]
+    """Recover the ingest_callback closure that PolicyRunner.setup attached to the backend."""
+    return mock_backend_class.return_value.ingest_callback
 
 
 def test_initial_status(policy_runner):
@@ -353,6 +353,16 @@ def test_run_backend_exception(
     mock_diode_client.ingest.assert_not_called()  # Client ingestion should not be called
     assert "Policy test_policy: Backend error" in caplog.text
 
+    # Regression guard: a crashing scheduled backend must still be recorded as a
+    # FAILED run — the run is created before the backend executes.
+    mock_run_store.create_run.assert_called_once()
+    failed_updates = [
+        c
+        for c in mock_run_store.update_run.call_args_list
+        if c.kwargs.get("status") == RunStatus.FAILED
+    ]
+    assert failed_updates, "backend crash must record a FAILED run"
+
 
 def test_stop_policy_runner(policy_runner):
     """Test stopping the PolicyRunner."""
@@ -551,7 +561,7 @@ def test_run_with_multiple_chunks(
         assert mock_diode_client.ingest.call_count == 2
 
         # Verify log messages for successful ingestion
-        assert "Successfully ingested 10 entities in 2 chunks" in caplog.text
+        assert "Successfully ingested 10 entities" in caplog.text
 
 
 def test_run_chunk_ingestion_error(
@@ -605,7 +615,7 @@ def test_run_chunk_ingestion_error(
 # ---------------------------------------------------------------------------
 
 
-def test_setup_passes_kwargs_to_backend(
+def test_setup_constructs_backend_directly_and_attaches_callback(
     policy_runner,
     sample_policy,
     sample_diode_config,
@@ -613,56 +623,17 @@ def test_setup_passes_kwargs_to_backend(
     mock_diode_client,
     mock_run_store,
 ):
-    """setup() constructs the backend with ingest_callback= kwarg (no policy= per ADR-0008)."""
+    """setup() constructs the backend with no args and attaches ingest_callback after deps are ready."""
     with patch.object(policy_runner.scheduler, "start"), patch.object(
         policy_runner.scheduler, "add_job"
     ):
         policy_runner.setup("policy1", sample_diode_config, sample_policy, mock_run_store)
 
     mock_backend_class = mock_load_class.return_value
-    call_kwargs = mock_backend_class.call_args.kwargs
-    assert "ingest_callback" in call_kwargs
-    assert callable(call_kwargs["ingest_callback"])
-    assert "policy" not in call_kwargs
-
-
-@pytest.mark.parametrize(
-    "init_signature, expects_ingest_callback",
-    [
-        pytest.param(
-            "def __init__(self): self.ingest_callback = None",
-            False,
-            id="legacy-zero-arg",
-        ),
-        pytest.param(
-            "def __init__(self, **kwargs): self.ingest_callback = kwargs.get('ingest_callback')",
-            True,
-            id="kwargs-absorber",
-        ),
-        pytest.param(
-            "def __init__(self, *, ingest_callback=None, **kwargs): self.ingest_callback = ingest_callback",
-            True,
-            id="named-kwarg",
-        ),
-    ],
-)
-def test_construct_backend_introspection(init_signature, expects_ingest_callback):
-    """_construct_backend only passes ingest_callback when the class accepts it."""
-    from worker.policy.runner import _construct_backend
-
-    namespace: dict = {}
-    exec(  # noqa: S102 — synthesizing tiny class fixture under test
-        "class _Stub:\n"
-        "    " + init_signature + "\n",
-        namespace,
-    )
-    stub_class = namespace["_Stub"]
-    sentinel = object()
-    instance = _construct_backend(stub_class, ingest_callback=sentinel)
-    if expects_ingest_callback:
-        assert instance.ingest_callback is sentinel
-    else:
-        assert instance.ingest_callback is None
+    assert mock_backend_class.call_args.args == ()
+    assert mock_backend_class.call_args.kwargs == {}
+    backend = mock_backend_class.return_value
+    assert callable(backend.ingest_callback)
 
 
 def test_ingest_callback_entities_happy_path(
@@ -760,7 +731,7 @@ def test_ingest_callback_requires_exactly_one_of_entities_or_error(
         callback(**kwargs)
 
 
-def test_ingest_callback_translates_transport_errors_to_unavailable(
+def test_ingest_callback_translates_transport_errors_to_ingest_error(
     policy_runner,
     sample_policy,
     sample_diode_config,
@@ -768,7 +739,7 @@ def test_ingest_callback_translates_transport_errors_to_unavailable(
     mock_diode_client,
     mock_run_store,
 ):
-    """Non-IngestError transport exceptions are wrapped as IngestUnavailable."""
+    """Non-IngestError transport exceptions are wrapped as the base IngestError."""
     with patch.object(policy_runner.scheduler, "start"), patch.object(
         policy_runner.scheduler, "add_job"
     ):
@@ -784,7 +755,7 @@ def test_ingest_callback_translates_transport_errors_to_unavailable(
     with patch("worker.policy.runner.estimate_message_size", return_value=1024), patch(
         "worker.policy.runner.apply_run_id_to_entities"
     ):
-        with pytest.raises(IngestUnavailable):
+        with pytest.raises(IngestError):
             callback(entities=[entity])
 
     mock_run_store.update_run.assert_called_once()
@@ -886,33 +857,6 @@ def test_run_unaffected_by_callback(
     assert update_kwargs["status"] == RunStatus.COMPLETED
 
 
-def test_ingest_callback_raises_when_not_ready(
-    policy_runner,
-    sample_policy,
-    sample_diode_config,
-    mock_run_store,
-    mock_load_class,
-    mock_diode_client,
-):
-    """Calling the callback before _callback_ready is True raises IngestUnavailable."""
-    with patch.object(policy_runner.scheduler, "start"), patch.object(
-        policy_runner.scheduler, "add_job"
-    ):
-        policy_runner.setup("policy-x", sample_diode_config, sample_policy, mock_run_store)
-
-    callback = _extract_callback(mock_load_class.return_value)
-
-    # Simulate "called before worker finished constructing" — clear the readiness flag.
-    policy_runner._callback_ready = False
-
-    entity = MagicMock()
-    with pytest.raises(IngestUnavailable, match="before the worker finished constructing"):
-        callback(entities=[entity])
-
-    # No pseudo-run must have been created (guard fires before create_run).
-    mock_run_store.create_run.assert_not_called()
-
-
 def test_ingest_callback_records_failure_on_apply_run_id_error(
     policy_runner,
     sample_policy,
@@ -921,7 +865,7 @@ def test_ingest_callback_records_failure_on_apply_run_id_error(
     mock_diode_client,
     mock_run_store,
 ):
-    """apply_run_id_to_entities failure inside try: records FAILED run as IngestUnavailable."""
+    """apply_run_id_to_entities failure inside try: records FAILED run as IngestError."""
     with patch.object(policy_runner.scheduler, "start"), patch.object(
         policy_runner.scheduler, "add_job"
     ):
@@ -936,7 +880,7 @@ def test_ingest_callback_records_failure_on_apply_run_id_error(
         "worker.policy.runner.apply_run_id_to_entities",
         side_effect=RuntimeError("entity corrupt"),
     ), patch("worker.policy.runner.estimate_message_size", return_value=1024):
-        with pytest.raises(IngestUnavailable):
+        with pytest.raises(IngestError):
             callback(entities=[entity])
 
     mock_run_store.update_run.assert_called_once()
@@ -965,7 +909,7 @@ def test_ingest_callback_records_failure_on_iterable_error(
     bad_iterable = MagicMock()
     bad_iterable.__iter__ = MagicMock(side_effect=ValueError("bad"))
 
-    with pytest.raises(IngestUnavailable):
+    with pytest.raises(IngestError):
         callback(entities=bad_iterable)
 
     mock_run_store.update_run.assert_called_once()
@@ -973,46 +917,3 @@ def test_ingest_callback_records_failure_on_iterable_error(
     assert update_kwargs["status"] == RunStatus.FAILED
     # Iterable failed before any entity was materialised.
     assert update_kwargs["entity_count"] == 0
-
-
-def test_setup_sets_callback_ready_flag(
-    policy_runner,
-    sample_policy,
-    sample_diode_config,
-    mock_load_class,
-    mock_diode_client,
-    mock_run_store,
-):
-    """After setup() returns, _callback_ready is True."""
-    with patch.object(policy_runner.scheduler, "start"), patch.object(
-        policy_runner.scheduler, "add_job"
-    ):
-        policy_runner.setup("policy1", sample_diode_config, sample_policy, mock_run_store)
-
-    assert policy_runner._callback_ready is True
-
-
-def test_stop_clears_callback_ready_flag(
-    policy_runner,
-    sample_policy,
-    sample_diode_config,
-    mock_load_class,
-    mock_diode_client,
-    mock_run_store,
-):
-    """After stop(), _callback_ready is False and the callback raises IngestUnavailable."""
-    with patch.object(policy_runner.scheduler, "start"), patch.object(
-        policy_runner.scheduler, "add_job"
-    ):
-        policy_runner.setup("policy1", sample_diode_config, sample_policy, mock_run_store)
-
-    callback = _extract_callback(mock_load_class.return_value)
-
-    with patch.object(policy_runner.scheduler, "shutdown"):
-        policy_runner.stop()
-
-    assert policy_runner._callback_ready is False
-
-    entity = MagicMock()
-    with pytest.raises(IngestUnavailable, match="before the worker finished constructing"):
-        callback(entities=[entity])
