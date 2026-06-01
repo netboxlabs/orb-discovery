@@ -122,22 +122,23 @@ def test_panos_sku_classifier_ordering_invariant():
 
 
 def test_parse_chassis_inventory_text_accepts_pan_prefixed_pids_and_letter_slots():
-    """Row parser tolerates `PAN-PA-...` PIDs and alphanumeric slot labels."""
+    """Real PAN-OS column layout: Slot / Component / Serial / Ports / Revision / Power(w)."""
     from custom_napalm.paloalto_panos_ssh import _parse_chassis_inventory_text
     text = """\
-Slot  Type  HW Rev  Part Number             Serial Number
--------------------------------------------------------------
-1     NPC   1.0     PAN-PA-7000-100G-NPC-A  007901111001
-BSC   BC    1.0     PAN-PA-5400-BC-A        007903555001
-2     SMC   Rev 1.0 PA-7080-SMC             007901333001
+Slot  Component               Serial Number   Ports  Revision  Power(w)
+-----------------------------------------------------------------------
+1     PAN-PA-7000-100G-NPC-A  007901111001    28     1.4       430
+BSC   PAN-PA-5400-BC-A        007903555001    0      1.0       60
+2     PA-7080-SMC             007901333001    0      1.0       40
 """
     rows = _parse_chassis_inventory_text(text)
     assert rows == [
-        {"slot": "1", "type": "NPC", "pid": "PAN-PA-7000-100G-NPC-A", "sn": "007901111001"},
-        {"slot": "BSC", "type": "BC", "pid": "PAN-PA-5400-BC-A", "sn": "007903555001"},
-        # `Rev 1.0` HW Rev is multi-token — lazy middle group keeps the
-        # parser locked on the PID column via the `PA-` anchor.
-        {"slot": "2", "type": "SMC", "pid": "PA-7080-SMC", "sn": "007901333001"},
+        # `PAN-PA-...` prefix from PaloAlto compat docs
+        {"slot": "1", "pid": "PAN-PA-7000-100G-NPC-A", "sn": "007901111001"},
+        # Alphanumeric slot label (PA-5450 base / system slot variant)
+        {"slot": "BSC", "pid": "PAN-PA-5400-BC-A", "sn": "007903555001"},
+        # Terminal SKU (no trailing hyphen) parses cleanly
+        {"slot": "2", "pid": "PA-7080-SMC", "sn": "007901333001"},
     ]
 
 

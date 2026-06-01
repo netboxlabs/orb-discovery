@@ -96,35 +96,50 @@ def classify_module_type_panos_ssh(part_number: str) -> str:
     return "other"
 
 
+def _panos_ssh_token_from_sku(part_number: str) -> str:
+    """Extract the canonical card-type token from a PaloAlto SKU (Approach A duplicate)."""
+    pid = (part_number or "").upper()
+    for token, _ in _PANOS_SSH_SKU_CLASSIFIER:
+        if f"-{token}-" in pid or pid.endswith(f"-{token}"):
+            return token
+    return ""
+
+
 # `show chassis inventory` text-table row regex. PAN-OS prints fixed-width
 # columns but the HW Rev column can be multi-token across releases
 # (`1.0`, `1.0a`, `Rev 1.0`). The middle of the row is lazy-matched and the
 # PID is anchored to the `PA-` prefix so the regex still locks on the right
 # columns even when HW Rev expands.
 _PANOS_INVENTORY_ROW_RE = re.compile(
+    # Real PAN-OS `show chassis inventory` column layout (per Palo Alto KB
+    # kA14u000000wlKJCAY):
+    #   Slot  Component             Serial Number   Ports  Revision  Power(w)
+    # Driver-relevant columns are Slot / Component (PID) / Serial — trailing
+    # Ports/Revision/Power columns are skipped via the open-ended tail.
+    #
     # Slot accepts alphanumerics (PA-7000 line slots are numeric; PA-5450
     # base / system slots may carry letter labels like `BSC` / `SYS`).
-    r"^\s*(?P<slot>[A-Za-z0-9]+)\s+"
-    r"(?P<type>\S+)\s+"
-    r".+?\s+"
     # PID matches PA-... AND the PAN-PA-... form Palo Alto's compatibility
     # docs use for modular cards (PAN-PA-7000-100G-NPC-A, PAN-PA-5400-BC-A).
-    r"(?P<pid>(?:PAN-)?PA-\S+)\s+"
     # Serial accepts alphanumerics, hyphens, and dots — covers documented
-    # 12-digit PA-7000/PA-5450 serials AND hyphenated / vendor-prefixed
-    # forms that show up on some PAN-OS variants.
-    r"(?P<sn>[A-Za-z0-9.\-]+)\s*$",
+    # 12-digit PA-7000/PA-5450 serials AND vendor-prefixed forms.
+    r"^\s*(?P<slot>[A-Za-z0-9]+)\s+"
+    r"(?P<pid>(?:PAN-)?PA-\S+)\s+"
+    r"(?P<sn>[A-Za-z0-9.\-]+)"
+    # No end-of-line anchor — `\s` includes `\n` even under MULTILINE, so
+    # consuming trailing columns greedily would eat across rows. After the
+    # serial column, finditer advances to the next `^` match.
+    ,
     re.MULTILINE,
 )
 
 
 def _parse_chassis_inventory_text(text: str) -> list[dict]:
-    """Parse `show chassis inventory` fixed-width text rows; PID-anchored regex."""
+    """Parse `show chassis inventory` text rows; PID-anchored regex."""
     rows: list[dict] = []
     for m in _PANOS_INVENTORY_ROW_RE.finditer(text or ""):
         rows.append({
             "slot": m.group("slot"),
-            "type": m.group("type"),
             "pid": m.group("pid"),
             "sn": m.group("sn"),
         })
@@ -132,13 +147,12 @@ def _parse_chassis_inventory_text(text: str) -> list[dict]:
 
 
 def _panos_ssh_build_bays(rows: list[dict]) -> list[_ModuleBay]:
-    """Build one top-level bay per inventory row, preserving slot order."""
+    """Build one top-level bay per inventory row; description derived from SKU."""
     bays: list[_ModuleBay] = []
     for row in rows:
         slot = row.get("slot") or ""
         pid = row.get("pid") or ""
         sn = row.get("sn") or ""
-        ctype_label = row.get("type") or ""
         if not (slot and pid and sn):
             continue
         mtype = classify_module_type_panos_ssh(pid)
@@ -147,7 +161,8 @@ def _panos_ssh_build_bays(rows: list[dict]) -> list[_ModuleBay]:
         bays.append(_ModuleBay(
             name=slot, position=slot,
             module=_ModuleEntry(
-                model=pid, serial=sn, type=mtype, description=ctype_label,
+                model=pid, serial=sn, type=mtype,
+                description=_panos_ssh_token_from_sku(pid),
             ),
         ))
     return bays

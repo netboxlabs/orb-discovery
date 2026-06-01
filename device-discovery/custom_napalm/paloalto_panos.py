@@ -130,6 +130,15 @@ def classify_module_type_panos(part_number: str) -> str:
     return "other"
 
 
+def _panos_token_from_sku(part_number: str) -> str:
+    """Extract canonical card-type token from a PaloAlto SKU (e.g. "NPC" from "PA-7000-100G-NPC-A")."""
+    pid = (part_number or "").upper()
+    for token, _ in _PANOS_SKU_CLASSIFIER:
+        if f"-{token}-" in pid or pid.endswith(f"-{token}"):
+            return token
+    return ""
+
+
 def _extract_model_from_info_xml(xml_text: str) -> str:
     """
     Extract <model> text from a `<show><system><info>` response.
@@ -163,7 +172,6 @@ def _parse_chassis_inventory_xml(xml_text: str) -> list[dict]:
         return rows
     for entry in root.findall(".//chassis/slots/entry"):
         slot_el = entry.find("slot")
-        type_el = entry.find("type")
         pn_el = entry.find("part-number")
         sn_el = entry.find("serial")
         slot = (slot_el.text or "").strip() if slot_el is not None else ""
@@ -171,7 +179,6 @@ def _parse_chassis_inventory_xml(xml_text: str) -> list[dict]:
             continue
         rows.append({
             "slot": slot,
-            "type": (type_el.text or "").strip() if type_el is not None else "",
             "pid": (pn_el.text or "").strip() if pn_el is not None else "",
             "sn": (sn_el.text or "").strip() if sn_el is not None else "",
         })
@@ -179,13 +186,12 @@ def _parse_chassis_inventory_xml(xml_text: str) -> list[dict]:
 
 
 def _panos_build_bays(rows: list[dict]) -> list[_ModuleBay]:
-    """Build one top-level bay per inventory row, preserving slot order."""
+    """Build one top-level bay per inventory row; description derived from SKU token."""
     bays: list[_ModuleBay] = []
     for row in rows:
         slot = row.get("slot") or ""
         pid = row.get("pid") or ""
         sn = row.get("sn") or ""
-        ctype_label = row.get("type") or ""
         if not (slot and pid and sn):
             continue
         mtype = classify_module_type_panos(pid)
@@ -194,7 +200,8 @@ def _panos_build_bays(rows: list[dict]) -> list[_ModuleBay]:
         bays.append(_ModuleBay(
             name=slot, position=slot,
             module=_ModuleEntry(
-                model=pid, serial=sn, type=mtype, description=ctype_label,
+                model=pid, serial=sn, type=mtype,
+                description=_panos_token_from_sku(pid),
             ),
         ))
     return bays
