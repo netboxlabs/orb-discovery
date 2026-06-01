@@ -255,10 +255,14 @@ def test_is_modular_accepts_documented_families():
 
 
 def test_is_modular_handles_vendor_prefixed_models():
-    """Vendor-prefixed model strings still resolve correctly."""
+    """Vendor-prefixed and HPE-rebranded model strings still resolve correctly."""
     assert _comware_is_modular("H3C S12508X-AF")
     assert _comware_is_modular("HPE FlexFabric S12500")
     assert _comware_is_modular("HP S10508")
+    # HPE rebrand strips the ``S`` prefix on the family name.
+    assert _comware_is_modular("HPE FlexFabric 12500 Switch")
+    # Comware-5 HP-branded ``A`` prefix on the family name.
+    assert _comware_is_modular("HP A10500")
 
 
 def test_is_modular_rejects_fixed_families():

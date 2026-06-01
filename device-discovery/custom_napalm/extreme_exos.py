@@ -252,11 +252,16 @@ _MODULAR_EXOS_RE = re.compile(
 # Block header regex for ``show slot detail``. EXOS prints one block per
 # physical slot with a header like ``Slot-1 information:``,
 # ``MSM-A information:``, ``FM-2 information:``. The header vocabulary is
-# broadened (``Slot|SLOT|MSM|MM|IO|FM``) plus a ``[-\s]`` separator so both
-# ``Slot 1`` and ``Slot-1`` headers parse; the slot name is normalised below.
+# a defensive over-approximation (``Slot|MSM|MM|IO|FM``) — real BD-X8 output
+# only emits ``Slot-N`` / ``MSM-X`` / ``FM-N``, but matching the broader set
+# costs nothing and survives future firmware variations. ``[-\s]`` separator
+# accepts both ``Slot 1`` and ``Slot-1`` headers; the slot name is normalised
+# below. ``IGNORECASE`` is essential — the field regexes below already match
+# case-insensitively, so the header regex must do the same or it will silently
+# drop every block on a future firmware that emits ``slot-1 information:``.
 _EXOS_SLOT_HEADER_RE = re.compile(
-    r"^(?P<slot>(?:Slot|SLOT|MSM|MM|IO|FM)[-\s][A-Za-z0-9]+)\s+information:\s*$",
-    re.MULTILINE,
+    r"^(?P<slot>(?:Slot|MSM|MM|IO|FM)[-\s][A-Za-z0-9]+)\s+information:\s*$",
+    re.MULTILINE | re.IGNORECASE,
 )
 _EXOS_HW_TYPE_RE = re.compile(
     r"^\s*Hw\s+Module\s+Type\s*:\s*(?P<type>\S+)", re.MULTILINE | re.IGNORECASE

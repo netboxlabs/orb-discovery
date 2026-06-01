@@ -582,13 +582,21 @@ def _comware_get_chassis_members_impl(driver) -> dict | None:
 # contain a shorter prefix as a substring MUST appear first (LSUM before LSU)
 # so supervisor SKUs are not mis-classified as linecards.
 
-# Family-prefix substrings (not full model names): real H3C model strings
-# include the chassis-size digit, e.g. ``S12508X-AF`` (S12500 family),
-# ``S12916-AF`` (S12900 family), ``S10510`` (S10500), ``S7503E`` (S7500E).
-# Substring-matching the family prefix (``S125``, ``S129``, ``S105``, ``S75``)
-# covers every chassis variant while rejecting the fixed pizza-box families
-# (``S5500`` / ``S5800`` / ``S6800``).
-_MODULAR_COMWARE_TOKENS: tuple[str, ...] = ("S75", "S105", "S125", "S129")
+# Family-token substrings. Real model strings reported by ``display version``
+# vary by branding:
+#   - H3C uses ``S7503E`` / ``S10510`` / ``S12508X-AF`` / ``S12916-AF`` —
+#     family-prefix substrings ``S75`` / ``S105`` / ``S125`` / ``S129``
+#     match each chassis-size variant.
+#   - HPE FlexFabric rebrands strip the leading ``S`` (``HPE FlexFabric
+#     12500``) and Comware-5 HP-branded variants use the ``A`` prefix
+#     (``HP A10500``) — substrings ``7500`` / ``10500`` / ``12500`` /
+#     ``12900`` match the full chassis number without the ``S``.
+# Fixed pizza-box families (``S5500`` / ``S5800`` / ``S6800``) contain none of
+# these substrings, so the broad set still rejects them cleanly.
+_MODULAR_COMWARE_TOKENS: tuple[str, ...] = (
+    "S75", "S105", "S125", "S129",
+    "7500", "10500", "12500", "12900",
+)
 
 # (prefix, type). 4-character prefixes appear BEFORE 3-character prefixes so
 # LSUM (supervisor) wins over LSU (linecard). The ordering-invariant test in

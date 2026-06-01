@@ -173,3 +173,18 @@ def test_parse_show_slot_detail_empty_input_returns_empty() -> None:
     """Empty / unparseable input returns an empty list."""
     assert _parse_show_slot_detail("") == []
     assert _parse_show_slot_detail("no slot headers here") == []
+
+
+def test_parse_show_slot_detail_case_insensitive_header() -> None:
+    """Lowercase / mixed-case slot headers parse just like TitleCase."""
+    text = (
+        "slot-1 information:\n"
+        "                Hw Module Type:        BDXA-10G48X\n"
+        "                Serial number:         12345N-S001\n"
+        "\n"
+        "msm-a information:\n"
+        "                Hw Module Type:        BDX-MM1\n"
+        "                Serial number:         12345N-A001\n"
+    )
+    rows = _parse_show_slot_detail(text)
+    assert [r["slot"] for r in rows] == ["slot-1", "msm-a"]
