@@ -69,7 +69,7 @@ def _netmask_to_prefix(netmask: str) -> int:
 _MODULAR_PANOS_PREFIXES_SSH = ("PA-7050", "PA-7080", "PA-7500", "PA-5450")
 
 
-def _is_modular_panos_ssh(model: str) -> bool:
+def _is_modular_panos_ssh(model: str | None) -> bool:
     """Return True when PAN-OS model identifies an in-scope modular chassis."""
     upper = (model or "").strip().upper()
     return any(upper.startswith(p) for p in _MODULAR_PANOS_PREFIXES_SSH)

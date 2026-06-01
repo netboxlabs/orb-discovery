@@ -88,13 +88,14 @@ def _extract_ip_info(parsed_intf_dict: dict) -> dict:
 _MODULAR_PANOS_PREFIXES = ("PA-7050", "PA-7080", "PA-7500", "PA-5450")
 
 
-def _is_modular_panos(model: str) -> bool:
+def _is_modular_panos(model: str | None) -> bool:
     """
     Return True when PAN-OS model identifies an in-scope modular chassis.
 
     Handles trailing variants like ``PA-7050B`` or ``PA-5450-AC`` by prefix
     match on the uppercased model string. Fixed-config / VM-series /
     Panorama appliances short-circuit before any chassis-inventory RPC.
+    Accepts ``None`` to tolerate missing facts entries.
     """
     upper = (model or "").strip().upper()
     return any(upper.startswith(p) for p in _MODULAR_PANOS_PREFIXES)
@@ -103,12 +104,14 @@ def _is_modular_panos(model: str) -> bool:
 # SKU card-type classifier. Each entry is a hyphen-bounded token that
 # appears in PaloAlto card PIDs (e.g. `MPC` matches `PA-7500-MPC-A` AND
 # `PA-XXX-MPC`). The token must be preceded by `-` and followed by either
-# `-` or end-of-string — naked-substring matching would over-trigger
-# (e.g. `NC` is a substring of `NPC`).
+# `-` or end-of-string — naked-substring matching would over-trigger.
 #
-# ORDER MATTERS (first-match-wins) — `NPC` must be checked before `NC`
-# because `PA-7000-100G-NPC-A` contains both `-NPC-` and `-NC` (the
-# latter as a substring of `NPC`). NPC-first ensures the correct match.
+# ORDER MATTERS (first-match-wins). The generic invariant: any token that
+# is a strict substring of another token MUST appear AFTER the longer
+# token. None of the current entries actually exhibit the substring
+# relation, but `test_panos_sku_classifier_ordering_invariant` enforces
+# the rule across the whole table — so future additions like a `PC`
+# token (substring of MPC / NPC / DPC / LPC) would be caught.
 _PANOS_SKU_CLASSIFIER: tuple[tuple[str, str], ...] = (
     ("MPC", "supervisor"),
     ("SMC", "supervisor"),

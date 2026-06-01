@@ -75,4 +75,4 @@ def test_is_modular_panos_fixed_models():
     assert _is_modular_panos("M-700") is False
     assert _is_modular_panos("PA-5440") is False
     assert _is_modular_panos("") is False
-    assert _is_modular_panos(None) is False  # type: ignore[arg-type]
+    assert _is_modular_panos(None) is False
