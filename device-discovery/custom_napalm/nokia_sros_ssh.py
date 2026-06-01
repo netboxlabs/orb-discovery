@@ -3,7 +3,8 @@
 Custom Nokia/Alcatel SR-OS SSH NAPALM driver.
 
 Implements only the methods used by device-discovery:
-  get_facts, get_interfaces, get_interfaces_ip, get_config, get_vlans.
+  get_facts, get_interfaces, get_interfaces_ip, get_config, get_vlans,
+  get_modules.
 
 Uses Netmiko (nokia_sros) for SSH transport and ntc-templates (alcatel_sros)
 for structured parsing of show port and show router interface.
@@ -186,10 +187,11 @@ _NOKIA_SROS_MDA_HDR_RE = re.compile(
     r"^MDA\s+(?P<slot>\d+)/(?P<mda>\d+)(?:\s+Detail)?\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
-# `SFM 1`, `SFM 1 detail`, etc. SFMs live in a separate Nokia state path
-# from cards; SSH queries them via `show sfm`.
+# Per-SFM detail block headers. Real SR-OS labels these blocks `Fabric <N>`
+# (per Nokia command reference for `show sfm <id> detail`); some test
+# fixtures and older releases use `SFM <N>`. Accept both keywords.
 _NOKIA_SROS_SFM_HDR_RE = re.compile(
-    r"^SFM\s+(?P<slot>\d+)(?:\s+Detail)?\s*$",
+    r"^(?:SFM|Fabric)\s+(?P<slot>\d+)(?:\s+Detail)?\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 # `show card` summary-table rows. Real SR-OS variants:
@@ -620,10 +622,17 @@ def _nokia_sros_ssh_get_modules_impl(driver) -> dict | None:
     """
     Module discovery for Nokia SR-OS via SSH CLI.
 
-    Issues `show chassis|card|mda detail` then iterates each parsed MDA's
-    port range, issuing `show port slot/mda/N detail` to pick up optics.
-    FakeCLIDevice returns "" for missing files so the scan is cheap in
-    tests; real hardware enumerates only valid port ids.
+    Command flow:
+      1. ``show chassis detail``                 session-prime, result unused
+      2. ``show card detail``                    cards + summary table
+      3. ``show sfm detail``                     fabric modules (separate path)
+      4. ``show mda <slot> detail`` per linecard CPMs and SFMs are skipped
+      5. ``show port``                           enumerates every port id
+      6. ``show port <port-id> detail`` only for ports under known MDAs
+
+    Bounded at ``linecard_count + port_count + 4`` commands. FakeCLIDevice
+    returns "" for missing fixture files, so dry-runs against test data
+    incur no additional cost.
     """
     # `show chassis detail` doesn't feed the envelope (cards / MDAs carry all
     # the data we need) but issuing it once primes the CLI session and

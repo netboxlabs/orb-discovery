@@ -4,7 +4,8 @@
 Custom Nokia SR-OS NETCONF NAPALM driver.
 
 Implements only the methods used by device-discovery:
-  get_facts, get_interfaces, get_interfaces_ip, get_config, get_vlans.
+  get_facts, get_interfaces, get_interfaces_ip, get_config, get_vlans,
+  get_modules.
 
 Uses ncclient for NETCONF/YANG transport and lxml for structured XML parsing
 against Nokia's YANG models (urn:nokia.com:sros:ns:yang:sr:*).

@@ -357,7 +357,7 @@ B      cpm5                                                  up     up/standby
 
 
 def test_parse_sfms_real_sros_format():
-    """`show sfm detail` parses with SFM-prefixed slot names."""
+    """`show sfm detail` accepts both `Fabric <N>` (real SR-OS) and `SFM <N>` headers."""
     from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_parse_sfms
     text = """\
 ===============================================================================
@@ -369,7 +369,7 @@ Slot  Provisioned Type     Equipped Type        Admin  Operational
 1     sfm5-12              sfm5-12              up     up
 2     sfm5-12              sfm5-12              up     up
 ===============================================================================
-SFM 1
+Fabric 1
 ===============================================================================
 Hardware Data
 -------------------------------------------------------------------------------
@@ -386,7 +386,9 @@ Hardware Data
 """
     rows = _nokia_sros_ssh_parse_sfms(text)
     assert rows == [
+        # First block uses real SR-OS `Fabric 1` header
         {"slot": "SFM 1", "equipped_type": "sfm5-12", "pid": "3HE08648AA", "sn": "NS-SFM1-001"},
+        # Second block uses legacy `SFM 2` header — still accepted
         {"slot": "SFM 2", "equipped_type": "sfm5-12", "pid": "3HE08648AA", "sn": "NS-SFM2-001"},
     ]
 
