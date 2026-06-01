@@ -13,3 +13,9 @@ class TestPANOSSHDriver(BaseDriverTest):
     driver_cls = PANOSSHDriver
     fake_device_cls = FakeCLIDevice
     mock_data_root = Path(__file__).parent / "mock_data"
+
+
+def test_driver_exposes_get_modules():
+    """PANOSSHDriver MUST expose a callable get_modules method."""
+    assert hasattr(PANOSSHDriver, "get_modules")
+    assert callable(PANOSSHDriver.get_modules)
