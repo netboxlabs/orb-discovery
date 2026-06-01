@@ -34,6 +34,13 @@ def test_classify_module_type_panos_sku_substrings():
     assert classify_module_type_panos("PA-5400-NC-A") == "linecard"
     assert classify_module_type_panos("PA-5400-MPC-A") == "supervisor"
     assert classify_module_type_panos("PA-5400-DPC-A") == "linecard"
+    # PA-5450 Base Card — first-class system card, classified as linecard
+    assert classify_module_type_panos("PA-5400-BC-A") == "linecard"
+    # PaloAlto compatibility docs sometimes list SKUs with a `PAN-` prefix
+    # — classifier still hits the substring tokens regardless of prefix
+    assert classify_module_type_panos("PAN-PA-7000-100G-NPC-A") == "linecard"
+    assert classify_module_type_panos("PAN-PA-5400-BC-A") == "linecard"
+    assert classify_module_type_panos("PAN-PA-7080-SMC") == "supervisor"
     # Unrelated / fan / psu SKUs classify as other
     assert classify_module_type_panos("PA-5440-PSU") == "other"
     assert classify_module_type_panos("PA-XXX-FAN") == "other"

@@ -116,6 +116,7 @@ _PANOS_SKU_CLASSIFIER: tuple[tuple[str, str], ...] = (
     ("NPC", "linecard"),
     ("LFC", "linecard"),
     ("DPC", "linecard"),
+    ("BC", "linecard"),
     ("NC", "linecard"),
 )
 

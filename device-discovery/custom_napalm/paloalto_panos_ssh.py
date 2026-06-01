@@ -82,6 +82,7 @@ _PANOS_SSH_SKU_CLASSIFIER: tuple[tuple[str, str], ...] = (
     ("NPC", "linecard"),
     ("LFC", "linecard"),
     ("DPC", "linecard"),
+    ("BC", "linecard"),
     ("NC", "linecard"),
 )
 
@@ -101,10 +102,14 @@ def classify_module_type_panos_ssh(part_number: str) -> str:
 # PID is anchored to the `PA-` prefix so the regex still locks on the right
 # columns even when HW Rev expands.
 _PANOS_INVENTORY_ROW_RE = re.compile(
-    r"^\s*(?P<slot>\d+)\s+"
+    # Slot accepts alphanumerics (PA-7000 line slots are numeric; PA-5450
+    # base / system slots may carry letter labels like `BSC` / `SYS`).
+    r"^\s*(?P<slot>[A-Za-z0-9]+)\s+"
     r"(?P<type>\S+)\s+"
     r".+?\s+"
-    r"(?P<pid>PA-\S+)\s+"
+    # PID matches PA-... AND the PAN-PA-... form Palo Alto's compatibility
+    # docs use for modular cards (PAN-PA-7000-100G-NPC-A, PAN-PA-5400-BC-A).
+    r"(?P<pid>(?:PAN-)?PA-\S+)\s+"
     # Serial accepts alphanumerics, hyphens, and dots — covers documented
     # 12-digit PA-7000/PA-5450 serials AND hyphenated / vendor-prefixed
     # forms that show up on some PAN-OS variants.
