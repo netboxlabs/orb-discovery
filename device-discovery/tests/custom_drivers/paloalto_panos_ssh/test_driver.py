@@ -99,26 +99,14 @@ def test_is_modular_panos_ssh_prefixes_and_variants():
 
 
 def test_panos_sku_classifier_tables_in_sync():
-    """XML and SSH drivers MUST carry the identical SKU classifier table.
-
-    Approach A (per-driver bespoke) duplicates the table across both
-    drivers. This guard locks the tuples in sync so a future card-type
-    addition has to be mirrored — without it, drift would only surface
-    on SKUs covered by parity fixtures.
-    """
+    """XML and SSH SKU classifier tables MUST be tuple-equal (Approach A guard)."""
     from custom_napalm.paloalto_panos import _PANOS_SKU_CLASSIFIER
     from custom_napalm.paloalto_panos_ssh import _PANOS_SSH_SKU_CLASSIFIER
     assert _PANOS_SKU_CLASSIFIER == _PANOS_SSH_SKU_CLASSIFIER
 
 
 def test_panos_sku_classifier_ordering_invariant():
-    """The classifier table must place `NPC` BEFORE `NC` so NPC SKUs cannot
-    mis-classify (NC is a substring of NPC).
-
-    Asserts the ordering directly on the tuple — stronger than asserting
-    classifier output on real SKUs (where both happen to map to `linecard`,
-    hiding ordering bugs).
-    """
+    """Classifier table must place NPC before NC — direct tuple-order assertion."""
     from custom_napalm.paloalto_panos import _PANOS_SKU_CLASSIFIER
     tokens = [t for t, _ in _PANOS_SKU_CLASSIFIER]
     npc_idx = tokens.index("NPC")
