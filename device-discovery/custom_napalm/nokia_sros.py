@@ -631,9 +631,14 @@ def _nokia_sros_attach_transceiver_sub_bays(
             name=port_id, position=port_id,
             module=_ModuleEntry(model=model, serial=sn, type="transceiver", description=""),
         ))
-        # Emit BOTH the MDA-path key (linecards mode → interface routes to
-        # MDA module) and the per-port key (full mode → deepest-bay-wins
-        # routes interface to its specific transceiver sub-bay).
+        # Emit three routing-key layers — the translator's deepest-bay-wins
+        # resolves them in `full` mode, and `linecards` mode short-circuits
+        # at depth 1 so only the card-slot key is consulted there:
+        #   - card-slot key   -> linecards mode routing
+        #   - mda-path key    -> full mode at MDA depth
+        #   - per-port key    -> full mode at transceiver depth
+        card_slot = parts[0]
+        interfaces_by_bay.setdefault(card_slot, []).append(port_id)
         interfaces_by_bay.setdefault(mda_path, []).append(port_id)
         interfaces_by_bay[port_id] = [port_id]
     return interfaces_by_bay
