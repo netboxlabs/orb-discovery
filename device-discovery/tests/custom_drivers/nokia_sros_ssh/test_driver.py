@@ -356,6 +356,41 @@ B      cpm5                                                  up     up/standby
     }
 
 
+def test_parse_sfms_real_sros_format():
+    """`show sfm detail` parses with SFM-prefixed slot names."""
+    from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_parse_sfms
+    text = """\
+===============================================================================
+SFM Summary
+===============================================================================
+Slot  Provisioned Type     Equipped Type        Admin  Operational
+                                                State  State
+-------------------------------------------------------------------------------
+1     sfm5-12              sfm5-12              up     up
+2     sfm5-12              sfm5-12              up     up
+===============================================================================
+SFM 1
+===============================================================================
+Hardware Data
+-------------------------------------------------------------------------------
+   Part number                  : 3HE08648AA
+   Serial number                : NS-SFM1-001
+===============================================================================
+SFM 2
+===============================================================================
+Hardware Data
+-------------------------------------------------------------------------------
+   Part number                  : 3HE08648AA
+   Serial number                : NS-SFM2-001
+===============================================================================
+"""
+    rows = _nokia_sros_ssh_parse_sfms(text)
+    assert rows == [
+        {"slot": "SFM 1", "equipped_type": "sfm5-12", "pid": "3HE08648AA", "sn": "NS-SFM1-001"},
+        {"slot": "SFM 2", "equipped_type": "sfm5-12", "pid": "3HE08648AA", "sn": "NS-SFM2-001"},
+    ]
+
+
 def test_parse_cards_summary_header_not_mismatched_as_slot():
     """`Card Summary` header must NOT be matched as slot='Summary'."""
     from custom_napalm.nokia_sros_ssh import _nokia_sros_ssh_parse_cards

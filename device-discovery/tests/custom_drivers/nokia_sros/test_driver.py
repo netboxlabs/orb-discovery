@@ -129,6 +129,42 @@ def test_attach_transceiver_routes_optic_less_port_to_parent_bays():
     assert sub_bays[0].module.type == "transceiver"
 
 
+def test_rows_from_state_xml_includes_sfm_subtree():
+    """SFMs live in state/sfm — must be emitted as top-level bays with SFM-prefixed names."""
+    from lxml import etree
+
+    from custom_napalm.nokia_sros import _nokia_sros_rows_from_state_xml
+    xml = """\
+<state xmlns="urn:nokia.com:sros:ns:yang:sr:state">
+  <sfm>
+    <sfm-slot>1</sfm-slot>
+    <equipped-type>sfm5-12</equipped-type>
+    <hardware-data>
+      <part-number>3HE08648AA</part-number>
+      <serial-number>NS-SFM1-001</serial-number>
+    </hardware-data>
+  </sfm>
+  <sfm>
+    <sfm-slot>2</sfm-slot>
+    <equipped-type>sfm5-12</equipped-type>
+    <hardware-data>
+      <part-number>3HE08648AA</part-number>
+      <serial-number>NS-SFM2-001</serial-number>
+    </hardware-data>
+  </sfm>
+</state>
+"""
+    root = etree.fromstring(xml.encode("utf-8"))
+    rows = _nokia_sros_rows_from_state_xml(root)
+    sfm_rows = [r for r in rows if r["slot"].startswith("SFM ")]
+    assert sfm_rows == [
+        {"kind": "card", "slot": "SFM 1", "parent_slot": None, "mda_slot": None,
+         "equipped_type": "sfm5-12", "pid": "3HE08648AA", "sn": "NS-SFM1-001"},
+        {"kind": "card", "slot": "SFM 2", "parent_slot": None, "mda_slot": None,
+         "equipped_type": "sfm5-12", "pid": "3HE08648AA", "sn": "NS-SFM2-001"},
+    ]
+
+
 def test_classify_xcm_as_linecard():
     """7950 XRS forwarding cards (XCM) classify as linecard, not 'other'."""
     from custom_napalm.nokia_sros import classify_module_type_nokia_sros

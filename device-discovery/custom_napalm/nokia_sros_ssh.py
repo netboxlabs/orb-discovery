@@ -186,6 +186,12 @@ _NOKIA_SROS_MDA_HDR_RE = re.compile(
     r"^MDA\s+(?P<slot>\d+)/(?P<mda>\d+)(?:\s+Detail)?\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
+# `SFM 1`, `SFM 1 detail`, etc. SFMs live in a separate Nokia state path
+# from cards; SSH queries them via `show sfm`.
+_NOKIA_SROS_SFM_HDR_RE = re.compile(
+    r"^SFM\s+(?P<slot>\d+)(?:\s+Detail)?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 # `show card` summary-table rows. Real SR-OS variants:
 #   - Two-type:    "1   iom4-e            iom4-e            up   up"
 #   - Single-type: "1   iom5-e:he1200g+                     up   up"
@@ -486,6 +492,41 @@ def _nokia_sros_ssh_parse_port_list(text: str) -> list[str]:
     return _NOKIA_SROS_PORT_LIST_RE.findall(text or "")
 
 
+def _nokia_sros_ssh_parse_sfms(text: str) -> list[dict]:
+    """Parse `show sfm detail`. Bay names use the `SFM <N>` prefix to avoid card-slot collision."""
+    summary_types: dict[str, str] = {}
+    for m in _NOKIA_SROS_CARD_SUMMARY_RE.finditer(text or ""):
+        summary_types[m.group("slot")] = m.group("equipped") or m.group("prov")
+    rows: list[dict] = []
+    pending_slot: str | None = None
+    for block in _nokia_sros_ssh_split_blocks(text):
+        hdr = _NOKIA_SROS_SFM_HDR_RE.search(block)
+        if hdr is not None:
+            if pending_slot is not None:
+                logger.warning(
+                    "nokia_sros_ssh: sfm %s header had no field block — dropping",
+                    pending_slot,
+                )
+            pending_slot = hdr.group("slot")
+            continue
+        if pending_slot is None:
+            continue
+        fields = _nokia_sros_ssh_extract_fields(block)
+        equipped = (
+            fields.get("sfm type")
+            or fields.get("equipped type")
+            or summary_types.get(pending_slot, "")
+        )
+        rows.append({
+            "slot": f"SFM {pending_slot}",
+            "equipped_type": equipped,
+            "pid": fields.get("part number", ""),
+            "sn": fields.get("serial number", ""),
+        })
+        pending_slot = None
+    return rows
+
+
 def _nokia_sros_ssh_fetch_and_parse_mdas(driver, card_rows: list[dict]) -> list[dict]:
     """
     Issue `show mda <slot> detail` per linecard slot and merge parsed rows.
@@ -597,6 +638,16 @@ def _nokia_sros_ssh_get_modules_impl(driver) -> dict | None:
         logger.warning("nokia_sros_ssh.get_modules: show card failed: %s", e)
         return None
     card_rows = _nokia_sros_ssh_parse_cards(card_raw or "")
+    # SFMs are a separate Nokia hardware concept — `show card` doesn't list
+    # them. Issue `show sfm detail` (Nokia command-reference syntax) and
+    # append the SFM rows as additional top-level bays.
+    try:
+        sfm_raw = driver.device.send_command("show sfm detail")
+    except Exception as e:
+        logger.warning("nokia_sros_ssh.get_modules: show sfm detail failed: %s", e)
+        sfm_raw = ""
+    if sfm_raw and sfm_raw.strip() and "MINOR:" not in sfm_raw and "Error:" not in sfm_raw:
+        card_rows.extend(_nokia_sros_ssh_parse_sfms(sfm_raw))
     mda_rows = _nokia_sros_ssh_fetch_and_parse_mdas(driver, card_rows)
     transceiver_rows = _nokia_sros_ssh_collect_transceivers(driver, mda_rows)
 

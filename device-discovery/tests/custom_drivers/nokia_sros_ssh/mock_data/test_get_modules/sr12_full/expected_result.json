@@ -14,7 +14,10 @@
         ]}},
         {"name": "2", "position": "2", "module": {"model": "3HE09576AA", "serial": "NS-IOM2-001", "description": "iom4-e", "type": "linecard", "sub_bays": [
           {"name": "2/1", "position": "2/1", "module": {"model": "3HE09579AA", "serial": "NS-MDA2-001", "description": "me10-10gb-sfp+", "type": "linecard", "sub_bays": []}}
-        ]}}
+        ]}},
+        {"name": "SFM 1", "position": "SFM 1", "module": {"model": "3HE08648AA", "serial": "NS-SFM1-001", "description": "sfm5-12", "type": "linecard", "sub_bays": []}},
+        {"name": "SFM 2", "position": "SFM 2", "module": {"model": "3HE08648AA", "serial": "NS-SFM2-001", "description": "sfm5-12", "type": "linecard", "sub_bays": []}},
+        {"name": "SFM 3", "position": "SFM 3", "module": {"model": "3HE08648AA", "serial": "NS-SFM3-001", "description": "sfm5-12", "type": "linecard", "sub_bays": []}}
       ],
       "interfaces_by_bay": {"1": ["1/1/1", "1/1/2", "1/2/1"], "1/1": ["1/1/1", "1/1/2"], "1/1/1": ["1/1/1"], "1/2": ["1/2/1"], "1/2/1": ["1/2/1"], "2": ["2/1/1"], "2/1": ["2/1/1"]}
     }

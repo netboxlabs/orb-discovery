@@ -64,6 +64,30 @@
           </hardware-data>
         </mda>
       </card>
+      <sfm>
+        <sfm-slot>1</sfm-slot>
+        <equipped-type>sfm5-12</equipped-type>
+        <hardware-data>
+          <part-number>3HE08648AA</part-number>
+          <serial-number>NS-SFM1-001</serial-number>
+        </hardware-data>
+      </sfm>
+      <sfm>
+        <sfm-slot>2</sfm-slot>
+        <equipped-type>sfm5-12</equipped-type>
+        <hardware-data>
+          <part-number>3HE08648AA</part-number>
+          <serial-number>NS-SFM2-001</serial-number>
+        </hardware-data>
+      </sfm>
+      <sfm>
+        <sfm-slot>3</sfm-slot>
+        <equipped-type>sfm5-12</equipped-type>
+        <hardware-data>
+          <part-number>3HE08648AA</part-number>
+          <serial-number>NS-SFM3-001</serial-number>
+        </hardware-data>
+      </sfm>
       <port>
         <port-id>1/1/1</port-id>
         <transceiver>

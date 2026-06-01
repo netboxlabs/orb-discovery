@@ -222,6 +222,14 @@ _FILTER_MODULES = f"""
                 </hardware-data>
             </mda>
         </card>
+        <sfm>
+            <sfm-slot/>
+            <equipped-type/>
+            <hardware-data>
+                <part-number/>
+                <serial-number/>
+            </hardware-data>
+        </sfm>
     </state>
 </filter>
 """
@@ -515,6 +523,28 @@ def _nokia_sros_rows_from_state_xml(state_root: etree._Element) -> list[dict]:
                 "pid": (mpn.text or "").strip() if mpn is not None else "",
                 "sn": (msn.text or "").strip() if msn is not None else "",
             })
+    # SFMs live in a SEPARATE state subtree (not under <card>). Emit each as
+    # a top-level bay; the existing classifier maps `sfm*` -> `linecard`.
+    # Bay names are prefixed `SFM <N>` to avoid collision with same-numbered
+    # card slots in a chassis that uses both namespaces.
+    for sfm in state_root.findall("state_ns:sfm", _NSMAP):
+        sslot_el = sfm.find("state_ns:sfm-slot", _NSMAP)
+        set_el = sfm.find("state_ns:equipped-type", _NSMAP)
+        shw = sfm.find("state_ns:hardware-data", _NSMAP)
+        spn = shw.find("state_ns:part-number", _NSMAP) if shw is not None else None
+        ssn = shw.find("state_ns:serial-number", _NSMAP) if shw is not None else None
+        sslot = (sslot_el.text or "").strip() if sslot_el is not None else ""
+        if not sslot:
+            continue
+        rows.append({
+            "kind": "card",
+            "slot": f"SFM {sslot}",
+            "parent_slot": None,
+            "mda_slot": None,
+            "equipped_type": (set_el.text or "").strip() if set_el is not None else "",
+            "pid": (spn.text or "").strip() if spn is not None else "",
+            "sn": (ssn.text or "").strip() if ssn is not None else "",
+        })
     return rows
 
 
