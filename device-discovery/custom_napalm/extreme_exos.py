@@ -266,8 +266,13 @@ _EXOS_SLOT_HEADER_RE = re.compile(
 _EXOS_HW_TYPE_RE = re.compile(
     r"^\s*Hw\s+Module\s+Type\s*:\s*(?P<type>\S+)", re.MULTILINE | re.IGNORECASE
 )
+# Real EXOS prints two whitespace-separated tokens on the BD-X8 serial line
+# (``Serial number: 800432-00-09 1534G-01368`` — Extreme part-number plus the
+# unique serial). Capture everything to end-of-line, then collapse whitespace
+# so the persisted serial is the full operator-meaningful string.
 _EXOS_SERIAL_RE = re.compile(
-    r"^\s*Serial\s+number\s*:\s*(?P<serial>\S+)", re.MULTILINE | re.IGNORECASE
+    r"^\s*Serial\s+number\s*:\s*(?P<serial>\S.*?)\s*$",
+    re.MULTILINE | re.IGNORECASE,
 )
 
 # Card-family classifier. Order matters: ``BDX-MM`` (supervisor) is checked

@@ -176,6 +176,29 @@ def test_parse_show_slot_detail_empty_input_returns_empty() -> None:
     assert _parse_show_slot_detail("no slot headers here") == []
 
 
+def test_parse_show_slot_detail_captures_multi_token_serial() -> None:
+    """
+    Real BD-X8 ``Serial number:`` lines have two whitespace-separated tokens.
+
+    Extreme's BD-X8 support output prints ``Serial number: 800432-00-09 1534G-01368``
+    (part-number plus the unique serial). The captured value must include both
+    tokens — capturing only the first leads to non-unique NetBox module serials.
+    """
+    text = (
+        "Slot-1 information:\n"
+        "                Hw Module Type:        BDXA-10G48X\n"
+        "                Serial number:         800432-00-09 1534G-01368\n"
+    )
+    rows = _parse_show_slot_detail(text)
+    assert rows == [
+        {
+            "slot": "Slot-1",
+            "hw_module_type": "BDXA-10G48X",
+            "serial": "800432-00-09 1534G-01368",
+        },
+    ]
+
+
 def test_parse_show_slot_detail_case_insensitive_header() -> None:
     """Lowercase / mixed-case slot headers parse just like TitleCase."""
     text = (

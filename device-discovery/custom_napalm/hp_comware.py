@@ -577,10 +577,10 @@ def _comware_get_chassis_members_impl(driver) -> dict | None:
 #
 # Comware modular chassis families (S7500E, S10500, S12500, S12900) print one
 # row per slot in `display device manuinfo` with a full vendor SKU in
-# `DEVICE_NAME`. The classifier maps documented H3C SKU prefixes to NetBox
-# module types (supervisor / linecard). Order matters: longer prefixes that
-# contain a shorter prefix as a substring MUST appear first (LSUM before LSU)
-# so supervisor SKUs are not mis-classified as linecards.
+# `DEVICE_NAME`. The classifier identifies supervisors by SKU substring
+# (``MPU`` / ``SUP``) rather than by family prefix, because H3C reuses the
+# same family prefix for both MPU and interface cards on the same chassis.
+# Anything else matching a known modular family prefix is a linecard.
 
 # Family-token substrings. Real model strings reported by ``display version``
 # vary by branding:
@@ -635,7 +635,7 @@ def _comware_is_modular(model: str) -> bool:
     Matches by uppercased substring so vendor-prefixed model strings
     (``H3C S12500-AF``, ``HPE FlexFabric S12500``, ``HP A12500``) and
     bare model names (``S12500``) both succeed. Non-modular families
-    (S5500 / S5800 / S5900) reject.
+    (S5500 / S5800 / S6800) reject.
     """
     if not model:
         return False
@@ -753,6 +753,13 @@ def _comware_get_modules_impl(driver) -> dict | None:
     members = _comware_modules_rows_from_manuinfo(manuinfo_rows)
     if not members:
         return None
+    # Standalone modular (one chassis) MUST key by ``None`` so the
+    # single-device translate path (which builds ``{None: device}``) attaches
+    # the bays correctly. IRF-of-modular keeps integer keys per member chassis
+    # — translate.translate_as_stack passes the multi-member device map.
+    if len(members) == 1:
+        only_member = next(iter(members.values()))
+        return _modules_to_payload({None: only_member})
     return _modules_to_payload(members)
 
 
@@ -981,7 +988,7 @@ class ComwareDriver(_napalm_base.NetworkDriver):
 
         Standalone modular families (S7500E, S10500, S12500, S12900) emit a
         single per-chassis envelope; IRF-of-modular emits one envelope per
-        IRF member chassis. Non-modular families (S5500, S5800, S5900) and
+        IRF member chassis. Non-modular families (S5500 / S5800 / S6800) and
         unparseable output return ``None``.
         """
         return _comware_get_modules_impl(self)
