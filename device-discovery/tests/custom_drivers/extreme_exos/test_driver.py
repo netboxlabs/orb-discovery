@@ -107,6 +107,24 @@ def test_is_modular_accepts_bdx8_variants() -> None:
     assert _exos_is_modular("blackdiamond x8")
 
 
+def test_is_modular_matches_switch_line_without_system_type() -> None:
+    """
+    BD-X8 ``show version`` may omit ``System Type:`` but still print ``Switch : BD-X8``.
+
+    Extreme's command-reference example for BD-X8 lists ``Chassis`` / ``Slot-*`` /
+    ``FM-*`` entries without an explicit ``System Type`` line. Scanning the full
+    ``show version`` output for the BD-X8 signature still triggers modular
+    detection in that shape.
+    """
+    ver_output = (
+        "Switch      : 800533-00-01 Rev 1.0 BootROM: 1.0.5.7   IMG: 30.7.1.4\n"
+        "Chassis     : BD-X8\n"
+        "Slot-1      : BDXA-10G48X\n"
+        "FM-1        : BDXA-FM-160T\n"
+    )
+    assert _exos_is_modular(ver_output)
+
+
 def test_is_modular_rejects_fixed_x8_variants() -> None:
     """BD-X8-X32 / BD-X8-32 (stackable) and X670 / X870 (pizza-box) reject."""
     assert not _exos_is_modular("BD-X8-32")

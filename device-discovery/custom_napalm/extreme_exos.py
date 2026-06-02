@@ -342,10 +342,15 @@ def _parse_show_slot_detail(text: str) -> list[dict[str, str]]:
         if not hw or not sn:
             continue
         slot_name = re.sub(r"\s+", "-", m.group("slot").strip())
+        # Collapse internal whitespace runs to a single space so variable
+        # spacing in real EXOS output (e.g. extra padding between the
+        # part-number and unique-serial tokens) never produces an
+        # accidentally non-unique or ugly persisted serial.
+        serial = " ".join(sn.group("serial").split())
         rows.append({
             "slot": slot_name,
             "hw_module_type": hw.group("type"),
-            "serial": sn.group("serial"),
+            "serial": serial,
         })
     return rows
 
@@ -366,11 +371,13 @@ def _exos_get_modules_impl(driver) -> dict | None:
         logger.warning("exos.get_modules: show version failed", exc_info=True)
         return None
 
-    model = ""
-    m = re.search(r"^System Type\s*:\s*(.+?)\s*$", ver_output or "", re.MULTILINE)
-    if m:
-        model = m.group(1).strip()
-    if not _exos_is_modular(model):
+    # ``show version`` on a BD-X8 prints the System Type on a dedicated line
+    # on most firmwares, but Extreme's command reference also documents BD-X8
+    # output that lists ``Switch : BD-X8 ...`` / ``Chassis``/``Slot-*`` /
+    # ``FM-*`` entries without an explicit ``System Type`` line. Scan the
+    # full output for the BD-X8 signature rather than gating on one field —
+    # the regex already rejects ``BD-X8-32`` / ``X670`` / ``X870`` variants.
+    if not _exos_is_modular(ver_output or ""):
         return None
 
     try:

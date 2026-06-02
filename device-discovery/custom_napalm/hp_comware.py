@@ -719,10 +719,12 @@ def _comware_get_modules_impl(driver) -> dict | None:
     Slot-type rows by ``chassis_id``, classifies each row's SKU, and emits
     one ``MemberModules`` envelope per surviving chassis id.
 
-    Standalone modular chassis produce a single ``members[1]`` envelope;
+    Standalone modular chassis produce a single ``members[None]`` envelope
+    (matching the single-device translate path's ``{None: device}`` map);
     IRF-of-modular emits one envelope per IRF member chassis (members[1],
-    members[2], ...). Subslot / Fan / Power rows are dropped — sub-bay
-    discovery is a follow-up.
+    members[2], ...) for the multi-member ``translate_as_stack`` path.
+    Subslot / Fan / Power rows are dropped — sub-bay discovery is a
+    follow-up.
     """
     try:
         raw_version = driver.device.send_command("display version")
