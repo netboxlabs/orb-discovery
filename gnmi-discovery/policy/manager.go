@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"strings"
 	"sync"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/config"
+	"github.com/netboxlabs/orb-discovery/gnmi-discovery/env"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,7 +38,7 @@ func NewManager(ctx context.Context, logger *slog.Logger, client diode.Client) (
 	}, nil
 }
 
-// ParsePolicies unmarshals and validates the request body.
+// ParsePolicies unmarshals, validates, applies defaults and resolves env vars.
 func (m *Manager) ParsePolicies(data []byte) (map[string]config.Policy, error) {
 	var payload config.Policies
 	if err := yaml.Unmarshal(data, &payload); err != nil {
@@ -44,7 +47,106 @@ func (m *Manager) ParsePolicies(data []byte) (map[string]config.Policy, error) {
 	if len(payload.Policies) == 0 {
 		return nil, errors.New("no policies found in the request")
 	}
+	for name, policy := range payload.Policies {
+		if err := m.validatePolicy(policy); err != nil {
+			return nil, fmt.Errorf("%s : invalid policy : %w", name, err)
+		}
+		// Resolve env BEFORE applying defaults: ResolveEnv only matches a
+		// whole-string ${VAR}, so the host must be resolved before the default
+		// port is appended (otherwise "${HOST}:9339" would never resolve).
+		if err := m.resolveEnv(&policy); err != nil {
+			return nil, fmt.Errorf("%s : failed to resolve environment variables : %w", name, err)
+		}
+		m.applyDefaults(&policy)
+		payload.Policies[name] = policy
+	}
 	return payload.Policies, nil
+}
+
+func (m *Manager) validatePolicy(policy config.Policy) error {
+	if len(policy.Scope.Targets) == 0 {
+		return errors.New("no targets configured")
+	}
+	switch policy.Config.Mode {
+	case "", config.ModeAuto, config.ModeOnChange, config.ModeSample, config.ModeGet:
+	default:
+		return fmt.Errorf("invalid mode %q (allowed: auto, on_change, sample, get)", policy.Config.Mode)
+	}
+	for _, t := range policy.Scope.Targets {
+		if t.Host == "" {
+			return errors.New("target with empty host")
+		}
+		switch t.Mode {
+		case "", config.ModeAuto, config.ModeOnChange, config.ModeSample, config.ModeGet:
+		default:
+			return fmt.Errorf("target %s: invalid mode %q", t.Host, t.Mode)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) applyDefaults(policy *config.Policy) {
+	if policy.Config.Mode == "" {
+		policy.Config.Mode = config.ModeAuto
+	}
+	if policy.Config.DebounceMs == 0 {
+		policy.Config.DebounceMs = config.DefaultDebounceMs
+	}
+	if policy.Config.SampleIntervalMs == 0 {
+		policy.Config.SampleIntervalMs = config.DefaultSampleInterval
+	}
+	if policy.Config.GetIntervalMs == 0 {
+		policy.Config.GetIntervalMs = config.DefaultGetInterval
+	}
+	if policy.Config.Defaults.Site == "" {
+		policy.Config.Defaults.Site = "undefined"
+	}
+	if policy.Config.Defaults.Role == "" {
+		policy.Config.Defaults.Role = "undefined"
+	}
+	if policy.Config.Defaults.Interface.Type == "" {
+		policy.Config.Defaults.Interface.Type = "other"
+	}
+	for i := range policy.Scope.Targets {
+		policy.Scope.Targets[i].Host = ensurePort(policy.Scope.Targets[i].Host)
+	}
+}
+
+// ensurePort appends the default gNMI port when the host has none. It is
+// IPv6-safe: a bare IPv6 literal (e.g. 2001:db8::1) has colons but no port, so
+// net.SplitHostPort is used to detect a real port, and IPv6 literals are
+// bracketed before the port is appended.
+func ensurePort(h string) string {
+	if h == "" {
+		return h
+	}
+	if _, _, err := net.SplitHostPort(h); err == nil {
+		return h // already host:port (handles bracketed IPv6 too)
+	}
+	host := h
+	if strings.Contains(h, ":") && !strings.HasPrefix(h, "[") {
+		host = "[" + h + "]" // bare IPv6 literal
+	}
+	return fmt.Sprintf("%s:%d", host, config.DefaultGNMIPort)
+}
+
+func (m *Manager) resolveEnv(policy *config.Policy) error {
+	for i := range policy.Scope.Targets {
+		t := &policy.Scope.Targets[i]
+		// Resolve every string field a user is likely to source from env: host,
+		// credentials, and TLS material paths.
+		for _, f := range []*string{
+			&t.Host, &t.Username, &t.Password,
+			&t.TLS.CAFile, &t.TLS.CertFile, &t.TLS.KeyFile,
+		} {
+			resolved, err := env.ResolveEnv(*f)
+			if err != nil {
+				return err
+			}
+			*f = resolved
+		}
+	}
+	return nil
 }
 
 // HasPolicy reports whether a policy is running.
