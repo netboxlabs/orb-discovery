@@ -53,6 +53,13 @@ func init() {
 // metricsMiddleware is a middleware that records API metrics
 func metricsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Start timing the request
+		startTime := time.Now()
+
+		// Process request
+		c.Next()
+
+		// Record API request counter and response latency with correct status
 		if apiMetric := metrics.GetAPIRequests(); apiMetric != nil {
 			apiMetric.Add(c.Request.Context(), 1,
 				metric.WithAttributes(
@@ -62,14 +69,6 @@ func metricsMiddleware() gin.HandlerFunc {
 				),
 			)
 		}
-
-		// Start timing the request
-		startTime := time.Now()
-
-		// Process request
-		c.Next()
-
-		// Record API response latency
 
 		if apiMetric := metrics.GetAPIResponseLatency(); apiMetric != nil {
 			// Calculate duration in milliseconds

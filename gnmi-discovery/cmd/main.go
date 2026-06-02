@@ -40,7 +40,7 @@ func main() {
 	otelEndpoint := flag.String("otel-endpoint", "", "OpenTelemetry exporter endpoint (e.g. localhost:4317)."+
 		" Environment variable can be used by wrapping it in ${} (e.g. ${OTEL_ENDPOINT})")
 	otelExportPeriod := flag.Int("otel-export-period", 10, "Period in seconds between OpenTelemetry exports")
-	profilesDir := flag.String("profiles-dir", "", "directory of gNMI profile overrides")
+	profilesDir := flag.String("profiles-dir", "", "directory of gNMI profile overrides") // profiles-dir: wired into the policy manager in M6
 
 	flag.Parse()
 	_ = profilesDir
