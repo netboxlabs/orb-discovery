@@ -99,12 +99,43 @@ type Policies struct {
 	Policies map[string]Policy `yaml:"policies"`
 }
 
+// cloneStrings returns a new slice with the same elements as src, sharing no
+// backing array with the original. A nil src returns nil.
+func cloneStrings(src []string) []string {
+	return append([]string(nil), src...)
+}
+
 // MergeDefaults returns policyDefaults overlaid with non-empty overrideDefaults.
+// The returned *Defaults owns all of its slice fields — no backing array is
+// shared with either input, so callers may freely append without corrupting the
+// parsed config.
 func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
+	if policyDefaults == nil {
+		if overrideDefaults == nil {
+			return &Defaults{}
+		}
+		// Return a deep copy of override so the caller still owns all slices.
+		cp := *overrideDefaults
+		cp.Tags = cloneStrings(overrideDefaults.Tags)
+		cp.Device.Tags = cloneStrings(overrideDefaults.Device.Tags)
+		cp.Interface.Tags = cloneStrings(overrideDefaults.Interface.Tags)
+		return &cp
+	}
 	if overrideDefaults == nil {
-		return policyDefaults
+		// Shallow-copy the struct, then clone every slice field so the result
+		// doesn't alias policyDefaults' backing arrays.
+		cp := *policyDefaults
+		cp.Tags = cloneStrings(policyDefaults.Tags)
+		cp.Device.Tags = cloneStrings(policyDefaults.Device.Tags)
+		cp.Interface.Tags = cloneStrings(policyDefaults.Interface.Tags)
+		return &cp
 	}
 	merged := *policyDefaults
+	// Clone slices inherited from the policy copy so they don't alias the source.
+	merged.Tags = cloneStrings(policyDefaults.Tags)
+	merged.Device.Tags = cloneStrings(policyDefaults.Device.Tags)
+	merged.Interface.Tags = cloneStrings(policyDefaults.Interface.Tags)
+
 	if overrideDefaults.Site != "" {
 		merged.Site = overrideDefaults.Site
 	}
@@ -115,7 +146,7 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 		merged.Location = overrideDefaults.Location
 	}
 	if len(overrideDefaults.Tags) > 0 {
-		merged.Tags = overrideDefaults.Tags
+		merged.Tags = cloneStrings(overrideDefaults.Tags)
 	}
 	if overrideDefaults.Device.Manufacturer != "" {
 		merged.Device.Manufacturer = overrideDefaults.Device.Manufacturer
@@ -130,7 +161,7 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 		merged.Device.Comments = overrideDefaults.Device.Comments
 	}
 	if len(overrideDefaults.Device.Tags) > 0 {
-		merged.Device.Tags = overrideDefaults.Device.Tags
+		merged.Device.Tags = cloneStrings(overrideDefaults.Device.Tags)
 	}
 	if overrideDefaults.Interface.Type != "" {
 		merged.Interface.Type = overrideDefaults.Interface.Type
@@ -139,7 +170,7 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 		merged.Interface.Description = overrideDefaults.Interface.Description
 	}
 	if len(overrideDefaults.Interface.Tags) > 0 {
-		merged.Interface.Tags = overrideDefaults.Interface.Tags
+		merged.Interface.Tags = cloneStrings(overrideDefaults.Interface.Tags)
 	}
 	return &merged
 }
