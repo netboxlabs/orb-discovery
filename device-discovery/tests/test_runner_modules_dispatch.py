@@ -18,11 +18,23 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from custom_napalm.aruba_aoscx import AOSCXDriver
+from custom_napalm.aruba_aoscx_ssh import AOSCXSSHDriver
+from custom_napalm.cisco_fxos import FXOSDriver
 from custom_napalm.eos import EOSDriver
+from custom_napalm.extreme_exos import ExosDriver
+from custom_napalm.hp_comware import ComwareDriver
+from custom_napalm.huawei_vrp import VRPDriver
 from custom_napalm.ios import IOSDriver
+from custom_napalm.iosxr import IOSXRDriver
+from custom_napalm.iosxr_netconf import IOSXRNETCONFDriver
 from custom_napalm.junos import JunOSDriver
+from custom_napalm.nokia_sros import SROSDriver
+from custom_napalm.nokia_sros_ssh import SROSSSHDriver
 from custom_napalm.nxos import NXOSDriver
 from custom_napalm.nxos_ssh import NXOSSSHDriver
+from custom_napalm.paloalto_panos import PANOSDriver
+from custom_napalm.paloalto_panos_ssh import PANOSSHDriver
 from device_discovery.policy.models import Config, Defaults, Options
 from device_discovery.policy.runner import PolicyRunner
 
@@ -144,10 +156,27 @@ def test_collect_modules_swallows_driver_exception(caplog) -> None:
 # per-driver internals (those live in the per-driver test modules).
 @pytest.mark.parametrize(
     "driver_cls",
-    [IOSDriver, EOSDriver, JunOSDriver, NXOSDriver, NXOSSSHDriver],
-    ids=["ios", "eos", "junos", "nxos", "nxos_ssh"],
+    [
+        pytest.param(IOSDriver, id="ios"),
+        pytest.param(EOSDriver, id="eos"),
+        pytest.param(IOSXRDriver, id="iosxr"),
+        pytest.param(IOSXRNETCONFDriver, id="iosxr_netconf"),
+        pytest.param(JunOSDriver, id="junos"),
+        pytest.param(NXOSDriver, id="nxos"),
+        pytest.param(NXOSSSHDriver, id="nxos_ssh"),
+        pytest.param(FXOSDriver, id="fxos"),
+        pytest.param(VRPDriver, id="vrp"),
+        pytest.param(AOSCXDriver, id="aoscx"),
+        pytest.param(AOSCXSSHDriver, id="aoscx_ssh"),
+        pytest.param(SROSDriver, id="nokia_sros"),
+        pytest.param(SROSSSHDriver, id="nokia_sros_ssh"),
+        pytest.param(PANOSDriver, id="paloalto_panos"),
+        pytest.param(PANOSSHDriver, id="paloalto_panos_ssh"),
+        pytest.param(ComwareDriver, id="hp_comware"),
+        pytest.param(ExosDriver, id="extreme_exos"),
+    ],
 )
 def test_driver_exposes_get_modules(driver_cls) -> None:
-    """Every batch-2 driver MUST expose a callable get_modules method."""
+    """Every driver MUST expose a callable get_modules method."""
     assert hasattr(driver_cls, "get_modules")
     assert callable(getattr(driver_cls, "get_modules"))
