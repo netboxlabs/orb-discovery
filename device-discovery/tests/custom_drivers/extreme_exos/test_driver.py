@@ -62,8 +62,9 @@ def test_classifier_supervisor_beats_linecard_prefix() -> None:
 
 
 def test_classifier_fabric_modules_are_linecards() -> None:
-    """BDXA-FM / BDXB-FM Fabric Modules classify as linecards (no NetBox fabric type)."""
+    """Extreme BD-X8 Fabric Modules classify as linecards (no NetBox fabric type)."""
     assert _exos_classify_module("BDXA-FM-160T") == "linecard"
+    # Hypothetical future BDXB-FM-* still resolves via the BDXB- fallback.
     assert _exos_classify_module("BDXB-FM-320T") == "linecard"
 
 

@@ -271,13 +271,15 @@ _EXOS_SERIAL_RE = re.compile(
 )
 
 # Card-family classifier. Order matters: ``BDX-MM`` (supervisor) is checked
-# before the generic ``BDXA-`` / ``BDXB-`` linecard prefixes. ``BDXA-FM`` /
-# ``BDXB-FM`` (Fabric Modules) are intentionally classified as linecards
-# because NetBox has no fabric module type today.
+# before the generic ``BDXA-`` / ``BDXB-`` linecard prefixes. ``BDXA-FM``
+# (Fabric Modules — ``BDXA-FM20T`` / ``BDXA-FM10T``) classify as linecards
+# because NetBox has no fabric module type today. Extreme's BD-X8 install
+# guide lists fabric modules only under the ``BDXA-FM`` family — any future
+# ``BDXB-FM*`` SKU still classifies as linecard via the generic ``BDXB-``
+# fallback.
 _EXOS_MODULE_CLASSIFIER: tuple[tuple[str, str], ...] = (
     ("BDX-MM", "supervisor"),
     ("BDXA-FM", "linecard"),
-    ("BDXB-FM", "linecard"),
     ("BDXA-", "linecard"),
     ("BDXB-", "linecard"),
 )

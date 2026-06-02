@@ -5,7 +5,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from custom_napalm.hp_comware import (
-    _COMWARE_MODULE_CLASSIFIER,
+    _COMWARE_FAMILY_PREFIXES,
+    _COMWARE_SUPERVISOR_TOKENS,
     ComwareDriver,
     _comware_classify_module,
     _comware_get_chassis_members_impl,
@@ -201,19 +202,40 @@ def test_driver_exposes_get_modules():
 # --- classifier unit tests ---------------------------------------------------
 
 
-def test_classifier_recognises_every_documented_prefix():
-    """Every SKU prefix in _COMWARE_MODULE_CLASSIFIER classifies to its declared type."""
-    for prefix, expected_type in _COMWARE_MODULE_CLASSIFIER:
-        sku = f"{prefix}1ABC"
-        assert _comware_classify_module(sku) == expected_type, (
-            f"prefix {prefix!r} mis-classified"
-        )
+def test_classifier_supervisor_by_mpu_token():
+    """SKUs containing ``MPU`` classify as supervisor across every family."""
+    assert _comware_classify_module("LSQM1MPUC0") == "supervisor"   # S7500E
+    assert _comware_classify_module("LSUM1MPUH1") == "supervisor"   # S10500
+    assert _comware_classify_module("LSXM1MPUD0") == "supervisor"   # S10500
+    assert _comware_classify_module("LSXM2MPUD0") == "supervisor"   # S12500X-AF
+    assert _comware_classify_module("LSXM2MPUA1") == "supervisor"   # S12900
 
 
-def test_classifier_lsum_beats_lsu_supervisor_precedence():
-    """LSUM (supervisor) MUST be checked before LSU (linecard)."""
+def test_classifier_supervisor_by_sup_token():
+    """The rarer ``SUP``-token variants (e.g. ``LSUM1SUPXD0``) also classify as supervisor."""
     assert _comware_classify_module("LSUM1SUPXD0") == "supervisor"
-    assert _comware_classify_module("LSU1FX48A") == "linecard"
+
+
+def test_classifier_interface_cards_with_supervisor_prefix_are_linecards():
+    """
+    LSQM / LSUM / LSXM interface cards (NOT containing MPU/SUP) classify as linecard.
+
+    This is the regression that the family-prefix-only classifier failed: H3C
+    reuses the same family prefix for MPU and interface cards, so prefix
+    matching alone would mis-emit every interface card as a supervisor.
+    """
+    assert _comware_classify_module("LSQM1FH48EA") == "linecard"   # S7500E interface
+    assert _comware_classify_module("LSQM1FV48EA") == "linecard"
+    assert _comware_classify_module("LSXM2SF40C") == "linecard"    # S12500X-AF fabric
+    assert _comware_classify_module("LSXM2QGS56QHB1") == "linecard"  # interface card
+    assert _comware_classify_module("LSXM2FX48LEB1") == "linecard"
+    assert _comware_classify_module("LSUM1QGS24XEC0") == "linecard"  # S10500 interface
+
+
+def test_classifier_other_family_prefixes_are_linecards():
+    """LSQS / LSXS / LSQ1 / LSQ2 / LSQK / LSX1 / LSX2 / LSR / LSU classify as linecard."""
+    for prefix in ("LSQS", "LSXS", "LSQ1", "LSQ2", "LSQK", "LSX1", "LSX2", "LSR", "LSU"):
+        assert _comware_classify_module(f"{prefix}1FX48LEB1") == "linecard", prefix
 
 
 def test_classifier_case_insensitive():
@@ -223,24 +245,23 @@ def test_classifier_case_insensitive():
 
 
 def test_classifier_unknown_returns_other():
-    """SKUs that match no prefix classify as 'other' (dropped by impl)."""
+    """SKUs that match no family prefix classify as 'other' (dropped by impl)."""
     assert _comware_classify_module("XYZ-UNKNOWN") == "other"
     assert _comware_classify_module("") == "other"
     assert _comware_classify_module("   ") == "other"
 
 
-def test_classifier_ordering_invariant_longer_before_shorter():
-    """Tokens that are substrings of other tokens MUST appear first in the table."""
-    prefixes = [p for p, _ in _COMWARE_MODULE_CLASSIFIER]
-    for i, short in enumerate(prefixes):
-        for j, longer in enumerate(prefixes):
-            if i == j or len(longer) <= len(short):
-                continue
-            if longer.startswith(short):
-                assert j < i, (
-                    f"ordering bug: longer prefix {longer!r} must appear "
-                    f"before shorter prefix {short!r}"
-                )
+def test_classifier_supervisor_token_wins_over_family_prefix():
+    """
+    Supervisor-token check runs BEFORE family-prefix fallback.
+
+    Without this ordering, an MPU SKU on an LSQM/LSUM/LSXM-family chassis
+    would classify as linecard via the family-prefix branch.
+    """
+    sku = "LSXM2MPUD0"
+    assert sku.startswith(_COMWARE_FAMILY_PREFIXES)
+    assert any(token in sku for token in _COMWARE_SUPERVISOR_TOKENS)
+    assert _comware_classify_module(sku) == "supervisor"
 
 
 # --- family detection unit tests --------------------------------------------

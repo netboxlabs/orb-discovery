@@ -598,22 +598,33 @@ _MODULAR_COMWARE_TOKENS: tuple[str, ...] = (
     "7500", "10500", "12500", "12900",
 )
 
-# (prefix, type). 4-character prefixes appear BEFORE 3-character prefixes so
-# LSUM (supervisor) wins over LSU (linecard). The ordering-invariant test in
-# the unit suite enforces this generically against the table.
-_COMWARE_MODULE_CLASSIFIER: tuple[tuple[str, str], ...] = (
-    ("LSUM", "supervisor"),   # S10500 supervisor — MUST come before LSU
-    ("LSQM", "supervisor"),   # S7500E MPU
-    ("LSXM", "supervisor"),   # S10500 / S12500X-AF / S12900 MPU
-    ("LSQS", "linecard"),     # S7500E SFU (fabric)
-    ("LSXS", "linecard"),     # S10500 / S12900 SFU (fabric)
-    ("LSQ1", "linecard"),     # S7500E LPU
-    ("LSQ2", "linecard"),     # S7500E LPU variant
-    ("LSQK", "linecard"),     # S7500E LPU variant
-    ("LSX1", "linecard"),     # S10500 / S12900 LPU
-    ("LSX2", "linecard"),     # S10500 / S12900 LPU variant
-    ("LSR", "linecard"),      # S12500 LPU SKU family
-    ("LSU", "linecard"),      # S12500 LSU fallback — must follow LSUM
+# Supervisor identification is by SKU substring, not family prefix: H3C reuses
+# the same family prefix (``LSQM`` / ``LSUM`` / ``LSXM``) for BOTH the MPU
+# (Main Processing Unit, supervisor) and interface cards on the same chassis.
+# The MPU's role is encoded in the SKU body — e.g. ``LSQM1MPUC0`` (supervisor)
+# vs ``LSQM1FH48EA`` (interface). ``MPU`` is the canonical supervisor token;
+# ``SUP`` covers the rarer ``LSUM1SUPXD0`` SUP-prefixed variant.
+_COMWARE_SUPERVISOR_TOKENS: tuple[str, ...] = ("MPU", "SUP")
+
+# Family prefixes that mark the SKU as a Comware modular-chassis card. Any SKU
+# matching one of these prefixes that does NOT contain a supervisor token is
+# treated as a linecard (this covers MPU sibling cards: SFU/fabric ``LSXM2SF``,
+# LPU ``LSXM2QGS`` / ``LSXM2FX`` / ``LSQM1FH``, etc.). Order doesn't matter
+# here — we only need a non-empty match. The 4-character prefixes are listed
+# first defensively; ``LSU`` follows ``LSUM`` for the same reason.
+_COMWARE_FAMILY_PREFIXES: tuple[str, ...] = (
+    "LSUM",  # S10500 family (MPU + interface cards)
+    "LSQM",  # S7500E family (MPU + interface cards)
+    "LSXM",  # S10500 / S12500X-AF / S12900 family (MPU + SFU + interface cards)
+    "LSQS",  # S7500E SFU (fabric)
+    "LSXS",  # S10500 / S12900 SFU (fabric)
+    "LSQ1",  # S7500E LPU
+    "LSQ2",  # S7500E LPU variant
+    "LSQK",  # S7500E LPU variant
+    "LSX1",  # S10500 / S12900 LPU
+    "LSX2",  # S10500 / S12900 LPU variant
+    "LSR",   # S12500 LPU SKU family
+    "LSU",   # S12500 LSU — must follow LSUM (the 4-char prefix wins first)
 )
 
 
@@ -636,18 +647,25 @@ def _comware_classify_module(device_name: str) -> str:
     """
     Classify a Comware SKU into a module type.
 
-    Returns ``"supervisor"`` / ``"linecard"`` per ``_COMWARE_MODULE_CLASSIFIER``,
-    or ``"other"`` when nothing matches. Empty / whitespace input returns
-    ``"other"``. The match is a case-insensitive prefix check against the
-    first table entry whose prefix the SKU starts with — order dictates
-    precedence.
+    Returns ``"supervisor"`` when the SKU contains an MPU / SUP token
+    (``LSQM1MPUC0``, ``LSXM2MPUD0``, ``LSUM1SUPXD0``); otherwise returns
+    ``"linecard"`` when the SKU starts with a documented Comware modular
+    family prefix (``LSUM`` / ``LSQM`` / ``LSXM`` / ``LSQS`` / ``LSXS`` /
+    ``LSQ1`` / ``LSQ2`` / ``LSQK`` / ``LSX1`` / ``LSX2`` / ``LSR`` /
+    ``LSU``). Anything else — including empty / whitespace input —
+    returns ``"other"`` and is dropped by the impl.
+
+    Why two passes? H3C reuses the same family prefix for MPU and
+    interface cards on the same chassis. A pure prefix classifier
+    would mis-emit every interface card as a supervisor.
     """
     sku = (device_name or "").strip().upper()
     if not sku:
         return "other"
-    for prefix, mtype in _COMWARE_MODULE_CLASSIFIER:
-        if sku.startswith(prefix):
-            return mtype
+    if any(token in sku for token in _COMWARE_SUPERVISOR_TOKENS):
+        return "supervisor"
+    if sku.startswith(_COMWARE_FAMILY_PREFIXES):
+        return "linecard"
     return "other"
 
 
