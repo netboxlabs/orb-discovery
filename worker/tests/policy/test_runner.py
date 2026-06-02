@@ -78,6 +78,11 @@ def mock_load_class():
     with patch("worker.policy.runner.load_class") as mock_load:
         mock_backend_class = MagicMock(spec=Backend)
         mock_backend_class.__name__ = "MockBackend"
+        # New path: the runner reads metadata via the class-level describe()
+        # before constructing the backend, so it must return real Metadata.
+        mock_backend_class.describe.return_value = Metadata(
+            name="mock_backend", app_name="mock_app", app_version="1.0.0"
+        )
         mock_load.return_value = mock_backend_class
         yield mock_load
 
@@ -118,8 +123,8 @@ def mock_backend():
 
 
 def _extract_callback(mock_backend_class):
-    """Recover the ingest_callback closure that PolicyRunner.setup attached to the backend."""
-    return mock_backend_class.return_value.ingest_callback
+    """Recover the ingest_callback closure PolicyRunner.setup passed at construction."""
+    return mock_backend_class.call_args.kwargs["ingest_callback"]
 
 
 def test_initial_status(policy_runner):
@@ -616,7 +621,7 @@ def test_run_chunk_ingestion_error(
 # ---------------------------------------------------------------------------
 
 
-def test_setup_constructs_backend_directly_and_attaches_callback(
+def test_setup_reads_metadata_via_describe_and_constructs_once_with_callback(
     policy_runner,
     sample_policy,
     sample_diode_config,
@@ -624,17 +629,51 @@ def test_setup_constructs_backend_directly_and_attaches_callback(
     mock_diode_client,
     mock_run_store,
 ):
-    """setup() constructs the backend with no args and attaches ingest_callback after deps are ready."""
+    """setup() reads metadata via describe() then constructs the backend ONCE with ingest_callback."""
     with patch.object(policy_runner.scheduler, "start"), patch.object(
         policy_runner.scheduler, "add_job"
     ):
         policy_runner.setup("policy1", sample_diode_config, sample_policy, mock_run_store)
 
     mock_backend_class = mock_load_class.return_value
+    # New path: metadata read off the class, not a constructed instance.
+    mock_backend_class.describe.assert_called_once_with()
+    mock_backend_class.setup.assert_not_called()
+    # Constructed exactly once, with the prebuilt ingest_callback passed in.
+    mock_backend_class.assert_called_once()
     assert mock_backend_class.call_args.args == ()
-    assert mock_backend_class.call_args.kwargs == {}
-    backend = mock_backend_class.return_value
-    assert callable(backend.ingest_callback)
+    assert set(mock_backend_class.call_args.kwargs) == {"ingest_callback"}
+    assert callable(mock_backend_class.call_args.kwargs["ingest_callback"])
+
+
+def test_setup_falls_back_to_setup_when_describe_not_implemented(
+    policy_runner,
+    sample_policy,
+    sample_diode_config,
+    mock_load_class,
+    mock_diode_client,
+    mock_run_store,
+):
+    """Legacy backend (describe() raises) → metadata read via a throwaway setup() instance."""
+    mock_backend_class = mock_load_class.return_value
+    # A bare MagicMock.describe() returns a Mock and would not raise, so we must
+    # force the fallback explicitly.
+    mock_backend_class.describe.side_effect = NotImplementedError
+    mock_backend_class.return_value.setup.return_value = Metadata(
+        name="legacy_backend", app_name="legacy_app", app_version="2.0.0"
+    )
+
+    with patch.object(policy_runner.scheduler, "start"), patch.object(
+        policy_runner.scheduler, "add_job"
+    ):
+        policy_runner.setup("policy1", sample_diode_config, sample_policy, mock_run_store)
+
+    # Throwaway instance's setup() was used to read metadata; identity flows through.
+    mock_backend_class.return_value.setup.assert_called_once_with()
+    assert policy_runner.metadata.name == "legacy_backend"
+    # The real, callback-bearing instance is still constructed with the callback.
+    assert set(mock_backend_class.call_args.kwargs) == {"ingest_callback"}
+    assert callable(mock_backend_class.call_args.kwargs["ingest_callback"])
 
 
 def test_ingest_callback_entities_happy_path(

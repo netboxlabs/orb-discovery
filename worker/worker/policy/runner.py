@@ -21,7 +21,7 @@ from worker.backend import Backend, load_class
 from worker.entity_metadata import apply_run_id_to_entities
 from worker.exceptions import IngestError, IngestRejected
 from worker.metrics import get_metric
-from worker.models import DiodeConfig, Policy, Status
+from worker.models import DiodeConfig, Metadata, Policy, Status
 from worker.package_finder import maybe_evict
 from worker.policy.run import RunStatus, RunStore
 
@@ -71,13 +71,11 @@ class PolicyRunner:
         # Debug logging for backend loading
         logger.debug(f"Loading backend class: {policy.config.package}")
         backend_class = load_class(policy.config.package)
-
-        # Construct with no ingest_callback; it is attached below once every
-        # dependency the closure reads has been assigned.
-        backend = backend_class()
         logger.debug(f"Backend class loaded successfully: {backend_class.__name__}")
 
-        metadata = backend.setup()
+        # Read the backend's identity WITHOUT committing to an instance, so the
+        # ingest callback can be built and passed at construction time below.
+        metadata = self._backend_metadata(backend_class)
         app_name = (
             f"{diode_config.prefix}/{metadata.app_name}"
             if diode_config.prefix
@@ -113,10 +111,9 @@ class PolicyRunner:
         self._diode_client = client
 
         # Every dependency the closure reads (run_store, metadata, _diode_client)
-        # is now assigned, so the callback is safe to build and attach. The
-        # consumer reads `backend.ingest_callback` lazily at trigger time, so
-        # post-construction assignment is correct.
-        backend.ingest_callback = self._build_ingest_callback()
+        # is now assigned, so the callback is built first and the backend is
+        # constructed ONCE with it — no post-construction attach step.
+        backend = backend_class(ingest_callback=self._build_ingest_callback())
 
         self.scheduler.start()
 
@@ -142,6 +139,20 @@ class PolicyRunner:
         active_policies = get_metric("active_policies")
         if active_policies:
             active_policies.add(1, {"policy": self.name})
+
+    def _backend_metadata(self, backend_class) -> Metadata:
+        """
+        Read the backend's metadata without committing to an instance.
+
+        Prefer the class-level describe(); fall back to a throwaway instance's
+        setup() for integrations that only implement the legacy instance method.
+        """
+        try:
+            return backend_class.describe()
+        except NotImplementedError:
+            # Legacy backend: construct a throwaway just to read its metadata. The
+            # real, callback-bearing instance is constructed below.
+            return backend_class().setup()
 
     def _build_ingest_callback(self):
         """

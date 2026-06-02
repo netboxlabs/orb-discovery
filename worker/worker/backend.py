@@ -44,6 +44,19 @@ class Backend:
         """
         self.ingest_callback = ingest_callback
 
+    @classmethod
+    def describe(cls) -> Metadata:
+        """
+        Return the backend's metadata without constructing an instance.
+
+        Preferred over setup(): lets the worker read the backend's identity
+        (name/app_name/app_version) before constructing it, so the ingest
+        callback can be built and passed at construction time. Integrations
+        that only implement the instance setup() are still supported — the
+        worker falls back to a throwaway instance to read their metadata.
+        """
+        raise NotImplementedError("The 'describe' classmethod must be implemented.")
+
     def setup(self) -> Metadata:
         """
         Set up the backend.

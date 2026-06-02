@@ -17,6 +17,14 @@ def mock_import_module():
         yield mock_import
 
 
+def test_backend_describe_not_implemented():
+    """Test that Backend.describe raises NotImplementedError."""
+    with pytest.raises(
+        NotImplementedError, match="The 'describe' classmethod must be implemented."
+    ):
+        Backend.describe()
+
+
 def test_backend_setup_not_implemented():
     """Test that Backend.setup raises NotImplementedError."""
     backend = Backend()
