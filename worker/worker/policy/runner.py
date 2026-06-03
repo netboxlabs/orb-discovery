@@ -14,7 +14,6 @@ from netboxlabs.diode.sdk import (
     DiodeDryRunClient,
     DiodeOTLPClient,
     create_message_chunks,
-    estimate_message_size,
 )
 
 from worker.backend import Backend, load_class
@@ -24,10 +23,6 @@ from worker.metrics import get_metric
 from worker.models import DiodeConfig, Metadata, Policy, Status
 from worker.package_finder import maybe_evict
 from worker.policy.run import RunStatus, RunStore
-
-# Diode message-size cap (per chunk). Stays in sync with the reconciler's
-# 4 MiB gRPC ceiling minus a safety margin.
-MAX_INGEST_MESSAGE_BYTES = 3 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -258,22 +253,20 @@ class PolicyRunner:
 
     def _send_entities(self, client, entities_list: list, metadata: dict) -> int:
         """
-        Send entities to the Diode client, chunking if the payload exceeds MAX_INGEST_MESSAGE_BYTES.
+        Send entities to the Diode client.
+
+        Delegates chunking to the SDK's ``create_message_chunks``, which owns
+        the gRPC message-size threshold (3 MB default, a safe margin below the
+        4 MB ceiling) and returns a single chunk when the payload already fits.
 
         Returns the number of chunks actually sent (1 if not chunked).
         """
-        size_bytes = estimate_message_size(entities_list)
-        if size_bytes > MAX_INGEST_MESSAGE_BYTES:
-            chunks = create_message_chunks(entities_list)
-            for chunk in chunks:
-                response = client.ingest(entities=chunk, metadata=metadata)
-                if response.errors:
-                    raise IngestRejected(f"Chunk ingestion failed: {response.errors}")
-            return len(chunks)
-        response = client.ingest(entities=entities_list, metadata=metadata)
-        if response.errors:
-            raise IngestRejected(f"Entities ingestion failed: {response.errors}")
-        return 1
+        chunks = create_message_chunks(entities_list)
+        for chunk in chunks:
+            response = client.ingest(entities=chunk, metadata=metadata)
+            if response.errors:
+                raise IngestRejected(f"Chunk ingestion failed: {response.errors}")
+        return len(chunks)
 
     def run(
         self,

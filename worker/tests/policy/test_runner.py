@@ -319,17 +319,14 @@ def test_run_ingestion_errors(
     # Simulate ingestion errors
     mock_diode_client.ingest.return_value.errors = ["error1", "error2"]
 
-    # Mock estimate_message_size to return small size (no chunking)
-    with patch("worker.policy.runner.estimate_message_size", return_value=1024 * 1024):
-        # Call the run method
-        with caplog.at_level("ERROR"):
-            policy_runner.run(mock_diode_client, mock_backend, sample_policy)
+    with caplog.at_level("ERROR"):
+        policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
     # Assertions
     mock_backend.run.assert_called_once_with(policy_runner.name, sample_policy)
     mock_diode_client.ingest.assert_called_once()
     assert (
-        "Policy test_policy: Entities ingestion failed: ['error1', 'error2']"
+        "Policy test_policy: Chunk ingestion failed: ['error1', 'error2']"
         in caplog.text
     )
 
@@ -512,11 +509,8 @@ def test_run_with_small_entities_no_chunking(
     mock_backend.run.return_value = entities
     mock_diode_client.ingest.return_value.errors = []
 
-    # Mock estimate_message_size to return small size (under 3.0 MB)
-    with patch(
-        "worker.policy.runner.estimate_message_size", return_value=1024 * 1024
-    ):  # 1MB
-        policy_runner.run(mock_diode_client, mock_backend, sample_policy)
+    # Small real entities fit in a single chunk, so the SDK returns one chunk.
+    policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
     # Should call ingest once (no chunking)
     mock_diode_client.ingest.assert_called_once()
@@ -548,10 +542,8 @@ def test_run_with_multiple_chunks(
     mock_backend.run.return_value = entities
     mock_diode_client.ingest.return_value.errors = []
 
-    # Mock estimate_message_size to return large size (over 3.0 MB) and create_message_chunks
+    # Force the SDK to split into two chunks.
     with patch(
-        "worker.policy.runner.estimate_message_size", return_value=5 * 1024 * 1024
-    ), patch(
         "worker.policy.runner.create_message_chunks",
         return_value=[entities[:5], entities[5:]],
     ) as mock_chunks:
@@ -597,10 +589,8 @@ def test_run_chunk_ingestion_error(
 
     mock_diode_client.ingest.side_effect = responses
 
-    # Mock large size to trigger chunking and create_message_chunks
+    # Force two chunks; the second one fails.
     with patch(
-        "worker.policy.runner.estimate_message_size", return_value=5 * 1024 * 1024
-    ), patch(
         "worker.policy.runner.create_message_chunks",
         return_value=[entities[:3], entities[3:]],
     ):
@@ -700,9 +690,7 @@ def test_ingest_callback_entities_happy_path(
     entity2 = ingester_pb2.Entity()
     entity2.device.name = "dev2"
 
-    with patch("worker.policy.runner.apply_run_id_to_entities"), patch(
-        "worker.policy.runner.estimate_message_size", return_value=1024
-    ), patch("worker.policy.runner.create_message_chunks"):
+    with patch("worker.policy.runner.apply_run_id_to_entities"):
         result = callback(entities=[entity1, entity2])
 
     assert result is None
@@ -792,9 +780,7 @@ def test_ingest_callback_translates_transport_errors_to_ingest_error(
     entity = ingester_pb2.Entity()
     entity.device.name = "dev1"
 
-    with patch("worker.policy.runner.estimate_message_size", return_value=1024), patch(
-        "worker.policy.runner.apply_run_id_to_entities"
-    ):
+    with patch("worker.policy.runner.apply_run_id_to_entities"):
         with pytest.raises(IngestError):
             callback(entities=[entity])
 
@@ -824,9 +810,7 @@ def test_ingest_callback_translates_response_errors_to_rejected(
     entity = ingester_pb2.Entity()
     entity.device.name = "dev1"
 
-    with patch("worker.policy.runner.estimate_message_size", return_value=1024), patch(
-        "worker.policy.runner.apply_run_id_to_entities"
-    ):
+    with patch("worker.policy.runner.apply_run_id_to_entities"):
         with pytest.raises(IngestRejected):
             callback(entities=[entity])
 
@@ -861,8 +845,6 @@ def test_ingest_callback_chunks_large_payloads(
     chunk_b = [entity2]
 
     with patch(
-        "worker.policy.runner.estimate_message_size", return_value=4 * 1024 * 1024
-    ), patch(
         "worker.policy.runner.create_message_chunks", return_value=[chunk_a, chunk_b]
     ), patch(
         "worker.policy.runner.apply_run_id_to_entities"
@@ -887,8 +869,7 @@ def test_run_unaffected_by_callback(
     mock_backend.run.return_value = [entity]
     mock_diode_client.ingest.return_value.errors = []
 
-    with patch("worker.policy.runner.estimate_message_size", return_value=512):
-        policy_runner.run(mock_diode_client, mock_backend, sample_policy)
+    policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
     mock_backend.run.assert_called_once_with("test_policy", sample_policy)
     mock_diode_client.ingest.assert_called_once()
@@ -919,7 +900,7 @@ def test_ingest_callback_records_failure_on_apply_run_id_error(
     with patch(
         "worker.policy.runner.apply_run_id_to_entities",
         side_effect=RuntimeError("entity corrupt"),
-    ), patch("worker.policy.runner.estimate_message_size", return_value=1024):
+    ):
         with pytest.raises(IngestError):
             callback(entities=[entity])
 
