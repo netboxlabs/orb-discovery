@@ -170,14 +170,20 @@ def test_panos_modular_prefixes_in_sync():
 def test_mgmt_ipv6_from_system_info_parses_addr_and_prefix():
     """Mgmt IPv6 with an explicit prefix is parsed to (addr, prefix_length)."""
     from custom_napalm.paloalto_panos_ssh import _mgmt_ipv6_from_system_info
-    text = "hostname: fw1\nipv6-address: 2001:db8:abcd::5/64\noperational-mode: normal\n"
+    text = "hostname: fw1\nip-address-v6: 2001:db8:abcd::5/64\noperational-mode: normal\n"
     assert _mgmt_ipv6_from_system_info(text) == ("2001:db8:abcd::5", 64)
 
 
 def test_mgmt_ipv6_from_system_info_skips_unknown_link_local_and_no_prefix():
     """Unknown / link-local / prefix-less / empty mgmt IPv6 all yield None."""
     from custom_napalm.paloalto_panos_ssh import _mgmt_ipv6_from_system_info
-    assert _mgmt_ipv6_from_system_info("ipv6-address: unknown\n") is None
-    assert _mgmt_ipv6_from_system_info("ipv6-address: fe80::1/64\n") is None
-    assert _mgmt_ipv6_from_system_info("ipv6-address: 2001:db8::9\n") is None
+    assert _mgmt_ipv6_from_system_info("ip-address-v6: unknown\n") is None
+    assert _mgmt_ipv6_from_system_info("ip-address-v6: fe80::1/64\n") is None
+    assert _mgmt_ipv6_from_system_info("ip-address-v6: 2001:db8::9\n") is None
     assert _mgmt_ipv6_from_system_info("") is None
+
+
+def test_mgmt_ipv6_from_system_info_skips_out_of_range_prefix():
+    """An IPv6 prefix outside 0..128 is rejected."""
+    from custom_napalm.paloalto_panos_ssh import _mgmt_ipv6_from_system_info
+    assert _mgmt_ipv6_from_system_info("ip-address-v6: 2001:db8::1/999\n") is None

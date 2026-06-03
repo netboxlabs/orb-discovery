@@ -86,10 +86,16 @@ _PANOS_MGMT_SKIP = {"", "unknown", "n/a", "0.0.0.0"}
 
 def _netmask_to_prefix(netmask: str) -> int | None:
     """Convert dotted-decimal netmask to a CIDR prefix length; None if malformed."""
+    octets = netmask.split(".")
+    if len(octets) != 4:
+        return None
     try:
-        return sum(bin(int(octet)).count("1") for octet in netmask.split("."))
+        values = [int(o) for o in octets]
     except ValueError:
         return None
+    if any(v < 0 or v > 255 for v in values):
+        return None
+    return sum(bin(v).count("1") for v in values)
 
 
 def _mgmt_interface_from_system_info(system_info: dict) -> dict:
@@ -147,9 +153,16 @@ def _mgmt_ip_from_system_info(system_info: dict) -> dict:
         if "/" in ipv6_raw:
             addr, plen = ipv6_raw.rsplit("/", 1)
             try:
-                mgmt.setdefault("ipv6", {})[addr] = {"prefix_length": int(plen)}
+                plen_int = int(plen)
             except ValueError:
                 logger.debug("paloalto_panos: skipping mgmt IPv6 %s: bad prefix", ipv6_raw)
+            else:
+                if 0 <= plen_int <= 128:
+                    mgmt.setdefault("ipv6", {})[addr] = {"prefix_length": plen_int}
+                else:
+                    logger.debug(
+                        "paloalto_panos: skipping mgmt IPv6 %s: prefix out of range", ipv6_raw
+                    )
         else:
             logger.debug(
                 "paloalto_panos: skipping mgmt IPv6 %s: no prefix length in system info",

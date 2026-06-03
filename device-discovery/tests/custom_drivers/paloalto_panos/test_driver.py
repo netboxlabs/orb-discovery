@@ -124,3 +124,15 @@ def test_mgmt_ip_from_system_info_skips_dhcp_unconfigured_and_mac_only():
     ) == {}
     # MAC present but no usable IP at all -> nothing emitted.
     assert _mgmt_ip_from_system_info({"mac-address": "00:50:56:aa:bb:cc"}) == {}
+
+
+def test_mgmt_ip_from_system_info_skips_out_of_range_prefixes():
+    """Out-of-range IPv6 prefix and malformed netmask are skipped, not emitted."""
+    from custom_napalm.paloalto_panos import _mgmt_ip_from_system_info
+    assert _mgmt_ip_from_system_info(
+        {"ip-address": "10.0.0.5", "netmask": "255.255.255.0", "ipv6-address": "2001:db8::1/999"}
+    ) == {"management": {"ipv4": {"10.0.0.5": {"prefix_length": 24}}}}
+    # Malformed (5-octet) netmask -> no ipv4 emitted.
+    assert _mgmt_ip_from_system_info(
+        {"ip-address": "10.0.0.5", "netmask": "255.255.255.255.255"}
+    ) == {}

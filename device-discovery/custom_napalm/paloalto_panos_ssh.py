@@ -52,14 +52,23 @@ def _parse_uptime(uptime_str: str) -> int:
     return days * 86400 + hours * 3600 + minutes * 60 + secs
 
 
-def _netmask_to_prefix(netmask: str) -> int:
-    """Convert dotted-decimal netmask to CIDR prefix length."""
-    return sum(bin(int(octet)).count("1") for octet in netmask.split("."))
+def _netmask_to_prefix(netmask: str) -> int | None:
+    """Convert dotted-decimal netmask to a CIDR prefix length; None if malformed."""
+    octets = netmask.split(".")
+    if len(octets) != 4:
+        return None
+    try:
+        values = [int(o) for o in octets]
+    except ValueError:
+        return None
+    if any(v < 0 or v > 255 for v in values):
+        return None
+    return sum(bin(v).count("1") for v in values)
 
 
-# `show system info` does not expose ipv6-address through the ntc-template,
+# `show system info` does not expose ip-address-v6 through the ntc-template,
 # so parse it directly from the raw text.
-_PANOS_SSH_MGMT_IPV6_RE = re.compile(r"^ipv6-address:\s+(?P<addr>\S+)", re.MULTILINE)
+_PANOS_SSH_MGMT_IPV6_RE = re.compile(r"^ip-address-v6:\s+(?P<addr>\S+)", re.MULTILINE)
 
 
 def _mgmt_ipv6_from_system_info(text: str) -> tuple[str, int] | None:
@@ -81,10 +90,14 @@ def _mgmt_ipv6_from_system_info(text: str) -> tuple[str, int] | None:
         return None
     addr, plen = raw.rsplit("/", 1)
     try:
-        return addr, int(plen)
+        plen_int = int(plen)
     except ValueError:
         logger.debug("paloalto_panos_ssh: skipping mgmt IPv6 %s: bad prefix", raw)
         return None
+    if not (0 <= plen_int <= 128):
+        logger.debug("paloalto_panos_ssh: skipping mgmt IPv6 %s: prefix out of range", raw)
+        return None
+    return addr, plen_int
 
 
 def _mgmt_interface_from_system_info(sysinfo_parsed: list[dict]) -> dict:
@@ -486,7 +499,7 @@ class PANOSSHDriver(_napalm_base.NetworkDriver):
                 ipv4
                 and ipv4.lower() not in ("unknown", "n/a", "0.0.0.0")
                 and netmask
-                and netmask.lower() not in ("unknown", "n/a")
+                and netmask.lower() not in ("unknown", "n/a", "0.0.0.0")
             ):
                 try:
                     prefix = _netmask_to_prefix(netmask)
