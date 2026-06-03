@@ -11,6 +11,11 @@ Unlike SNMP/NAPALM-based polling, `gnmi-discovery` reacts to ON_CHANGE notificat
 3. After a configurable debounce window, the snapshot is translated to Diode entities (Device, Interface, Module/ModuleBay) and ingested.
 4. The model is pruned each cycle so departed interfaces stop being ingested — removals are counted but not propagated as NetBox deletes (Diode delete unavailable).
 
+### Device enrichment
+
+- **Serial**: the device's own serial is taken from the `CHASSIS` component (`/components/component` with `state/type == CHASSIS`); its `state/serial-no` becomes `Device.Serial`. The chassis is not surfaced as a module — non-chassis inventory components become Modules instead.
+- **Platform / software version**: the discovered software version (`/system/state/software-version`) is appended to the operator's `platform` default, which acts as the NOS-name prefix (e.g. platform `Arista EOS` + version `4.30.1F` → platform `Arista EOS 4.30.1F`). If only one is present, that value alone is used; if neither is present, no platform is set.
+
 ## Requirements
 
 A running [NetBox Diode](https://github.com/netboxlabs/diode) endpoint, or use `--dry-run` for local testing.

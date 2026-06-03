@@ -151,6 +151,70 @@ func TestTranslateUint64Mtu(t *testing.T) {
 	require.Equal(t, int64(9000), *eth.Mtu)
 }
 
+func TestTranslateDeviceSerialAndVersion(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+
+	// Base snapshot: hostname + software version + a CHASSIS component carrying
+	// the device's own serial.
+	chassisSnap := func() map[string]any {
+		return map[string]any{
+			"/system/state/hostname":                               "spine1",
+			"/system/state/software-version":                       "4.30.1F",
+			"/components/component[name=Chassis1]/state/type":      "CHASSIS",
+			"/components/component[name=Chassis1]/state/serial-no": "JPE-CHASSIS-1",
+		}
+	}
+
+	t.Run("platform default + version", func(t *testing.T) {
+		entities := Translate(base, chassisSnap(),
+			&config.Defaults{Device: config.DeviceDefaults{Platform: "Arista EOS"}})
+		dev := entities[0].(*diode.Device)
+		require.NotNil(t, dev.Serial)
+		require.Equal(t, "JPE-CHASSIS-1", *dev.Serial)
+		require.NotNil(t, dev.Platform)
+		require.Equal(t, "Arista EOS 4.30.1F", *dev.Platform.Name)
+
+		// The CHASSIS component must NOT surface as a Module/ModuleBay.
+		for _, e := range entities {
+			switch v := e.(type) {
+			case *diode.Module:
+				require.NotEqual(t, "Chassis1", *v.ModuleBay.Name)
+			case *diode.ModuleBay:
+				require.NotEqual(t, "Chassis1", *v.Name)
+			}
+		}
+	})
+
+	t.Run("version only (no platform default)", func(t *testing.T) {
+		entities := Translate(base, chassisSnap(), &config.Defaults{})
+		dev := entities[0].(*diode.Device)
+		require.NotNil(t, dev.Platform)
+		require.Equal(t, "4.30.1F", *dev.Platform.Name)
+		require.NotNil(t, dev.Serial)
+		require.Equal(t, "JPE-CHASSIS-1", *dev.Serial)
+	})
+
+	t.Run("platform default only (no version leaf) preserves prior behavior", func(t *testing.T) {
+		snap := map[string]any{"/system/state/hostname": "spine1"}
+		entities := Translate(base, snap,
+			&config.Defaults{Device: config.DeviceDefaults{Platform: "Arista EOS"}})
+		dev := entities[0].(*diode.Device)
+		require.NotNil(t, dev.Platform)
+		require.Equal(t, "Arista EOS", *dev.Platform.Name)
+		require.Nil(t, dev.Serial)
+	})
+
+	t.Run("neither platform default nor version", func(t *testing.T) {
+		snap := map[string]any{"/system/state/hostname": "spine1"}
+		entities := Translate(base, snap, &config.Defaults{})
+		dev := entities[0].(*diode.Device)
+		require.Nil(t, dev.Platform)
+		require.Nil(t, dev.Serial)
+	})
+}
+
 func TestTranslateComponents(t *testing.T) {
 	store, err := LoadProfiles("")
 	require.NoError(t, err)
