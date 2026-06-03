@@ -60,6 +60,11 @@ func (d *GnmicDialer) Dial(ctx context.Context, spec TargetSpec) (Session, error
 // gnmicSession wraps a gnmic Target and implements Session.
 type gnmicSession struct {
 	tg *target.Target
+	// subCancel cancels the context driving the active SubscribeChan producer
+	// goroutine. It is set by Subscribe and invoked by Close so the producer
+	// always observes cancellation, even while it is blocked in gnmic's
+	// internal retry-timer wait (which only selects on this context).
+	subCancel context.CancelFunc
 }
 
 // Capabilities runs the gNMI Capabilities RPC and returns a normalized result.
@@ -72,8 +77,17 @@ func (s *gnmicSession) Capabilities(ctx context.Context) (*CapabilitiesResult, e
 }
 
 // Subscribe opens a gNMI STREAM subscription.
-// After the forwarder goroutine below returns (e.g. on a stream error), the
-// underlying gnmic goroutine may block briefly until tg.Close() drains it.
+//
+// We use tg.SubscribeChan (not SubscribeStreamChan): it returns buffered
+// (cap-1) channels of *target.SubscribeResponse / *target.TargetError, and its
+// producer goroutine's sends and retry-timer wait all select on the context we
+// pass, so the producer exits cleanly once that context is cancelled. We derive
+// that context from the caller's ctx and store its cancel on the session so
+// Close() can stop the producer (and its gRPC connection) even when it is
+// blocked mid-retry. This avoids the goroutine/connection leak that
+// SubscribeStreamChan caused on reconnect (its producer looped forever on a
+// bare `goto SUBSC` and only watched the parent ctx).
+//
 // Callers MUST call Session.Close() when the stream ends; the runner satisfies
 // this via `defer sess.Close()` in runOnce.
 func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string, sampleIntervalMs int) (<-chan Notification, <-chan error, error) {
@@ -102,7 +116,12 @@ func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string,
 		return nil, nil, fmt.Errorf("gnmi subscribe: build request: %w", err)
 	}
 
-	rawResp, rawErr := s.tg.SubscribeStreamChan(ctx, req, "default")
+	// Own context for the producer so Close() can stop it independently of the
+	// caller's ctx lifetime.
+	subCtx, cancel := context.WithCancel(ctx)
+	s.subCancel = cancel
+
+	rawResp, rawErr := s.tg.SubscribeChan(subCtx, req, "default")
 
 	notes := make(chan Notification)
 	errs := make(chan error, 1)
@@ -112,16 +131,21 @@ func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string,
 		defer close(errs)
 		for {
 			select {
-			case <-ctx.Done():
+			case <-subCtx.Done():
 				return
-			case resp, ok := <-rawResp:
+			case wrapped, ok := <-rawResp:
 				if !ok {
 					return
+				}
+				// SubscribeChan wraps the proto response in .Response.
+				resp := wrapped.Response
+				if resp == nil {
+					continue
 				}
 				if resp.GetSyncResponse() {
 					select {
 					case notes <- Notification{SyncDone: true}:
-					case <-ctx.Done():
+					case <-subCtx.Done():
 						return
 					}
 					continue
@@ -130,18 +154,19 @@ func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string,
 					n := convertNotification(upd)
 					select {
 					case notes <- n:
-					case <-ctx.Done():
+					case <-subCtx.Done():
 						return
 					}
 				}
-			case err, ok := <-rawErr:
+			case terr, ok := <-rawErr:
 				if !ok {
 					return
 				}
-				if err != nil {
+				// TargetError wraps the underlying error in .Err.
+				if terr != nil && terr.Err != nil {
 					select {
-					case errs <- err:
-					case <-ctx.Done():
+					case errs <- terr.Err:
+					case <-subCtx.Done():
 					}
 				}
 				return
@@ -181,8 +206,13 @@ func (s *gnmicSession) GetOnce(ctx context.Context, paths []string) (Notificatio
 	return result, nil
 }
 
-// Close releases the underlying gNMI connection.
+// Close releases the underlying gNMI connection. It first cancels the
+// subscribe context so the gnmic producer goroutine exits (even if blocked in
+// its internal retry-timer wait), then closes the target's gRPC connection.
 func (s *gnmicSession) Close() error {
+	if s.subCancel != nil {
+		s.subCancel()
+	}
 	return s.tg.Close()
 }
 
@@ -191,7 +221,27 @@ func mapCapabilities(resp *gnmiproto.CapabilityResponse) *CapabilitiesResult {
 	result := &CapabilitiesResult{}
 
 	models := resp.GetSupportedModels()
-	if len(models) > 0 {
+	// The first SupportedModel is frequently an OpenConfig model whose
+	// Organization is "OpenConfig working group", not the hardware vendor.
+	// Scan all models and prefer the first Organization that names a known
+	// hardware vendor; fall back to models[0] so behavior is no worse than
+	// taking the first organization blindly.
+	vendorTokens := []string{"arista", "nokia", "cisco", "juniper", "nvidia", "huawei"}
+	for _, m := range models {
+		org := strings.ToLower(m.GetOrganization())
+		matched := false
+		for _, tok := range vendorTokens {
+			if strings.Contains(org, tok) {
+				result.Vendor = m.GetOrganization()
+				matched = true
+				break
+			}
+		}
+		if matched {
+			break
+		}
+	}
+	if result.Vendor == "" && len(models) > 0 {
 		result.Vendor = models[0].GetOrganization()
 	}
 	for _, m := range models {
