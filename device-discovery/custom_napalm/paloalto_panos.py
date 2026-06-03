@@ -428,11 +428,22 @@ class PANOSDriver(_napalm_base.NetworkDriver):
         return str(self.device.xml_root())
 
     def _system_info_dict(self) -> dict:
-        """Return the parsed ``show system info`` ``result.system`` dict, or {} on failure."""
+        """
+        Return the parsed ``show system info`` ``result.system`` dict, or {} on failure.
+
+        Best-effort: a failed RPC (``PanXapiError`` — timeout / auth / API error) or
+        an unexpected payload yields {} rather than propagating. The management-IP
+        lookup is an enhancement layered on top of ``get_interfaces()`` /
+        ``get_interfaces_ip()``, so a system-info failure must not fail those getters
+        once their data-plane interfaces/IPs have been collected.
+        """
         try:
             self.device.op(cmd="<show><system><info></info></system></show>")
             parsed = xmltodict.parse(self.device.xml_root())
             system = parsed["response"]["result"]["system"]
+        except pan.xapi.PanXapiError as e:
+            logger.warning("paloalto_panos: `show system info` RPC failed: %s", e)
+            return {}
         except (KeyError, TypeError, AttributeError):
             return {}
         return system or {}

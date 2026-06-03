@@ -136,3 +136,21 @@ def test_mgmt_ip_from_system_info_skips_out_of_range_prefixes():
     assert _mgmt_ip_from_system_info(
         {"ip-address": "10.0.0.5", "netmask": "255.255.255.255.255"}
     ) == {}
+
+
+def test_system_info_dict_returns_empty_on_panxapi_error():
+    """A failed `show system info` RPC degrades to {} rather than propagating."""
+    import pan.xapi
+
+    from custom_napalm.paloalto_panos import PANOSDriver
+
+    class _BoomDevice:
+        def op(self, cmd=""):
+            raise pan.xapi.PanXapiError("boom")
+
+        def xml_root(self):
+            return ""
+
+    drv = object.__new__(PANOSDriver)
+    drv.device = _BoomDevice()
+    assert drv._system_info_dict() == {}
