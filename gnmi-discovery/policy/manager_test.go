@@ -149,6 +149,79 @@ policies:
 	}
 }
 
+func TestValidateRejectsHugeIntervals(t *testing.T) {
+	cases := []struct {
+		name  string
+		field string
+		yaml  string
+	}{
+		{
+			name:  "overflow get_interval_ms",
+			field: "get_interval_ms",
+			yaml: `
+policies:
+  p1:
+    config:
+      get_interval_ms: 9223372036854775807
+    scope:
+      targets:
+        - host: 10.0.0.1
+`,
+		},
+		{
+			name:  "overflow sample_interval_ms",
+			field: "sample_interval_ms",
+			yaml: `
+policies:
+  p1:
+    config:
+      sample_interval_ms: 9223372036854775807
+    scope:
+      targets:
+        - host: 10.0.0.1
+`,
+		},
+		{
+			name:  "overflow debounce_ms",
+			field: "debounce_ms",
+			yaml: `
+policies:
+  p1:
+    config:
+      debounce_ms: 9223372036854775807
+    scope:
+      targets:
+        - host: 10.0.0.1
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestManager(t)
+			_, err := m.ParsePolicies([]byte(tc.yaml))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.field)
+		})
+	}
+}
+
+func TestValidateSaneIntervalPasses(t *testing.T) {
+	m := newTestManager(t)
+	data := []byte(`
+policies:
+  p1:
+    config:
+      get_interval_ms: 300000
+      sample_interval_ms: 300000
+      debounce_ms: 300000
+    scope:
+      targets:
+        - host: 10.0.0.1
+`)
+	_, err := m.ParsePolicies(data)
+	require.NoError(t, err)
+}
+
 func TestResolvesEnvInCredentials(t *testing.T) {
 	t.Setenv("GNMI_PW", "s3cret")
 	m := newTestManager(t)

@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/config"
@@ -16,6 +18,10 @@ import (
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/mapping"
 	"gopkg.in/yaml.v3"
 )
+
+// maxIntervalMs is the largest interval (in ms) that can be multiplied by
+// time.Millisecond without overflowing time.Duration (int64 ns).
+const maxIntervalMs = int64(math.MaxInt64) / int64(time.Millisecond)
 
 // Manager owns the set of running policies.
 type Manager struct {
@@ -85,14 +91,14 @@ func (m *Manager) validatePolicy(policy config.Policy) error {
 	// Zero is allowed — applyDefaults will replace it with the built-in default.
 	// Negative values are invalid: a negative get_interval_ms/sample_interval_ms
 	// would reach time.NewTicker with a non-positive duration and panic.
-	if policy.Config.GetIntervalMs < 0 {
-		return fmt.Errorf("get_interval_ms must be >= 0, got %d", policy.Config.GetIntervalMs)
+	if policy.Config.GetIntervalMs < 0 || int64(policy.Config.GetIntervalMs) > maxIntervalMs {
+		return fmt.Errorf("get_interval_ms must be >= 0 and <= %d, got %d", maxIntervalMs, policy.Config.GetIntervalMs)
 	}
-	if policy.Config.SampleIntervalMs < 0 {
-		return fmt.Errorf("sample_interval_ms must be >= 0, got %d", policy.Config.SampleIntervalMs)
+	if policy.Config.SampleIntervalMs < 0 || int64(policy.Config.SampleIntervalMs) > maxIntervalMs {
+		return fmt.Errorf("sample_interval_ms must be >= 0 and <= %d, got %d", maxIntervalMs, policy.Config.SampleIntervalMs)
 	}
-	if policy.Config.DebounceMs < 0 {
-		return fmt.Errorf("debounce_ms must be >= 0, got %d", policy.Config.DebounceMs)
+	if policy.Config.DebounceMs < 0 || int64(policy.Config.DebounceMs) > maxIntervalMs {
+		return fmt.Errorf("debounce_ms must be >= 0 and <= %d, got %d", maxIntervalMs, policy.Config.DebounceMs)
 	}
 	for _, t := range policy.Scope.Targets {
 		if t.Host == "" {
