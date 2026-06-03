@@ -1,0 +1,19 @@
+match: {}
+device:
+  hostname: /system/state/hostname
+  os_version: /system/state/software-version
+interfaces:
+  list_path: /interfaces/interface
+  keys:
+    name: name
+    description: config/description
+    admin_status: state/admin-status
+    mtu: state/mtu
+components:
+  list_path: /components/component
+  keys:
+    name: name
+    type: state/type
+    serial: state/serial-no
+    part: state/part-no
+    parent: state/parent

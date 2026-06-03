@@ -1,0 +1,355 @@
+package mapping
+
+import (
+	"embed"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+//go:embed all:gnmi-profiles
+var embeddedProfiles embed.FS
+
+// Match holds the criteria that select a profile for a target. Only Vendor is
+// auto-detected today (from Capabilities). Model/OS matching would require a
+// /system/state read during selection (deferred); leaving those fields out keeps
+// the matcher honest — a criterion we never populate would silently never fire.
+type Match struct {
+	Vendor string `yaml:"vendor,omitempty"`
+}
+
+// DeviceMap maps device-level fields to OpenConfig leaf paths.
+type DeviceMap struct {
+	Hostname  string `yaml:"hostname,omitempty"`
+	OSVersion string `yaml:"os_version,omitempty"`
+}
+
+// ListMap maps a repeated OpenConfig list to entity keys. Key is the gNMI list
+// key leaf used to build subscription wildcards (defaults to "name", correct for
+// OpenConfig /interfaces/interface and /components/component); override it for a
+// differently-keyed list.
+type ListMap struct {
+	ListPath string            `yaml:"list_path,omitempty"`
+	Key      string            `yaml:"key,omitempty"`
+	Keys     map[string]string `yaml:"keys,omitempty"`
+}
+
+// listKey returns the configured gNMI list key, defaulting to "name".
+func (l ListMap) listKey() string {
+	if l.Key != "" {
+		return l.Key
+	}
+	return "name"
+}
+
+// Profile is one (possibly overlay) OpenConfig profile.
+type Profile struct {
+	Name       string    `yaml:"-"`
+	Extends    string    `yaml:"extends,omitempty"`
+	Match      Match     `yaml:"match"`
+	Device     DeviceMap `yaml:"device"`
+	Interfaces ListMap   `yaml:"interfaces"`
+	Components ListMap   `yaml:"components"`
+}
+
+// MatchInput is what we learn about a target from Capabilities.
+type MatchInput struct {
+	Vendor string
+}
+
+// Store holds all loaded, fully-resolved profiles.
+type Store struct {
+	profiles map[string]*Profile
+}
+
+// Get returns a profile by name.
+func (s *Store) Get(name string) (*Profile, bool) {
+	p, ok := s.profiles[name]
+	return p, ok
+}
+
+// Match returns the matching profile, or _base when nothing matches. When more
+// than one profile's vendor substring matches, the MOST SPECIFIC one wins
+// (longest matching vendor string), so a "Arista 7050" profile beats a generic
+// "Arista" overlay. Ties are broken deterministically by sorted name.
+func (s *Store) Match(in MatchInput) *Profile {
+	names := make([]string, 0, len(s.profiles))
+	for name := range s.profiles {
+		if name != "_base" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	vendor := strings.ToLower(in.Vendor)
+	var best *Profile
+	bestLen := 0
+	for _, name := range names {
+		p := s.profiles[name]
+		if p.Match.Vendor == "" {
+			continue // a profile with no criteria never auto-matches
+		}
+		if strings.Contains(vendor, strings.ToLower(p.Match.Vendor)) && len(p.Match.Vendor) > bestLen {
+			best, bestLen = p, len(p.Match.Vendor)
+		}
+	}
+	if best != nil {
+		return best
+	}
+	return s.profiles["_base"]
+}
+
+// LoadProfiles loads bundled profiles then overlays any in overrideDir, then
+// resolves `extends` inheritance. Tests use this nil-logger form.
+func LoadProfiles(overrideDir string) (*Store, error) {
+	return LoadProfilesWithLogger(overrideDir, nil)
+}
+
+// LoadProfilesWithLogger is LoadProfiles with skip logging. Unreadable/invalid
+// override files are skipped (so one bad file can't break startup), but each
+// skip is logged (LOW) so a profile-rollout failure isn't mistaken for a silent
+// _base fallback. logger may be nil.
+func LoadProfilesWithLogger(overrideDir string, logger *slog.Logger) (*Store, error) {
+	raw := map[string]*Profile{}
+
+	entries, err := embeddedProfiles.ReadDir("gnmi-profiles")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded profiles: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		b, err := embeddedProfiles.ReadFile("gnmi-profiles/" + e.Name())
+		if err != nil {
+			return nil, err
+		}
+		if err := addProfile(raw, e.Name(), b); err != nil {
+			return nil, err
+		}
+	}
+
+	if overrideDir != "" {
+		dirEntries, err := os.ReadDir(overrideDir)
+		if err != nil {
+			if logger != nil {
+				logger.Warn("could not read gNMI profiles_dir; using bundled profiles only",
+					"dir", overrideDir, "error", err)
+			}
+		} else {
+			for _, e := range dirEntries {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+					continue
+				}
+				path := filepath.Join(overrideDir, e.Name())
+				b, err := os.ReadFile(path)
+				if err != nil {
+					if logger != nil {
+						logger.Warn("skipping unreadable gNMI profile override", "file", path, "error", err)
+					}
+					continue
+				}
+				if err := addProfile(raw, e.Name(), b); err != nil {
+					if logger != nil {
+						logger.Warn("skipping invalid gNMI profile override", "file", path, "error", err)
+					}
+					continue
+				}
+			}
+		}
+	}
+
+	resolved := map[string]*Profile{}
+	for name := range raw {
+		p, err := resolve(name, raw, map[string]bool{})
+		if err != nil {
+			// A semantically-bad profile (unresolved `extends` or an inheritance
+			// cycle) must not crash startup — skip and log it, like a bad parse.
+			// _base has no `extends` so it always resolves; the matcher still has
+			// its fallback. (Bundled profiles are expected to resolve; a failure
+			// there is a build bug, surfaced via this same log.)
+			if logger != nil {
+				logger.Warn("skipping gNMI profile with unresolved inheritance", "profile", name, "error", err)
+			}
+			continue
+		}
+		resolved[name] = p
+	}
+	if _, ok := resolved["_base"]; !ok {
+		return nil, fmt.Errorf("bundled _base profile failed to load")
+	}
+	return &Store{profiles: resolved}, nil
+}
+
+func addProfile(into map[string]*Profile, filename string, b []byte) error {
+	var p Profile
+	if err := yaml.Unmarshal(b, &p); err != nil {
+		return fmt.Errorf("parse profile %s: %w", filename, err)
+	}
+	p.Name = strings.TrimSuffix(filename, ".yaml")
+	into[p.Name] = &p
+	return nil
+}
+
+// resolve produces a profile with its parent's values filled in where the
+// child left them empty. Child keys win on conflict.
+func resolve(name string, raw map[string]*Profile, seen map[string]bool) (*Profile, error) {
+	if seen[name] {
+		return nil, fmt.Errorf("profile inheritance cycle at %q", name)
+	}
+	seen[name] = true
+	p, ok := raw[name]
+	if !ok {
+		return nil, fmt.Errorf("profile %q not found", name)
+	}
+	if p.Extends == "" {
+		return p, nil
+	}
+	parent, err := resolve(p.Extends, raw, seen)
+	if err != nil {
+		return nil, err
+	}
+	return merge(parent, p), nil
+}
+
+// merge overlays child onto a copy of parent.
+func merge(parent, child *Profile) *Profile {
+	out := *parent
+	out.Name = child.Name
+	out.Extends = child.Extends
+	out.Match = child.Match
+	if child.Device.Hostname != "" {
+		out.Device.Hostname = child.Device.Hostname
+	}
+	if child.Device.OSVersion != "" {
+		out.Device.OSVersion = child.Device.OSVersion
+	}
+	out.Interfaces = mergeList(parent.Interfaces, child.Interfaces)
+	out.Components = mergeList(parent.Components, child.Components)
+	return &out
+}
+
+func mergeList(parent, child ListMap) ListMap {
+	out := ListMap{ListPath: parent.ListPath, Key: parent.Key, Keys: map[string]string{}}
+	for k, v := range parent.Keys {
+		out.Keys[k] = v
+	}
+	if child.ListPath != "" {
+		out.ListPath = child.ListPath
+	}
+	if child.Key != "" {
+		out.Key = child.Key
+	}
+	for k, v := range child.Keys {
+		out.Keys[k] = v
+	}
+	return out
+}
+
+// SubscribePaths returns the exact curated leaf paths to subscribe to (spec §6),
+// using gNMI list wildcards so the target streams only inventory leaves — never
+// volatile telemetry. e.g. /interfaces/interface[name=*]/state/admin-status.
+func (p *Profile) SubscribePaths() []string {
+	var out []string
+	if p.Device.Hostname != "" {
+		out = append(out, p.Device.Hostname)
+	}
+	if p.Device.OSVersion != "" {
+		out = append(out, p.Device.OSVersion)
+	}
+	addList := func(l ListMap) {
+		for k, leaf := range l.Keys {
+			if k == "name" || leaf == "" || l.ListPath == "" {
+				continue // the list key arrives within the path; no leaf to subscribe
+			}
+			out = append(out, l.ListPath+"["+l.listKey()+"=*]/"+leaf)
+		}
+	}
+	addList(p.Interfaces)
+	addList(p.Components)
+	sort.Strings(out)
+	return out
+}
+
+// AllowsPath reports whether an inbound update path is one of the curated leaves.
+func (p *Profile) AllowsPath(path string) bool {
+	if path == p.Device.Hostname || (p.Device.OSVersion != "" && path == p.Device.OSVersion) {
+		return true
+	}
+	if leaf, ok := leafUnderList(path, p.Interfaces.ListPath); ok && hasKeyLeaf(p.Interfaces, leaf) {
+		return true
+	}
+	if leaf, ok := leafUnderList(path, p.Components.ListPath); ok && hasKeyLeaf(p.Components, leaf) {
+		return true
+	}
+	return false
+}
+
+// AllowsDelete reports whether a delete path falls within the curated subtrees
+// (the interfaces list, the components list, or the device leaves / their
+// ancestors). This bounds the blast radius of an unexpected delete so a target
+// cannot wipe unrelated state; a legitimate list-entry or subtree delete inside
+// a curated area is allowed (M-2). `within` is true when either path is a prefix
+// of the other (covers both "delete a child" and "delete an ancestor").
+func (p *Profile) AllowsDelete(path string) bool {
+	if p.Interfaces.ListPath != "" && pathOverlaps(path, p.Interfaces.ListPath) {
+		return true
+	}
+	if p.Components.ListPath != "" && pathOverlaps(path, p.Components.ListPath) {
+		return true
+	}
+	return pathOverlaps(path, p.Device.Hostname) || pathOverlaps(path, p.Device.OSVersion)
+}
+
+// pathOverlaps reports whether a and b are equal or one is an ANCESTOR of the
+// other on a YANG path boundary. Boundary-awareness matters: a raw prefix test
+// would treat /interfaces/interface-state as "within" /interfaces/interface;
+// here the next character after the shorter path must be "/" or "[" (a list key).
+func pathOverlaps(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	return a == b || isAncestorPath(a, b) || isAncestorPath(b, a)
+}
+
+func isAncestorPath(anc, desc string) bool {
+	if !strings.HasPrefix(desc, anc) {
+		return false
+	}
+	rest := desc[len(anc):]
+	return strings.HasPrefix(rest, "/") || strings.HasPrefix(rest, "[")
+}
+
+// leafUnderList returns the leaf path beneath a list entry, e.g.
+// (/interfaces/interface[name=Eth1]/state/mtu, /interfaces/interface) -> ("state/mtu", true).
+func leafUnderList(path, listPath string) (string, bool) {
+	if listPath == "" {
+		return "", false
+	}
+	prefix := listPath + "["
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	rest := path[len(prefix):]
+	c := strings.Index(rest, "]")
+	if c < 0 {
+		return "", false
+	}
+	return strings.TrimPrefix(rest[c+1:], "/"), true
+}
+
+func hasKeyLeaf(l ListMap, leaf string) bool {
+	for k, v := range l.Keys {
+		if k == "name" {
+			continue
+		}
+		if v == leaf {
+			return true
+		}
+	}
+	return false
+}
