@@ -113,6 +113,9 @@ Profiles live in `mapping/gnmi-profiles/` and are compiled into the binary. Bund
 | `_base` | fallback for any vendor |
 | `arista_eos` | vendor = `Arista` |
 | `nokia_sros` | vendor = `Nokia` |
+| `nvidia_cumulus` | vendor = `nvidia`, `cumulus`, or `mellanox` (alias-matched) |
+
+`match.vendor` accepts a comma-separated alias list (matched any-of, most-specific alias wins); `nvidia_cumulus` uses this to cover the differing Organization strings NVIDIA Cumulus reports across releases. The `arista_eos`, `nokia_sros`, and `nvidia_cumulus` overlays are placeholders inheriting `_base` paths, pending real-device validation.
 
 To add vendor-specific overrides without rebuilding, mount a directory and pass `-profiles-dir`:
 

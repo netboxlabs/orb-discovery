@@ -19,8 +19,27 @@ var embeddedProfiles embed.FS
 // auto-detected today (from Capabilities). Model/OS matching would require a
 // /system/state read during selection (deferred); leaving those fields out keeps
 // the matcher honest — a criterion we never populate would silently never fire.
+//
+// Vendor may be a single substring (e.g. "Arista") or a comma-separated list of
+// aliases matched ANY-of (e.g. "nvidia,cumulus,mellanox"). Aliases let one
+// overlay cover a vendor that reports different Organization strings across
+// releases; a single-value Vendor behaves exactly as a one-element alias list.
 type Match struct {
 	Vendor string `yaml:"vendor,omitempty"`
+}
+
+// vendorAliases splits a (possibly comma-separated) Match.Vendor into its
+// trimmed, lowercased, non-empty aliases. A single-value field yields a
+// one-element slice, so existing single-token overlays are unaffected.
+func (m Match) vendorAliases() []string {
+	var out []string
+	for _, a := range strings.Split(m.Vendor, ",") {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if a != "" {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // DeviceMap maps device-level fields to OpenConfig leaf paths.
@@ -73,10 +92,14 @@ func (s *Store) Get(name string) (*Profile, bool) {
 	return p, ok
 }
 
-// Match returns the matching profile, or _base when nothing matches. When more
-// than one profile's vendor substring matches, the MOST SPECIFIC one wins
-// (longest matching vendor string), so a "Arista 7050" profile beats a generic
-// "Arista" overlay. Ties are broken deterministically by sorted name.
+// Match returns the matching profile, or _base when nothing matches. A profile
+// matches when ANY of its vendor aliases is a substring of the input vendor.
+// When more than one profile matches, the MOST SPECIFIC one wins, where
+// specificity is the length of the LONGEST alias that actually matched — so a
+// "Arista 7050" alias beats a generic "Arista", and within an alias list the
+// longest matched token sets the score. Ties are broken deterministically by
+// sorted profile name. (A single-value Match.Vendor scores by its own length,
+// preserving the prior behavior exactly.)
 func (s *Store) Match(in MatchInput) *Profile {
 	names := make([]string, 0, len(s.profiles))
 	for name := range s.profiles {
@@ -90,11 +113,18 @@ func (s *Store) Match(in MatchInput) *Profile {
 	bestLen := 0
 	for _, name := range names {
 		p := s.profiles[name]
-		if p.Match.Vendor == "" {
-			continue // a profile with no criteria never auto-matches
+		// Longest alias of this profile that is a substring of the input vendor.
+		matchedLen := 0
+		for _, alias := range p.Match.vendorAliases() {
+			if strings.Contains(vendor, alias) && len(alias) > matchedLen {
+				matchedLen = len(alias)
+			}
 		}
-		if strings.Contains(vendor, strings.ToLower(p.Match.Vendor)) && len(p.Match.Vendor) > bestLen {
-			best, bestLen = p, len(p.Match.Vendor)
+		if matchedLen == 0 {
+			continue // no alias matched (or profile has no criteria)
+		}
+		if matchedLen > bestLen {
+			best, bestLen = p, matchedLen
 		}
 	}
 	if best != nil {

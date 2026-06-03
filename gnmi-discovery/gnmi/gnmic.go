@@ -244,7 +244,10 @@ func mapCapabilities(resp *gnmiproto.CapabilityResponse) *CapabilitiesResult {
 	// Scan all models and prefer the first Organization that names a known
 	// hardware vendor; fall back to models[0] so behavior is no worse than
 	// taking the first organization blindly.
-	vendorTokens := []string{"arista", "nokia", "cisco", "juniper", "nvidia", "huawei"}
+	// NVIDIA Cumulus may report its Organization as "NVIDIA", "Cumulus", or
+	// "Mellanox" depending on release; all three are recognized so the derived
+	// vendor lines up with the nvidia_cumulus overlay's aliases.
+	vendorTokens := []string{"arista", "nokia", "cisco", "juniper", "nvidia", "cumulus", "mellanox", "huawei"}
 	for _, m := range models {
 		org := strings.ToLower(m.GetOrganization())
 		matched := false

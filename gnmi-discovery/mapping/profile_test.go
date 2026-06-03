@@ -61,6 +61,46 @@ match:
 	require.Equal(t, "acme", p.Name)
 }
 
+func TestMatchVendorAliases(t *testing.T) {
+	// The bundled nvidia_cumulus overlay uses the alias list
+	// "nvidia,cumulus,mellanox"; any of those org strings must resolve to it.
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	for _, vendor := range []string{
+		"Cumulus Networks, Inc.",
+		"NVIDIA Corporation",
+		"Mellanox Technologies",
+	} {
+		p := store.Match(MatchInput{Vendor: vendor})
+		require.Equal(t, "nvidia_cumulus", p.Name, "vendor %q should match nvidia_cumulus", vendor)
+	}
+	// Unknown vendor still falls back to _base.
+	p := store.Match(MatchInput{Vendor: "Totally Unknown"})
+	require.Equal(t, "_base", p.Name)
+}
+
+func TestMatchAliasSpecificityLongestWins(t *testing.T) {
+	// Two overlays could match the input; the one whose LONGEST matched alias is
+	// longer wins, regardless of name ordering.
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "generic.yaml"), []byte(`
+extends: _base
+match:
+  vendor: net
+`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "specific.yaml"), []byte(`
+extends: _base
+match:
+  vendor: acme,acme networks
+`), 0o644))
+	store, err := LoadProfiles(dir)
+	require.NoError(t, err)
+	// "ACME Networks" contains "net" (len 3), "acme" (len 4), and
+	// "acme networks" (len 13); the longest matched alias belongs to specific.
+	p := store.Match(MatchInput{Vendor: "ACME Networks"})
+	require.Equal(t, "specific", p.Name)
+}
+
 func TestSubscribePathsAreCuratedLeaves(t *testing.T) {
 	store, err := LoadProfiles("")
 	require.NoError(t, err)
