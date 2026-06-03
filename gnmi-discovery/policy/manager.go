@@ -82,6 +82,18 @@ func (m *Manager) validatePolicy(policy config.Policy) error {
 	default:
 		return fmt.Errorf("invalid mode %q (allowed: auto, on_change, sample, get)", policy.Config.Mode)
 	}
+	// Zero is allowed — applyDefaults will replace it with the built-in default.
+	// Negative values are invalid: a negative get_interval_ms/sample_interval_ms
+	// would reach time.NewTicker with a non-positive duration and panic.
+	if policy.Config.GetIntervalMs < 0 {
+		return fmt.Errorf("get_interval_ms must be >= 0, got %d", policy.Config.GetIntervalMs)
+	}
+	if policy.Config.SampleIntervalMs < 0 {
+		return fmt.Errorf("sample_interval_ms must be >= 0, got %d", policy.Config.SampleIntervalMs)
+	}
+	if policy.Config.DebounceMs < 0 {
+		return fmt.Errorf("debounce_ms must be >= 0, got %d", policy.Config.DebounceMs)
+	}
 	for _, t := range policy.Scope.Targets {
 		if t.Host == "" {
 			return errors.New("target with empty host")

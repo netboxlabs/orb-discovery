@@ -155,15 +155,26 @@ func ResetMeter() {
 	cacheLock.Unlock()
 }
 
-// Shutdown gracefully shuts down the metrics exporter. It is idempotent: the
-// second call (e.g. from both the signal handler and the server-error path) is
-// a no-op that returns nil.
+// Shutdown gracefully shuts down the metrics exporter. It is idempotent: a
+// second real shutdown attempt (e.g. from both the signal handler and the
+// server-error path) is a no-op that returns nil.
+//
+// Calling Shutdown before SetupMetricsExport (meterProvider == nil) is also a
+// no-op, but does NOT consume the Once — a later Setup + Shutdown cycle still
+// works correctly (important for test sequences that call ResetMeter).
 func Shutdown(ctx context.Context) error {
+	cacheLock.Lock()
+	mp := meterProvider
+	cacheLock.Unlock()
+
+	if mp == nil {
+		// No real provider yet; don't burn the Once so a future real shutdown works.
+		return nil
+	}
+
 	var shutdownErr error
 	shutdownOnce.Do(func() {
-		if meterProvider != nil {
-			shutdownErr = meterProvider.Shutdown(ctx)
-		}
+		shutdownErr = mp.Shutdown(ctx)
 	})
 	return shutdownErr
 }

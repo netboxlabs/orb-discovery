@@ -93,6 +93,62 @@ policies:
 	require.Error(t, err)
 }
 
+func TestValidateRejectsNegativeIntervals(t *testing.T) {
+	cases := []struct {
+		name  string
+		field string
+		yaml  string
+	}{
+		{
+			name:  "negative get_interval_ms",
+			field: "get_interval_ms",
+			yaml: `
+policies:
+  p1:
+    config:
+      get_interval_ms: -1
+    scope:
+      targets:
+        - host: 10.0.0.1
+`,
+		},
+		{
+			name:  "negative sample_interval_ms",
+			field: "sample_interval_ms",
+			yaml: `
+policies:
+  p1:
+    config:
+      sample_interval_ms: -500
+    scope:
+      targets:
+        - host: 10.0.0.1
+`,
+		},
+		{
+			name:  "negative debounce_ms",
+			field: "debounce_ms",
+			yaml: `
+policies:
+  p1:
+    config:
+      debounce_ms: -100
+    scope:
+      targets:
+        - host: 10.0.0.1
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestManager(t)
+			_, err := m.ParsePolicies([]byte(tc.yaml))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.field)
+		})
+	}
+}
+
 func TestResolvesEnvInCredentials(t *testing.T) {
 	t.Setenv("GNMI_PW", "s3cret")
 	m := newTestManager(t)
