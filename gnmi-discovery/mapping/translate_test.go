@@ -270,6 +270,62 @@ func TestTranslateComponents(t *testing.T) {
 	require.Equal(t, "Linecard1", *bays[0].Name)
 }
 
+// TestComponentTypeIdentityref verifies that the JSON_IETF-serialized identityref
+// form of /components/component/state/type (module-prefixed, e.g.
+// "openconfig-platform-types:CHASSIS") is normalized identically to the bare form
+// ("CHASSIS"). Without prefix-stripping, exact upper-case equality fails and the
+// chassis serial/manufacturer/model are silently lost AND every Module/ModuleBay
+// is silently dropped. This test FAILS against the pre-fix exact-equality code.
+func TestComponentTypeIdentityref(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+
+	// Same topology as the bare-form tests, but with prefixed identityref types.
+	snap := map[string]any{
+		"/system/state/hostname":                                "spine1",
+		"/components/component[name=Chassis1]/state/type":       "openconfig-platform-types:CHASSIS",
+		"/components/component[name=Chassis1]/state/serial-no":  "JPE-CHASSIS-1",
+		"/components/component[name=Chassis1]/state/part-no":    "DCS-7050",
+		"/components/component[name=Chassis1]/state/mfg-name":   "Arista",
+		"/components/component[name=Linecard1]/state/type":      "openconfig-platform-types:LINECARD",
+		"/components/component[name=Linecard1]/state/serial-no": "JPE123",
+		"/components/component[name=Linecard1]/state/part-no":   "DCS-LC",
+		"/components/component[name=Xcvr1]/state/type":          "openconfig-platform-types:TRANSCEIVER",
+		"/components/component[name=Xcvr1]/state/mfg-name":      "Finisar",
+		"/components/component[name=Xcvr1]/state/part-no":       "FTLX",
+	}
+	entities := Translate(base, snap, &config.Defaults{}, "")
+
+	dev := entities[0].(*diode.Device)
+	require.NotNil(t, dev.Serial)
+	require.Equal(t, "JPE-CHASSIS-1", *dev.Serial, "chassis serial must resolve from prefixed type")
+	require.NotNil(t, dev.DeviceType)
+	require.Equal(t, "Arista", *dev.DeviceType.Manufacturer.Name, "chassis mfg-name must resolve from prefixed type")
+	require.Equal(t, "DCS-7050", *dev.DeviceType.Model, "chassis part-no must resolve from prefixed type")
+
+	// Modules/ModuleBays must still be emitted for the prefixed LINECARD/TRANSCEIVER,
+	// and the CHASSIS must NOT surface as a Module/ModuleBay.
+	mods := map[string]*diode.Module{}
+	bays := map[string]bool{}
+	for _, e := range entities {
+		switch v := e.(type) {
+		case *diode.Module:
+			mods[*v.ModuleBay.Name] = v
+		case *diode.ModuleBay:
+			bays[*v.Name] = true
+		}
+	}
+	require.Contains(t, mods, "Linecard1", "LINECARD must emit a Module from prefixed type")
+	require.Contains(t, mods, "Xcvr1", "TRANSCEIVER must emit a Module from prefixed type")
+	require.True(t, bays["Linecard1"] && bays["Xcvr1"])
+	require.NotContains(t, mods, "Chassis1", "CHASSIS must not surface as a Module")
+	require.False(t, bays["Chassis1"], "CHASSIS must not surface as a ModuleBay")
+	// The transceiver carries its own mfg-name; the chassis manufacturer is Arista.
+	require.Equal(t, "Finisar", *mods["Xcvr1"].ModuleType.Manufacturer.Name)
+	require.Equal(t, "Arista", *mods["Linecard1"].ModuleType.Manufacturer.Name)
+}
+
 // TestTranslateDiscoversManufacturer exercises the manufacturer/model discovery
 // precedence: policy default > chassis mfg-name (or part-no) > Capabilities
 // vendor > "Unknown"; and per-component module manufacturer.

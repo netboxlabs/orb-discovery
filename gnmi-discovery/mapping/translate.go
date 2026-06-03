@@ -81,13 +81,27 @@ func toStr(v any) string {
 
 func sortStrings(s []string) { sort.Strings(s) }
 
-// firstNonEmpty returns the first non-empty argument, or "" if all are empty.
-// Used for the manufacturer/model precedence chains (policy default overrides
-// discovered, discovered overrides "Unknown").
+// componentType returns the component's OpenConfig type, upper-cased and stripped
+// of any YANG identityref module prefix. JSON_IETF serializes the identityref as
+// "openconfig-platform-types:CHASSIS"; bare "CHASSIS" also occurs. Both normalize
+// to "CHASSIS".
+func componentType(typeVal any) string {
+	t := toStr(typeVal)
+	if i := strings.LastIndex(t, ":"); i >= 0 {
+		t = t[i+1:]
+	}
+	return strings.ToUpper(strings.TrimSpace(t))
+}
+
+// firstNonEmpty returns the first argument that is non-empty after trimming
+// surrounding whitespace, returning that trimmed value, or "" if all are
+// empty/whitespace. Used for the manufacturer/model precedence chains (policy
+// default overrides discovered, discovered overrides "Unknown"); trimming keeps
+// a whitespace-only leaf from winning and producing a Manufacturer/Model named " ".
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
-		if v != "" {
-			return v
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			return trimmed
 		}
 	}
 	return ""
@@ -187,7 +201,7 @@ func translateDevice(profile *Profile, snap map[string]any, defaults *config.Def
 		byKey, order := componentsByKey(profile, snap)
 		for _, key := range order {
 			leaves := byKey[key]
-			if strings.ToUpper(toStr(leaves[typeLeaf])) != "CHASSIS" {
+			if componentType(leaves[typeLeaf]) != "CHASSIS" {
 				continue
 			}
 			if mfgLeaf != "" {
@@ -276,7 +290,7 @@ func chassisSerial(profile *Profile, snap map[string]any) string {
 	byKey, order := componentsByKey(profile, snap)
 	for _, key := range order {
 		leaves := byKey[key]
-		if strings.ToUpper(toStr(leaves[typeLeaf])) == "CHASSIS" {
+		if componentType(leaves[typeLeaf]) == "CHASSIS" {
 			return toStr(leaves[serialLeaf])
 		}
 	}
@@ -382,7 +396,7 @@ func translateComponents(profile *Profile, snap map[string]any, dev *diode.Devic
 	var out []diode.Entity
 	for _, key := range order {
 		leaves := byKey[key]
-		ctype := strings.ToUpper(toStr(leaves[typeLeaf]))
+		ctype := componentType(leaves[typeLeaf])
 		if !emittableComponentTypes[ctype] {
 			continue
 		}

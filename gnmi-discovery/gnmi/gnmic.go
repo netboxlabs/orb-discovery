@@ -234,26 +234,45 @@ func (s *gnmicSession) Close() error {
 	return s.tg.Close()
 }
 
+// vendorCanonical maps a lower-cased vendor token (as it may appear within a
+// SupportedModel Organization string) to the clean display name surfaced as the
+// discovered vendor. NVIDIA Cumulus may report "NVIDIA", "Cumulus", or
+// "Mellanox" depending on release; all three are recognized so the derived
+// vendor still lines up with the nvidia_cumulus overlay's aliases.
+var vendorCanonical = map[string]string{
+	"arista":   "Arista",
+	"nokia":    "Nokia",
+	"cisco":    "Cisco",
+	"juniper":  "Juniper",
+	"nvidia":   "NVIDIA",
+	"cumulus":  "Cumulus",
+	"mellanox": "Mellanox",
+	"huawei":   "Huawei",
+}
+
+// vendorTokenOrder fixes the scan order over vendorCanonical so the first match
+// is deterministic across runs (map iteration order is randomized).
+var vendorTokenOrder = []string{"arista", "nokia", "cisco", "juniper", "nvidia", "cumulus", "mellanox", "huawei"}
+
 // mapCapabilities converts a raw gNMI CapabilityResponse to our CapabilitiesResult.
 func mapCapabilities(resp *gnmiproto.CapabilityResponse) *CapabilitiesResult {
 	result := &CapabilitiesResult{}
 
 	models := resp.GetSupportedModels()
 	// The first SupportedModel is frequently an OpenConfig model whose
-	// Organization is "OpenConfig working group", not the hardware vendor.
-	// Scan all models and prefer the first Organization that names a known
-	// hardware vendor; fall back to models[0] so behavior is no worse than
-	// taking the first organization blindly.
-	// NVIDIA Cumulus may report its Organization as "NVIDIA", "Cumulus", or
-	// "Mellanox" depending on release; all three are recognized so the derived
-	// vendor lines up with the nvidia_cumulus overlay's aliases.
-	vendorTokens := []string{"arista", "nokia", "cisco", "juniper", "nvidia", "cumulus", "mellanox", "huawei"}
+	// Organization is "OpenConfig working group", not the hardware vendor. Scan
+	// all model Organizations for a known hardware-vendor token and, on the first
+	// match, set Vendor to its clean canonical display name. If nothing matches,
+	// Vendor stays "" — we deliberately do NOT fall back to models[0]'s raw
+	// Organization, which would surface noise like "OpenConfig working group" as
+	// a literal NetBox manufacturer. The profile Store.Match still works because
+	// each canonical token is a substring of itself (and of the overlay aliases).
 	for _, m := range models {
 		org := strings.ToLower(m.GetOrganization())
 		matched := false
-		for _, tok := range vendorTokens {
+		for _, tok := range vendorTokenOrder {
 			if strings.Contains(org, tok) {
-				result.Vendor = m.GetOrganization()
+				result.Vendor = vendorCanonical[tok]
 				matched = true
 				break
 			}
@@ -261,9 +280,6 @@ func mapCapabilities(resp *gnmiproto.CapabilityResponse) *CapabilitiesResult {
 		if matched {
 			break
 		}
-	}
-	if result.Vendor == "" && len(models) > 0 {
-		result.Vendor = models[0].GetOrganization()
 	}
 	for _, m := range models {
 		result.Models = append(result.Models, m.GetName())
