@@ -57,6 +57,36 @@ def _netmask_to_prefix(netmask: str) -> int:
     return sum(bin(int(octet)).count("1") for octet in netmask.split("."))
 
 
+# `show system info` does not expose ipv6-address through the ntc-template,
+# so parse it directly from the raw text.
+_PANOS_SSH_MGMT_IPV6_RE = re.compile(r"^ipv6-address:\s+(?P<addr>\S+)", re.MULTILINE)
+
+
+def _mgmt_ipv6_from_system_info(text: str) -> tuple[str, int] | None:
+    """
+    Extract ``(addr, prefix)`` for the management IPv6 from ``show system info``.
+
+    Returns ``None`` for unknown / link-local (``fe80::``) / prefix-less values
+    — skipping a prefix-less address rather than assuming ``/64`` mirrors the
+    checkpoint_gaia / dell_ftos / aruba_os convention.
+    """
+    m = _PANOS_SSH_MGMT_IPV6_RE.search(text or "")
+    if not m:
+        return None
+    raw = m.group("addr").strip()
+    if raw.lower() in ("unknown", "n/a", "") or raw.lower().startswith("fe80"):
+        return None
+    if "/" not in raw:
+        logger.debug("paloalto_panos_ssh: skipping mgmt IPv6 %s: no prefix length", raw)
+        return None
+    addr, plen = raw.rsplit("/", 1)
+    try:
+        return addr, int(plen)
+    except ValueError:
+        logger.debug("paloalto_panos_ssh: skipping mgmt IPv6 %s: bad prefix", raw)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # get_modules — module / module bay discovery via PAN-OS SSH CLI
 # ---------------------------------------------------------------------------
@@ -400,19 +430,37 @@ class PANOSSHDriver(_napalm_base.NetworkDriver):
             except (ValueError, AttributeError):
                 continue
 
-        # Management interface
-        mgmt_out = self.device.send_command("show interface management")
-        mgmt_parsed = parse_output(
-            platform="paloalto_panos", command="show interface management", data=mgmt_out
+        # Management interface — PAN-OS exposes the mgmt-plane IP via
+        # `show system info`, NOT `show interface management` (whose
+        # ntc-template raises TextFSMError on the real `Interface Type:` line).
+        sysinfo_out = self.device.send_command("show system info")
+        sysinfo_parsed = parse_output(
+            platform="paloalto_panos", command="show system info", data=sysinfo_out
         )
-        for row in mgmt_parsed:
-            ipv4 = row.get("ipv4_address", "")
-            netmask = row.get("ipv4_netmask", "")
-            if ipv4 and netmask and ipv4 not in ("unknown", "N/A", ""):
-                prefix = _netmask_to_prefix(netmask)
-                interfaces_ip.setdefault("management", {}).setdefault("ipv4", {})[ipv4] = {
-                    "prefix_length": prefix
-                }
+        if sysinfo_parsed:
+            row = sysinfo_parsed[0]
+            ipv4 = (row.get("ip_address") or "").strip()
+            netmask = (row.get("netmask") or "").strip()
+            if (
+                ipv4
+                and ipv4.lower() not in ("unknown", "n/a", "0.0.0.0")
+                and netmask
+                and netmask.lower() not in ("unknown", "n/a")
+            ):
+                try:
+                    prefix = _netmask_to_prefix(netmask)
+                except ValueError:
+                    prefix = None
+                if prefix is not None:
+                    interfaces_ip.setdefault("management", {}).setdefault("ipv4", {})[ipv4] = {
+                        "prefix_length": prefix
+                    }
+        mgmt_v6 = _mgmt_ipv6_from_system_info(sysinfo_out)
+        if mgmt_v6 is not None:
+            addr, plen = mgmt_v6
+            interfaces_ip.setdefault("management", {}).setdefault("ipv6", {})[addr] = {
+                "prefix_length": plen
+            }
 
         return interfaces_ip
 

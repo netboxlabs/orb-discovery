@@ -165,3 +165,19 @@ def test_panos_modular_prefixes_in_sync():
     from custom_napalm.paloalto_panos import _MODULAR_PANOS_PREFIXES
     from custom_napalm.paloalto_panos_ssh import _MODULAR_PANOS_PREFIXES_SSH
     assert _MODULAR_PANOS_PREFIXES == _MODULAR_PANOS_PREFIXES_SSH
+
+
+def test_mgmt_ipv6_from_system_info_parses_addr_and_prefix():
+    """Mgmt IPv6 with an explicit prefix is parsed to (addr, prefix_length)."""
+    from custom_napalm.paloalto_panos_ssh import _mgmt_ipv6_from_system_info
+    text = "hostname: fw1\nipv6-address: 2001:db8:abcd::5/64\noperational-mode: normal\n"
+    assert _mgmt_ipv6_from_system_info(text) == ("2001:db8:abcd::5", 64)
+
+
+def test_mgmt_ipv6_from_system_info_skips_unknown_link_local_and_no_prefix():
+    """Unknown / link-local / prefix-less / empty mgmt IPv6 all yield None."""
+    from custom_napalm.paloalto_panos_ssh import _mgmt_ipv6_from_system_info
+    assert _mgmt_ipv6_from_system_info("ipv6-address: unknown\n") is None
+    assert _mgmt_ipv6_from_system_info("ipv6-address: fe80::1/64\n") is None
+    assert _mgmt_ipv6_from_system_info("ipv6-address: 2001:db8::9\n") is None
+    assert _mgmt_ipv6_from_system_info("") is None
