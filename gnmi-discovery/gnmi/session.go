@@ -37,6 +37,7 @@ const (
 )
 
 // Session is one connection to a gNMI target.
+// Close must be called when a session's stream ends or errors, to release transport resources.
 type Session interface {
 	// Capabilities runs the gNMI Capabilities RPC.
 	Capabilities(ctx context.Context) (*CapabilitiesResult, error)

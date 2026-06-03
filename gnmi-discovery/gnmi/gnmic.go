@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -71,6 +72,10 @@ func (s *gnmicSession) Capabilities(ctx context.Context) (*CapabilitiesResult, e
 }
 
 // Subscribe opens a gNMI STREAM subscription.
+// After the forwarder goroutine below returns (e.g. on a stream error), the
+// underlying gnmic goroutine may block briefly until tg.Close() drains it.
+// Callers MUST call Session.Close() when the stream ends; the runner satisfies
+// this via `defer sess.Close()` in runOnce.
 func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string, sampleIntervalMs int) (<-chan Notification, <-chan error, error) {
 	subOpts := []gapi.GNMIOption{
 		gapi.SubscriptionListModeSTREAM(),
@@ -223,6 +228,11 @@ func convertNotification(n *gnmiproto.Notification) Notification {
 
 // pathToString renders a *gnmi.Path to an absolute XPath-style string.
 // Keys within each element are sorted for deterministic output.
+//
+// The Path.Origin field is intentionally not rendered. Profile paths are
+// origin-less OpenConfig xpaths, so omitting origin lets incoming updates
+// match the profile regardless of whether the target sets origin (e.g.
+// "openconfig"). Prepending origin would break AllowsPath / profile matching.
 func pathToString(p *gnmiproto.Path) string {
 	if p == nil {
 		return ""
@@ -290,6 +300,11 @@ func decodeTypedValue(tv *gnmiproto.TypedValue) any {
 			return decoded
 		}
 		return string(v.JsonVal)
+	case *gnmiproto.TypedValue_DecimalVal:
+		if v.DecimalVal != nil {
+			return float64(v.DecimalVal.GetDigits()) / math.Pow10(int(v.DecimalVal.GetPrecision()))
+		}
+		return nil
 	default:
 		return tv.String()
 	}
