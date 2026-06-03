@@ -187,7 +187,11 @@ func translateDevice(profile *Profile, snap map[string]any, defaults *config.Def
 		}
 		platformName := strings.TrimSpace(strings.Join(filterNonEmpty(defaults.Device.Platform, osVersion), " "))
 		if platformName != "" {
-			dev.Platform = &diode.Platform{Name: strptr(platformName)}
+			plat := &diode.Platform{Name: strptr(platformName)}
+			if defaults.Device.Manufacturer != "" {
+				plat.Manufacturer = &diode.Manufacturer{Name: strptr(defaults.Device.Manufacturer)}
+			}
+			dev.Platform = plat
 		}
 		if defaults.Location != "" {
 			// Location is scoped to the device's Site (NetBox requires a site).

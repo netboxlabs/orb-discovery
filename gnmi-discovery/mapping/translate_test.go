@@ -175,6 +175,8 @@ func TestTranslateDeviceSerialAndVersion(t *testing.T) {
 		require.Equal(t, "JPE-CHASSIS-1", *dev.Serial)
 		require.NotNil(t, dev.Platform)
 		require.Equal(t, "Arista EOS 4.30.1F", *dev.Platform.Name)
+		// No manufacturer default — Platform.Manufacturer must be nil.
+		require.Nil(t, dev.Platform.Manufacturer)
 
 		// The CHASSIS component must NOT surface as a Module/ModuleBay.
 		for _, e := range entities {
@@ -185,6 +187,19 @@ func TestTranslateDeviceSerialAndVersion(t *testing.T) {
 				require.NotEqual(t, "Chassis1", *v.Name)
 			}
 		}
+	})
+
+	t.Run("platform + manufacturer default attached to Platform", func(t *testing.T) {
+		entities := Translate(base, chassisSnap(),
+			&config.Defaults{Device: config.DeviceDefaults{Platform: "Arista EOS", Manufacturer: "Arista"}})
+		dev := entities[0].(*diode.Device)
+		require.NotNil(t, dev.Platform)
+		require.Equal(t, "Arista EOS 4.30.1F", *dev.Platform.Name)
+		require.NotNil(t, dev.Platform.Manufacturer)
+		require.Equal(t, "Arista", *dev.Platform.Manufacturer.Name)
+		// DeviceType must reference the same manufacturer name.
+		require.NotNil(t, dev.DeviceType)
+		require.Equal(t, "Arista", *dev.DeviceType.Manufacturer.Name)
 	})
 
 	t.Run("version only (no platform default)", func(t *testing.T) {
