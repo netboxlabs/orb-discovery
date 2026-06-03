@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -100,6 +101,11 @@ func (m *Manager) validatePolicy(policy config.Policy) error {
 	if policy.Config.DebounceMs < 0 || int64(policy.Config.DebounceMs) > maxIntervalMs {
 		return fmt.Errorf("debounce_ms must be >= 0 and <= %d, got %d", maxIntervalMs, policy.Config.DebounceMs)
 	}
+	// Compile the interface name patterns/excludes at parse time so a bad regex
+	// fails the POST /policies with a 400 instead of silently breaking at flush.
+	if err := validateInterfaceRegexes(&policy.Config.Defaults); err != nil {
+		return err
+	}
 	for _, t := range policy.Scope.Targets {
 		if t.Host == "" {
 			return errors.New("target with empty host")
@@ -108,6 +114,31 @@ func (m *Manager) validatePolicy(policy config.Policy) error {
 		case "", config.ModeAuto, config.ModeOnChange, config.ModeSample, config.ModeGet:
 		default:
 			return fmt.Errorf("target %s: invalid mode %q", t.Host, t.Mode)
+		}
+		if t.OverrideDefaults != nil {
+			if err := validateInterfaceRegexes(t.OverrideDefaults); err != nil {
+				return fmt.Errorf("target %s: %w", t.Host, err)
+			}
+		}
+	}
+	return nil
+}
+
+// validateInterfaceRegexes compiles every interface_patterns match and every
+// interface_exclude_patterns entry in d, returning a clear error naming the
+// offending pattern. d may be nil.
+func validateInterfaceRegexes(d *config.Defaults) error {
+	if d == nil {
+		return nil
+	}
+	for _, p := range d.InterfacePatterns {
+		if _, err := regexp.Compile(p.Match); err != nil {
+			return fmt.Errorf("invalid interface_patterns match %q: %w", p.Match, err)
+		}
+	}
+	for _, m := range d.InterfaceExcludePatterns {
+		if _, err := regexp.Compile(m); err != nil {
+			return fmt.Errorf("invalid interface_exclude_patterns %q: %w", m, err)
 		}
 	}
 	return nil

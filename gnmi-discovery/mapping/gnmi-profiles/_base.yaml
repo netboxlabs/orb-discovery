@@ -9,6 +9,11 @@ interfaces:
     description: config/description
     admin_status: state/admin-status
     mtu: state/mtu
+    # OpenConfig iana-if-type identityref (e.g. "iana-if-type:ieee8023adLag").
+    # Mapped to a NetBox interface type for lag/virtual/etc. in translate.go;
+    # ethernet media is not derivable from the type alone, so it falls through to
+    # a user interface_patterns rule or the interface.if_type default.
+    type: state/type
     # H-2: speed (ethernet/state/port-speed) and lag_member
     # (ethernet/state/aggregate-id) are intentionally NOT curated yet — the
     # translator does not map them, so subscribing would only churn the model

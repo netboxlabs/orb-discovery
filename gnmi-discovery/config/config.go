@@ -69,6 +69,14 @@ type InterfaceDefaults struct {
 	Tags        []string `yaml:"tags,omitempty"`
 }
 
+// InterfacePattern maps an interface-name regex to a NetBox interface type.
+// Mirrors snmp-discovery's InterfacePattern so policy YAML is portable between
+// the two backends.
+type InterfacePattern struct {
+	Match string `yaml:"match"` // regex matched against the interface name
+	Type  string `yaml:"type"`  // NetBox interface type assigned on match
+}
+
 // Defaults holds NetBox defaults applied to discovered entities.
 type Defaults struct {
 	Site      string            `yaml:"site,omitempty"`
@@ -77,6 +85,12 @@ type Defaults struct {
 	Tags      []string          `yaml:"tags,omitempty"`
 	Device    DeviceDefaults    `yaml:"device,omitempty"`
 	Interface InterfaceDefaults `yaml:"interface,omitempty"`
+	// InterfacePatterns map interface-name regexes to NetBox types (first match
+	// wins) and take precedence over the discovered OpenConfig type and the
+	// Interface.Type default. InterfaceExcludePatterns are name regexes that skip
+	// an interface entirely. Both mirror snmp-discovery.
+	InterfacePatterns        []InterfacePattern `yaml:"interface_patterns,omitempty"`
+	InterfaceExcludePatterns []string           `yaml:"interface_exclude_patterns,omitempty"`
 }
 
 // PolicyConfig holds policy-wide config (spec §7).
@@ -105,6 +119,12 @@ func cloneStrings(src []string) []string {
 	return append([]string(nil), src...)
 }
 
+// clonePatterns returns a new slice with the same elements as src, sharing no
+// backing array with the original. A nil src returns nil.
+func clonePatterns(src []InterfacePattern) []InterfacePattern {
+	return append([]InterfacePattern(nil), src...)
+}
+
 // MergeDefaults returns policyDefaults overlaid with non-empty overrideDefaults.
 // The returned *Defaults owns all of its slice fields — no backing array is
 // shared with either input, so callers may freely append without corrupting the
@@ -119,6 +139,8 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 		cp.Tags = cloneStrings(overrideDefaults.Tags)
 		cp.Device.Tags = cloneStrings(overrideDefaults.Device.Tags)
 		cp.Interface.Tags = cloneStrings(overrideDefaults.Interface.Tags)
+		cp.InterfacePatterns = clonePatterns(overrideDefaults.InterfacePatterns)
+		cp.InterfaceExcludePatterns = cloneStrings(overrideDefaults.InterfaceExcludePatterns)
 		return &cp
 	}
 	if overrideDefaults == nil {
@@ -128,6 +150,8 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 		cp.Tags = cloneStrings(policyDefaults.Tags)
 		cp.Device.Tags = cloneStrings(policyDefaults.Device.Tags)
 		cp.Interface.Tags = cloneStrings(policyDefaults.Interface.Tags)
+		cp.InterfacePatterns = clonePatterns(policyDefaults.InterfacePatterns)
+		cp.InterfaceExcludePatterns = cloneStrings(policyDefaults.InterfaceExcludePatterns)
 		return &cp
 	}
 	merged := *policyDefaults
@@ -135,6 +159,8 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 	merged.Tags = cloneStrings(policyDefaults.Tags)
 	merged.Device.Tags = cloneStrings(policyDefaults.Device.Tags)
 	merged.Interface.Tags = cloneStrings(policyDefaults.Interface.Tags)
+	merged.InterfacePatterns = clonePatterns(policyDefaults.InterfacePatterns)
+	merged.InterfaceExcludePatterns = cloneStrings(policyDefaults.InterfaceExcludePatterns)
 
 	if overrideDefaults.Site != "" {
 		merged.Site = overrideDefaults.Site
@@ -171,6 +197,12 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 	}
 	if len(overrideDefaults.Interface.Tags) > 0 {
 		merged.Interface.Tags = cloneStrings(overrideDefaults.Interface.Tags)
+	}
+	if len(overrideDefaults.InterfacePatterns) > 0 {
+		merged.InterfacePatterns = clonePatterns(overrideDefaults.InterfacePatterns)
+	}
+	if len(overrideDefaults.InterfaceExcludePatterns) > 0 {
+		merged.InterfaceExcludePatterns = cloneStrings(overrideDefaults.InterfaceExcludePatterns)
 	}
 	return &merged
 }

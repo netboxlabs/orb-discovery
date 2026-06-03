@@ -79,9 +79,16 @@ policies:
           comments: ""
           tags: []
         interface:
-          if_type: other           # default interface type (default "other")
+          if_type: other           # fallback interface type (default "other")
           description: ""
           tags: []
+        # Name-regex -> NetBox type, highest precedence (first match wins):
+        interface_patterns:
+          - match: "^Ethernet"
+            type: 10gbase-x-sfpp
+        # Name-regex; matching interfaces are skipped entirely:
+        interface_exclude_patterns:
+          - "^Management"
     scope:
       targets:
         - host: 10.0.0.11:6030       # Arista EOS default gNMI port
@@ -102,6 +109,29 @@ policies:
           username: admin
           password: pw
 ```
+
+### Interface type discovery
+
+Each interface's NetBox type is resolved per-interface by this precedence:
+
+1. `interface_exclude_patterns` — if the interface name matches any regex, the
+   interface is skipped entirely (no NetBox interface is emitted for it).
+2. `interface_patterns` — the first pattern whose regex matches the interface
+   name assigns its `type`. This wins over everything below.
+3. OpenConfig `state/type` — the discovered `iana-if-type`/`openconfig-if-types`
+   identityref is mapped to a NetBox type for the structural families: LAG
+   (`ieee8023adLag`, `ifAggregate`) → `lag`; loopback / VLAN / tunnel /
+   prop-virtual → `virtual`.
+4. `interface.if_type` — the policy default.
+5. `"other"` — last resort when no default is set.
+
+Both pattern lists may also appear under a target's `override_defaults` and are
+validated (regex-compiled) at `POST /policies`, so a bad regex returns 400.
+
+No default name-patterns are bundled: the OpenConfig type already covers
+lag/virtual, while ethernet *media* (e.g. `10gbase-x-sfpp` vs `1000base-t`) is
+not derivable from the OC type, so operators add `interface_patterns` to assign
+ethernet media types by name.
 
 ### Delivery modes
 

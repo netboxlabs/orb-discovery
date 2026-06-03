@@ -232,6 +232,95 @@ func TestTranslateDeviceSerialAndVersion(t *testing.T) {
 	})
 }
 
+// ifaceByName extracts the named Interface entity from a translation result, or
+// nil if it was not emitted.
+func ifaceByName(entities []diode.Entity, name string) *diode.Interface {
+	for _, e := range entities {
+		if i, ok := e.(*diode.Interface); ok && *i.Name == name {
+			return i
+		}
+	}
+	return nil
+}
+
+// TestTranslateInterfaceTypeFromOpenConfig verifies the OpenConfig state/type ->
+// NetBox type map (lag/virtual), and that ethernetCsmacd (no media in the OC
+// type) falls through to the policy default, or "other" with no default.
+func TestTranslateInterfaceTypeFromOpenConfig(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+
+	snap := map[string]any{
+		"/interfaces/interface[name=Port-Channel1]/state/type": "iana-if-type:ieee8023adLag",
+		"/interfaces/interface[name=Loopback0]/state/type":     "iana-if-type:softwareLoopback",
+		"/interfaces/interface[name=Ethernet1]/state/type":     "iana-if-type:ethernetCsmacd",
+	}
+
+	t.Run("lag and virtual from OC type; ethernet falls to default", func(t *testing.T) {
+		entities := Translate(base, snap,
+			&config.Defaults{Interface: config.InterfaceDefaults{Type: "1000base-t"}}, "")
+		require.Equal(t, "lag", *ifaceByName(entities, "Port-Channel1").Type)
+		require.Equal(t, "virtual", *ifaceByName(entities, "Loopback0").Type)
+		// ethernetCsmacd is intentionally not in the OC map -> policy default.
+		require.Equal(t, "1000base-t", *ifaceByName(entities, "Ethernet1").Type)
+	})
+
+	t.Run("ethernet with no default -> other", func(t *testing.T) {
+		// nil defaults -> default type "other"; lag/virtual still resolve from OC.
+		entities := Translate(base, snap, nil, "")
+		require.Equal(t, "lag", *ifaceByName(entities, "Port-Channel1").Type)
+		require.Equal(t, "virtual", *ifaceByName(entities, "Loopback0").Type)
+		require.Equal(t, "other", *ifaceByName(entities, "Ethernet1").Type)
+	})
+}
+
+// TestTranslateInterfacePatterns verifies user interface_patterns (name regex ->
+// NetBox type) win over both the OC-type map and the policy default.
+func TestTranslateInterfacePatterns(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+
+	snap := map[string]any{
+		"/interfaces/interface[name=Ethernet1]/state/type": "iana-if-type:ethernetCsmacd",
+		// Port-Channel1 reports an OC lag type, but a user pattern must win.
+		"/interfaces/interface[name=Port-Channel1]/state/type": "iana-if-type:ieee8023adLag",
+	}
+	defaults := &config.Defaults{
+		Interface: config.InterfaceDefaults{Type: "other"},
+		InterfacePatterns: []config.InterfacePattern{
+			{Match: "^Ethernet", Type: "10gbase-x-sfpp"},
+			{Match: "^Port-Channel", Type: "lag-override"},
+		},
+	}
+	entities := Translate(base, snap, defaults, "")
+	// Pattern beats the (absent) OC-type entry and the default.
+	require.Equal(t, "10gbase-x-sfpp", *ifaceByName(entities, "Ethernet1").Type)
+	// Pattern beats the OC-type map even when both could apply.
+	require.Equal(t, "lag-override", *ifaceByName(entities, "Port-Channel1").Type)
+}
+
+// TestTranslateInterfaceExclude verifies interface_exclude_patterns drop the
+// interface entirely (no Interface entity) while non-matching interfaces remain.
+func TestTranslateInterfaceExclude(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+
+	snap := map[string]any{
+		"/interfaces/interface[name=Management1]/state/admin-status": "UP",
+		"/interfaces/interface[name=Ethernet1]/state/admin-status":   "UP",
+	}
+	defaults := &config.Defaults{
+		Interface:                config.InterfaceDefaults{Type: "other"},
+		InterfaceExcludePatterns: []string{"^Management"},
+	}
+	entities := Translate(base, snap, defaults, "")
+	require.Nil(t, ifaceByName(entities, "Management1"), "excluded interface must not be emitted")
+	require.NotNil(t, ifaceByName(entities, "Ethernet1"))
+}
+
 func TestTranslateComponents(t *testing.T) {
 	store, err := LoadProfiles("")
 	require.NoError(t, err)

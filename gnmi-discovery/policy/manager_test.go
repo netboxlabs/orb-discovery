@@ -80,6 +80,66 @@ policies:
 	require.Contains(t, err.Error(), "invalid mode")
 }
 
+func TestValidateRejectsBadInterfaceRegex(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "bad interface_patterns match (policy defaults)",
+			yaml: `
+policies:
+  p1:
+    config:
+      defaults:
+        interface_patterns:
+          - match: "(unclosed"
+            type: "10gbase-x-sfpp"
+    scope:
+      targets:
+        - host: 10.0.0.1
+`,
+		},
+		{
+			name: "bad interface_exclude_patterns (policy defaults)",
+			yaml: `
+policies:
+  p1:
+    config:
+      defaults:
+        interface_exclude_patterns:
+          - "[bad"
+    scope:
+      targets:
+        - host: 10.0.0.1
+`,
+		},
+		{
+			name: "bad interface_patterns match (target override_defaults)",
+			yaml: `
+policies:
+  p1:
+    config: {}
+    scope:
+      targets:
+        - host: 10.0.0.1
+          override_defaults:
+            interface_patterns:
+              - match: "(unclosed"
+                type: "virtual"
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestManager(t)
+			_, err := m.ParsePolicies([]byte(tc.yaml))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "invalid")
+		})
+	}
+}
+
 func TestValidateRequiresTargets(t *testing.T) {
 	m := newTestManager(t)
 	data := []byte(`

@@ -2,6 +2,7 @@ package mapping
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -81,16 +82,40 @@ func toStr(v any) string {
 
 func sortStrings(s []string) { sort.Strings(s) }
 
-// componentType returns the component's OpenConfig type, upper-cased and stripped
-// of any YANG identityref module prefix. JSON_IETF serializes the identityref as
-// "openconfig-platform-types:CHASSIS"; bare "CHASSIS" also occurs. Both normalize
-// to "CHASSIS".
-func componentType(typeVal any) string {
-	t := toStr(typeVal)
+// identityRefBase normalizes a YANG identityref value: it strips any module
+// prefix, trims surrounding whitespace, and upper-cases the result. JSON_IETF
+// serializes identityrefs as "module:VALUE" (e.g. "openconfig-platform-types:CHASSIS"
+// or "iana-if-type:ieee8023adLag"); a bare "VALUE" also occurs. Both normalize to
+// the upper-cased base ("CHASSIS", "IEEE8023ADLAG").
+func identityRefBase(v any) string {
+	t := toStr(v)
 	if i := strings.LastIndex(t, ":"); i >= 0 {
 		t = t[i+1:]
 	}
 	return strings.ToUpper(strings.TrimSpace(t))
+}
+
+// componentType returns the component's OpenConfig type as a normalized
+// identityref base (see identityRefBase).
+func componentType(typeVal any) string {
+	return identityRefBase(typeVal)
+}
+
+// ocInterfaceTypeToNetBox maps a normalized OpenConfig interface-type identityref
+// (UPPER, prefix-stripped; see identityRefBase) to a NetBox interface type. It
+// covers the structural types derivable from the OC type alone — lag and the
+// virtual families. ethernetCsmacd / IF_ETHERNET are intentionally absent: media
+// (speed/connector) is unknown from the OC type, so an ethernet interface falls
+// through to a user interface_patterns rule or the interface.if_type default.
+var ocInterfaceTypeToNetBox = map[string]string{
+	"IEEE8023ADLAG":    "lag",
+	"IF_AGGREGATE":     "lag",
+	"SOFTWARELOOPBACK": "virtual",
+	"IF_LOOPBACK":      "virtual",
+	"L2VLAN":           "virtual",
+	"L3IPVLAN":         "virtual",
+	"PROPVIRTUAL":      "virtual",
+	"TUNNEL":           "virtual",
 }
 
 // firstNonEmpty returns the first argument that is non-empty after trimming
@@ -318,24 +343,78 @@ func translateInterfaces(profile *Profile, snap map[string]any, dev *diode.Devic
 	}
 	sortStrings(order)
 
-	ifType := "other"
+	defaultType := "other"
 	var ifDefaultDesc string
 	var ifTags []*diode.Tag
+	var userPatterns []config.InterfacePattern
+	var excludePatterns []string
 	if defaults != nil {
 		if defaults.Interface.Type != "" {
-			ifType = defaults.Interface.Type
+			defaultType = defaults.Interface.Type
 		}
 		ifDefaultDesc = defaults.Interface.Description
 		ifTags = toTags(defaults.Interface.Tags)
+		userPatterns = defaults.InterfacePatterns
+		excludePatterns = defaults.InterfaceExcludePatterns
 	}
+	// Compile the name patterns once per call. They were validated at policy
+	// parse (manager.validatePolicy), so any compile error here is unexpected;
+	// defensively skip the offending pattern rather than panicking. Per-flush
+	// compilation is acceptable at inventory cadence (sample/get intervals are
+	// minutes, on_change is debounced).
+	compiledExcludes := make([]*regexp.Regexp, 0, len(excludePatterns))
+	for _, m := range excludePatterns {
+		if re, err := regexp.Compile(m); err == nil {
+			compiledExcludes = append(compiledExcludes, re)
+		}
+	}
+	type compiledPattern struct {
+		re  *regexp.Regexp
+		typ string
+	}
+	compiledPatterns := make([]compiledPattern, 0, len(userPatterns))
+	for _, p := range userPatterns {
+		if re, err := regexp.Compile(p.Match); err == nil {
+			compiledPatterns = append(compiledPatterns, compiledPattern{re: re, typ: p.Type})
+		}
+	}
+	typeLeafPath := profile.Interfaces.Keys["type"]
 
 	var out []diode.Entity
 	for _, key := range order {
 		leaves := byKey[key]
+		// 1) exclude patterns (regex on name) -> skip the interface entirely.
+		excluded := false
+		for _, re := range compiledExcludes {
+			if re.MatchString(key) {
+				excluded = true
+				break
+			}
+		}
+		if excluded {
+			continue
+		}
+		// Resolve the interface type by precedence: user pattern (first match) ->
+		// OpenConfig state/type map -> policy default -> "other".
+		resolvedType := ""
+		for _, p := range compiledPatterns {
+			if p.re.MatchString(key) {
+				resolvedType = p.typ
+				break
+			}
+		}
+		if resolvedType == "" && typeLeafPath != "" {
+			if nb, ok := ocInterfaceTypeToNetBox[identityRefBase(leaves[typeLeafPath])]; ok {
+				resolvedType = nb
+			}
+		}
+		if resolvedType == "" {
+			resolvedType = defaultType
+		}
 		iface := &diode.Interface{
 			Device: dev,
 			Name:   strptr(key),
-			Type:   strptr(ifType),
+			Type:   strptr(resolvedType),
 		}
 		if len(ifTags) > 0 {
 			iface.Tags = ifTags
