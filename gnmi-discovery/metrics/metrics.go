@@ -18,6 +18,7 @@ var (
 	meterProvider      *sdkmetric.MeterProvider
 	meter              metric.Meter
 	cacheLock          sync.Mutex
+	shutdownOnce       sync.Once
 	counterCache       = map[string]metric.Int64Counter{}
 	upDownCounterCache = map[string]metric.Int64UpDownCounter{}
 	histogramCache     = map[string]metric.Float64Histogram{}
@@ -137,39 +138,14 @@ func GetGauge(name string, description string) metric.Int64Gauge {
 	return g
 }
 
-// GetDiscoverySuccess returns the counter for successful discoveries.
-func GetDiscoverySuccess() metric.Int64Counter {
-	return GetCounter("discovery_success", "Number of successful network discoveries")
-}
-
-// GetDiscoveryFailure returns the counter for failed discoveries.
-func GetDiscoveryFailure() metric.Int64Counter {
-	return GetCounter("discovery_failure", "Number of failed network discoveries")
-}
-
-// GetPolicyExecutions returns the counter for policy executions
-func GetPolicyExecutions() metric.Int64Counter {
-	return GetCounter("policy_executions", "Number of policy executions")
-}
-
 // GetAPIRequests returns the counter for API requests
 func GetAPIRequests() metric.Int64Counter {
 	return GetCounter("api_requests", "Number of API requests")
 }
 
-// GetDiscoveryLatency returns the histogram for discovery latency
-func GetDiscoveryLatency() metric.Float64Histogram {
-	return GetHistogram("discovery_latency", "Time taken for the network discovery process")
-}
-
 // GetAPIResponseLatency returns the histogram for API response latency
 func GetAPIResponseLatency() metric.Float64Histogram {
 	return GetHistogram("api_response_latency", "Time taken to respond to API requests")
-}
-
-// GetActivePolicies returns the updown counter for active policies
-func GetActivePolicies() metric.Int64UpDownCounter {
-	return GetUpDownCounter("active_policies", "Number of currently active policies")
 }
 
 // ResetMeter resets the meter to nil for testing purposes.
@@ -179,10 +155,15 @@ func ResetMeter() {
 	cacheLock.Unlock()
 }
 
-// Shutdown gracefully shuts down the metrics exporter
+// Shutdown gracefully shuts down the metrics exporter. It is idempotent: the
+// second call (e.g. from both the signal handler and the server-error path) is
+// a no-op that returns nil.
 func Shutdown(ctx context.Context) error {
-	if meterProvider != nil {
-		return meterProvider.Shutdown(ctx)
-	}
-	return nil
+	var shutdownErr error
+	shutdownOnce.Do(func() {
+		if meterProvider != nil {
+			shutdownErr = meterProvider.Shutdown(ctx)
+		}
+	})
+	return shutdownErr
 }

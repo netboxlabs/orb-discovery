@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -97,9 +97,13 @@ func NewServer(host string, port int, logger *slog.Logger, manager *policy.Manag
 		host:   host,
 		port:   port,
 	}
+	// Fix #5: add sensible timeouts to prevent slow-client and slowloris attacks.
 	server.httpServer = &http.Server{
-		Addr:    fmt.Sprintf("%s:%d", host, port),
-		Handler: server.router,
+		Addr:              fmt.Sprintf("%s:%d", host, port),
+		Handler:           server.router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
 	}
 
 	// Add metrics middleware
@@ -139,13 +143,14 @@ func (s *Server) Start() <-chan error {
 }
 
 func (s *Server) getStatus(c *gin.Context) {
-	s.stat.UpTimeSeconds = int64(math.Round(time.Since(s.stat.StartTime).Seconds()))
-
+	// Fix #1: copy s.stat into a local to avoid a data race — multiple goroutines
+	// serve GET /api/v1/status concurrently and must not mutate the shared struct.
+	st := s.stat
+	st.UpTimeSeconds = int64(time.Since(s.stat.StartTime).Seconds())
 	response := StatusResponse{
-		Status:   s.stat,
+		Status:   st,
 		Policies: s.manager.GetPolicyStatuses(),
 	}
-
 	c.IndentedJSON(http.StatusOK, response)
 }
 
@@ -154,10 +159,14 @@ func (s *Server) getCapabilities(c *gin.Context) {
 }
 
 func (s *Server) createPolicy(c *gin.Context) {
-	if t := c.Request.Header.Get("Content-type"); t != "application/x-yaml" {
+	// Fix #4: use mime.ParseMediaType so "application/x-yaml; charset=utf-8" is accepted.
+	mediaType, _, _ := mime.ParseMediaType(c.Request.Header.Get("Content-type"))
+	if mediaType != "application/x-yaml" {
 		c.IndentedJSON(http.StatusBadRequest, Response{"invalid Content-Type. Only 'application/x-yaml' is supported"})
 		return
 	}
+	// Fix #5: cap request body to 1 MiB to prevent unbounded reads.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		c.IndentedJSON(http.StatusBadRequest, Response{err.Error()})

@@ -104,6 +104,53 @@ func TestTranslateAppliesRichDefaults(t *testing.T) {
 	require.Equal(t, "if-tag", *eth.Tags[0].Name)
 }
 
+// TestToInt64PtrUintTypes verifies that uint variants (as produced by the gNMI
+// UintVal decoder for OpenConfig mtu) are correctly converted rather than
+// silently dropped to nil.
+func TestToInt64PtrUintTypes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   any
+		want int64
+	}{
+		{"uint", uint(9000), 9000},
+		{"uint8", uint8(255), 255},
+		{"uint16", uint16(1500), 1500},
+		{"uint32", uint32(65535), 65535},
+		{"uint64", uint64(9000), 9000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := toInt64Ptr(tc.in)
+			require.NotNil(t, got, "toInt64Ptr returned nil for %T(%v)", tc.in, tc.in)
+			require.Equal(t, tc.want, *got)
+		})
+	}
+}
+
+// TestTranslateUint64Mtu verifies that a uint64 mtu value from gNMI (the type
+// returned by decodeTypedValue for UintVal) is propagated to the Interface.Mtu
+// field instead of being silently dropped.
+func TestTranslateUint64Mtu(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+
+	snap := map[string]any{
+		"/interfaces/interface[name=Ethernet1]/state/mtu": uint64(9000),
+	}
+	entities := Translate(base, snap, nil)
+	var eth *diode.Interface
+	for _, e := range entities {
+		if i, ok := e.(*diode.Interface); ok && *i.Name == "Ethernet1" {
+			eth = i
+		}
+	}
+	require.NotNil(t, eth)
+	require.NotNil(t, eth.Mtu, "mtu must not be nil for uint64 gNMI value")
+	require.Equal(t, int64(9000), *eth.Mtu)
+}
+
 func TestTranslateComponents(t *testing.T) {
 	store, err := LoadProfiles("")
 	require.NoError(t, err)

@@ -43,6 +43,21 @@ func toInt64Ptr(v any) *int64 {
 		return &x
 	case int64:
 		return &n
+	case uint:
+		x := int64(n)
+		return &x
+	case uint8:
+		x := int64(n)
+		return &x
+	case uint16:
+		x := int64(n)
+		return &x
+	case uint32:
+		x := int64(n)
+		return &x
+	case uint64:
+		x := int64(n)
+		return &x
 	case float64:
 		x := int64(n)
 		return &x
