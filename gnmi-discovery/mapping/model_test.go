@@ -1,0 +1,107 @@
+package mapping
+
+import (
+	"testing"
+
+	"github.com/netboxlabs/orb-discovery/gnmi-discovery/gnmi"
+	"github.com/stretchr/testify/require"
+)
+
+func TestApplyUpdateAndSnapshot(t *testing.T) {
+	m := NewDeviceModel()
+	changed := m.Apply(gnmi.Notification{Updates: []gnmi.Update{
+		{Path: "/system/state/hostname", Value: "r1"},
+	}})
+	require.True(t, changed)
+	snap := m.Snapshot()
+	require.Equal(t, "r1", snap["/system/state/hostname"])
+}
+
+func TestApplyNoChangeReturnsFalse(t *testing.T) {
+	m := NewDeviceModel()
+	m.Apply(gnmi.Notification{Updates: []gnmi.Update{{Path: "/a", Value: 1}}})
+	changed := m.Apply(gnmi.Notification{Updates: []gnmi.Update{{Path: "/a", Value: 1}}})
+	require.False(t, changed)
+}
+
+func TestApplyDeleteRemovesPath(t *testing.T) {
+	m := NewDeviceModel()
+	m.Apply(gnmi.Notification{Updates: []gnmi.Update{{Path: "/a", Value: 1}}})
+	changed := m.Apply(gnmi.Notification{Deletes: []string{"/a"}})
+	require.True(t, changed)
+	_, ok := m.Snapshot()["/a"]
+	require.False(t, ok)
+}
+
+func TestApplyDeleteRemovesSubtree(t *testing.T) {
+	m := NewDeviceModel()
+	m.Apply(gnmi.Notification{Updates: []gnmi.Update{
+		{Path: "/interfaces/interface[name=Eth1]/state/mtu", Value: 9000},
+		{Path: "/interfaces/interface[name=Eth1]/state/admin-status", Value: "UP"},
+		{Path: "/interfaces/interface[name=Eth2]/state/mtu", Value: 1500},
+	}})
+	// delete the whole Eth1 list entry -> both its leaves go, Eth2 stays
+	changed := m.Apply(gnmi.Notification{Deletes: []string{"/interfaces/interface[name=Eth1]"}})
+	require.True(t, changed)
+	snap := m.Snapshot()
+	require.NotContains(t, snap, "/interfaces/interface[name=Eth1]/state/mtu")
+	require.NotContains(t, snap, "/interfaces/interface[name=Eth1]/state/admin-status")
+	require.Contains(t, snap, "/interfaces/interface[name=Eth2]/state/mtu")
+}
+
+func TestApplyNonComparableValueDoesNotPanic(t *testing.T) {
+	m := NewDeviceModel()
+	// a JSON_IETF container leaf can decode to a map; == would panic.
+	require.NotPanics(t, func() {
+		m.Apply(gnmi.Notification{Updates: []gnmi.Update{{Path: "/x", Value: map[string]any{"k": 1}}}})
+		// same logical value again -> equal, no change, still no panic
+		m.Apply(gnmi.Notification{Updates: []gnmi.Update{{Path: "/x", Value: map[string]any{"k": 1}}}})
+	})
+}
+
+func TestTTLPruningKeep1(t *testing.T) {
+	m := NewDeviceModel()
+	// cycle 1: two paths
+	m.Apply(gnmi.Notification{Updates: []gnmi.Update{
+		{Path: "/a", Value: 1}, {Path: "/b", Value: 2},
+	}})
+	m.EndCycle(1, true)
+	// cycle 2: only /a seen -> with keep=1, /b (unseen this cycle) is pruned
+	m.Apply(gnmi.Notification{Updates: []gnmi.Update{{Path: "/a", Value: 1}}})
+	pruned := m.EndCycle(1, true)
+	require.Equal(t, []string{"/b"}, pruned)
+	require.NotContains(t, m.Snapshot(), "/b")
+	require.Contains(t, m.Snapshot(), "/a")
+}
+
+func TestTTLPruningKeep2ToleratesOneMissedCycle(t *testing.T) {
+	m := NewDeviceModel()
+	m.Apply(gnmi.Notification{Updates: []gnmi.Update{{Path: "/a", Value: 1}, {Path: "/b", Value: 2}}})
+	m.EndCycle(2, true)
+	// one silent cycle: nothing applied; keep=2 must NOT prune /a or /b
+	pruned := m.EndCycle(2, true)
+	require.Empty(t, pruned)
+	require.Contains(t, m.Snapshot(), "/a")
+	require.Contains(t, m.Snapshot(), "/b")
+	// a second consecutive silent cycle now exceeds the TTL -> both pruned
+	pruned = m.EndCycle(2, true)
+	require.ElementsMatch(t, []string{"/a", "/b"}, pruned)
+	require.Empty(t, m.Snapshot())
+}
+
+func TestEndCycleNoPruneAdvancesOnly(t *testing.T) {
+	m := NewDeviceModel()
+	m.Apply(gnmi.Notification{Updates: []gnmi.Update{{Path: "/a", Value: 1}}})
+	// prune=false (empty-view guard): cycle advances but nothing is removed
+	pruned := m.EndCycle(1, false)
+	require.Empty(t, pruned)
+	require.Contains(t, m.Snapshot(), "/a")
+}
+
+func TestSeenInCycle(t *testing.T) {
+	m := NewDeviceModel()
+	m.Apply(gnmi.Notification{Updates: []gnmi.Update{{Path: "/sys/host", Value: "r1"}}})
+	require.True(t, m.SeenInCycle("/sys/host"))
+	m.EndCycle(1, false) // advance; nothing applied in the new cycle yet
+	require.False(t, m.SeenInCycle("/sys/host"))
+}
