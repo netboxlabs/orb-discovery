@@ -48,7 +48,7 @@ func TestTranslateDeviceAndInterfaces(t *testing.T) {
 	}
 	defaults := &config.Defaults{Site: "lab", Role: "spine", Interface: config.InterfaceDefaults{Type: "other"}}
 
-	entities := Translate(base, snap, defaults)
+	entities := Translate(base, snap, defaults, "")
 
 	var dev *diode.Device
 	ifaceNames := map[string]bool{}
@@ -80,7 +80,7 @@ func TestTranslateAppliesRichDefaults(t *testing.T) {
 		Device:    config.DeviceDefaults{Comments: "auto-discovered", Tags: []string{"gnmi"}},
 		Interface: config.InterfaceDefaults{Type: "other", Description: "discovered", Tags: []string{"if-tag"}},
 	}
-	entities := Translate(base, snap, defaults)
+	entities := Translate(base, snap, defaults, "")
 	dev := entities[0].(*diode.Device)
 	require.Equal(t, "auto-discovered", *dev.Comments)
 	require.NotNil(t, dev.Location)
@@ -139,7 +139,7 @@ func TestTranslateUint64Mtu(t *testing.T) {
 	snap := map[string]any{
 		"/interfaces/interface[name=Ethernet1]/state/mtu": uint64(9000),
 	}
-	entities := Translate(base, snap, nil)
+	entities := Translate(base, snap, nil, "")
 	var eth *diode.Interface
 	for _, e := range entities {
 		if i, ok := e.(*diode.Interface); ok && *i.Name == "Ethernet1" {
@@ -169,14 +169,16 @@ func TestTranslateDeviceSerialAndVersion(t *testing.T) {
 
 	t.Run("platform default + version", func(t *testing.T) {
 		entities := Translate(base, chassisSnap(),
-			&config.Defaults{Device: config.DeviceDefaults{Platform: "Arista EOS"}})
+			&config.Defaults{Device: config.DeviceDefaults{Platform: "Arista EOS"}}, "")
 		dev := entities[0].(*diode.Device)
 		require.NotNil(t, dev.Serial)
 		require.Equal(t, "JPE-CHASSIS-1", *dev.Serial)
 		require.NotNil(t, dev.Platform)
 		require.Equal(t, "Arista EOS 4.30.1F", *dev.Platform.Name)
-		// No manufacturer default — Platform.Manufacturer must be nil.
-		require.Nil(t, dev.Platform.Manufacturer)
+		// No manufacturer default, no chassis mfg-name, no vendor — the resolved
+		// device manufacturer is "Unknown" and Platform carries it.
+		require.NotNil(t, dev.Platform.Manufacturer)
+		require.Equal(t, "Unknown", *dev.Platform.Manufacturer.Name)
 
 		// The CHASSIS component must NOT surface as a Module/ModuleBay.
 		for _, e := range entities {
@@ -191,7 +193,7 @@ func TestTranslateDeviceSerialAndVersion(t *testing.T) {
 
 	t.Run("platform + manufacturer default attached to Platform", func(t *testing.T) {
 		entities := Translate(base, chassisSnap(),
-			&config.Defaults{Device: config.DeviceDefaults{Platform: "Arista EOS", Manufacturer: "Arista"}})
+			&config.Defaults{Device: config.DeviceDefaults{Platform: "Arista EOS", Manufacturer: "Arista"}}, "")
 		dev := entities[0].(*diode.Device)
 		require.NotNil(t, dev.Platform)
 		require.Equal(t, "Arista EOS 4.30.1F", *dev.Platform.Name)
@@ -203,7 +205,7 @@ func TestTranslateDeviceSerialAndVersion(t *testing.T) {
 	})
 
 	t.Run("version only (no platform default)", func(t *testing.T) {
-		entities := Translate(base, chassisSnap(), &config.Defaults{})
+		entities := Translate(base, chassisSnap(), &config.Defaults{}, "")
 		dev := entities[0].(*diode.Device)
 		require.NotNil(t, dev.Platform)
 		require.Equal(t, "4.30.1F", *dev.Platform.Name)
@@ -214,7 +216,7 @@ func TestTranslateDeviceSerialAndVersion(t *testing.T) {
 	t.Run("platform default only (no version leaf) preserves prior behavior", func(t *testing.T) {
 		snap := map[string]any{"/system/state/hostname": "spine1"}
 		entities := Translate(base, snap,
-			&config.Defaults{Device: config.DeviceDefaults{Platform: "Arista EOS"}})
+			&config.Defaults{Device: config.DeviceDefaults{Platform: "Arista EOS"}}, "")
 		dev := entities[0].(*diode.Device)
 		require.NotNil(t, dev.Platform)
 		require.Equal(t, "Arista EOS", *dev.Platform.Name)
@@ -223,7 +225,7 @@ func TestTranslateDeviceSerialAndVersion(t *testing.T) {
 
 	t.Run("neither platform default nor version", func(t *testing.T) {
 		snap := map[string]any{"/system/state/hostname": "spine1"}
-		entities := Translate(base, snap, &config.Defaults{})
+		entities := Translate(base, snap, &config.Defaults{}, "")
 		dev := entities[0].(*diode.Device)
 		require.Nil(t, dev.Platform)
 		require.Nil(t, dev.Serial)
@@ -241,7 +243,7 @@ func TestTranslateComponents(t *testing.T) {
 		"/components/component[name=Linecard1]/state/part-no":   "DCS-7500",
 		"/components/component[name=PowerSupply1]/state/type":   "POWER_SUPPLY",
 	}
-	entities := Translate(base, snap, &config.Defaults{Device: config.DeviceDefaults{Manufacturer: "Arista"}})
+	entities := Translate(base, snap, &config.Defaults{Device: config.DeviceDefaults{Manufacturer: "Arista"}}, "")
 	var modules []*diode.Module
 	var bays []*diode.ModuleBay
 	bayIdx, modIdx := -1, -1
@@ -266,4 +268,101 @@ func TestTranslateComponents(t *testing.T) {
 	require.Equal(t, "DCS-7500", *modules[0].ModuleType.Model)
 	require.Equal(t, "Arista", *modules[0].ModuleType.Manufacturer.Name)
 	require.Equal(t, "Linecard1", *bays[0].Name)
+}
+
+// TestTranslateDiscoversManufacturer exercises the manufacturer/model discovery
+// precedence: policy default > chassis mfg-name (or part-no) > Capabilities
+// vendor > "Unknown"; and per-component module manufacturer.
+func TestTranslateDiscoversManufacturer(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+
+	devOf := func(entities []diode.Entity) *diode.Device { return entities[0].(*diode.Device) }
+
+	t.Run("chassis mfg-name discovered (no default)", func(t *testing.T) {
+		snap := map[string]any{
+			"/system/state/hostname":                              "spine1",
+			"/system/state/software-version":                      "4.30.1F",
+			"/components/component[name=Chassis1]/state/type":     "CHASSIS",
+			"/components/component[name=Chassis1]/state/mfg-name": "Arista",
+		}
+		dev := devOf(Translate(base, snap,
+			&config.Defaults{Device: config.DeviceDefaults{Platform: "Arista EOS"}}, ""))
+		require.NotNil(t, dev.DeviceType)
+		require.Equal(t, "Arista", *dev.DeviceType.Manufacturer.Name)
+		require.NotNil(t, dev.Platform)
+		require.NotNil(t, dev.Platform.Manufacturer)
+		require.Equal(t, "Arista", *dev.Platform.Manufacturer.Name)
+	})
+
+	t.Run("capabilities vendor fallback (no mfg-name, no default)", func(t *testing.T) {
+		snap := map[string]any{"/system/state/hostname": "r1"}
+		dev := devOf(Translate(base, snap, &config.Defaults{}, "Nokia"))
+		require.Equal(t, "Nokia", *dev.DeviceType.Manufacturer.Name)
+	})
+
+	t.Run("policy default overrides discovered", func(t *testing.T) {
+		snap := map[string]any{
+			"/system/state/hostname":                              "spine1",
+			"/components/component[name=Chassis1]/state/type":     "CHASSIS",
+			"/components/component[name=Chassis1]/state/mfg-name": "Arista",
+		}
+		dev := devOf(Translate(base, snap,
+			&config.Defaults{Device: config.DeviceDefaults{Manufacturer: "OverrideCorp"}}, "Nokia"))
+		require.Equal(t, "OverrideCorp", *dev.DeviceType.Manufacturer.Name)
+	})
+
+	t.Run("nothing discovered -> Unknown", func(t *testing.T) {
+		snap := map[string]any{"/system/state/hostname": "r1"}
+		dev := devOf(Translate(base, snap, &config.Defaults{}, ""))
+		require.Equal(t, "Unknown", *dev.DeviceType.Manufacturer.Name)
+		require.Equal(t, "Unknown", *dev.DeviceType.Model)
+	})
+
+	t.Run("chassis part-no -> DeviceType.Model (no model default)", func(t *testing.T) {
+		snap := map[string]any{
+			"/system/state/hostname":                             "spine1",
+			"/components/component[name=Chassis1]/state/type":    "CHASSIS",
+			"/components/component[name=Chassis1]/state/part-no": "DCS-7050",
+		}
+		dev := devOf(Translate(base, snap, &config.Defaults{}, ""))
+		require.Equal(t, "DCS-7050", *dev.DeviceType.Model)
+	})
+
+	t.Run("model default overrides chassis part-no", func(t *testing.T) {
+		snap := map[string]any{
+			"/system/state/hostname":                             "spine1",
+			"/components/component[name=Chassis1]/state/type":    "CHASSIS",
+			"/components/component[name=Chassis1]/state/part-no": "DCS-7050",
+		}
+		dev := devOf(Translate(base, snap,
+			&config.Defaults{Device: config.DeviceDefaults{Model: "ModelDefault"}}, ""))
+		require.Equal(t, "ModelDefault", *dev.DeviceType.Model)
+	})
+
+	t.Run("per-component module manufacturer from its own mfg-name", func(t *testing.T) {
+		// Chassis is Arista; a transceiver reports its own mfg-name "Finisar".
+		snap := map[string]any{
+			"/system/state/hostname":                              "spine1",
+			"/components/component[name=Chassis1]/state/type":     "CHASSIS",
+			"/components/component[name=Chassis1]/state/mfg-name": "Arista",
+			"/components/component[name=Xcvr1]/state/type":        "TRANSCEIVER",
+			"/components/component[name=Xcvr1]/state/mfg-name":    "Finisar",
+			"/components/component[name=Xcvr1]/state/part-no":     "FTLX",
+			"/components/component[name=Linecard1]/state/type":    "LINECARD",
+		}
+		entities := Translate(base, snap, &config.Defaults{}, "")
+		mods := map[string]*diode.Module{}
+		for _, e := range entities {
+			if m, ok := e.(*diode.Module); ok {
+				mods[*m.ModuleBay.Name] = m
+			}
+		}
+		require.Contains(t, mods, "Xcvr1")
+		require.Equal(t, "Finisar", *mods["Xcvr1"].ModuleType.Manufacturer.Name)
+		// The linecard has no own mfg-name -> falls back to the device manufacturer.
+		require.Contains(t, mods, "Linecard1")
+		require.Equal(t, "Arista", *mods["Linecard1"].ModuleType.Manufacturer.Name)
+	})
 }

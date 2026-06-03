@@ -178,10 +178,16 @@ func (r *Runner) runOnce(t config.Target, model *mapping.DeviceModel, deb *Debou
 	}
 	profile := r.selectProfile(t, caps)
 	defaults := config.MergeDefaults(&r.policy.Config.Defaults, t.OverrideDefaults)
+	// Capabilities vendor is the lowest-precedence discovered manufacturer source
+	// (chassis mfg-name and the policy default both override it in Translate).
+	discoveredVendor := ""
+	if caps != nil {
+		discoveredVendor = caps.Vendor
+	}
 
 	warnedNoIdentity := false // rate-limit the no-identity warning to once per connection
 	flush := func() {
-		entities := mapping.Translate(profile, model.Snapshot(), defaults)
+		entities := mapping.Translate(profile, model.Snapshot(), defaults, discoveredVendor)
 		dev, _ := entities[0].(*diode.Device) // Translate always emits the Device first
 		// Q2: thread target netbox_id onto the Device for explicit NetBox matching.
 		if t.NetboxID != nil && dev != nil {

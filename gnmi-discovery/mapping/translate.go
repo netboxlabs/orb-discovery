@@ -81,6 +81,18 @@ func toStr(v any) string {
 
 func sortStrings(s []string) { sort.Strings(s) }
 
+// firstNonEmpty returns the first non-empty argument, or "" if all are empty.
+// Used for the manufacturer/model precedence chains (policy default overrides
+// discovered, discovered overrides "Unknown").
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // filterNonEmpty returns the non-empty arguments in order, used to compose the
 // Platform name from the operator's NOS-name prefix and the discovered version.
 func filterNonEmpty(vals ...string) []string {
@@ -141,37 +153,74 @@ func toTags(names []string) []*diode.Tag {
 // Translate converts a reconciled snapshot into Diode entities using profile.
 // It always emits one *diode.Device, then interfaces, then components
 // (ModuleBay before its Module, mirroring snmp-discovery ordering).
-func Translate(profile *Profile, snap map[string]any, defaults *config.Defaults) []diode.Entity {
-	dev := translateDevice(profile, snap, defaults)
+func Translate(profile *Profile, snap map[string]any, defaults *config.Defaults, discoveredVendor string) []diode.Entity {
+	dev, deviceMfg := translateDevice(profile, snap, defaults, discoveredVendor)
 	entities := []diode.Entity{dev}
 	entities = append(entities, translateInterfaces(profile, snap, dev, defaults)...)
-	entities = append(entities, translateComponents(profile, snap, dev, defaults)...)
+	entities = append(entities, translateComponents(profile, snap, dev, deviceMfg)...)
 	return entities
 }
 
-func translateDevice(profile *Profile, snap map[string]any, defaults *config.Defaults) *diode.Device {
+// translateDevice builds the Device entity and returns the resolved device
+// manufacturer so translateComponents can fall back to it for modules that do
+// not report their own mfg-name.
+//
+// Manufacturer precedence (policy default overrides discovered, mirroring the
+// repo convention): defaults.Device.Manufacturer > chassis mfg-name >
+// Capabilities vendor > "Unknown". Model precedence: defaults.Device.Model >
+// chassis part-no > "Unknown".
+func translateDevice(profile *Profile, snap map[string]any, defaults *config.Defaults, discoveredVendor string) (*diode.Device, string) {
 	dev := &diode.Device{}
 	if profile.Device.Hostname != "" {
 		if v, ok := snap[profile.Device.Hostname]; ok {
 			dev.Name = strptr(toStr(v))
 		}
 	}
+
+	// Resolve the device manufacturer/model from the CHASSIS component leaves and
+	// the gNMI Capabilities vendor, with the policy default taking precedence.
+	var chassisMfg, chassisPart string
+	mfgLeaf := profile.Components.Keys["mfg_name"]
+	partLeaf := profile.Components.Keys["part"]
+	typeLeaf := profile.Components.Keys["type"]
+	if typeLeaf != "" {
+		byKey, order := componentsByKey(profile, snap)
+		for _, key := range order {
+			leaves := byKey[key]
+			if strings.ToUpper(toStr(leaves[typeLeaf])) != "CHASSIS" {
+				continue
+			}
+			if mfgLeaf != "" {
+				chassisMfg = toStr(leaves[mfgLeaf])
+			}
+			if partLeaf != "" {
+				chassisPart = toStr(leaves[partLeaf])
+			}
+			break
+		}
+	}
+	var defaultMfg, defaultModel string
+	if defaults != nil {
+		defaultMfg = defaults.Device.Manufacturer
+		defaultModel = defaults.Device.Model
+	}
+	deviceMfg := firstNonEmpty(defaultMfg, chassisMfg, discoveredVendor, "Unknown")
+	deviceModel := firstNonEmpty(defaultModel, chassisPart, "Unknown")
+
+	// NetBox requires device_type with both manufacturer and model, so DeviceType
+	// is ALWAYS emitted. With discovery these are real values; "Unknown" is only a
+	// last resort when neither a default nor a discovered value is present.
+	dev.DeviceType = &diode.DeviceType{
+		Model:        strptr(deviceModel),
+		Manufacturer: &diode.Manufacturer{Name: strptr(deviceMfg)},
+	}
+
 	if defaults != nil {
 		if defaults.Site != "" {
 			dev.Site = &diode.Site{Name: strptr(defaults.Site)}
 		}
 		if defaults.Role != "" {
 			dev.Role = &diode.DeviceRole{Name: strptr(defaults.Role)}
-		}
-		if defaults.Device.Manufacturer != "" || defaults.Device.Model != "" {
-			dt := &diode.DeviceType{}
-			if defaults.Device.Model != "" {
-				dt.Model = strptr(defaults.Device.Model)
-			}
-			if defaults.Device.Manufacturer != "" {
-				dt.Manufacturer = &diode.Manufacturer{Name: strptr(defaults.Device.Manufacturer)}
-			}
-			dev.DeviceType = dt
 		}
 		// Platform name folds the discovered software version into the operator's
 		// platform default (treated as the NOS-name prefix), mirroring the
@@ -187,11 +236,13 @@ func translateDevice(profile *Profile, snap map[string]any, defaults *config.Def
 		}
 		platformName := strings.TrimSpace(strings.Join(filterNonEmpty(defaults.Device.Platform, osVersion), " "))
 		if platformName != "" {
-			plat := &diode.Platform{Name: strptr(platformName)}
-			if defaults.Device.Manufacturer != "" {
-				plat.Manufacturer = &diode.Manufacturer{Name: strptr(defaults.Device.Manufacturer)}
+			// Platform carries the resolved device manufacturer (discovered or
+			// default), not just the default, so the platform's manufacturer matches
+			// the DeviceType's.
+			dev.Platform = &diode.Platform{
+				Name:         strptr(platformName),
+				Manufacturer: &diode.Manufacturer{Name: strptr(deviceMfg)},
 			}
-			dev.Platform = plat
 		}
 		if defaults.Location != "" {
 			// Location is scoped to the device's Site (NetBox requires a site).
@@ -211,7 +262,7 @@ func translateDevice(profile *Profile, snap map[string]any, defaults *config.Def
 	if serial := chassisSerial(profile, snap); serial != "" {
 		dev.Serial = strptr(serial)
 	}
-	return dev
+	return dev, deviceMfg
 }
 
 // chassisSerial returns the serial-no of the component whose type is CHASSIS, or
@@ -315,8 +366,9 @@ var emittableComponentTypes = map[string]bool{
 // ModuleBay entity FOLLOWED BY its Module. This mirrors snmp-discovery's
 // ordering (Device -> ModuleBay -> Module) so Diode creates the module bay
 // before the module that references it. The ModuleType always carries a
-// Manufacturer (policy default, else "Unknown"), never model-only.
-func translateComponents(profile *Profile, snap map[string]any, dev *diode.Device, defaults *config.Defaults) []diode.Entity {
+// Manufacturer (the component's own mfg-name, else the resolved device
+// manufacturer, else "Unknown"), never model-only.
+func translateComponents(profile *Profile, snap map[string]any, dev *diode.Device, deviceMfg string) []diode.Entity {
 	if profile.Components.ListPath == "" {
 		return nil
 	}
@@ -325,11 +377,7 @@ func translateComponents(profile *Profile, snap map[string]any, dev *diode.Devic
 	typeLeaf := profile.Components.Keys["type"]
 	serialLeaf := profile.Components.Keys["serial"]
 	partLeaf := profile.Components.Keys["part"]
-
-	mfg := "Unknown"
-	if defaults != nil && defaults.Device.Manufacturer != "" {
-		mfg = defaults.Device.Manufacturer
-	}
+	mfgLeaf := profile.Components.Keys["mfg_name"]
 
 	var out []diode.Entity
 	for _, key := range order {
@@ -342,13 +390,21 @@ func translateComponents(profile *Profile, snap map[string]any, dev *diode.Devic
 		bay := &diode.ModuleBay{Device: dev, Name: strptr(key)}
 		out = append(out, bay)
 
-		// 2) Module referencing the bay, with a manufacturer-bearing ModuleType
+		// 2) Module referencing the bay, with a manufacturer-bearing ModuleType.
+		// The module manufacturer is the component's own mfg-name (a module may be
+		// from a different vendor than the chassis — e.g. a transceiver), falling
+		// back to the resolved device manufacturer, then "Unknown".
 		model := "Unknown"
 		if partLeaf != "" {
 			if v, ok := leaves[partLeaf]; ok && toStr(v) != "" {
 				model = toStr(v)
 			}
 		}
+		var componentMfgName string
+		if mfgLeaf != "" {
+			componentMfgName = toStr(leaves[mfgLeaf])
+		}
+		mfg := firstNonEmpty(componentMfgName, deviceMfg, "Unknown")
 		mod := &diode.Module{
 			Device:    dev,
 			ModuleBay: bay,

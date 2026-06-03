@@ -14,6 +14,9 @@ Unlike SNMP/NAPALM-based polling, `gnmi-discovery` reacts to ON_CHANGE notificat
 ### Device enrichment
 
 - **Serial**: the device's own serial is taken from the `CHASSIS` component (`/components/component` with `state/type == CHASSIS`); its `state/serial-no` becomes `Device.Serial`. The chassis is not surfaced as a module — non-chassis inventory components become Modules instead.
+- **Manufacturer**: discovered, not just defaulted. NetBox requires a manufacturer on `DeviceType`, `Platform`, and `ModuleType`, so a `DeviceType` (with manufacturer and model) is always emitted. The device manufacturer is resolved as the first non-empty of: the operator's `manufacturer` default, the `CHASSIS` component's `state/mfg-name`, the gNMI Capabilities vendor, then `Unknown`. The same resolved manufacturer is attached to the `Platform`.
+- **Device model** (`DeviceType.Model`): first non-empty of the operator's `model` default, the `CHASSIS` component's `state/part-no`, then `Unknown`.
+- **Module manufacturer** (`ModuleType.Manufacturer`): each module/transceiver may be a different vendor than the chassis, so it is the first non-empty of that component's own `state/mfg-name`, the resolved device manufacturer, then `Unknown`. The module model stays its `state/part-no` (else `Unknown`).
 - **Platform / software version**: the discovered software version (`/system/state/software-version`) is appended to the operator's `platform` default, which acts as the NOS-name prefix (e.g. platform `Arista EOS` + version `4.30.1F` → platform `Arista EOS 4.30.1F`). If only one is present, that value alone is used; if neither is present, no platform is set.
 
 ## Requirements

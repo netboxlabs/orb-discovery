@@ -22,4 +22,5 @@ components:
     type: state/type
     serial: state/serial-no
     part: state/part-no
+    mfg_name: state/mfg-name
     parent: state/parent
