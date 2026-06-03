@@ -440,12 +440,16 @@ func (r *Runner) streamLoop(host string, profile *mapping.Profile, pruneEvery ti
 			}
 			if n.SyncDone {
 				if pruneEvery == 0 {
-					rotate() // ON_CHANGE: prune on the initial-sync boundary + sets synced
-				} else {
+					rotate() // ON_CHANGE: prune on the initial-sync boundary, sets synced, triggers flush
+				} else if !synced {
 					// SAMPLE: the initial full snapshot is complete — allow flushes.
 					// Pruning stays ticker-driven (rotate on the prune interval); we
-					// do NOT rotate here, only release the pre-sync flush gate.
+					// do NOT rotate here. Trigger the debouncer so the completed
+					// snapshot flushes promptly: a debounce signal that fired pre-sync
+					// was consumed and dropped by the synced gate, so we must not rely
+					// on it to flush the now-complete initial snapshot.
 					synced = true
+					deb.Trigger()
 				}
 			}
 		case <-prune:

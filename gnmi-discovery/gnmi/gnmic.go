@@ -96,6 +96,19 @@ func (s *gnmicSession) Capabilities(ctx context.Context) (*CapabilitiesResult, e
 // Callers MUST call Session.Close() when the stream ends; the runner satisfies
 // this via `defer sess.Close()` in runOnce.
 func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string, sampleIntervalMs int) (<-chan Notification, <-chan error, error) {
+	// Tear down any prior subscription on this session FIRST — before building or
+	// validating the new request — so a build error can never leak the previous
+	// producer goroutine + gRPC stream. The auto-fallback ladder in the runner
+	// calls Subscribe twice on the same session (on_change, then sample on
+	// downgrade); cancelling subCancel is the only thing that unblocks a producer
+	// parked in gnmic's retry-timer wait. Cancel funcs are idempotent, so a later
+	// Close() calling subCancel again is harmless. StopSubscription is a no-op for
+	// an unknown name, so it is safe before any prior subscribe.
+	if s.subCancel != nil {
+		s.subCancel()
+	}
+	s.tg.StopSubscription(subscriptionName)
+
 	subOpts := []gapi.GNMIOption{
 		gapi.SubscriptionListModeSTREAM(),
 		gapi.Encoding("json_ietf"),
@@ -120,19 +133,6 @@ func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string,
 	if err != nil {
 		return nil, nil, fmt.Errorf("gnmi subscribe: build request: %w", err)
 	}
-
-	// Tear down any prior subscription on this session before starting a new
-	// one. The auto-fallback ladder in the runner calls Subscribe twice on the
-	// same session (on_change, then sample on downgrade); without this, the
-	// first producer goroutine + gRPC stream would leak until the parent ctx is
-	// cancelled, because cancelling subCancel is the only thing that unblocks a
-	// producer parked in gnmic's retry-timer wait. Cancel funcs are idempotent,
-	// so a later Close() calling subCancel again is harmless. StopSubscription
-	// is a no-op for an unknown name, so it is safe before any prior subscribe.
-	if s.subCancel != nil {
-		s.subCancel()
-	}
-	s.tg.StopSubscription(subscriptionName)
 
 	// Own context for the producer so Close() can stop it independently of the
 	// caller's ctx lifetime.

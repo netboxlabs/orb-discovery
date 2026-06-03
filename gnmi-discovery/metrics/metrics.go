@@ -38,7 +38,9 @@ func SetupMetricsExport(ctx context.Context, logg *slog.Logger, endpoint string,
 	if strings.Contains(endpoint, "://") {
 		endpointOpt = otlpmetric.WithEndpointURL(endpoint)
 	} else {
-		endpointOpt = otlpmetric.WithEndpoint(endpoint)
+		// WithEndpoint expects a bare host:port; a trailing slash (e.g.
+		// "localhost:4317/") would be passed through unnormalized, so strip it.
+		endpointOpt = otlpmetric.WithEndpoint(strings.TrimRight(endpoint, "/"))
 	}
 	exporter, err := otlpmetric.New(ctx,
 		endpointOpt,
