@@ -103,12 +103,13 @@ def _mgmt_interface_from_system_info(system_info: dict) -> dict:
     Build the NAPALM ``get_interfaces`` entry for the management interface.
 
     The management port is not listed by ``show interface all``; its MAC
-    comes from ``show system info``. Returns ``{"management": {...}}`` when a
-    usable management IP is present, else ``{}``. A missing / malformed MAC
-    yields an empty ``mac_address`` rather than dropping the entry.
+    comes from ``show system info``. Emitted whenever a usable management IP
+    (IPv4 or IPv6) is present — i.e. exactly the cases where
+    ``get_interfaces_ip`` emits a management IP, so the MAC is carried even on
+    IPv6-only management planes. A missing / malformed MAC yields an empty
+    ``mac_address`` rather than dropping the entry.
     """
-    mgmt_ipv4 = (system_info.get("ip-address") or "").strip().lower()
-    if not mgmt_ipv4 or mgmt_ipv4 in _PANOS_MGMT_SKIP:
+    if not _mgmt_ip_from_system_info(system_info):
         return {}
     mac_raw = (system_info.get("mac-address") or "").strip()
     try:

@@ -100,20 +100,26 @@ def _mgmt_ipv6_from_system_info(text: str) -> tuple[str, int] | None:
     return addr, plen_int
 
 
-def _mgmt_interface_from_system_info(sysinfo_parsed: list[dict]) -> dict:
+def _mgmt_interface_from_system_info(sysinfo_parsed: list[dict], sysinfo_out: str) -> dict:
     """
     Build the NAPALM ``get_interfaces`` entry for the management interface.
 
     The management port is not listed by ``show interface hardware``; its MAC
-    comes from ``show system info``. Returns ``{"management": {...}}`` when a
-    usable management IP is present, else ``{}``. A missing / malformed MAC
-    yields an empty ``mac_address`` rather than dropping the entry.
+    comes from ``show system info``. Emitted whenever a usable management IP
+    (IPv4 or IPv6) is present — i.e. exactly the cases where
+    ``get_interfaces_ip`` emits a management IP, so the MAC is carried even on
+    IPv6-only management planes. A missing / malformed MAC yields an empty
+    ``mac_address`` rather than dropping the entry.
     """
     if not sysinfo_parsed:
         return {}
     row = sysinfo_parsed[0]
     ipv4 = (row.get("ip_address") or "").strip()
-    if not ipv4 or ipv4.lower() in ("unknown", "n/a", "0.0.0.0"):
+    ipv4_usable = bool(ipv4) and ipv4.lower() not in ("unknown", "n/a", "0.0.0.0")
+    # The global IPv6 lives in the raw text (ntc-template doesn't expose it),
+    # mirroring get_interfaces_ip's IPv6 sourcing.
+    ipv6_usable = _mgmt_ipv6_from_system_info(sysinfo_out) is not None
+    if not (ipv4_usable or ipv6_usable):
         return {}
     mac_raw = (row.get("mac_address") or "").strip()
     try:
@@ -458,7 +464,7 @@ class PANOSSHDriver(_napalm_base.NetworkDriver):
         sysinfo_parsed = parse_output(
             platform="paloalto_panos", command="show system info", data=sysinfo_out
         )
-        interfaces.update(_mgmt_interface_from_system_info(sysinfo_parsed))
+        interfaces.update(_mgmt_interface_from_system_info(sysinfo_parsed, sysinfo_out))
 
         return interfaces
 
@@ -501,10 +507,7 @@ class PANOSSHDriver(_napalm_base.NetworkDriver):
                 and netmask
                 and netmask.lower() not in ("unknown", "n/a", "0.0.0.0")
             ):
-                try:
-                    prefix = _netmask_to_prefix(netmask)
-                except ValueError:
-                    prefix = None
+                prefix = _netmask_to_prefix(netmask)
                 if prefix is not None:
                     interfaces_ip.setdefault("management", {}).setdefault("ipv4", {})[ipv4] = {
                         "prefix_length": prefix
