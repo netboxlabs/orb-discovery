@@ -6,13 +6,15 @@ import (
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
+	"github.com/netboxlabs/orb-discovery/gnmi-discovery/gnmi"
 	"github.com/stretchr/testify/require"
 )
 
 func newTestManager(t *testing.T) *Manager {
 	t.Helper()
 	var client diode.Client
-	m, err := NewManager(context.Background(), slog.Default(), client)
+	m, err := NewManager(context.Background(), slog.Default(), client,
+		&gnmi.FakeDialer{Session: &gnmi.FakeSession{}}, "")
 	require.NoError(t, err)
 	return m
 }

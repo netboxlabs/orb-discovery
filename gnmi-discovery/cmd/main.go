@@ -11,6 +11,7 @@ import (
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/config"
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/env"
+	"github.com/netboxlabs/orb-discovery/gnmi-discovery/gnmi"
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/metrics"
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/policy"
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/server"
@@ -40,10 +41,9 @@ func main() {
 	otelEndpoint := flag.String("otel-endpoint", "", "OpenTelemetry exporter endpoint (e.g. localhost:4317)."+
 		" Environment variable can be used by wrapping it in ${} (e.g. ${OTEL_ENDPOINT})")
 	otelExportPeriod := flag.Int("otel-export-period", 10, "Period in seconds between OpenTelemetry exports")
-	profilesDir := flag.String("profiles-dir", "", "directory of gNMI profile overrides") // profiles-dir: wired into the policy manager in M6
+	profilesDir := flag.String("profiles-dir", "", "directory of gNMI profile overrides")
 
 	flag.Parse()
-	_ = profilesDir
 
 	if *help {
 		fmt.Fprintf(os.Stderr, "Usage of gnmi-discovery:\n")
@@ -102,7 +102,8 @@ func main() {
 		logger.Info("metrics export configured", "endpoint", *otelEndpoint, "period_seconds", *otelExportPeriod)
 	}
 
-	policyManager, err := policy.NewManager(ctx, logger, client)
+	dialer := &gnmi.GnmicDialer{}
+	policyManager, err := policy.NewManager(ctx, logger, client, dialer, env.ResolveEnvOrExit(*profilesDir))
 	if err != nil {
 		logger.Error("failed to create policy manager", "error", err)
 		os.Exit(1)

@@ -12,6 +12,8 @@ import (
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/config"
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/env"
+	"github.com/netboxlabs/orb-discovery/gnmi-discovery/gnmi"
+	"github.com/netboxlabs/orb-discovery/gnmi-discovery/mapping"
 	"gopkg.in/yaml.v3"
 )
 
@@ -26,15 +28,23 @@ type Manager struct {
 	client   diode.Client
 	logger   *slog.Logger
 	ctx      context.Context
+	dialer   gnmi.Dialer
+	store    *mapping.Store
 }
 
 // NewManager returns a new policy manager.
-func NewManager(ctx context.Context, logger *slog.Logger, client diode.Client) (*Manager, error) {
+func NewManager(ctx context.Context, logger *slog.Logger, client diode.Client, dialer gnmi.Dialer, profilesDir string) (*Manager, error) {
+	store, err := mapping.LoadProfilesWithLogger(profilesDir, logger)
+	if err != nil {
+		return nil, err
+	}
 	return &Manager{
 		ctx:      ctx,
 		client:   client,
 		logger:   logger,
 		policies: make(map[string]*Runner),
+		dialer:   dialer,
+		store:    store,
 	}, nil
 }
 
@@ -157,17 +167,27 @@ func (m *Manager) HasPolicy(name string) bool {
 	return ok
 }
 
-// StartPolicy starts a policy (no-op runner until M6).
+// StartPolicy starts a policy.
 func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 	if len(policy.Scope.Targets) == 0 {
 		return fmt.Errorf("%s : no targets found in the policy", name)
+	}
+	// Fail fast on a pinned-but-unknown profile: a profile: typo is explicit
+	// operator intent, not something to silently fall back from. This surfaces
+	// as a 400 from POST /policies rather than a silent _base run.
+	for _, tgt := range policy.Scope.Targets {
+		if tgt.Profile != "" {
+			if _, ok := m.store.Get(tgt.Profile); !ok {
+				return fmt.Errorf("%s : target %s pins unknown profile %q", name, tgt.Host, tgt.Profile)
+			}
+		}
 	}
 	m.mu.Lock()
 	if _, ok := m.policies[name]; ok {
 		m.mu.Unlock()
 		return nil // already running
 	}
-	r, err := NewRunner(m.ctx, m.logger, name, policy, m.client)
+	r, err := NewRunner(m.ctx, m.logger, name, policy, m.client, m.dialer, m.store)
 	if err != nil {
 		m.mu.Unlock()
 		return err
@@ -218,18 +238,42 @@ func (m *Manager) GetCapabilities() []string {
 
 // Status is the per-policy status surfaced by /api/v1/status.
 type Status struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
+	Name    string         `json:"name"`
+	Status  string         `json:"status"`
+	Targets []TargetStatus `json:"targets,omitempty"`
+	Runs    []*Run         `json:"runs,omitempty"`
 }
 
-// GetPolicyStatuses returns the status of all known policies. (M6.3 replaces the
-// body with run-derived status; the RLock guard stays.)
+// GetPolicyStatuses returns each running policy with its derived status,
+// per-target state, and recent runs. RLock guards the map iteration against
+// concurrent StartPolicy/StopPolicy; the per-runner Runs()/TargetStatuses()
+// take their own locks (no nesting on m.mu).
 func (m *Manager) GetPolicyStatuses() []Status {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	statuses := make([]Status, 0, len(m.policies))
 	for name, r := range m.policies {
-		statuses = append(statuses, Status{Name: name, Status: r.State()})
+		runs := r.Runs()
+		statuses = append(statuses, Status{
+			Name:    name,
+			Status:  deriveStatus(runs),
+			Targets: r.TargetStatuses(),
+			Runs:    runs,
+		})
 	}
 	return statuses
+}
+
+// deriveStatus returns "unknown" with no runs, "running" if any run is in-flight,
+// otherwise the latest run's status. Runs are newest-first (GetRunsForPolicy).
+func deriveStatus(runs []*Run) string {
+	if len(runs) == 0 {
+		return "unknown"
+	}
+	for _, r := range runs {
+		if r.Status == RunStatusRunning {
+			return string(RunStatusRunning)
+		}
+	}
+	return string(runs[0].Status)
 }
