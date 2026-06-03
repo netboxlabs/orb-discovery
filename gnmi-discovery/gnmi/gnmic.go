@@ -14,6 +14,11 @@ import (
 	"github.com/openconfig/gnmic/pkg/api/target"
 )
 
+// subscriptionName is the gnmic-side name used for this session's single
+// subscription. It is reused across re-Subscribe calls (the auto-fallback
+// ladder) so StopSubscription can clear the prior subscription's state.
+const subscriptionName = "default"
+
 // GnmicDialer implements Dialer using the gnmic library.
 type GnmicDialer struct{}
 
@@ -116,12 +121,25 @@ func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string,
 		return nil, nil, fmt.Errorf("gnmi subscribe: build request: %w", err)
 	}
 
+	// Tear down any prior subscription on this session before starting a new
+	// one. The auto-fallback ladder in the runner calls Subscribe twice on the
+	// same session (on_change, then sample on downgrade); without this, the
+	// first producer goroutine + gRPC stream would leak until the parent ctx is
+	// cancelled, because cancelling subCancel is the only thing that unblocks a
+	// producer parked in gnmic's retry-timer wait. Cancel funcs are idempotent,
+	// so a later Close() calling subCancel again is harmless. StopSubscription
+	// is a no-op for an unknown name, so it is safe before any prior subscribe.
+	if s.subCancel != nil {
+		s.subCancel()
+	}
+	s.tg.StopSubscription(subscriptionName)
+
 	// Own context for the producer so Close() can stop it independently of the
 	// caller's ctx lifetime.
 	subCtx, cancel := context.WithCancel(ctx)
 	s.subCancel = cancel
 
-	rawResp, rawErr := s.tg.SubscribeChan(subCtx, req, "default")
+	rawResp, rawErr := s.tg.SubscribeChan(subCtx, req, subscriptionName)
 
 	notes := make(chan Notification)
 	errs := make(chan error, 1)
