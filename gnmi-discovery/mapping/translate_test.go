@@ -22,6 +22,17 @@ func TestListKeyAndLeafNonMatch(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestListKeyAndLeafSlashInName(t *testing.T) {
+	// Key value contains a slash (e.g. "Ethernet1/1"); split must happen on ']'
+	// not on '/', so the full key and the correct leaf are recovered.
+	key, leaf, ok := listKeyAndLeaf(
+		"/interfaces/interface[name=Ethernet1/1]/state/mtu",
+		"/interfaces/interface")
+	require.True(t, ok)
+	require.Equal(t, "Ethernet1/1", key)
+	require.Equal(t, "state/mtu", leaf)
+}
+
 func TestTranslateDeviceAndInterfaces(t *testing.T) {
 	store, err := LoadProfiles("")
 	require.NoError(t, err)

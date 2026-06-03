@@ -37,6 +37,9 @@ func annotateEntitiesWithRunID(entities []diode.Entity, runID string) {
 		case *diode.ModuleBay:
 			if v != nil {
 				set(&v.Metadata)
+				if v.Device != nil {
+					set(&v.Device.Metadata)
+				}
 			}
 		}
 	}
