@@ -87,6 +87,39 @@ def _mgmt_ipv6_from_system_info(text: str) -> tuple[str, int] | None:
         return None
 
 
+def _mgmt_interface_from_system_info(sysinfo_parsed: list[dict]) -> dict:
+    """
+    Build the NAPALM ``get_interfaces`` entry for the management interface.
+
+    The management port is not listed by ``show interface hardware``; its MAC
+    comes from ``show system info``. Returns ``{"management": {...}}`` when a
+    usable management IP is present, else ``{}``. A missing / malformed MAC
+    yields an empty ``mac_address`` rather than dropping the entry.
+    """
+    if not sysinfo_parsed:
+        return {}
+    row = sysinfo_parsed[0]
+    ipv4 = (row.get("ip_address") or "").strip()
+    if not ipv4 or ipv4.lower() in ("unknown", "n/a", "0.0.0.0"):
+        return {}
+    mac_raw = (row.get("mac_address") or "").strip()
+    try:
+        mgmt_mac = normalize_mac(mac_raw) if mac_raw else ""
+    except Exception:
+        mgmt_mac = ""
+    return {
+        "management": {
+            "is_up": True,
+            "is_enabled": True,
+            "description": "",
+            "last_flapped": -1.0,
+            "mtu": 0,
+            "speed": 0.0,
+            "mac_address": mgmt_mac,
+        }
+    }
+
+
 # ---------------------------------------------------------------------------
 # get_modules — module / module bay discovery via PAN-OS SSH CLI
 # ---------------------------------------------------------------------------
@@ -405,6 +438,14 @@ class PANOSSHDriver(_napalm_base.NetworkDriver):
                 "speed": parent_data["speed"],
                 "mac_address": parent_data["mac_address"],
             }
+
+        # Management interface — MAC comes from `show system info`; the mgmt
+        # port is not listed by `show interface hardware`.
+        sysinfo_out = self.device.send_command("show system info")
+        sysinfo_parsed = parse_output(
+            platform="paloalto_panos", command="show system info", data=sysinfo_out
+        )
+        interfaces.update(_mgmt_interface_from_system_info(sysinfo_parsed))
 
         return interfaces
 
