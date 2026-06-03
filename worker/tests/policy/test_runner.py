@@ -643,6 +643,7 @@ def test_setup_falls_back_to_setup_when_describe_not_implemented(
     mock_load_class,
     mock_diode_client,
     mock_run_store,
+    caplog,
 ):
     """Legacy backend (describe() raises) → metadata read via a throwaway setup() instance."""
     mock_backend_class = mock_load_class.return_value
@@ -655,9 +656,11 @@ def test_setup_falls_back_to_setup_when_describe_not_implemented(
 
     with patch.object(policy_runner.scheduler, "start"), patch.object(
         policy_runner.scheduler, "add_job"
-    ):
+    ), caplog.at_level("WARNING"):
         policy_runner.setup("policy1", sample_diode_config, sample_policy, mock_run_store)
 
+    # The deprecation is surfaced to operators at the fallback site.
+    assert "deprecated setup() fallback" in caplog.text
     # Throwaway instance's setup() was used to read metadata; identity flows through.
     mock_backend_class.return_value.setup.assert_called_once_with()
     assert policy_runner.metadata.name == "legacy_backend"

@@ -4,9 +4,11 @@
 
 import importlib
 import inspect
+import warnings
 from collections.abc import Iterable
 
 from netboxlabs.diode.sdk.ingester import Entity
+from typing_extensions import deprecated
 
 from worker.models import Metadata, Policy
 
@@ -42,6 +44,22 @@ class Backend:
         """
         self.ingest_callback = ingest_callback
 
+    def __init_subclass__(cls, **kwargs) -> None:
+        """Warn once, at class-definition time, when a subclass still relies on setup()."""
+        super().__init_subclass__(**kwargs)
+        overrides_setup = any(
+            "setup" in klass.__dict__ for klass in cls.__mro__[:-1] if klass is not Backend
+        )
+        has_describe = cls.describe.__func__ is not Backend.describe.__func__
+        if overrides_setup and not has_describe:
+            warnings.warn(
+                f"{cls.__module__}.{cls.__qualname__} overrides Backend.setup(), which is "
+                "deprecated — implement the describe() classmethod instead "
+                "(the setup() fallback will be removed in worker v2.0).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
     @classmethod
     def describe(cls) -> Metadata:
         """
@@ -55,9 +73,19 @@ class Backend:
         """
         raise NotImplementedError("The 'describe' classmethod must be implemented.")
 
+    @deprecated(
+        "Implement the describe() classmethod instead; "
+        "the setup() fallback will be removed in worker v2.0."
+    )
     def setup(self) -> Metadata:
         """
         Set up the backend.
+
+        .. deprecated::
+            Implement the :meth:`describe` classmethod instead. The worker reads
+            metadata via ``describe()`` and only falls back to a throwaway
+            instance's ``setup()`` for legacy backends; that fallback is
+            scheduled for removal in worker v2.0.
 
         Returns
         -------

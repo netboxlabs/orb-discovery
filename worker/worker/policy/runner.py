@@ -147,6 +147,12 @@ class PolicyRunner:
         except NotImplementedError:
             # Legacy backend: construct a throwaway just to read its metadata. The
             # real, callback-bearing instance is constructed below.
+            logger.warning(
+                "%s does not implement describe(); reading metadata via the "
+                "deprecated setup() fallback (scheduled for removal in worker "
+                "v2.0) — implement the describe() classmethod.",
+                backend_class.__name__,
+            )
             return backend_class().setup()
 
     def _build_ingest_callback(self):
