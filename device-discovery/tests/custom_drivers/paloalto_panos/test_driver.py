@@ -175,3 +175,19 @@ def test_mgmt_ip_from_system_info_skips_non_fe80_link_local():
     assert _mgmt_ip_from_system_info(
         {"ip-address": "10.0.0.5", "netmask": "255.0.255.0"}
     ) == {}
+
+
+def test_system_info_dict_returns_empty_on_malformed_xml():
+    """A malformed `show system info` XML body degrades to {} (ExpatError)."""
+    from custom_napalm.paloalto_panos import PANOSDriver
+
+    class _BadXmlDevice:
+        def op(self, cmd=""):
+            return None
+
+        def xml_root(self):
+            return "<response><result><system>"  # truncated / unparseable
+
+    drv = object.__new__(PANOSDriver)
+    drv.device = _BadXmlDevice()
+    assert drv._system_info_dict() == {}

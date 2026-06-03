@@ -202,3 +202,24 @@ def test_mgmt_ipv6_from_system_info_skips_non_fe80_link_local():
     from custom_napalm.paloalto_panos_ssh import _mgmt_ipv6_from_system_info
     assert _mgmt_ipv6_from_system_info("ip-address-v6: fe9c::1/64\n") is None
     assert _mgmt_ipv6_from_system_info("ip-address-v6: feaf::2/64\n") is None
+
+
+def test_mgmt_interface_skipped_when_netmask_unparseable():
+    """Valid IPv4 + unparseable/0.0.0.0 netmask (no IPv6) emits no mgmt interface, mirroring get_interfaces_ip()."""
+    from custom_napalm.paloalto_panos_ssh import _mgmt_interface_from_system_info
+
+    # Non-contiguous netmask, no IPv6 -> no management interface.
+    assert _mgmt_interface_from_system_info(
+        [{"ip_address": "10.0.0.5", "netmask": "255.0.255.0", "mac_address": "0e:0c:29:aa:bb:00"}],
+        "ip-address-v6: unknown\n",
+    ) == {}
+    # 0.0.0.0 netmask, no IPv6 -> no management interface.
+    assert _mgmt_interface_from_system_info(
+        [{"ip_address": "10.0.0.5", "netmask": "0.0.0.0", "mac_address": "0e:0c:29:aa:bb:00"}],
+        "",
+    ) == {}
+    # Sanity: valid netmask still emits.
+    assert "management" in _mgmt_interface_from_system_info(
+        [{"ip_address": "10.0.0.5", "netmask": "255.255.255.0", "mac_address": "0e:0c:29:aa:bb:00"}],
+        "",
+    )

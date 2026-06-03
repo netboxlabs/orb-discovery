@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import xml.etree.ElementTree
+import xml.parsers.expat
 
 import napalm.base as _napalm_base
 import pan.xapi
@@ -453,11 +454,12 @@ class PANOSDriver(_napalm_base.NetworkDriver):
         """
         Return the parsed ``show system info`` ``result.system`` dict, or {} on failure.
 
-        Best-effort: a failed RPC (``PanXapiError`` — timeout / auth / API error) or
-        an unexpected payload yields {} rather than propagating. The management-IP
-        lookup is an enhancement layered on top of ``get_interfaces()`` /
-        ``get_interfaces_ip()``, so a system-info failure must not fail those getters
-        once their data-plane interfaces/IPs have been collected.
+        Best-effort: a failed RPC (``PanXapiError`` — timeout / auth / API error), a
+        malformed/unparseable XML body (``ExpatError``), or an unexpected payload all
+        yield {} rather than propagating. The management-IP lookup is an enhancement
+        layered on top of ``get_interfaces()`` / ``get_interfaces_ip()``, so a
+        system-info failure must not fail those getters once their data-plane
+        interfaces/IPs have been collected.
         """
         try:
             self.device.op(cmd="<show><system><info></info></system></show>")
@@ -465,6 +467,9 @@ class PANOSDriver(_napalm_base.NetworkDriver):
             system = parsed["response"]["result"]["system"]
         except pan.xapi.PanXapiError as e:
             logger.warning("paloalto_panos: `show system info` RPC failed: %s", e)
+            return {}
+        except xml.parsers.expat.ExpatError as e:
+            logger.warning("paloalto_panos: `show system info` XML parse failed: %s", e)
             return {}
         except (KeyError, TypeError, AttributeError):
             return {}

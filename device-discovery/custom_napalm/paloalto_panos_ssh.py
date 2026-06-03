@@ -128,7 +128,16 @@ def _mgmt_interface_from_system_info(sysinfo_parsed: list[dict], sysinfo_out: st
         return {}
     row = sysinfo_parsed[0]
     ipv4 = (row.get("ip_address") or "").strip()
-    ipv4_usable = bool(ipv4) and ipv4.lower() not in ("unknown", "n/a", "0.0.0.0")
+    netmask = (row.get("netmask") or "").strip()
+    # Require a parseable netmask too, so this emits the management interface for
+    # EXACTLY the cases get_interfaces_ip() emits a management IPv4 — otherwise a
+    # malformed / 0.0.0.0 netmask would yield an interface-without-IP artifact.
+    ipv4_usable = (
+        bool(ipv4)
+        and ipv4.lower() not in ("unknown", "n/a", "0.0.0.0")
+        and netmask.lower() not in ("unknown", "n/a", "0.0.0.0")
+        and _netmask_to_prefix(netmask) is not None
+    )
     # The global IPv6 lives in the raw text (ntc-template doesn't expose it),
     # mirroring get_interfaces_ip's IPv6 sourcing.
     ipv6_usable = _mgmt_ipv6_from_system_info(sysinfo_out) is not None
