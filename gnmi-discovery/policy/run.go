@@ -12,9 +12,12 @@ import (
 type RunStatus string
 
 const (
-	RunStatusRunning   RunStatus = "running"
+	// RunStatusRunning indicates an in-progress flush run.
+	RunStatusRunning RunStatus = "running"
+	// RunStatusCompleted indicates a successfully finished flush run.
 	RunStatusCompleted RunStatus = "completed"
-	RunStatusFailed    RunStatus = "failed"
+	// RunStatusFailed indicates a flush run that ended with an error.
+	RunStatusFailed RunStatus = "failed"
 )
 
 const maxRunsPerTarget = 3

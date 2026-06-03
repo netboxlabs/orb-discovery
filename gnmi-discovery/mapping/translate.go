@@ -20,17 +20,17 @@ func listKeyAndLeaf(path, listPath string) (key, leaf string, ok bool) {
 		return "", "", false
 	}
 	rest := path[len(prefix):]
-	close := strings.Index(rest, "]")
-	if close < 0 {
+	closeBracket := strings.Index(rest, "]")
+	if closeBracket < 0 {
 		return "", "", false
 	}
-	kv := rest[:close] // e.g. name=Eth1
+	kv := rest[:closeBracket] // e.g. name=Eth1
 	eq := strings.Index(kv, "=")
 	if eq < 0 {
 		return "", "", false
 	}
 	key = kv[eq+1:]
-	leaf = strings.TrimPrefix(rest[close+1:], "/")
+	leaf = strings.TrimPrefix(rest[closeBracket+1:], "/")
 	return key, leaf, true
 }
 

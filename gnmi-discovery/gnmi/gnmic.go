@@ -298,7 +298,7 @@ func pathToString(p *gnmiproto.Path) string {
 			}
 			sort.Strings(keys)
 			for _, k := range keys {
-				b.WriteString(fmt.Sprintf("[%s=%s]", k, elem.GetKey()[k]))
+				fmt.Fprintf(&b, "[%s=%s]", k, elem.GetKey()[k])
 			}
 		}
 	}
@@ -330,8 +330,8 @@ func decodeTypedValue(tv *gnmiproto.TypedValue) any {
 		return v.UintVal
 	case *gnmiproto.TypedValue_BoolVal:
 		return v.BoolVal
-	case *gnmiproto.TypedValue_FloatVal:
-		return float64(v.FloatVal)
+	case *gnmiproto.TypedValue_FloatVal: //nolint:staticcheck // deprecated proto field, kept for legacy target compat
+		return float64(v.FloatVal) //nolint:staticcheck
 	case *gnmiproto.TypedValue_DoubleVal:
 		return v.DoubleVal
 	case *gnmiproto.TypedValue_BytesVal:
@@ -350,9 +350,9 @@ func decodeTypedValue(tv *gnmiproto.TypedValue) any {
 			return decoded
 		}
 		return string(v.JsonVal)
-	case *gnmiproto.TypedValue_DecimalVal:
-		if v.DecimalVal != nil {
-			return float64(v.DecimalVal.GetDigits()) / math.Pow10(int(v.DecimalVal.GetPrecision()))
+	case *gnmiproto.TypedValue_DecimalVal: //nolint:staticcheck // deprecated proto field, kept for legacy target compat
+		if v.DecimalVal != nil { //nolint:staticcheck
+			return float64(v.DecimalVal.GetDigits()) / math.Pow10(int(v.DecimalVal.GetPrecision())) //nolint:staticcheck
 		}
 		return nil
 	default:

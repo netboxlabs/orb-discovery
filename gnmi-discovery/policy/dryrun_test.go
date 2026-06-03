@@ -49,14 +49,16 @@ func TestDryRunEOSGolden(t *testing.T) {
 	}
 	rec := &recordingClient{}
 	pol := config.Policy{
-		Config: config.PolicyConfig{Mode: config.ModeOnChange, DebounceMs: 30,
-			Defaults: config.Defaults{Site: "lab", Role: "spine", Interface: config.InterfaceDefaults{Type: "other"}}},
+		Config: config.PolicyConfig{
+			Mode: config.ModeOnChange, DebounceMs: 30,
+			Defaults: config.Defaults{Site: "lab", Role: "spine", Interface: config.InterfaceDefaults{Type: "other"}},
+		},
 		Scope: config.Scope{Targets: []config.Target{{Host: "10.0.0.1:6030", Profile: "arista_eos"}}},
 	}
 	r, err := NewRunner(context.Background(), slog.Default(), "eos", pol, rec, &gnmi.FakeDialer{Session: fake}, store)
 	require.NoError(t, err)
 	r.Start()
-	defer r.Stop()
+	defer func() { require.NoError(t, r.Stop()) }()
 
 	require.Eventually(t, func() bool { return rec.count() >= 1 }, 2*time.Second, 20*time.Millisecond)
 

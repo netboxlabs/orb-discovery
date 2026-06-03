@@ -59,9 +59,9 @@ policies:
 		policies["p1"].Scope.Targets[1].Host,
 		policies["p1"].Scope.Targets[2].Host,
 	}
-	require.Equal(t, "[2001:db8::1]:9339", hosts[0]) // bare IPv6 bracketed + default port
+	require.Equal(t, "[2001:db8::1]:9339", hosts[0])  // bare IPv6 bracketed + default port
 	require.Equal(t, "[2001:db8::2]:57400", hosts[1]) // already has port -> untouched
-	require.Equal(t, "10.0.0.5:6030", hosts[2])        // already has port -> untouched
+	require.Equal(t, "10.0.0.5:6030", hosts[2])       // already has port -> untouched
 }
 
 func TestValidateRejectsBadMode(t *testing.T) {

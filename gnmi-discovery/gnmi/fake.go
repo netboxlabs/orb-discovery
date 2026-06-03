@@ -22,14 +22,14 @@ type FakeSession struct {
 }
 
 // Capabilities returns the scripted capabilities.
-func (f *FakeSession) Capabilities(ctx context.Context) (*CapabilitiesResult, error) {
+func (f *FakeSession) Capabilities(_ context.Context) (*CapabilitiesResult, error) {
 	return f.Caps, f.CapsErr
 }
 
 // Subscribe replays the scripted stream. OnChange replays once then errors (if
 // StreamErr set) or blocks; SAMPLE re-sends the snapshot set every SampleReplay,
 // matching real SAMPLE semantics so periodic reconciliation/pruning is exercised.
-func (f *FakeSession) Subscribe(ctx context.Context, mode Mode, paths []string, sampleIntervalMs int) (<-chan Notification, <-chan error, error) {
+func (f *FakeSession) Subscribe(ctx context.Context, mode Mode, _ []string, _ int) (<-chan Notification, <-chan error, error) {
 	if mode == OnChange && !f.OnChangeSupport {
 		return nil, nil, errors.New("on_change unsupported")
 	}
@@ -80,7 +80,7 @@ func (f *FakeSession) Subscribe(ctx context.Context, mode Mode, paths []string, 
 }
 
 // GetOnce returns the scripted Get result.
-func (f *FakeSession) GetOnce(ctx context.Context, paths []string) (Notification, error) {
+func (f *FakeSession) GetOnce(_ context.Context, _ []string) (Notification, error) {
 	return f.GetResult, f.GetErr
 }
 
@@ -91,6 +91,6 @@ func (f *FakeSession) Close() error { f.Closed = true; return nil }
 type FakeDialer struct{ Session *FakeSession }
 
 // Dial returns the configured fake session.
-func (d *FakeDialer) Dial(ctx context.Context, target TargetSpec) (Session, error) {
+func (d *FakeDialer) Dial(_ context.Context, _ TargetSpec) (Session, error) {
 	return d.Session, nil
 }

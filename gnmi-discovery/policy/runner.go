@@ -54,7 +54,8 @@ type targetState struct {
 
 // NewRunner creates a runner for a policy.
 func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy config.Policy,
-	client diode.Client, dialer gnmi.Dialer, store *mapping.Store) (*Runner, error) {
+	client diode.Client, dialer gnmi.Dialer, store *mapping.Store,
+) (*Runner, error) {
 	rctx, cancel := context.WithCancel(ctx)
 	return &Runner{
 		ctx: rctx, cancel: cancel, logger: logger, name: name, policy: policy,
@@ -164,7 +165,7 @@ func (r *Runner) runOnce(t config.Target, model *mapping.DeviceModel, deb *Debou
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 
 	// M-6: do not swallow Capabilities errors — they usually mean auth/TLS/model
 	// detection failed. Log, surface in status, count, then fall back to _base
@@ -323,7 +324,8 @@ func (r *Runner) runOnce(t config.Target, model *mapping.DeviceModel, deb *Debou
 // the auto ladder downgrades on a sync rejection or an early (pre-data) stream
 // failure, but not on a productive flap.
 func (r *Runner) runOpenStream(host string, profile *mapping.Profile, pruneEvery time.Duration,
-	notes <-chan gnmi.Notification, errs <-chan error, model *mapping.DeviceModel, deb *Debouncer, flush func()) error {
+	notes <-chan gnmi.Notification, errs <-chan error, model *mapping.DeviceModel, deb *Debouncer, flush func(),
+) error {
 	metrics.GetSubscriptionsActive().Add(r.ctx, 1)
 	defer metrics.GetSubscriptionsActive().Add(r.ctx, -1)
 	return r.streamLoop(host, profile, pruneEvery, notes, errs, model, deb, flush)
@@ -344,7 +346,8 @@ func (r *Runner) runOpenStream(host string, profile *mapping.Profile, pruneEvery
 // was not seen this cycle, the cycle advances WITHOUT pruning so a partial/empty
 // dump can never wipe a good persisted model.
 func (r *Runner) streamLoop(host string, profile *mapping.Profile, pruneEvery time.Duration,
-	notes <-chan gnmi.Notification, errs <-chan error, model *mapping.DeviceModel, deb *Debouncer, flush func()) error {
+	notes <-chan gnmi.Notification, errs <-chan error, model *mapping.DeviceModel, deb *Debouncer, flush func(),
+) error {
 	keep := int64(1)
 	var prune <-chan time.Time
 	// MED-2: ON_CHANGE holds flushes until the first sync_response so a slow

@@ -71,7 +71,7 @@ func TestTranslateAppliesRichDefaults(t *testing.T) {
 	require.NoError(t, err)
 	base, _ := store.Get("_base")
 	snap := map[string]any{
-		"/system/state/hostname":                                     "spine1",
+		"/system/state/hostname":                                   "spine1",
 		"/interfaces/interface[name=Ethernet1]/state/admin-status": "UP",
 	}
 	defaults := &config.Defaults{
@@ -156,11 +156,11 @@ func TestTranslateComponents(t *testing.T) {
 	require.NoError(t, err)
 	base, _ := store.Get("_base")
 	snap := map[string]any{
-		"/system/state/hostname":                               "spine1",
-		"/components/component[name=Linecard1]/state/type":    "LINECARD",
+		"/system/state/hostname":                                "spine1",
+		"/components/component[name=Linecard1]/state/type":      "LINECARD",
 		"/components/component[name=Linecard1]/state/serial-no": "JPE123",
-		"/components/component[name=Linecard1]/state/part-no": "DCS-7500",
-		"/components/component[name=PowerSupply1]/state/type": "POWER_SUPPLY",
+		"/components/component[name=Linecard1]/state/part-no":   "DCS-7500",
+		"/components/component[name=PowerSupply1]/state/type":   "POWER_SUPPLY",
 	}
 	entities := Translate(base, snap, &config.Defaults{Device: config.DeviceDefaults{Manufacturer: "Arista"}})
 	var modules []*diode.Module

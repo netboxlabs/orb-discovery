@@ -31,6 +31,7 @@ func (c *recordingClient) Ingest(_ context.Context, entities []diode.Entity, opt
 	c.lastOptN = len(opts) // diode.IngestOption is opaque; we can only assert one was passed
 	return &diodepb.IngestResponse{Errors: c.respErrors}, nil
 }
+
 func (c *recordingClient) IngestProto(context.Context, []*diodepb.Entity, ...diode.IngestOption) (*diodepb.IngestResponse, error) {
 	return &diodepb.IngestResponse{}, nil
 }
@@ -62,7 +63,7 @@ func TestRunnerOnChangeIngests(t *testing.T) {
 		&gnmi.FakeDialer{Session: fake}, store)
 	require.NoError(t, err)
 	r.Start()
-	defer r.Stop()
+	defer func() { require.NoError(t, r.Stop()) }()
 
 	require.Eventually(t, func() bool { return client.count() >= 1 }, 2*time.Second, 20*time.Millisecond)
 }
@@ -80,14 +81,16 @@ func TestRunnerAutoFallsBackToSample(t *testing.T) {
 	}
 	client := &recordingClient{}
 	pol := config.Policy{
-		Config: config.PolicyConfig{Mode: config.ModeAuto, DebounceMs: 30, SampleIntervalMs: 100,
-			Defaults: config.Defaults{Site: "lab", Role: "router"}},
+		Config: config.PolicyConfig{
+			Mode: config.ModeAuto, DebounceMs: 30, SampleIntervalMs: 100,
+			Defaults: config.Defaults{Site: "lab", Role: "router"},
+		},
 		Scope: config.Scope{Targets: []config.Target{{Host: "10.0.0.2:57400"}}},
 	}
 	r, err := NewRunner(context.Background(), slog.Default(), "p2", pol, client, &gnmi.FakeDialer{Session: fake}, store)
 	require.NoError(t, err)
 	r.Start()
-	defer r.Stop()
+	defer func() { require.NoError(t, r.Stop()) }()
 	require.Eventually(t, func() bool { return client.count() >= 1 }, 2*time.Second, 20*time.Millisecond)
 }
 
@@ -106,15 +109,17 @@ func TestRunnerAutoDoesNotDemoteOnStreamError(t *testing.T) {
 		StreamErr: errors.New("transient stream drop"), // …but the stream keeps dropping
 	}
 	pol := config.Policy{
-		Config: config.PolicyConfig{Mode: config.ModeAuto, DebounceMs: 20,
-			Defaults: config.Defaults{Site: "lab", Role: "router"}},
+		Config: config.PolicyConfig{
+			Mode: config.ModeAuto, DebounceMs: 20,
+			Defaults: config.Defaults{Site: "lab", Role: "router"},
+		},
 		Scope: config.Scope{Targets: []config.Target{{Host: "h:1"}}},
 	}
 	r, err := NewRunner(context.Background(), slog.Default(), "p3", pol, &recordingClient{}, &gnmi.FakeDialer{Session: fake}, store)
 	require.NoError(t, err)
 	r.backoffBase = 15 * time.Millisecond // force quick reconnects within the test
 	r.Start()
-	defer r.Stop()
+	defer func() { require.NoError(t, r.Stop()) }()
 
 	// span several reconnect cycles; active_mode must stay on_change, never sample/get
 	deadline := time.After(300 * time.Millisecond)
@@ -154,15 +159,17 @@ func TestRunnerAutoDowngradesOnAsyncOnChangeRejection(t *testing.T) {
 	}
 	client := &recordingClient{}
 	pol := config.Policy{
-		Config: config.PolicyConfig{Mode: config.ModeAuto, DebounceMs: 20, SampleIntervalMs: 100,
-			Defaults: config.Defaults{Site: "lab", Role: "router"}},
+		Config: config.PolicyConfig{
+			Mode: config.ModeAuto, DebounceMs: 20, SampleIntervalMs: 100,
+			Defaults: config.Defaults{Site: "lab", Role: "router"},
+		},
 		Scope: config.Scope{Targets: []config.Target{{Host: "10.0.0.9:6030"}}},
 	}
 	r, err := NewRunner(context.Background(), slog.Default(), "p7", pol, client, &gnmi.FakeDialer{Session: fake}, store)
 	require.NoError(t, err)
 	r.backoffBase = 15 * time.Millisecond // quick reconnect/downgrade within the test
 	r.Start()
-	defer r.Stop()
+	defer func() { require.NoError(t, r.Stop()) }()
 
 	require.Eventually(t, func() bool { return client.count() >= 1 }, 2*time.Second, 20*time.Millisecond,
 		"runner must downgrade to SAMPLE and ingest after the async ON_CHANGE rejection")
@@ -193,14 +200,16 @@ func TestRunnerOnChangeHoldsFlushUntilSync(t *testing.T) {
 	}
 	client := &recordingClient{}
 	pol := config.Policy{
-		Config: config.PolicyConfig{Mode: config.ModeOnChange, DebounceMs: 20,
-			Defaults: config.Defaults{Site: "lab", Role: "router"}},
+		Config: config.PolicyConfig{
+			Mode: config.ModeOnChange, DebounceMs: 20,
+			Defaults: config.Defaults{Site: "lab", Role: "router"},
+		},
 		Scope: config.Scope{Targets: []config.Target{{Host: "h:1"}}},
 	}
 	r, err := NewRunner(context.Background(), slog.Default(), "p4", pol, client, &gnmi.FakeDialer{Session: fake}, store)
 	require.NoError(t, err)
 	r.Start()
-	defer r.Stop()
+	defer func() { require.NoError(t, r.Stop()) }()
 	time.Sleep(200 * time.Millisecond) // well past debounce; with no sync, flush stays suppressed
 	require.Equal(t, 0, client.count(), "must not ingest a partial device before the initial sync completes")
 }
@@ -219,14 +228,16 @@ func TestRunnerStampsRunIDAndRecordsRun(t *testing.T) {
 	}
 	client := &recordingClient{}
 	pol := config.Policy{
-		Config: config.PolicyConfig{Mode: config.ModeOnChange, DebounceMs: 20,
-			Defaults: config.Defaults{Site: "lab", Role: "router"}},
+		Config: config.PolicyConfig{
+			Mode: config.ModeOnChange, DebounceMs: 20,
+			Defaults: config.Defaults{Site: "lab", Role: "router"},
+		},
 		Scope: config.Scope{Targets: []config.Target{{Host: "h:1"}}},
 	}
 	r, err := NewRunner(context.Background(), slog.Default(), "p5", pol, client, &gnmi.FakeDialer{Session: fake}, store)
 	require.NoError(t, err)
 	r.Start()
-	defer r.Stop()
+	defer func() { require.NoError(t, r.Stop()) }()
 
 	require.Eventually(t, func() bool { return client.count() >= 1 }, 2*time.Second, 20*time.Millisecond)
 
@@ -262,14 +273,16 @@ func TestRunnerMarksRunFailedOnDiodeErrors(t *testing.T) {
 	// Go error is nil but Diode reports per-entity errors — must be a failed run.
 	client := &recordingClient{respErrors: []string{"device: name required"}}
 	pol := config.Policy{
-		Config: config.PolicyConfig{Mode: config.ModeOnChange, DebounceMs: 20,
-			Defaults: config.Defaults{Site: "lab", Role: "router"}},
+		Config: config.PolicyConfig{
+			Mode: config.ModeOnChange, DebounceMs: 20,
+			Defaults: config.Defaults{Site: "lab", Role: "router"},
+		},
 		Scope: config.Scope{Targets: []config.Target{{Host: "h:1"}}},
 	}
 	r, err := NewRunner(context.Background(), slog.Default(), "p6", pol, client, &gnmi.FakeDialer{Session: fake}, store)
 	require.NoError(t, err)
 	r.Start()
-	defer r.Stop()
+	defer func() { require.NoError(t, r.Stop()) }()
 
 	require.Eventually(t, func() bool {
 		runs := r.Runs()
@@ -287,13 +300,17 @@ func TestRunnerMarksRunFailedOnDiodeErrors(t *testing.T) {
 // connects and sets up the subscription.
 func TestRunnerReportsActiveMode(t *testing.T) {
 	store, _ := mapping.LoadProfiles("")
-	fake := &gnmi.FakeSession{Caps: &gnmi.CapabilitiesResult{Vendor: "Arista"}, OnChangeSupport: true,
-		OnChangeStream: []gnmi.Notification{{SyncDone: true}}}
-	pol := config.Policy{Config: config.PolicyConfig{Mode: config.ModeOnChange, DebounceMs: 20},
-		Scope: config.Scope{Targets: []config.Target{{Host: "h:1"}}}}
+	fake := &gnmi.FakeSession{
+		Caps: &gnmi.CapabilitiesResult{Vendor: "Arista"}, OnChangeSupport: true,
+		OnChangeStream: []gnmi.Notification{{SyncDone: true}},
+	}
+	pol := config.Policy{
+		Config: config.PolicyConfig{Mode: config.ModeOnChange, DebounceMs: 20},
+		Scope:  config.Scope{Targets: []config.Target{{Host: "h:1"}}},
+	}
 	r, _ := NewRunner(context.Background(), slog.Default(), "p", pol, &recordingClient{}, &gnmi.FakeDialer{Session: fake}, store)
 	r.Start()
-	defer r.Stop()
+	defer func() { _ = r.Stop() }()
 	require.Eventually(t, func() bool {
 		for _, ts := range r.TargetStatuses() {
 			if ts.Host == "h:1" && ts.ActiveMode == "on_change" {

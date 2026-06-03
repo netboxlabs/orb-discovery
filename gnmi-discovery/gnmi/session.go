@@ -31,9 +31,12 @@ type CapabilitiesResult struct {
 type Mode string
 
 const (
+	// OnChange requests a gNMI ON_CHANGE subscription (event-driven updates).
 	OnChange Mode = "on_change"
-	Sample   Mode = "sample"
-	Get      Mode = "get"
+	// Sample requests a gNMI SAMPLE subscription (periodic snapshots).
+	Sample Mode = "sample"
+	// Get requests a one-shot gNMI Get (polled delivery).
+	Get Mode = "get"
 )
 
 // Session is one connection to a gNMI target.
