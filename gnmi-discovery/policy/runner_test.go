@@ -214,6 +214,75 @@ func TestRunnerOnChangeHoldsFlushUntilSync(t *testing.T) {
 	require.Equal(t, 0, client.count(), "must not ingest a partial device before the initial sync completes")
 }
 
+// Codex — SAMPLE must ALSO hold the first debounced flush until the initial
+// sync_response (gNMI STREAM/SAMPLE emits one after the first full dump), so a
+// slow initial SAMPLE dump can't ingest a partial device. The fake delivers
+// hostname+interface data but NO SyncDone, and the prune interval is long enough
+// that no prune tick lands within the assertion window — so the only thing that
+// could release the flush gate would be a (here-absent) sync_response.
+func TestRunnerSampleHoldsFlushUntilSync(t *testing.T) {
+	store, err := mapping.LoadProfiles("")
+	require.NoError(t, err)
+	fake := &gnmi.FakeSession{
+		Caps: &gnmi.CapabilitiesResult{Vendor: "Arista"},
+		SampleSnapshots: []gnmi.Notification{
+			{Updates: []gnmi.Update{{Path: "/system/state/hostname", Value: "r1"}}},
+			{Updates: []gnmi.Update{{Path: "/interfaces/interface[name=Eth1]/state/admin-status", Value: "UP"}}},
+			// no SyncDone
+		},
+		SampleReplay: 2 * time.Second, // don't re-send within the window
+	}
+	client := &recordingClient{}
+	pol := config.Policy{
+		Config: config.PolicyConfig{
+			// long sample interval => prune ticker (the fallback) won't fire in-window
+			Mode: config.ModeSample, DebounceMs: 20, SampleIntervalMs: 5000,
+			Defaults: config.Defaults{Site: "lab", Role: "router"},
+		},
+		Scope: config.Scope{Targets: []config.Target{{Host: "h:1"}}},
+	}
+	r, err := NewRunner(context.Background(), slog.Default(), "p-sample-hold", pol, client, &gnmi.FakeDialer{Session: fake}, store)
+	require.NoError(t, err)
+	r.Start()
+	defer func() { require.NoError(t, r.Stop()) }()
+	time.Sleep(200 * time.Millisecond) // well past debounce; no sync + no prune tick => suppressed
+	require.Equal(t, 0, client.count(), "SAMPLE must not ingest a partial device before the initial sync (sync_response) arrives")
+}
+
+// Codex — FALLBACK: a non-compliant SAMPLE target that never emits a
+// sync_response must still ingest after the first prune tick (one sample
+// interval), because rotate() also releases the flush gate (synced=true). The
+// fake delivers data with NO SyncDone and a short sample interval; the prune tick
+// must eventually flush.
+func TestRunnerSampleFlushesViaPruneTickWithoutSync(t *testing.T) {
+	store, err := mapping.LoadProfiles("")
+	require.NoError(t, err)
+	fake := &gnmi.FakeSession{
+		Caps: &gnmi.CapabilitiesResult{Vendor: "Arista"},
+		SampleSnapshots: []gnmi.Notification{
+			{Updates: []gnmi.Update{{Path: "/system/state/hostname", Value: "r1"}}},
+			// no SyncDone — target never sends sync_response
+		},
+		SampleReplay: 40 * time.Millisecond,
+	}
+	client := &recordingClient{}
+	pol := config.Policy{
+		Config: config.PolicyConfig{
+			// short sample interval => prune ticker fires quickly and is the only
+			// path to synced=true here (no SyncDone in the stream)
+			Mode: config.ModeSample, DebounceMs: 20, SampleIntervalMs: 60,
+			Defaults: config.Defaults{Site: "lab", Role: "router"},
+		},
+		Scope: config.Scope{Targets: []config.Target{{Host: "h:1"}}},
+	}
+	r, err := NewRunner(context.Background(), slog.Default(), "p-sample-fallback", pol, client, &gnmi.FakeDialer{Session: fake}, store)
+	require.NoError(t, err)
+	r.Start()
+	defer func() { require.NoError(t, r.Stop()) }()
+	require.Eventually(t, func() bool { return client.count() >= 1 }, 2*time.Second, 20*time.Millisecond,
+		"SAMPLE without sync_response must still ingest after the first prune tick (fallback)")
+}
+
 // M6.2 — run_id is stamped on every ingested entity, WithIngestMetadata is
 // passed, and a completed run is recorded in the RunStore.
 func TestRunnerStampsRunIDAndRecordsRun(t *testing.T) {

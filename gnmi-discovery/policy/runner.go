@@ -350,11 +350,14 @@ func (r *Runner) streamLoop(host string, profile *mapping.Profile, pruneEvery ti
 ) error {
 	keep := int64(1)
 	var prune <-chan time.Time
-	// MED-2: ON_CHANGE holds flushes until the first sync_response so a slow
-	// initial dump (longer than debounce_ms) can't ingest a half-built device.
-	// SAMPLE starts "synced" — its first prune tick is a full interval away and
-	// we want the debounced first ingest promptly, not delayed by the interval.
-	synced := pruneEvery > 0
+	// MED-2 / Codex: BOTH modes hold the first flush until the initial full view
+	// is complete, so a slow initial dump (longer than debounce_ms) can't ingest a
+	// half-built device. gNMI STREAM subscriptions (ON_CHANGE *and* SAMPLE) emit a
+	// sync_response after the initial full dump, so we gate on it for both — see
+	// the SyncDone handling below. FALLBACK: rotate() also sets synced=true, so a
+	// non-compliant target that never emits sync_response still ingests after the
+	// first prune tick (SAMPLE) / never blocks indefinitely.
+	synced := false
 	if pruneEvery > 0 {
 		keep = 2
 		ticker := time.NewTicker(pruneEvery)
@@ -435,8 +438,15 @@ func (r *Runner) streamLoop(host string, profile *mapping.Profile, pruneEvery ti
 			if model.Apply(n) {
 				deb.Trigger()
 			}
-			if pruneEvery == 0 && n.SyncDone {
-				rotate() // ON_CHANGE: prune on the initial-sync boundary
+			if n.SyncDone {
+				if pruneEvery == 0 {
+					rotate() // ON_CHANGE: prune on the initial-sync boundary + sets synced
+				} else {
+					// SAMPLE: the initial full snapshot is complete — allow flushes.
+					// Pruning stays ticker-driven (rotate on the prune interval); we
+					// do NOT rotate here, only release the pre-sync flush gate.
+					synced = true
+				}
 			}
 		case <-prune:
 			rotate() // SAMPLE: prune per interval (nil channel blocks forever for ON_CHANGE)
