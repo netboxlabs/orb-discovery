@@ -92,6 +92,36 @@ def _netmask_to_prefix(netmask: str) -> int | None:
         return None
 
 
+def _mgmt_interface_from_system_info(system_info: dict) -> dict:
+    """
+    Build the NAPALM ``get_interfaces`` entry for the management interface.
+
+    The management port is not listed by ``show interface all``; its MAC
+    comes from ``show system info``. Returns ``{"management": {...}}`` when a
+    usable management IP is present, else ``{}``. A missing / malformed MAC
+    yields an empty ``mac_address`` rather than dropping the entry.
+    """
+    mgmt_ipv4 = (system_info.get("ip-address") or "").strip().lower()
+    if not mgmt_ipv4 or mgmt_ipv4 in _PANOS_MGMT_SKIP:
+        return {}
+    mac_raw = (system_info.get("mac-address") or "").strip()
+    try:
+        mgmt_mac = standardize_mac(mac_raw) if mac_raw else ""
+    except Exception:
+        mgmt_mac = ""
+    return {
+        "management": {
+            "is_up": True,
+            "is_enabled": True,
+            "speed": 0.0,
+            "last_flapped": -1.0,
+            "mtu": 0,
+            "mac_address": mgmt_mac,
+            "description": "",
+        }
+    }
+
+
 def _mgmt_ip_from_system_info(system_info: dict) -> dict:
     """
     Build the NAPALM ``interface_ip`` fragment for the management interface.
@@ -491,6 +521,10 @@ class PANOSDriver(_napalm_base.NetworkDriver):
                 "mac_address": standardize_mac(interface_info.get("mac")),
                 "description": interface_descr.get(intf, ""),
             }
+
+        # Management interface — MAC comes from `show system info`
+        # (the management port is not listed by `show interface all`).
+        interface_dict.update(_mgmt_interface_from_system_info(self._system_info_dict()))
 
         return interface_dict
 
