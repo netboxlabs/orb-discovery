@@ -223,3 +223,20 @@ def test_mgmt_interface_skipped_when_netmask_unparseable():
         [{"ip_address": "10.0.0.5", "netmask": "255.255.255.0", "mac_address": "0e:0c:29:aa:bb:00"}],
         "",
     )
+
+
+def test_mgmt_ipv6_from_system_info_accepts_both_field_labels():
+    """Both `ip-address-v6:` and the XML-style `ipv6-address:` labels are parsed."""
+    from custom_napalm.paloalto_panos_ssh import _mgmt_ipv6_from_system_info
+    assert _mgmt_ipv6_from_system_info("ip-address-v6: 2001:db8::5/64\n") == ("2001:db8::5", 64)
+    assert _mgmt_ipv6_from_system_info("ipv6-address: 2001:db8::5/64\n") == ("2001:db8::5", 64)
+    # The separate link-local field must never be picked up by the global-address regex.
+    assert _mgmt_ipv6_from_system_info("ipv6-link-local-address: fe80::1/64\n") is None
+
+
+def test_mgmt_ipv6_from_system_info_skips_malformed_and_scoped():
+    """A non-IPv6 / malformed value or a zone-index address is rejected."""
+    from custom_napalm.paloalto_panos_ssh import _mgmt_ipv6_from_system_info
+    assert _mgmt_ipv6_from_system_info("ipv6-address: not-an-addr/64\n") is None
+    assert _mgmt_ipv6_from_system_info("ipv6-address: 10.0.0.5/24\n") is None  # IPv4, not v6
+    assert _mgmt_ipv6_from_system_info("ipv6-address: 2001:db8::1%mgmt/64\n") is None  # zone index

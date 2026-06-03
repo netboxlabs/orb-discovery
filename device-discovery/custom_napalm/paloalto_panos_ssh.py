@@ -78,7 +78,14 @@ def _is_link_local_v6(addr: str) -> bool:
 
 # `show system info` does not expose ip-address-v6 through the ntc-template,
 # so parse it directly from the raw text.
-_PANOS_SSH_MGMT_IPV6_RE = re.compile(r"^ip-address-v6:\s+(?P<addr>\S+)", re.MULTILINE)
+# Accept both observed labels: `ip-address-v6` (this repo's real-device-derived
+# `show system info` fixture) and `ipv6-address` (the XML-API tag name / Palo Alto
+# CLI examples). Matching both is robust to the exact CLI build without betting on
+# one. The `^...:` anchor + word boundary means it never matches the separate
+# `ipv6-link-local-address:` line.
+_PANOS_SSH_MGMT_IPV6_RE = re.compile(
+    r"^(?:ip-address-v6|ipv6-address):\s+(?P<addr>\S+)", re.MULTILINE
+)
 
 
 def _mgmt_ipv6_from_system_info(text: str) -> tuple[str, int] | None:
@@ -101,6 +108,15 @@ def _mgmt_ipv6_from_system_info(text: str) -> tuple[str, int] | None:
     addr, plen = raw.rsplit("/", 1)
     if _is_link_local_v6(addr):
         logger.debug("paloalto_panos_ssh: skipping mgmt IPv6 %s: link-local", raw)
+        return None
+    # Validate it's a real, unscoped IPv6 before emitting — a malformed value or a
+    # zone index (e.g. `2001:db8::1%mgmt`) would otherwise crash translation when
+    # `ipaddress.ip_network(addr/prefix)` is built downstream.
+    try:
+        if ipaddress.ip_address(addr).version != 6 or "%" in addr:
+            raise ValueError
+    except ValueError:
+        logger.debug("paloalto_panos_ssh: skipping mgmt IPv6 %s: not a valid global IPv6", raw)
         return None
     try:
         plen_int = int(plen)

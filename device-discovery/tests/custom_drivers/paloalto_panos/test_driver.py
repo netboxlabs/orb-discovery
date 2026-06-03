@@ -191,3 +191,12 @@ def test_system_info_dict_returns_empty_on_malformed_xml():
     drv = object.__new__(PANOSDriver)
     drv.device = _BadXmlDevice()
     assert drv._system_info_dict() == {}
+
+
+def test_mgmt_ip_from_system_info_skips_malformed_and_scoped_ipv6():
+    """A malformed / non-v6 / zone-index mgmt IPv6 is rejected, not emitted."""
+    from custom_napalm.paloalto_panos import _mgmt_ip_from_system_info
+    assert _mgmt_ip_from_system_info({"ipv6-address": "not-an-addr/64"}) == {}
+    assert _mgmt_ip_from_system_info({"ipv6-address": "2001:db8::1%mgmt/64"}) == {}
+    # IPv4 in the v6 field is rejected on the v6 path.
+    assert _mgmt_ip_from_system_info({"ipv6-address": "10.0.0.5/24"}) == {}

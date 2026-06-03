@@ -127,6 +127,15 @@ def _usable_mgmt_ipv6(ipv6_raw: str) -> tuple[str, int] | None:
     if _is_link_local_v6(addr):
         logger.debug("paloalto_panos: skipping mgmt IPv6 %s: link-local", raw)
         return None
+    # Validate it's a real, unscoped IPv6 before emitting — a malformed value or a
+    # zone index (e.g. `2001:db8::1%mgmt`) would otherwise crash translation when
+    # `ipaddress.ip_network(addr/prefix)` is built downstream.
+    try:
+        if ipaddress.ip_address(addr).version != 6 or "%" in addr:
+            raise ValueError
+    except ValueError:
+        logger.debug("paloalto_panos: skipping mgmt IPv6 %s: not a valid global IPv6", raw)
+        return None
     try:
         plen_int = int(plen)
     except ValueError:
