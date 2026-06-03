@@ -9,6 +9,12 @@ interfaces:
     description: config/description
     admin_status: state/admin-status
     mtu: state/mtu
+    # H-2: speed (ethernet/state/port-speed) and lag_member
+    # (ethernet/state/aggregate-id) are intentionally NOT curated yet — the
+    # translator does not map them, so subscribing would only churn the model
+    # without changing the Diode payload. Add them back here together with their
+    # Interface.Speed / Interface.Lag mapping in translate.go (deferred
+    # enrichment; see spec §6 interfaces).
 components:
   list_path: /components/component
   keys:
