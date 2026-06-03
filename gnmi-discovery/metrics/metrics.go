@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,8 +34,14 @@ func SetupMetricsExport(ctx context.Context, logg *slog.Logger, endpoint string,
 		return nil
 	}
 
+	var endpointOpt otlpmetric.Option
+	if strings.Contains(endpoint, "://") {
+		endpointOpt = otlpmetric.WithEndpointURL(endpoint)
+	} else {
+		endpointOpt = otlpmetric.WithEndpoint(endpoint)
+	}
 	exporter, err := otlpmetric.New(ctx,
-		otlpmetric.WithEndpointURL(endpoint),
+		endpointOpt,
 		otlpmetric.WithInsecure(),
 	)
 	if err != nil {

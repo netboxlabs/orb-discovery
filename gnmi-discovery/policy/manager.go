@@ -205,8 +205,8 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 		return err
 	}
 	m.policies[name] = r
+	r.Start() // under the lock: wg.Add happens-before any StopPolicy's wg.Wait
 	m.mu.Unlock()
-	r.Start() // launch goroutines outside the lock
 	return nil
 }
 
