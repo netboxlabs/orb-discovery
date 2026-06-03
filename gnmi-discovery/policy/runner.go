@@ -385,6 +385,16 @@ func (r *Runner) streamLoop(host string, profile *mapping.Profile, pruneEvery ti
 		deb.Trigger()
 	}
 
+	// earlyFailureErr wraps e as errEarlyStreamFailure when the stream never
+	// produced data, or returns e as-is when it did (a productive flap). This
+	// logic is shared by the errs-case and the notes-closed drain below.
+	earlyFailureErr := func(e error) error {
+		if !productive {
+			return fmt.Errorf("subscription failed before any data: %w", errEarlyStreamFailure)
+		}
+		return e
+	}
+
 	for {
 		select {
 		case <-r.ctx.Done():
@@ -395,14 +405,24 @@ func (r *Runner) streamLoop(host string, profile *mapping.Profile, pruneEvery ti
 				continue
 			}
 			if e != nil {
-				if !productive {
-					// Mode unviable: the stream errored before yielding any data.
-					return fmt.Errorf("subscription failed before any data: %w", errEarlyStreamFailure)
-				}
-				return e // working mode flapped → transient, reconnect at preferred mode
+				return earlyFailureErr(e)
 			}
 		case n, ok := <-notes:
 			if !ok {
+				// notes closed: the producer may have buffered a non-nil error on
+				// errs before closing both channels. Drain it non-blocking so a
+				// notes-close that wins the select race doesn't silently discard an
+				// early-failure error, causing the auto ladder to see a clean exit
+				// (return nil) and reconnect at on_change instead of downgrading.
+				if errs != nil {
+					select {
+					case e := <-errs:
+						if e != nil {
+							return earlyFailureErr(e)
+						}
+					default:
+					}
+				}
 				return nil
 			}
 			productive = true

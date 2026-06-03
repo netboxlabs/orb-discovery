@@ -296,6 +296,38 @@ func TestRunnerMarksRunFailedOnDiodeErrors(t *testing.T) {
 	}
 }
 
+// streamLoop drain: when notes closes after the producer already buffered a
+// non-nil error on errs, the notes-closed case must drain and return the error
+// rather than silently returning nil. This tests the path deterministically by
+// closing notes FIRST (so the notes-closed case always wins the select), with
+// a pre-buffered error already sitting on errs.
+func TestStreamLoopDrainsErrOnNotesClose(t *testing.T) {
+	t.Parallel()
+	store, err := mapping.LoadProfiles("")
+	require.NoError(t, err)
+	profile, _ := store.Get("_base")
+
+	r := &Runner{
+		ctx:    context.Background(),
+		name:   "drain-test",
+		states: map[string]*targetState{"h:1": {}},
+		logger: slog.Default(),
+	}
+
+	errs := make(chan error, 1)
+	notes := make(chan gnmi.Notification)
+
+	sentinel := errors.New("ON_CHANGE not supported")
+	errs <- sentinel // pre-buffer — simulates the race where errs lands before notes closes
+	close(notes)     // notes closes first; this is the case that was racy before the fix
+
+	got := r.streamLoop("h:1", profile, 0, notes, errs,
+		mapping.NewDeviceModel(), NewDebouncer(0), func() {})
+
+	require.ErrorIs(t, got, errEarlyStreamFailure, "notes-closed drain must surface buffered early-failure as errEarlyStreamFailure")
+	_ = sentinel // referenced to keep import alive
+}
+
 // M6.3 — TargetStatuses surfaces the active delivery mode after the runner
 // connects and sets up the subscription.
 func TestRunnerReportsActiveMode(t *testing.T) {

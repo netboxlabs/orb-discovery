@@ -148,10 +148,19 @@ func GetAPIResponseLatency() metric.Float64Histogram {
 	return GetHistogram("api_response_latency", "Time taken to respond to API requests")
 }
 
-// ResetMeter resets the meter to nil for testing purposes.
+// ResetMeter resets the meter and all cached instruments to nil for testing
+// purposes. It also resets shutdownOnce so that a subsequent Setup +
+// SetupMetricsExport + Shutdown cycle works correctly in test sequences that
+// need to exercise multiple setup/teardown rounds.
 func ResetMeter() {
 	cacheLock.Lock()
 	meter = nil
+	meterProvider = nil
+	counterCache = map[string]metric.Int64Counter{}
+	upDownCounterCache = map[string]metric.Int64UpDownCounter{}
+	histogramCache = map[string]metric.Float64Histogram{}
+	gaugeCache = map[string]metric.Int64Gauge{}
+	shutdownOnce = sync.Once{}
 	cacheLock.Unlock()
 }
 
@@ -159,9 +168,13 @@ func ResetMeter() {
 // second real shutdown attempt (e.g. from both the signal handler and the
 // server-error path) is a no-op that returns nil.
 //
-// Calling Shutdown before SetupMetricsExport (meterProvider == nil) is also a
-// no-op, but does NOT consume the Once — a later Setup + Shutdown cycle still
-// works correctly (important for test sequences that call ResetMeter).
+// Calling Shutdown before SetupMetricsExport (meterProvider == nil) is a
+// no-op that does NOT consume the Once, so a later SetupMetricsExport +
+// Shutdown cycle still works correctly.
+//
+// Test sequences that need multiple setup/teardown cycles must call ResetMeter
+// between cycles; ResetMeter resets both the meter and shutdownOnce under the
+// cache lock, ensuring a fresh shutdown guard for the next cycle.
 func Shutdown(ctx context.Context) error {
 	cacheLock.Lock()
 	mp := meterProvider
