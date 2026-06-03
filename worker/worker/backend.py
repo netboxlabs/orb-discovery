@@ -23,19 +23,17 @@ class Backend:
         """
         Construct the Backend.
 
-        The worker constructs the Backend with no arguments and assigns
-        ``ingest_callback`` afterwards, once its dependencies are ready — so
-        ``__init__`` does not receive it from the current worker. The
-        parameter and ``**kwargs`` stay accepted for forward-compatibility
-        and for integrations that pass them directly.
+        The worker reads the backend's metadata first (via the ``describe()``
+        classmethod, or a throwaway legacy ``setup()`` instance that receives
+        no callback), then constructs the instance it will run with
+        ``ingest_callback`` passed here. Every dependency the callback uses
+        is ready by that point, so the callback is usable as soon as the
+        instance exists — just do not invoke it from ``__init__`` itself.
 
         Args:
         ----
             ingest_callback: Optional callable that ingests entities or
-                reports errors outside of the ``run()`` cycle. **Do not
-                invoke from ``__init__`` or ``setup()`` — the callback is
-                only usable starting after the worker finishes constructing
-                the Backend (i.e. after ``setup()`` returns).** See
+                reports errors outside of the ``run()`` cycle. See
                 ``worker.exceptions`` for the exception hierarchy it may
                 raise.
             **kwargs: Forward-compat door for additional resources worker
