@@ -8,6 +8,7 @@ Implements only the methods used by device-discovery:
 Uses ntc-templates 9.x for structured parsing.
 """
 
+import ipaddress
 import logging
 import re
 
@@ -53,17 +54,26 @@ def _parse_uptime(uptime_str: str) -> int:
 
 
 def _netmask_to_prefix(netmask: str) -> int | None:
-    """Convert dotted-decimal netmask to a CIDR prefix length; None if malformed."""
-    octets = netmask.split(".")
-    if len(octets) != 4:
-        return None
+    """
+    Convert dotted-decimal netmask to a CIDR prefix length; None if malformed.
+
+    Uses stdlib ``ipaddress`` so wrong-length, out-of-range, AND non-contiguous
+    masks (e.g. ``255.0.255.0``) are all rejected — a plain 1-bit count would
+    accept the latter as a bogus ``/16``.
+    """
     try:
-        values = [int(o) for o in octets]
+        return ipaddress.ip_network(f"0.0.0.0/{netmask}").prefixlen
     except ValueError:
         return None
-    if any(v < 0 or v > 255 for v in values):
-        return None
-    return sum(bin(v).count("1") for v in values)
+
+
+def _is_link_local_v6(addr: str) -> bool:
+    """Return True if *addr* is an IPv6 link-local address (the full ``fe80::/10``)."""
+    try:
+        return ipaddress.ip_address(addr).is_link_local
+    except ValueError:
+        # Unparseable — fall back to the fe80::/10 textual prefixes (fe8/fe9/fea/feb).
+        return addr.lower().startswith(("fe8", "fe9", "fea", "feb"))
 
 
 # `show system info` does not expose ip-address-v6 through the ntc-template,
@@ -75,20 +85,23 @@ def _mgmt_ipv6_from_system_info(text: str) -> tuple[str, int] | None:
     """
     Extract ``(addr, prefix)`` for the management IPv6 from ``show system info``.
 
-    Returns ``None`` for unknown / link-local (``fe80::``) / prefix-less values
-    — skipping a prefix-less address rather than assuming ``/64`` mirrors the
-    checkpoint_gaia / dell_ftos / aruba_os convention.
+    Returns ``None`` for unknown / link-local (``fe80::/10``) / prefix-less
+    values — skipping a prefix-less address rather than assuming ``/64`` mirrors
+    the checkpoint_gaia / dell_ftos / aruba_os convention.
     """
     m = _PANOS_SSH_MGMT_IPV6_RE.search(text or "")
     if not m:
         return None
     raw = m.group("addr").strip()
-    if raw.lower() in ("unknown", "n/a", "") or raw.lower().startswith("fe80"):
+    if raw.lower() in ("unknown", "n/a", ""):
         return None
     if "/" not in raw:
         logger.debug("paloalto_panos_ssh: skipping mgmt IPv6 %s: no prefix length", raw)
         return None
     addr, plen = raw.rsplit("/", 1)
+    if _is_link_local_v6(addr):
+        logger.debug("paloalto_panos_ssh: skipping mgmt IPv6 %s: link-local", raw)
+        return None
     try:
         plen_int = int(plen)
     except ValueError:

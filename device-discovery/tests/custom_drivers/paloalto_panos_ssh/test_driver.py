@@ -187,3 +187,18 @@ def test_mgmt_ipv6_from_system_info_skips_out_of_range_prefix():
     """An IPv6 prefix outside 0..128 is rejected."""
     from custom_napalm.paloalto_panos_ssh import _mgmt_ipv6_from_system_info
     assert _mgmt_ipv6_from_system_info("ip-address-v6: 2001:db8::1/999\n") is None
+
+
+def test_netmask_to_prefix_rejects_non_contiguous_and_malformed():
+    """Non-contiguous / wrong-length / out-of-range netmasks return None."""
+    from custom_napalm.paloalto_panos_ssh import _netmask_to_prefix
+    assert _netmask_to_prefix("255.255.255.0") == 24
+    assert _netmask_to_prefix("255.0.255.0") is None
+    assert _netmask_to_prefix("255.255.255.255.255") is None
+
+
+def test_mgmt_ipv6_from_system_info_skips_non_fe80_link_local():
+    """Link-local beyond fe80 (fe80::/10) is rejected, not just the fe80 prefix."""
+    from custom_napalm.paloalto_panos_ssh import _mgmt_ipv6_from_system_info
+    assert _mgmt_ipv6_from_system_info("ip-address-v6: fe9c::1/64\n") is None
+    assert _mgmt_ipv6_from_system_info("ip-address-v6: feaf::2/64\n") is None

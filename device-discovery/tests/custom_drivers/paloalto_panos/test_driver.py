@@ -154,3 +154,24 @@ def test_system_info_dict_returns_empty_on_panxapi_error():
     drv = object.__new__(PANOSDriver)
     drv.device = _BoomDevice()
     assert drv._system_info_dict() == {}
+
+
+def test_netmask_to_prefix_rejects_non_contiguous_and_malformed():
+    """Non-contiguous / wrong-length / out-of-range netmasks return None."""
+    from custom_napalm.paloalto_panos import _netmask_to_prefix
+    assert _netmask_to_prefix("255.255.255.0") == 24
+    assert _netmask_to_prefix("255.0.255.0") is None       # non-contiguous
+    assert _netmask_to_prefix("255.255.255.255.255") is None  # 5 octets
+    assert _netmask_to_prefix("255.255.300.0") is None     # out of range
+
+
+def test_mgmt_ip_from_system_info_skips_non_fe80_link_local():
+    """Link-local beyond fe80 (fe80::/10 -> fe9x/feax/febx) is skipped."""
+    from custom_napalm.paloalto_panos import _mgmt_ip_from_system_info
+    assert _mgmt_ip_from_system_info(
+        {"ip-address": "10.0.0.5", "netmask": "255.255.255.0", "ipv6-address": "fe9c::1/64"}
+    ) == {"management": {"ipv4": {"10.0.0.5": {"prefix_length": 24}}}}
+    # Non-contiguous mgmt netmask -> no IPv4 emitted.
+    assert _mgmt_ip_from_system_info(
+        {"ip-address": "10.0.0.5", "netmask": "255.0.255.0"}
+    ) == {}

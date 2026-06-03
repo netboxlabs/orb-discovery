@@ -7,6 +7,7 @@ Implements only the methods used by device-discovery:
   get_facts, get_interfaces, get_interfaces_ip, get_config, get_vlans.
 """
 
+import ipaddress
 import json
 import logging
 import re
@@ -85,17 +86,55 @@ _PANOS_MGMT_SKIP = {"", "unknown", "n/a", "0.0.0.0"}
 
 
 def _netmask_to_prefix(netmask: str) -> int | None:
-    """Convert dotted-decimal netmask to a CIDR prefix length; None if malformed."""
-    octets = netmask.split(".")
-    if len(octets) != 4:
-        return None
+    """
+    Convert dotted-decimal netmask to a CIDR prefix length; None if malformed.
+
+    Uses stdlib ``ipaddress`` so wrong-length, out-of-range, AND non-contiguous
+    masks (e.g. ``255.0.255.0``) are all rejected — a plain 1-bit count would
+    accept the latter as a bogus ``/16``.
+    """
     try:
-        values = [int(o) for o in octets]
+        return ipaddress.ip_network(f"0.0.0.0/{netmask}").prefixlen
     except ValueError:
         return None
-    if any(v < 0 or v > 255 for v in values):
+
+
+def _is_link_local_v6(addr: str) -> bool:
+    """Return True if *addr* is an IPv6 link-local address (the full ``fe80::/10``)."""
+    try:
+        return ipaddress.ip_address(addr).is_link_local
+    except ValueError:
+        # Unparseable — fall back to the fe80::/10 textual prefixes (fe8/fe9/fea/feb).
+        return addr.lower().startswith(("fe8", "fe9", "fea", "feb"))
+
+
+def _usable_mgmt_ipv6(ipv6_raw: str) -> tuple[str, int] | None:
+    """
+    Parse a usable global management ``(addr, prefix)`` from the ``ipv6-address`` field.
+
+    Returns None for skip values, link-local (``fe80::/10``), prefix-less, or
+    out-of-range entries. IPv6 without an explicit ``/prefix`` is skipped (not
+    assumed ``/64``), mirroring the checkpoint_gaia / dell_ftos / aruba_os convention.
+    """
+    raw = (ipv6_raw or "").strip()
+    if raw.lower() in _PANOS_MGMT_SKIP:
         return None
-    return sum(bin(v).count("1") for v in values)
+    if "/" not in raw:
+        logger.debug("paloalto_panos: skipping mgmt IPv6 %s: no prefix length", raw)
+        return None
+    addr, plen = raw.rsplit("/", 1)
+    if _is_link_local_v6(addr):
+        logger.debug("paloalto_panos: skipping mgmt IPv6 %s: link-local", raw)
+        return None
+    try:
+        plen_int = int(plen)
+    except ValueError:
+        logger.debug("paloalto_panos: skipping mgmt IPv6 %s: bad prefix", raw)
+        return None
+    if not (0 <= plen_int <= 128):
+        logger.debug("paloalto_panos: skipping mgmt IPv6 %s: prefix out of range", raw)
+        return None
+    return addr, plen_int
 
 
 def _mgmt_interface_from_system_info(system_info: dict) -> dict:
@@ -149,26 +188,9 @@ def _mgmt_ip_from_system_info(system_info: dict) -> dict:
         if prefix is not None:
             mgmt.setdefault("ipv4", {})[ipv4] = {"prefix_length": prefix}
 
-    ipv6_raw = (system_info.get("ipv6-address") or "").strip()
-    if ipv6_raw.lower() not in _PANOS_MGMT_SKIP and not ipv6_raw.lower().startswith("fe80"):
-        if "/" in ipv6_raw:
-            addr, plen = ipv6_raw.rsplit("/", 1)
-            try:
-                plen_int = int(plen)
-            except ValueError:
-                logger.debug("paloalto_panos: skipping mgmt IPv6 %s: bad prefix", ipv6_raw)
-            else:
-                if 0 <= plen_int <= 128:
-                    mgmt.setdefault("ipv6", {})[addr] = {"prefix_length": plen_int}
-                else:
-                    logger.debug(
-                        "paloalto_panos: skipping mgmt IPv6 %s: prefix out of range", ipv6_raw
-                    )
-        else:
-            logger.debug(
-                "paloalto_panos: skipping mgmt IPv6 %s: no prefix length in system info",
-                ipv6_raw,
-            )
+    mgmt_v6 = _usable_mgmt_ipv6(system_info.get("ipv6-address") or "")
+    if mgmt_v6 is not None:
+        mgmt.setdefault("ipv6", {})[mgmt_v6[0]] = {"prefix_length": mgmt_v6[1]}
 
     if not mgmt:
         return {}
