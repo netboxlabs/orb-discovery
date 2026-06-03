@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -15,16 +16,25 @@ import (
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/metrics"
 )
 
+// errEarlyStreamFailure marks a subscription that produced an error BEFORE it
+// ever yielded a notification — i.e. the mode is unviable, not merely flapping.
+// The real gnmic transport reports an ON_CHANGE rejection ASYNCHRONOUSLY on the
+// error channel (Subscribe itself returns nil), so the auto ladder can only
+// distinguish "mode unsupported" from "transient drop" by whether the stream was
+// ever productive. The auto branch downgrades on this sentinel; explicit
+// on_change/sample modes treat it like any other error (reconnect at same mode).
+var errEarlyStreamFailure = errors.New("early stream failure")
+
 // Runner owns the subscriptions for one policy.
 type Runner struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	logger  *slog.Logger
-	name    string
-	policy  config.Policy
-	client  diode.Client
-	dialer  gnmi.Dialer
-	store   *mapping.Store
+	ctx      context.Context
+	cancel   context.CancelFunc
+	logger   *slog.Logger
+	name     string
+	policy   config.Policy
+	client   diode.Client
+	dialer   gnmi.Dialer
+	store    *mapping.Store
 	runStore *RunStore
 	wg       sync.WaitGroup
 
@@ -139,10 +149,13 @@ func (r *Runner) targetLoop(t config.Target) {
 
 // runOnce dials, selects a profile, resolves the delivery mode, and runs ONE
 // connection's worth of delivery. It returns when the connection ends (error or
-// ctx). It walks the auto fallback ladder ONLY on subscribe-time rejection;
-// a stream error mid-connection is returned as-is so targetLoop reconnects and
-// re-attempts the preferred mode (ON_CHANGE first) — a transient ON_CHANGE drop
-// never permanently demotes the target.
+// ctx). In auto mode it walks the fallback ladder on a subscribe-time rejection
+// OR an early stream failure (a stream that errors before yielding any data —
+// how the real gnmic transport reports an async ON_CHANGE rejection). A stream
+// error AFTER data (a productive flap) is returned as-is so targetLoop reconnects
+// and re-attempts the preferred mode — a transient ON_CHANGE drop never
+// permanently demotes the target. Explicit on_change/sample modes never
+// auto-downgrade; they return the error to reconnect at the same mode.
 func (r *Runner) runOnce(t config.Target, model *mapping.DeviceModel, deb *Debouncer, retry *time.Timer) error {
 	sess, err := r.dialer.Dial(r.ctx, gnmi.TargetSpec{
 		Host: t.Host, Username: t.Username, Password: t.Password,
@@ -253,36 +266,62 @@ func (r *Runner) runOnce(t config.Target, model *mapping.DeviceModel, deb *Debou
 		}
 		r.setState(t.Host, func(s *targetState) { s.ActiveMode = "on_change"; s.FallbackReason = "" })
 		return r.runOpenStream(t.Host, profile, 0, notes, errs, model, deb, flush)
-	default: // auto — walk the ladder ONLY on subscribe rejection
-		// LOW-2: gNMI advertises no per-path ON_CHANGE capability, so a Subscribe
-		// error here cannot be distinguished from a transient gRPC blip. A blip
-		// therefore causes a one-connection downgrade to sample; it self-heals on
-		// the next reconnect (auto retries on_change first), and the current mode
-		// is visible via active_mode/fallback_reason.
-		if notes, errs, serr := sess.Subscribe(r.ctx, gnmi.OnChange, profile.SubscribePaths(), 0); serr == nil {
+	default: // auto — walk the ladder on subscribe rejection OR early stream failure
+		// LOW-2: gNMI advertises no per-path ON_CHANGE capability, so neither a
+		// Subscribe error nor an early stream failure can be distinguished from a
+		// transient gRPC blip. Either therefore causes a one-connection downgrade
+		// to sample; it self-heals on the next reconnect (auto retries on_change
+		// first), and the current mode is visible via active_mode/fallback_reason.
+		//
+		// Two rejection shapes are handled: (a) a SYNCHRONOUS Subscribe error
+		// (serr != nil), and (b) the real gnmic transport's ASYNCHRONOUS rejection,
+		// where Subscribe returns nil and the error arrives on the stream before any
+		// data — surfaced by runOpenStream as errEarlyStreamFailure.
+		notes, errs, serr := sess.Subscribe(r.ctx, gnmi.OnChange, profile.SubscribePaths(), 0)
+		var ocReason string
+		if serr == nil {
 			r.setState(t.Host, func(s *targetState) { s.ActiveMode = "on_change"; s.FallbackReason = "" })
-			return r.runOpenStream(t.Host, profile, 0, notes, errs, model, deb, flush)
-		} else if r.ctx.Err() == nil {
-			r.logger.Info("on_change unsupported, trying sample", "policy", r.name, "host", t.Host, "reason", serr)
-			metrics.GetModeFallbacks().Add(r.ctx, 1)
-			if notes, errs, s2 := sess.Subscribe(r.ctx, gnmi.Sample, profile.SubscribePaths(), r.policy.Config.SampleIntervalMs); s2 == nil {
-				r.setState(t.Host, func(s *targetState) { s.ActiveMode = "sample"; s.FallbackReason = serr.Error() })
-				return r.runOpenStream(t.Host, profile, sampleEvery, notes, errs, model, deb, flush)
-			} else if r.ctx.Err() == nil {
-				r.logger.Info("sample unsupported, falling back to get", "policy", r.name, "host", t.Host, "reason", s2)
-				metrics.GetModeFallbacks().Add(r.ctx, 1)
-				r.setState(t.Host, func(s *targetState) { s.ActiveMode = "get"; s.FallbackReason = s2.Error() })
-				return r.deliverGet(t.Host, sess, profile, model, flush)
+			err := r.runOpenStream(t.Host, profile, 0, notes, errs, model, deb, flush)
+			// A non-early error (productive flap, or ctx-cancel returning nil) goes
+			// back to targetLoop to reconnect at the preferred mode — do NOT demote.
+			if !errors.Is(err, errEarlyStreamFailure) {
+				return err
 			}
+			ocReason = err.Error() // on_change unviable mid-stream → fall through to sample
+		} else {
+			ocReason = serr.Error()
 		}
-		return nil // ctx cancelled during fallback negotiation
+		if r.ctx.Err() != nil {
+			return nil // ctx cancelled during/after on_change attempt
+		}
+
+		r.logger.Info("on_change unsupported, trying sample", "policy", r.name, "host", t.Host, "reason", ocReason)
+		metrics.GetModeFallbacks().Add(r.ctx, 1)
+		notes, errs, s2 := sess.Subscribe(r.ctx, gnmi.Sample, profile.SubscribePaths(), r.policy.Config.SampleIntervalMs)
+		if s2 == nil {
+			r.setState(t.Host, func(s *targetState) { s.ActiveMode = "sample"; s.FallbackReason = ocReason })
+			err := r.runOpenStream(t.Host, profile, sampleEvery, notes, errs, model, deb, flush)
+			if !errors.Is(err, errEarlyStreamFailure) {
+				return err
+			}
+			s2 = err // sample unviable mid-stream → fall through to get
+		}
+		if r.ctx.Err() != nil {
+			return nil // ctx cancelled during/after sample attempt
+		}
+		r.logger.Info("sample unsupported, falling back to get", "policy", r.name, "host", t.Host, "reason", s2)
+		metrics.GetModeFallbacks().Add(r.ctx, 1)
+		r.setState(t.Host, func(s *targetState) { s.ActiveMode = "get"; s.FallbackReason = s2.Error() })
+		return r.deliverGet(t.Host, sess, profile, model, flush)
 	}
 }
 
 // runOpenStream tracks the active-subscription gauge around an already-opened
-// stream, then reconciles it. Subscribe is done by the caller so that a
-// subscribe-time rejection stays distinguishable from a mid-stream error (the
-// auto ladder downgrades only on the former).
+// stream, then reconciles it, propagating streamLoop's (possibly
+// errEarlyStreamFailure-wrapped) error unchanged. Subscribe is done by the caller
+// so a subscribe-time rejection stays distinguishable from a mid-stream error;
+// the auto ladder downgrades on a sync rejection or an early (pre-data) stream
+// failure, but not on a productive flap.
 func (r *Runner) runOpenStream(host string, profile *mapping.Profile, pruneEvery time.Duration,
 	notes <-chan gnmi.Notification, errs <-chan error, model *mapping.DeviceModel, deb *Debouncer, flush func()) error {
 	metrics.GetSubscriptionsActive().Add(r.ctx, 1)
@@ -322,6 +361,14 @@ func (r *Runner) streamLoop(host string, profile *mapping.Profile, pruneEvery ti
 	anchor := profile.Device.Hostname
 	notif := metrics.GetNotifications() // LOW-1: resolve the hot-path counter once
 
+	// productive tracks whether the stream ever yielded a notification. A stream
+	// error after ≥1 notification is a transient flap of a working mode (return it
+	// raw → targetLoop reconnects at the preferred mode, no demote). A stream error
+	// before ANY notification means the mode is unviable (e.g. a real gnmic async
+	// ON_CHANGE rejection): wrap it as errEarlyStreamFailure so the auto ladder
+	// downgrades. ctx-cancel always returns nil regardless.
+	productive := false
+
 	rotate := func() {
 		trustworthy := anchor == "" || model.SeenInCycle(anchor)
 		pruned := model.EndCycle(keep, trustworthy)
@@ -345,12 +392,17 @@ func (r *Runner) streamLoop(host string, profile *mapping.Profile, pruneEvery ti
 				continue
 			}
 			if e != nil {
-				return e
+				if !productive {
+					// Mode unviable: the stream errored before yielding any data.
+					return fmt.Errorf("subscription failed before any data: %w", errEarlyStreamFailure)
+				}
+				return e // working mode flapped → transient, reconnect at preferred mode
 			}
 		case n, ok := <-notes:
 			if !ok {
 				return nil
 			}
+			productive = true
 			notif.Add(r.ctx, 1)
 			n = r.filterNotification(n, profile) // B-1/M-2: drop non-curated updates and out-of-scope deletes
 			if len(n.Deletes) > 0 {

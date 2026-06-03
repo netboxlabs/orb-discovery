@@ -134,6 +134,48 @@ func TestRunnerAutoDoesNotDemoteOnStreamError(t *testing.T) {
 	}
 }
 
+// M6.2 — the real gnmic transport reports an ON_CHANGE rejection ASYNCHRONOUSLY:
+// Subscribe returns nil and the error arrives on the stream BEFORE any data. The
+// auto ladder must treat that early stream failure as "mode unviable" and
+// downgrade to SAMPLE (not retry on_change forever). The fake mimics this with
+// OnChangeSupport=true (sync Subscribe succeeds), an EMPTY OnChangeStream, and a
+// StreamErr that therefore fires before any notification.
+func TestRunnerAutoDowngradesOnAsyncOnChangeRejection(t *testing.T) {
+	store, err := mapping.LoadProfiles("")
+	require.NoError(t, err)
+	fake := &gnmi.FakeSession{
+		Caps:            &gnmi.CapabilitiesResult{Vendor: "Arista"},
+		OnChangeSupport: true,                                            // sync Subscribe(OnChange) succeeds…
+		OnChangeStream:  nil,                                             // …but yields NO data…
+		StreamErr:       errors.New("ON_CHANGE not supported by target"), // …then errors early (async rejection)
+		SampleSnapshots: []gnmi.Notification{
+			{Updates: []gnmi.Update{{Path: "/system/state/hostname", Value: "a1"}}, SyncDone: true},
+		},
+	}
+	client := &recordingClient{}
+	pol := config.Policy{
+		Config: config.PolicyConfig{Mode: config.ModeAuto, DebounceMs: 20, SampleIntervalMs: 100,
+			Defaults: config.Defaults{Site: "lab", Role: "router"}},
+		Scope: config.Scope{Targets: []config.Target{{Host: "10.0.0.9:6030"}}},
+	}
+	r, err := NewRunner(context.Background(), slog.Default(), "p7", pol, client, &gnmi.FakeDialer{Session: fake}, store)
+	require.NoError(t, err)
+	r.backoffBase = 15 * time.Millisecond // quick reconnect/downgrade within the test
+	r.Start()
+	defer r.Stop()
+
+	require.Eventually(t, func() bool { return client.count() >= 1 }, 2*time.Second, 20*time.Millisecond,
+		"runner must downgrade to SAMPLE and ingest after the async ON_CHANGE rejection")
+	require.Eventually(t, func() bool {
+		for _, ts := range r.TargetStatuses() {
+			if ts.Host == "10.0.0.9:6030" && ts.ActiveMode == "sample" {
+				return true
+			}
+		}
+		return false
+	}, time.Second, 20*time.Millisecond, "active_mode must become sample")
+}
+
 // M6.2 MED-2 — ON_CHANGE must hold debounced flushes until the initial
 // sync_response arrives; a partial pre-sync dump must never be ingested.
 func TestRunnerOnChangeHoldsFlushUntilSync(t *testing.T) {
