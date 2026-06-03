@@ -80,6 +80,57 @@ def _extract_ip_info(parsed_intf_dict: dict) -> dict:
     return ip_info
 
 
+# Management-plane values that are not real addresses.
+_PANOS_MGMT_SKIP = {"", "unknown", "n/a", "0.0.0.0"}
+
+
+def _netmask_to_prefix(netmask: str) -> int | None:
+    """Convert dotted-decimal netmask to a CIDR prefix length; None if malformed."""
+    try:
+        return sum(bin(int(octet)).count("1") for octet in netmask.split("."))
+    except ValueError:
+        return None
+
+
+def _mgmt_ip_from_system_info(system_info: dict) -> dict:
+    """
+    Build the NAPALM ``interface_ip`` fragment for the management interface.
+
+    PAN-OS exposes the management-plane IP in ``show system info``
+    (``ip-address`` / ``netmask`` / ``ipv6-address``), not in
+    ``show interface all``. Returns ``{"management": {...}}`` or ``{}`` when
+    nothing usable is present. IPv6 without an explicit ``/prefix`` is skipped
+    (matching the checkpoint_gaia / dell_ftos / aruba_os convention) rather
+    than assuming ``/64``; link-local ``fe80::`` is ignored.
+    """
+    mgmt: dict = {}
+
+    ipv4 = (system_info.get("ip-address") or "").strip()
+    netmask = (system_info.get("netmask") or "").strip()
+    if ipv4.lower() not in _PANOS_MGMT_SKIP and netmask.lower() not in _PANOS_MGMT_SKIP:
+        prefix = _netmask_to_prefix(netmask)
+        if prefix is not None:
+            mgmt.setdefault("ipv4", {})[ipv4] = {"prefix_length": prefix}
+
+    ipv6_raw = (system_info.get("ipv6-address") or "").strip()
+    if ipv6_raw.lower() not in _PANOS_MGMT_SKIP and not ipv6_raw.lower().startswith("fe80"):
+        if "/" in ipv6_raw:
+            addr, plen = ipv6_raw.rsplit("/", 1)
+            try:
+                mgmt.setdefault("ipv6", {})[addr] = {"prefix_length": int(plen)}
+            except ValueError:
+                logger.debug("paloalto_panos: skipping mgmt IPv6 %s: bad prefix", ipv6_raw)
+        else:
+            logger.debug(
+                "paloalto_panos: skipping mgmt IPv6 %s: no prefix length in system info",
+                ipv6_raw,
+            )
+
+    if not mgmt:
+        return {}
+    return {"management": mgmt}
+
+
 # ---------------------------------------------------------------------------
 # get_modules — module / module bay discovery via PAN-OS XML API
 # ---------------------------------------------------------------------------
@@ -332,6 +383,16 @@ class PANOSDriver(_napalm_base.NetworkDriver):
         self.device.op(cmd="<show><config><candidate></candidate></config></show>")
         return str(self.device.xml_root())
 
+    def _system_info_dict(self) -> dict:
+        """Return the parsed ``show system info`` ``result.system`` dict, or {} on failure."""
+        try:
+            self.device.op(cmd="<show><system><info></info></system></show>")
+            parsed = xmltodict.parse(self.device.xml_root())
+            system = parsed["response"]["result"]["system"]
+        except (KeyError, TypeError, AttributeError):
+            return {}
+        return system or {}
+
     # ------------------------------------------------------------------
     # NAPALM getters
     # ------------------------------------------------------------------
@@ -434,22 +495,29 @@ class PANOSDriver(_napalm_base.NetworkDriver):
         return interface_dict
 
     def get_interfaces_ip(self):
-        """Return IP addresses per interface."""
+        """Return IP addresses per interface (data-plane + management)."""
         self.device.op(cmd="<show><interface>all</interface></show>")
         interface_info_xml = xmltodict.parse(self.device.xml_root())
         result = interface_info_xml.get("response", {}).get("result", {}) or {}
         ifnet = result.get("ifnet") or {}
         entry = ifnet.get("entry")
-        if not entry:
-            return {}
-
-        interface_info = entry if isinstance(entry, list) else [entry]
 
         ip_interfaces = {}
-        for intf_dict in interface_info:
-            ip_info = _extract_ip_info(intf_dict)
-            if ip_info:
-                ip_interfaces.update(ip_info)
+        if entry:
+            interface_info = entry if isinstance(entry, list) else [entry]
+            for intf_dict in interface_info:
+                ip_info = _extract_ip_info(intf_dict)
+                if ip_info:
+                    ip_interfaces.update(ip_info)
+
+        # PAN-OS exposes the management-plane IP only via `show system info`.
+        # Merge (don't clobber): the MGT port is genuinely absent from
+        # `show interface all` today, but a nested merge is collision-safe if a
+        # future PAN-OS ever lists a "management" key there too.
+        for intf, families in _mgmt_ip_from_system_info(self._system_info_dict()).items():
+            dest = ip_interfaces.setdefault(intf, {})
+            for family, addrs in families.items():
+                dest.setdefault(family, {}).update(addrs)
 
         return ip_interfaces
 

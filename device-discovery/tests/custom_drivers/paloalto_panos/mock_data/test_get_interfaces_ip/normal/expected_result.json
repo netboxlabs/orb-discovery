@@ -10,5 +10,17 @@
         "prefix_length": 64
       }
     }
+  },
+  "management": {
+    "ipv4": {
+      "10.0.0.5": {
+        "prefix_length": 24
+      }
+    },
+    "ipv6": {
+      "2001:db8:abcd::5": {
+        "prefix_length": 64
+      }
+    }
   }
 }

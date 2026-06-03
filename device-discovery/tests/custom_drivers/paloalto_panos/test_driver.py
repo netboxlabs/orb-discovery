@@ -76,3 +76,51 @@ def test_is_modular_panos_fixed_models():
     assert _is_modular_panos("PA-5440") is False
     assert _is_modular_panos("") is False
     assert _is_modular_panos(None) is False
+
+
+def test_mgmt_ip_from_system_info_ipv4_and_ipv6():
+    """Mgmt IPv4 + prefixed IPv6 are emitted under the 'management' key."""
+    from custom_napalm.paloalto_panos import _mgmt_ip_from_system_info
+    info = {
+        "ip-address": "10.0.0.5",
+        "netmask": "255.255.255.0",
+        "ipv6-address": "2001:db8:abcd::5/64",
+        "mac-address": "00:50:56:aa:bb:cc",
+    }
+    assert _mgmt_ip_from_system_info(info) == {
+        "management": {
+            "ipv4": {"10.0.0.5": {"prefix_length": 24}},
+            "ipv6": {"2001:db8:abcd::5": {"prefix_length": 64}},
+        }
+    }
+
+
+def test_mgmt_ip_from_system_info_skips_ipv6_without_prefix():
+    """Mgmt IPv6 lacking an explicit prefix is dropped; IPv4 still emitted."""
+    from custom_napalm.paloalto_panos import _mgmt_ip_from_system_info
+    info = {"ip-address": "10.0.0.5", "netmask": "255.255.255.0", "ipv6-address": "2001:db8::99"}
+    assert _mgmt_ip_from_system_info(info) == {
+        "management": {"ipv4": {"10.0.0.5": {"prefix_length": 24}}}
+    }
+
+
+def test_mgmt_ip_from_system_info_skips_link_local_and_unknown():
+    """Link-local / unknown / empty system info yield no spurious mgmt IPs."""
+    from custom_napalm.paloalto_panos import _mgmt_ip_from_system_info
+    info = {"ip-address": "10.0.0.5", "netmask": "255.255.255.0", "ipv6-address": "fe80::1/64"}
+    assert _mgmt_ip_from_system_info(info) == {
+        "management": {"ipv4": {"10.0.0.5": {"prefix_length": 24}}}
+    }
+    assert _mgmt_ip_from_system_info({"ip-address": "unknown", "netmask": "unknown"}) == {}
+    assert _mgmt_ip_from_system_info({}) == {}
+
+
+def test_mgmt_ip_from_system_info_skips_dhcp_unconfigured_and_mac_only():
+    """DHCP-unconfigured 0.0.0.0 and MAC-only system info emit nothing."""
+    from custom_napalm.paloalto_panos import _mgmt_ip_from_system_info
+    # DHCP-unconfigured mgmt plane reports 0.0.0.0 — must be skipped.
+    assert _mgmt_ip_from_system_info(
+        {"ip-address": "0.0.0.0", "netmask": "0.0.0.0", "mac-address": "00:50:56:aa:bb:cc"}
+    ) == {}
+    # MAC present but no usable IP at all -> nothing emitted.
+    assert _mgmt_ip_from_system_info({"mac-address": "00:50:56:aa:bb:cc"}) == {}
