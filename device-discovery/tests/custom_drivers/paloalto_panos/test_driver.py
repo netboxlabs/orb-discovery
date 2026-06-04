@@ -200,3 +200,11 @@ def test_mgmt_ip_from_system_info_skips_malformed_and_scoped_ipv6():
     assert _mgmt_ip_from_system_info({"ipv6-address": "2001:db8::1%mgmt/64"}) == {}
     # IPv4 in the v6 field is rejected on the v6 path.
     assert _mgmt_ip_from_system_info({"ipv6-address": "10.0.0.5/24"}) == {}
+
+
+def test_mgmt_ip_from_system_info_skips_invalid_ipv4():
+    """A malformed / non-IPv4 ip-address is rejected, not emitted."""
+    from custom_napalm.paloalto_panos import _mgmt_ip_from_system_info
+    assert _mgmt_ip_from_system_info({"ip-address": "not-an-ip", "netmask": "255.255.255.0"}) == {}
+    # An IPv6 literal in the ip-address field is not a valid IPv4.
+    assert _mgmt_ip_from_system_info({"ip-address": "2001:db8::5", "netmask": "255.255.255.0"}) == {}

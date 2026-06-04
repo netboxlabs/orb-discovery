@@ -129,6 +129,29 @@ def _mgmt_ipv6_from_system_info(text: str) -> tuple[str, int] | None:
     return addr, plen_int
 
 
+def _usable_mgmt_ipv4(ipv4: str, netmask: str) -> int | None:
+    """
+    Return the CIDR prefix for a usable management IPv4, or None.
+
+    Skips junk / ``0.0.0.0`` values, addresses that aren't valid IPv4, and
+    unparseable / non-contiguous netmasks — so a malformed ``ip_address`` can't
+    reach translation and crash ``ipaddress.ip_network(...)``.
+    """
+    ipv4 = (ipv4 or "").strip()
+    netmask = (netmask or "").strip()
+    if ipv4.lower() in ("unknown", "n/a", "0.0.0.0", ""):
+        return None
+    if netmask.lower() in ("unknown", "n/a", "0.0.0.0", ""):
+        return None
+    try:
+        if ipaddress.ip_address(ipv4).version != 4:
+            return None
+    except ValueError:
+        logger.debug("paloalto_panos_ssh: skipping mgmt IPv4 %s: not a valid address", ipv4)
+        return None
+    return _netmask_to_prefix(netmask)
+
+
 def _mgmt_interface_from_system_info(sysinfo_parsed: list[dict], sysinfo_out: str) -> dict:
     """
     Build the NAPALM ``get_interfaces`` entry for the management interface.
@@ -143,16 +166,11 @@ def _mgmt_interface_from_system_info(sysinfo_parsed: list[dict], sysinfo_out: st
     if not sysinfo_parsed:
         return {}
     row = sysinfo_parsed[0]
-    ipv4 = (row.get("ip_address") or "").strip()
-    netmask = (row.get("netmask") or "").strip()
-    # Require a parseable netmask too, so this emits the management interface for
-    # EXACTLY the cases get_interfaces_ip() emits a management IPv4 — otherwise a
-    # malformed / 0.0.0.0 netmask would yield an interface-without-IP artifact.
+    # Emit the management interface for EXACTLY the cases get_interfaces_ip()
+    # emits a management IPv4 (valid IPv4 + parseable netmask) — otherwise a
+    # malformed address / netmask would yield an interface-without-IP artifact.
     ipv4_usable = (
-        bool(ipv4)
-        and ipv4.lower() not in ("unknown", "n/a", "0.0.0.0")
-        and netmask.lower() not in ("unknown", "n/a", "0.0.0.0")
-        and _netmask_to_prefix(netmask) is not None
+        _usable_mgmt_ipv4(row.get("ip_address") or "", row.get("netmask") or "") is not None
     )
     # The global IPv6 lives in the raw text (ntc-template doesn't expose it),
     # mirroring get_interfaces_ip's IPv6 sourcing.
@@ -538,18 +556,11 @@ class PANOSSHDriver(_napalm_base.NetworkDriver):
         if sysinfo_parsed:
             row = sysinfo_parsed[0]
             ipv4 = (row.get("ip_address") or "").strip()
-            netmask = (row.get("netmask") or "").strip()
-            if (
-                ipv4
-                and ipv4.lower() not in ("unknown", "n/a", "0.0.0.0")
-                and netmask
-                and netmask.lower() not in ("unknown", "n/a", "0.0.0.0")
-            ):
-                prefix = _netmask_to_prefix(netmask)
-                if prefix is not None:
-                    interfaces_ip.setdefault("management", {}).setdefault("ipv4", {})[ipv4] = {
-                        "prefix_length": prefix
-                    }
+            prefix = _usable_mgmt_ipv4(ipv4, row.get("netmask") or "")
+            if prefix is not None:
+                interfaces_ip.setdefault("management", {}).setdefault("ipv4", {})[ipv4] = {
+                    "prefix_length": prefix
+                }
         mgmt_v6 = _mgmt_ipv6_from_system_info(sysinfo_out)
         if mgmt_v6 is not None:
             addr, plen = mgmt_v6

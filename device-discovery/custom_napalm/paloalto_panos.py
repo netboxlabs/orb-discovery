@@ -178,6 +178,27 @@ def _mgmt_interface_from_system_info(system_info: dict) -> dict:
     }
 
 
+def _usable_mgmt_ipv4(ipv4: str, netmask: str) -> int | None:
+    """
+    Return the CIDR prefix for a usable management IPv4, or None.
+
+    Skips junk / ``0.0.0.0`` values, addresses that aren't valid IPv4, and
+    unparseable / non-contiguous netmasks — so a malformed ``ip-address`` can't
+    reach translation and crash ``ipaddress.ip_network(...)``.
+    """
+    ipv4 = (ipv4 or "").strip()
+    netmask = (netmask or "").strip()
+    if ipv4.lower() in _PANOS_MGMT_SKIP or netmask.lower() in _PANOS_MGMT_SKIP:
+        return None
+    try:
+        if ipaddress.ip_address(ipv4).version != 4:
+            return None
+    except ValueError:
+        logger.debug("paloalto_panos: skipping mgmt IPv4 %s: not a valid address", ipv4)
+        return None
+    return _netmask_to_prefix(netmask)
+
+
 def _mgmt_ip_from_system_info(system_info: dict) -> dict:
     """
     Build the NAPALM ``interface_ip`` fragment for the management interface.
@@ -192,11 +213,9 @@ def _mgmt_ip_from_system_info(system_info: dict) -> dict:
     mgmt: dict = {}
 
     ipv4 = (system_info.get("ip-address") or "").strip()
-    netmask = (system_info.get("netmask") or "").strip()
-    if ipv4.lower() not in _PANOS_MGMT_SKIP and netmask.lower() not in _PANOS_MGMT_SKIP:
-        prefix = _netmask_to_prefix(netmask)
-        if prefix is not None:
-            mgmt.setdefault("ipv4", {})[ipv4] = {"prefix_length": prefix}
+    prefix = _usable_mgmt_ipv4(ipv4, system_info.get("netmask") or "")
+    if prefix is not None:
+        mgmt.setdefault("ipv4", {})[ipv4] = {"prefix_length": prefix}
 
     mgmt_v6 = _usable_mgmt_ipv6(system_info.get("ipv6-address") or "")
     if mgmt_v6 is not None:

@@ -240,3 +240,13 @@ def test_mgmt_ipv6_from_system_info_skips_malformed_and_scoped():
     assert _mgmt_ipv6_from_system_info("ipv6-address: not-an-addr/64\n") is None
     assert _mgmt_ipv6_from_system_info("ipv6-address: 10.0.0.5/24\n") is None  # IPv4, not v6
     assert _mgmt_ipv6_from_system_info("ipv6-address: 2001:db8::1%mgmt/64\n") is None  # zone index
+
+
+def test_usable_mgmt_ipv4_rejects_invalid_addresses():
+    """_usable_mgmt_ipv4 returns None for malformed / non-IPv4 / junk values."""
+    from custom_napalm.paloalto_panos_ssh import _usable_mgmt_ipv4
+    assert _usable_mgmt_ipv4("not-an-ip", "255.255.255.0") is None
+    assert _usable_mgmt_ipv4("2001:db8::5", "255.255.255.0") is None  # IPv6, not v4
+    assert _usable_mgmt_ipv4("10.0.0.5", "255.0.255.0") is None       # non-contiguous netmask
+    assert _usable_mgmt_ipv4("0.0.0.0", "255.255.255.0") is None      # junk address
+    assert _usable_mgmt_ipv4("10.0.0.5", "255.255.255.0") == 24       # valid
