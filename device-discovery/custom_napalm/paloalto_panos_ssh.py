@@ -76,13 +76,14 @@ def _is_link_local_v6(addr: str) -> bool:
         return addr.lower().startswith(("fe8", "fe9", "fea", "feb"))
 
 
-# `show system info` does not expose ip-address-v6 through the ntc-template,
+# `show system info` does not expose the mgmt IPv6 through the ntc-template,
 # so parse it directly from the raw text.
 # Accept both observed labels: `ip-address-v6` (this repo's real-device-derived
 # `show system info` fixture) and `ipv6-address` (the XML-API tag name / Palo Alto
 # CLI examples). Matching both is robust to the exact CLI build without betting on
-# one. The `^...:` anchor + word boundary means it never matches the separate
-# `ipv6-link-local-address:` line.
+# one. Safety comes from the `^` start-of-line anchor plus matching the FULL field
+# label up to the `:` (not a prefix match) — so the separate
+# `ipv6-link-local-address:` line never matches (it diverges at `link-...`).
 _PANOS_SSH_MGMT_IPV6_RE = re.compile(
     r"^(?:ip-address-v6|ipv6-address):\s+(?P<addr>\S+)", re.MULTILINE
 )
