@@ -301,6 +301,13 @@ func (p *Profile) SubscribePaths() []string {
 	}
 	addList(p.Interfaces)
 	addList(p.Components)
+	if p.Interfaces.ListPath != "" {
+		base := p.Interfaces.ListPath + "[" + p.Interfaces.listKey() + "=*]/subinterfaces/subinterface[index=*]"
+		out = append(out,
+			base+"/ipv4/addresses/address[ip=*]/state/prefix-length",
+			base+"/ipv6/addresses/address[ip=*]/state/prefix-length",
+		)
+	}
 	sort.Strings(out)
 	return out
 }
@@ -314,6 +321,9 @@ func (p *Profile) AllowsPath(path string) bool {
 		return true
 	}
 	if leaf, ok := leafUnderList(path, p.Components.ListPath); ok && hasKeyLeaf(p.Components, leaf) {
+		return true
+	}
+	if _, _, _, _, leaf, ok := parseIPAddressPath(path, p.Interfaces.ListPath); ok && leaf == "state/prefix-length" {
 		return true
 	}
 	return false

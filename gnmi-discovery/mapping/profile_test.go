@@ -126,6 +126,24 @@ func TestAllowsPath(t *testing.T) {
 	require.False(t, base.AllowsPath("/interfaces/interface[name=Ethernet1]/state/counters/in-octets"))
 }
 
+func TestSubscribePathsIncludeIPSubtree(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+	paths := base.SubscribePaths()
+	require.Contains(t, paths, "/interfaces/interface[name=*]/subinterfaces/subinterface[index=*]/ipv4/addresses/address[ip=*]/state/prefix-length")
+	require.Contains(t, paths, "/interfaces/interface[name=*]/subinterfaces/subinterface[index=*]/ipv6/addresses/address[ip=*]/state/prefix-length")
+}
+
+func TestAllowsPathIPSubtree(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+	require.True(t, base.AllowsPath("/interfaces/interface[name=Ethernet1]/subinterfaces/subinterface[index=0]/ipv4/addresses/address[ip=10.0.0.1]/state/prefix-length"))
+	require.True(t, base.AllowsPath("/interfaces/interface[name=Ethernet1]/subinterfaces/subinterface[index=100]/ipv6/addresses/address[ip=2001:db8::1]/state/prefix-length"))
+	require.False(t, base.AllowsPath("/interfaces/interface[name=Ethernet1]/subinterfaces/subinterface[index=0]/ipv4/state/counters/in-pkts")) // not an address leaf
+}
+
 func TestAllowsDelete(t *testing.T) {
 	store, err := LoadProfiles("")
 	require.NoError(t, err)
