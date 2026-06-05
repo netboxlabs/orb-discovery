@@ -42,6 +42,15 @@ func (c *recordingClient) count() int {
 	return len(c.ingested)
 }
 
+func (c *recordingClient) lastIngested() []diode.Entity {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.ingested) == 0 {
+		return nil
+	}
+	return c.ingested[len(c.ingested)-1]
+}
+
 func TestRunnerOnChangeIngests(t *testing.T) {
 	store, err := mapping.LoadProfiles("")
 	require.NoError(t, err)
@@ -420,4 +429,52 @@ func TestRunnerReportsActiveMode(t *testing.T) {
 		}
 		return false
 	}, time.Second, 20*time.Millisecond)
+}
+
+func TestRunnerSetsPrimaryIPFromHost(t *testing.T) {
+	store, err := mapping.LoadProfiles("")
+	require.NoError(t, err)
+	fake := &gnmi.FakeSession{
+		Caps: &gnmi.CapabilitiesResult{Vendor: "Arista"}, OnChangeSupport: true,
+		OnChangeStream: []gnmi.Notification{
+			{Updates: []gnmi.Update{
+				{Path: "/system/state/hostname", Value: "r1"},
+				{Path: "/interfaces/interface[name=Loopback0]/subinterfaces/subinterface[index=0]/ipv4/addresses/address[ip=10.7.7.7]/state/prefix-length", Value: 32},
+			}},
+			{SyncDone: true},
+		},
+	}
+	client := &recordingClient{}
+	pol := config.Policy{
+		Config: config.PolicyConfig{Mode: config.ModeOnChange, DebounceMs: 20,
+			Defaults: config.Defaults{Site: "lab", Role: "router"}},
+		Scope: config.Scope{Targets: []config.Target{{Host: "10.7.7.7:6030"}}},
+	}
+	r, err := NewRunner(context.Background(), slog.Default(), "p", pol, client, &gnmi.FakeDialer{Session: fake}, store)
+	require.NoError(t, err)
+	r.Start()
+	defer r.Stop()
+
+	require.Eventually(t, func() bool { return client.count() >= 1 }, 2*time.Second, 20*time.Millisecond)
+	last := client.lastIngested()
+	dev := last[0].(*diode.Device)
+	require.NotNil(t, dev.PrimaryIp4)
+	require.Equal(t, "10.7.7.7/32", *dev.PrimaryIp4.Address)
+}
+
+func TestTargetHostIP(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"10.7.7.7:6030", "10.7.7.7"},        // IPv4 host:port
+		{"10.7.7.7", "10.7.7.7"},             // bare IPv4
+		{"[2001:db8::1]:6030", "2001:db8::1"}, // bracketed IPv6 host:port
+		{"[2001:db8::1]", "2001:db8::1"},     // bracketed IPv6, no port
+		{"2001:db8::1", "2001:db8::1"},       // bare IPv6 (SplitHostPort fails -> used as-is)
+		{"[fe80::1%eth0]:6030", "fe80::1"},   // zoned IPv6 -> zone dropped
+		{"router1.lab:6030", ""},             // DNS name with port -> skip
+		{"router1.lab", ""},                  // bare DNS name -> skip
+		{"", ""},                             // empty -> skip
+	}
+	for _, c := range cases {
+		require.Equal(t, c.want, targetHostIP(c.in), "host=%q", c.in)
+	}
 }

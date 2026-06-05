@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +17,25 @@ import (
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/mapping"
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/metrics"
 )
+
+// targetHostIP returns the bare IP literal from a policy target host, suitable
+// for exact-matching against discovered address strings: strips any :port,
+// unbrackets an IPv6 literal, and drops an IPv6 zone id. Returns "" for a host
+// with no embedded IP (e.g. a DNS name) so AssignPrimaryIP no-ops.
+func targetHostIP(host string) string {
+	h := host
+	if hp, _, err := net.SplitHostPort(host); err == nil {
+		h = hp // strips :port; unbrackets [2001:db8::1]
+	}
+	h = strings.TrimPrefix(strings.TrimSuffix(h, "]"), "[") // bare bracketed IPv6 w/o port
+	if i := strings.IndexByte(h, '%'); i >= 0 {
+		h = h[:i] // drop zone id (fe80::1%eth0)
+	}
+	if net.ParseIP(h) == nil {
+		return "" // DNS name / not an IP literal -> no primary-IP match
+	}
+	return h
+}
 
 // errEarlyStreamFailure marks a subscription that produced an error BEFORE it
 // ever yielded a notification — i.e. the mode is unviable, not merely flapping.
@@ -188,6 +209,7 @@ func (r *Runner) runOnce(t config.Target, model *mapping.DeviceModel, deb *Debou
 	warnedNoIdentity := false // rate-limit the no-identity warning to once per connection
 	flush := func() {
 		entities := mapping.Translate(profile, model.Snapshot(), defaults, discoveredVendor)
+		mapping.AssignPrimaryIP(entities, targetHostIP(t.Host))
 		dev, _ := entities[0].(*diode.Device) // Translate always emits the Device first
 		// Q2: thread target netbox_id onto the Device for explicit NetBox matching.
 		if t.NetboxID != nil && dev != nil {
