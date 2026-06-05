@@ -138,3 +138,50 @@ func translateIPs(profile *Profile, snap map[string]any, dev *diode.Device) []di
 	}
 	return out
 }
+
+// AssignPrimaryIP sets Device.PrimaryIp4/6 to the emitted IPAddress whose bare
+// address equals hostIP — the address the collector connected to is the device's
+// primary management IP (mirrors device-discovery). Exact match only; never
+// guesses. hostIP must already be stripped of any :port (the runner does this).
+//
+// CRITICAL: PrimaryIp4/6 is set to a matcher-only IPAddress stub (Address only,
+// AssignedObject left nil), NOT the rich emitted IPAddress. The rich one has
+// AssignedObject -> *Interface -> Device, so embedding it back into Device would
+// form a Device -> IPAddress -> Interface -> Device reference cycle that the
+// Diode SDK's recursive proto conversion (ConvertToProtoMessage, used by the
+// gRPC client AND the dry-run protojson marshal) walks until it stack-overflows.
+// snmp-discovery breaks the same cycle via mapping.newIPMatchStub (see
+// snmp-discovery/mapping/stubs.go and chassis.go's primary_ip4/6 handling).
+// The rich IPAddress still rides as a top-level entity; the stub only carries
+// the matcher field so Diode resolves it to the same NetBox row.
+func AssignPrimaryIP(entities []diode.Entity, hostIP string) {
+	if hostIP == "" || len(entities) == 0 {
+		return
+	}
+	dev, _ := entities[0].(*diode.Device)
+	if dev == nil {
+		return
+	}
+	for _, e := range entities {
+		ip, ok := e.(*diode.IPAddress)
+		if !ok || ip.Address == nil {
+			continue
+		}
+		bare := *ip.Address
+		if i := strings.IndexByte(bare, '/'); i >= 0 {
+			bare = bare[:i]
+		}
+		if bare != hostIP {
+			continue
+		}
+		// Matcher-only stub — Address only, no AssignedObject (breaks the
+		// IP -> Interface -> Device cycle). Carry Vrf here too if/when VRF lands.
+		stub := &diode.IPAddress{Address: ip.Address}
+		if strings.Contains(bare, ":") {
+			dev.PrimaryIp6 = stub
+		} else {
+			dev.PrimaryIp4 = stub
+		}
+		return
+	}
+}

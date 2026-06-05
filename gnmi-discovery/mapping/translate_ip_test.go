@@ -91,3 +91,57 @@ func TestTranslateIPsParentAndSubinterface(t *testing.T) {
 	// the no-prefix-length address was skipped
 	require.NotContains(t, byAddr, "10.9.9.9/")
 }
+
+func TestAssignPrimaryIP(t *testing.T) {
+	mk := func() []diode.Entity {
+		dev := &diode.Device{Name: strptr("r1")}
+		return []diode.Entity{
+			dev,
+			&diode.IPAddress{Address: strptr("10.0.0.1/31"), AssignedObject: &diode.Interface{Device: dev, Name: strptr("Ethernet1")}},
+			&diode.IPAddress{Address: strptr("2001:db8::1/64"), AssignedObject: &diode.Interface{Device: dev, Name: strptr("Ethernet1")}},
+		}
+	}
+
+	// v4 match -> PrimaryIp4 (matcher-only stub: Address set, AssignedObject nil)
+	e := mk()
+	AssignPrimaryIP(e, "10.0.0.1")
+	require.NotNil(t, e[0].(*diode.Device).PrimaryIp4)
+	require.Equal(t, "10.0.0.1/31", *e[0].(*diode.Device).PrimaryIp4.Address)
+	require.Nil(t, e[0].(*diode.Device).PrimaryIp4.AssignedObject) // cycle-break: no back-ref
+	require.Nil(t, e[0].(*diode.Device).PrimaryIp6)
+
+	// v6 match -> PrimaryIp6
+	e = mk()
+	AssignPrimaryIP(e, "2001:db8::1")
+	require.NotNil(t, e[0].(*diode.Device).PrimaryIp6)
+	require.Nil(t, e[0].(*diode.Device).PrimaryIp6.AssignedObject)
+	require.Nil(t, e[0].(*diode.Device).PrimaryIp4)
+
+	// no match -> unset
+	e = mk()
+	AssignPrimaryIP(e, "8.8.8.8")
+	require.Nil(t, e[0].(*diode.Device).PrimaryIp4)
+	require.Nil(t, e[0].(*diode.Device).PrimaryIp6)
+
+	// empty host -> no-op
+	e = mk()
+	AssignPrimaryIP(e, "")
+	require.Nil(t, e[0].(*diode.Device).PrimaryIp4)
+}
+
+// TestAssignPrimaryIPNoReferenceCycle is the regression guard for the
+// Device -> IPAddress -> Interface -> Device cycle: after assignment, the rich
+// emitted IPAddress AND the Device must both convert to proto without
+// recursing forever. ConvertToProtoMessage is what the real gRPC client and
+// the dry-run protojson marshal call; a cycle stack-overflows here, NOT in the
+// recordingClient-based runner test (which never serializes).
+func TestAssignPrimaryIPNoReferenceCycle(t *testing.T) {
+	dev := &diode.Device{Name: strptr("r1")}
+	rich := &diode.IPAddress{Address: strptr("10.0.0.1/31"),
+		AssignedObject: &diode.Interface{Device: dev, Name: strptr("Ethernet1")}}
+	e := []diode.Entity{dev, rich}
+	AssignPrimaryIP(e, "10.0.0.1")
+	// Must not stack-overflow:
+	require.NotNil(t, dev.ConvertToProtoMessage())
+	require.NotNil(t, rich.ConvertToProtoMessage())
+}
