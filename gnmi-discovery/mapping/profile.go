@@ -301,6 +301,9 @@ func (p *Profile) SubscribePaths() []string {
 	}
 	addList(p.Interfaces)
 	addList(p.Components)
+	// The OpenConfig subinterface IP subtree is standardized across vendors, so it
+	// is always subscribed (assumes the OpenConfig /subinterfaces/.../{ipv4,ipv6}
+	// shape under the interface list). AllowsPath gates the same paths symmetrically.
 	if p.Interfaces.ListPath != "" {
 		base := p.Interfaces.ListPath + "[" + p.Interfaces.listKey() + "=*]/subinterfaces/subinterface[index=*]"
 		out = append(out,
