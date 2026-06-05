@@ -79,3 +79,19 @@ func TestAnnotateEntitiesWithRunID(t *testing.T) {
 	// Pre-existing key on Device is preserved.
 	require.Equal(t, "orig", dev.Metadata["source_match"])
 }
+
+func TestAnnotateRunIDCoversIPAddress(t *testing.T) {
+	dev := &diode.Device{Name: strPtrT("r1")}
+	iface := &diode.Interface{Device: dev, Name: strPtrT("Ethernet1")}
+	ip := &diode.IPAddress{Address: strPtrT("10.0.0.1/31"), AssignedObject: iface}
+	// Pass ONLY dev + ip (NOT iface) as top-level entities. iface is reachable
+	// solely through ip.AssignedObject, so if it ends up annotated, that proves
+	// the new *diode.IPAddress case did it — not the pre-existing Interface case.
+	annotateEntitiesWithRunID([]diode.Entity{dev, ip}, "RID")
+	require.Equal(t, "RID", ip.Metadata["run_id"])
+	require.Equal(t, "RID", iface.Metadata["run_id"])      // assigned interface annotated via the IP path
+	require.Equal(t, "RID", iface.Device.Metadata["run_id"]) // and its Device
+}
+
+// strPtrT returns a pointer to the given string value — test helper.
+func strPtrT(s string) *string { return &s }

@@ -41,6 +41,16 @@ func annotateEntitiesWithRunID(entities []diode.Entity, runID string) {
 					set(&v.Device.Metadata)
 				}
 			}
+		case *diode.IPAddress:
+			if v != nil {
+				set(&v.Metadata)
+				if iface, ok := v.AssignedObject.(*diode.Interface); ok && iface != nil {
+					set(&iface.Metadata)
+					if iface.Device != nil {
+						set(&iface.Device.Metadata)
+					}
+				}
+			}
 		}
 	}
 }
