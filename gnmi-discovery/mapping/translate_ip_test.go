@@ -24,7 +24,7 @@ func TestParseIPAddressPathV6(t *testing.T) {
 	iface, idx, fam, ip, leaf, ok := parseIPAddressPath(
 		"/interfaces/interface[name=Eth1/1]/subinterfaces/subinterface[index=100]/ipv6/addresses/address[ip=2001:db8::1]/state/prefix-length", lp)
 	require.True(t, ok)
-	require.Equal(t, "Eth1/1", iface)   // slash in the interface key survives (split on ']')
+	require.Equal(t, "Eth1/1", iface) // slash in the interface key survives (split on ']')
 	require.Equal(t, "100", idx)
 	require.Equal(t, "ipv6", fam)
 	require.Equal(t, "2001:db8::1", ip) // colons in the v6 key survive
@@ -34,9 +34,9 @@ func TestParseIPAddressPathV6(t *testing.T) {
 func TestParseIPAddressPathNonMatch(t *testing.T) {
 	lp := "/interfaces/interface"
 	for _, p := range []string{
-		"/interfaces/interface[name=Ethernet1]/state/mtu",              // not an IP path
-		"/system/state/hostname",                                       // unrelated
-		"/components/component[name=Chassis1]/state/serial-no",        // unrelated
+		"/interfaces/interface[name=Ethernet1]/state/mtu",      // not an IP path
+		"/system/state/hostname",                               // unrelated
+		"/components/component[name=Chassis1]/state/serial-no", // unrelated
 	} {
 		_, _, _, _, _, ok := parseIPAddressPath(p, lp)
 		require.False(t, ok, p)
@@ -137,8 +137,10 @@ func TestAssignPrimaryIP(t *testing.T) {
 // recordingClient-based runner test (which never serializes).
 func TestAssignPrimaryIPNoReferenceCycle(t *testing.T) {
 	dev := &diode.Device{Name: strptr("r1")}
-	rich := &diode.IPAddress{Address: strptr("10.0.0.1/31"),
-		AssignedObject: &diode.Interface{Device: dev, Name: strptr("Ethernet1")}}
+	rich := &diode.IPAddress{
+		Address:        strptr("10.0.0.1/31"),
+		AssignedObject: &diode.Interface{Device: dev, Name: strptr("Ethernet1")},
+	}
 	e := []diode.Entity{dev, rich}
 	AssignPrimaryIP(e, "10.0.0.1")
 	// Must not stack-overflow:

@@ -446,14 +446,16 @@ func TestRunnerSetsPrimaryIPFromHost(t *testing.T) {
 	}
 	client := &recordingClient{}
 	pol := config.Policy{
-		Config: config.PolicyConfig{Mode: config.ModeOnChange, DebounceMs: 20,
-			Defaults: config.Defaults{Site: "lab", Role: "router"}},
+		Config: config.PolicyConfig{
+			Mode: config.ModeOnChange, DebounceMs: 20,
+			Defaults: config.Defaults{Site: "lab", Role: "router"},
+		},
 		Scope: config.Scope{Targets: []config.Target{{Host: "10.7.7.7:6030"}}},
 	}
 	r, err := NewRunner(context.Background(), slog.Default(), "p", pol, client, &gnmi.FakeDialer{Session: fake}, store)
 	require.NoError(t, err)
 	r.Start()
-	defer r.Stop()
+	defer func() { require.NoError(t, r.Stop()) }()
 
 	require.Eventually(t, func() bool { return client.count() >= 1 }, 2*time.Second, 20*time.Millisecond)
 	last := client.lastIngested()
@@ -464,15 +466,15 @@ func TestRunnerSetsPrimaryIPFromHost(t *testing.T) {
 
 func TestTargetHostIP(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"10.7.7.7:6030", "10.7.7.7"},        // IPv4 host:port
-		{"10.7.7.7", "10.7.7.7"},             // bare IPv4
+		{"10.7.7.7:6030", "10.7.7.7"},         // IPv4 host:port
+		{"10.7.7.7", "10.7.7.7"},              // bare IPv4
 		{"[2001:db8::1]:6030", "2001:db8::1"}, // bracketed IPv6 host:port
-		{"[2001:db8::1]", "2001:db8::1"},     // bracketed IPv6, no port
-		{"2001:db8::1", "2001:db8::1"},       // bare IPv6 (SplitHostPort fails -> used as-is)
-		{"[fe80::1%eth0]:6030", "fe80::1"},   // zoned IPv6 -> zone dropped
-		{"router1.lab:6030", ""},             // DNS name with port -> skip
-		{"router1.lab", ""},                  // bare DNS name -> skip
-		{"", ""},                             // empty -> skip
+		{"[2001:db8::1]", "2001:db8::1"},      // bracketed IPv6, no port
+		{"2001:db8::1", "2001:db8::1"},        // bare IPv6 (SplitHostPort fails -> used as-is)
+		{"[fe80::1%eth0]:6030", "fe80::1"},    // zoned IPv6 -> zone dropped
+		{"router1.lab:6030", ""},              // DNS name with port -> skip
+		{"router1.lab", ""},                   // bare DNS name -> skip
+		{"", ""},                              // empty -> skip
 	}
 	for _, c := range cases {
 		require.Equal(t, c.want, targetHostIP(c.in), "host=%q", c.in)

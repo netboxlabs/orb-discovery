@@ -89,7 +89,7 @@ func TestAnnotateRunIDCoversIPAddress(t *testing.T) {
 	// the new *diode.IPAddress case did it — not the pre-existing Interface case.
 	annotateEntitiesWithRunID([]diode.Entity{dev, ip}, "RID")
 	require.Equal(t, "RID", ip.Metadata["run_id"])
-	require.Equal(t, "RID", iface.Metadata["run_id"])      // assigned interface annotated via the IP path
+	require.Equal(t, "RID", iface.Metadata["run_id"])        // assigned interface annotated via the IP path
 	require.Equal(t, "RID", iface.Device.Metadata["run_id"]) // and its Device
 }
 
