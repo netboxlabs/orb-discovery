@@ -1,6 +1,11 @@
 package mapping
 
-import "strings"
+import (
+	"sort"
+	"strings"
+
+	"github.com/netboxlabs/diode-sdk-go/diode"
+)
 
 // firstKeyVal expects s to start with "[<key>=<val>]" and returns val plus the
 // remainder after the closing "]". Splitting on "]" (not "/") keeps values that
@@ -62,4 +67,74 @@ func parseIPAddressPath(path, ifaceListPath string) (iface, index, family, ip, l
 	}
 	leaf = strings.TrimPrefix(rest, "/")
 	return iface, index, family, ip, leaf, true
+}
+
+// translateIPs emits an IPAddress per (interface, subinterface index, family, ip)
+// that reports a prefix-length. index 0 assigns to the parent interface; index>0
+// emits a child virtual subinterface "<iface>.<index>" (once) and assigns there.
+func translateIPs(profile *Profile, snap map[string]any, dev *diode.Device) []diode.Entity {
+	listPath := profile.Interfaces.ListPath
+	if listPath == "" {
+		return nil
+	}
+	type addrKey struct{ iface, index, family, ip string }
+	prefixLen := map[addrKey]string{}
+	var order []addrKey
+	for path, val := range snap {
+		iface, index, family, ip, leaf, ok := parseIPAddressPath(path, listPath)
+		if !ok || leaf != "state/prefix-length" {
+			continue
+		}
+		k := addrKey{iface, index, family, ip}
+		if _, seen := prefixLen[k]; !seen {
+			order = append(order, k)
+		}
+		prefixLen[k] = toStr(val)
+	}
+	sort.Slice(order, func(i, j int) bool {
+		a, b := order[i], order[j]
+		if a.iface != b.iface {
+			return a.iface < b.iface
+		}
+		if a.index != b.index {
+			return a.index < b.index
+		}
+		if a.family != b.family {
+			return a.family < b.family
+		}
+		return a.ip < b.ip
+	})
+
+	children := map[string]*diode.Interface{} // "<iface>.<index>" -> emitted child
+	var out []diode.Entity
+	for _, k := range order {
+		pl := prefixLen[k]
+		if pl == "" {
+			continue // skip addresses with no prefix-length (do not guess /32 or /128)
+		}
+		var assigned *diode.Interface
+		if k.index == "0" {
+			assigned = &diode.Interface{Device: dev, Name: strptr(k.iface)}
+		} else {
+			name := k.iface + "." + k.index
+			ch, ok := children[name]
+			if !ok {
+				ch = &diode.Interface{
+					Device: dev,
+					Name:   strptr(name),
+					Type:   strptr("virtual"),
+					Parent: &diode.Interface{Device: dev, Name: strptr(k.iface)},
+				}
+				children[name] = ch
+				out = append(out, ch) // emit the child subinterface before its IP
+			}
+			assigned = ch
+		}
+		out = append(out, &diode.IPAddress{
+			Address:        strptr(k.ip + "/" + pl),
+			Status:         strptr("active"),
+			AssignedObject: assigned,
+		})
+	}
+	return out
 }

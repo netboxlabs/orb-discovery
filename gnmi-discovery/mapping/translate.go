@@ -197,6 +197,7 @@ func Translate(profile *Profile, snap map[string]any, defaults *config.Defaults,
 	entities := []diode.Entity{dev}
 	entities = append(entities, translateInterfaces(profile, snap, dev, defaults)...)
 	entities = append(entities, translateComponents(profile, snap, dev, deviceMfg)...)
+	entities = append(entities, translateIPs(profile, snap, dev)...) // Device -> Interfaces -> Modules -> subifs+IPs
 	return entities
 }
 
