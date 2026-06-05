@@ -88,6 +88,12 @@ def _expand_interface_range(range_str: str) -> list[str]:
             prefix = m.group(1)
             start, end = int(m.group(2)), int(m.group(3))
             if end < start:
+                logger.debug(
+                    "Skipping reversed S300 interface range %r (end %d < start %d)",
+                    token,
+                    end,
+                    start,
+                )
                 continue
             range_size = end - start + 1
             if range_size > _MAX_INTERFACE_RANGE_EXPANSION:
