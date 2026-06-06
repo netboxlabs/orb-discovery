@@ -111,6 +111,125 @@ func TestMergeDefaults(t *testing.T) {
 		result.Interface.Tags = append(result.Interface.Tags, "extra")
 		require.NotContains(t, override.Interface.Tags, "extra", "result.Interface.Tags must not alias override.Interface.Tags")
 	})
+
+	t.Run("both nil returns empty Defaults", func(t *testing.T) {
+		result := MergeDefaults(nil, nil)
+		require.NotNil(t, result)
+		require.Equal(t, &Defaults{}, result)
+	})
+
+	t.Run("nil policy with non-nil override clones all slice fields", func(t *testing.T) {
+		override := &Defaults{
+			Site:                     "SF",
+			Tags:                     []string{"ov-tag"},
+			Device:                   DeviceDefaults{Tags: []string{"ov-dev-tag"}},
+			Interface:                InterfaceDefaults{Tags: []string{"ov-iface-tag"}},
+			InterfacePatterns:        []InterfacePattern{{Match: "eth.*", Type: "1000base-t"}},
+			InterfaceExcludePatterns: []string{"lo.*"},
+		}
+		result := MergeDefaults(nil, override)
+		require.Equal(t, "SF", result.Site)
+		require.Equal(t, []string{"ov-tag"}, result.Tags)
+		require.Equal(t, []string{"ov-dev-tag"}, result.Device.Tags)
+		require.Equal(t, []string{"ov-iface-tag"}, result.Interface.Tags)
+		require.Equal(t, override.InterfacePatterns, result.InterfacePatterns)
+		require.Equal(t, override.InterfaceExcludePatterns, result.InterfaceExcludePatterns)
+
+		// Mutating result slices must not affect the override source.
+		result.Tags = append(result.Tags, "extra")
+		require.NotContains(t, override.Tags, "extra", "result.Tags must not alias override.Tags")
+		result.InterfacePatterns = append(result.InterfacePatterns, InterfacePattern{Match: "x", Type: "y"})
+		require.Len(t, override.InterfacePatterns, 1, "result.InterfacePatterns must not alias override.InterfacePatterns")
+		result.InterfaceExcludePatterns = append(result.InterfaceExcludePatterns, "extra")
+		require.NotContains(t, override.InterfaceExcludePatterns, "extra", "result.InterfaceExcludePatterns must not alias override.InterfaceExcludePatterns")
+	})
+
+	t.Run("override sets Location, Manufacturer, Platform, Interface.Type when non-empty", func(t *testing.T) {
+		policy := &Defaults{
+			Location: "DC-1",
+			Device: DeviceDefaults{
+				Manufacturer: "Cisco",
+				Platform:     "IOS-XR",
+			},
+			Interface: InterfaceDefaults{
+				Type: "old-type",
+			},
+		}
+		override := &Defaults{
+			Location: "DC-2",
+			Device: DeviceDefaults{
+				Manufacturer: "Arista",
+				Platform:     "EOS",
+			},
+			Interface: InterfaceDefaults{
+				Type: "1000base-t",
+			},
+		}
+		result := MergeDefaults(policy, override)
+		require.Equal(t, "DC-2", result.Location)
+		require.Equal(t, "Arista", result.Device.Manufacturer)
+		require.Equal(t, "EOS", result.Device.Platform)
+		require.Equal(t, "1000base-t", result.Interface.Type)
+	})
+
+	t.Run("override sets InterfacePatterns and InterfaceExcludePatterns when non-empty", func(t *testing.T) {
+		policy := &Defaults{
+			InterfacePatterns:        []InterfacePattern{{Match: "eth.*", Type: "1000base-t"}},
+			InterfaceExcludePatterns: []string{"lo.*"},
+		}
+		override := &Defaults{
+			InterfacePatterns:        []InterfacePattern{{Match: "xe.*", Type: "10gbase-x-xfp"}},
+			InterfaceExcludePatterns: []string{"mgmt.*"},
+		}
+		result := MergeDefaults(policy, override)
+		require.Equal(t, override.InterfacePatterns, result.InterfacePatterns)
+		require.Equal(t, override.InterfaceExcludePatterns, result.InterfaceExcludePatterns)
+
+		// Mutating result slices must not affect the override source.
+		result.InterfacePatterns = append(result.InterfacePatterns, InterfacePattern{Match: "x", Type: "y"})
+		require.Len(t, override.InterfacePatterns, 1, "result.InterfacePatterns must not alias override.InterfacePatterns")
+		result.InterfaceExcludePatterns = append(result.InterfaceExcludePatterns, "extra")
+		require.NotContains(t, override.InterfaceExcludePatterns, "extra", "result.InterfaceExcludePatterns must not alias override.InterfaceExcludePatterns")
+	})
+
+	t.Run("empty override fields preserve all policy values", func(t *testing.T) {
+		policy := &Defaults{
+			Site:     "NYC",
+			Location: "DC-1",
+			Role:     "Spine",
+			Tags:     []string{"p-tag"},
+			Device: DeviceDefaults{
+				Manufacturer: "Arista",
+				Model:        "7050CX3",
+				Platform:     "EOS",
+				Comments:     "comment",
+				Tags:         []string{"p-dev-tag"},
+			},
+			Interface: InterfaceDefaults{
+				Type:        "1000base-t",
+				Description: "uplink",
+				Tags:        []string{"p-iface-tag"},
+			},
+			InterfacePatterns:        []InterfacePattern{{Match: "eth.*", Type: "1000base-t"}},
+			InterfaceExcludePatterns: []string{"lo.*"},
+		}
+		override := &Defaults{} // all zero-values: nothing should be overridden
+		result := MergeDefaults(policy, override)
+		require.Equal(t, "NYC", result.Site)
+		require.Equal(t, "DC-1", result.Location)
+		require.Equal(t, "Spine", result.Role)
+		require.Equal(t, []string{"p-tag"}, result.Tags)
+		require.Equal(t, "Arista", result.Device.Manufacturer)
+		require.Equal(t, "7050CX3", result.Device.Model)
+		require.Equal(t, "EOS", result.Device.Platform)
+		require.Equal(t, "comment", result.Device.Comments)
+		require.Equal(t, []string{"p-dev-tag"}, result.Device.Tags)
+		require.Equal(t, "1000base-t", result.Interface.Type)
+		require.Equal(t, "uplink", result.Interface.Description)
+		require.Equal(t, []string{"p-iface-tag"}, result.Interface.Tags)
+		require.Equal(t, policy.InterfacePatterns, result.InterfacePatterns)
+		require.Equal(t, policy.InterfaceExcludePatterns, result.InterfaceExcludePatterns)
+	})
 }
 
 func TestUnmarshalPolicy(t *testing.T) {
