@@ -25,7 +25,9 @@ import (
 // initTestMetrics initialises the OTel meter to a live (but no-export) provider
 // so that metricsMiddleware exercises its non-nil instrument branches. The OTLP
 // endpoint doesn't need to be reachable — the gRPC exporter dials lazily.
-// Returns a cleanup func that must be deferred by the caller.
+// Cleanup shuts down the MeterProvider (with a short deadline so the test suite
+// doesn't stall) before resetting the meter, preventing goroutine leaks from the
+// PeriodicReader.
 func initTestMetrics(t *testing.T) {
 	t.Helper()
 	// Use an ephemeral local address that nothing is actually listening on.
@@ -38,10 +40,17 @@ func initTestMetrics(t *testing.T) {
 	); err != nil {
 		t.Skipf("could not init test metrics (OTel exporter setup failed): %v", err)
 	}
-	t.Cleanup(metrics.ResetMeter)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		_ = metrics.Shutdown(ctx)
+		cancel()
+		metrics.ResetMeter()
+	})
 }
 
 // newTestManager creates a policy.Manager backed by a FakeDialer for unit tests.
+// A t.Cleanup is registered to stop all running policy runners so no background
+// goroutines leak after the test.
 func newTestManager(t *testing.T) *policy.Manager {
 	t.Helper()
 	var client diode.Client
@@ -53,6 +62,7 @@ func newTestManager(t *testing.T) *policy.Manager {
 		"",
 	)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = m.Stop() })
 	return m
 }
 
@@ -469,74 +479,59 @@ policies:
 	require.Contains(t, resp.Detail, "mode")
 }
 
-// TestCreatePolicyConflictWithRollback verifies that when a batch of two policies
-// is submitted and the second already exists, the first (already started) is
-// rolled back and 409 is returned. This exercises the rollback loop inside the
-// HasPolicy conflict branch.
-func TestCreatePolicyConflictWithRollback(t *testing.T) {
-	s := NewServer("127.0.0.1", 0, slog.Default(), newTestManager(t), "v0")
+// TestCreatePolicyConflictBatchResponse verifies that when a batch includes a
+// policy that already exists the server returns 409 Conflict and that after the
+// failed batch the pre-existing policy is still listed as running (no state
+// leak). The rollback branch (stop already-started policies on conflict) may or
+// may not execute depending on Go's non-deterministic map iteration — this test
+// only asserts the observable contract: conflict is reported and persistent state
+// is consistent.
+func TestCreatePolicyConflictBatchResponse(t *testing.T) {
+	mgr := newTestManager(t)
+	s := NewServer("127.0.0.1", 0, slog.Default(), mgr, "v0")
 
-	// Pre-create "conflict-b" so the batch will hit a conflict on it.
-	preBody := validPolicyYAML("conflict-b", "10.2.0.2")
+	// Pre-create "pre-existing" so the batch will hit a conflict on it.
+	preBody := validPolicyYAML("pre-existing", "10.2.0.99")
 	preReq := httptest.NewRequest(http.MethodPost, "/api/v1/policies", bytes.NewBuffer(preBody))
 	preReq.Header.Set("Content-Type", "application/x-yaml")
 	preW := httptest.NewRecorder()
 	s.Router().ServeHTTP(preW, preReq)
 	require.Equal(t, http.StatusCreated, preW.Code)
 
-	// Submit a batch: "conflict-a" (new) then "conflict-b" (already exists).
-	// YAML maps have non-deterministic iteration order in Go, but the handler
-	// iterates them once. We need "conflict-a" to be processed first so it is
-	// added to rPolicies before the conflict on "conflict-b" is detected.
-	// We achieve this by relying on alphabetical order in Go's map iteration
-	// being undefined — so we use a batch where only one ordering triggers the
-	// rollback. To make the test deterministic, pre-start "conflict-b" and
-	// send a single-policy batch that conflicts, after first creating "conflict-a"
-	// through a separate request.
-	extraBody := validPolicyYAML("conflict-a", "10.2.0.1")
-	extraReq := httptest.NewRequest(http.MethodPost, "/api/v1/policies", bytes.NewBuffer(extraBody))
-	extraReq.Header.Set("Content-Type", "application/x-yaml")
-	extraW := httptest.NewRecorder()
-	s.Router().ServeHTTP(extraW, extraReq)
-	require.Equal(t, http.StatusCreated, extraW.Code)
-
-	// Now delete conflict-a so it's free, then send a batch with conflict-a and
-	// conflict-b. Since conflict-b already exists, no matter which is processed
-	// first the conflict is hit. But to exercise the rollback loop we need
-	// conflict-a to be started first. The YAML below lists conflict-a before
-	// conflict-b alphabetically — Go maps don't guarantee order, so we use a
-	// three-policy batch: new "rollback-first", "rollback-second", and existing
-	// "conflict-b".  At least one ordering will have started policies in rPolicies
-	// by the time conflict-b is encountered.
-	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/policies/conflict-a", nil)
-	delW := httptest.NewRecorder()
-	s.Router().ServeHTTP(delW, delReq)
-	require.Equal(t, http.StatusOK, delW.Code)
-
+	// Submit a batch that includes "pre-existing" (conflict) and a fresh policy.
+	// The order of iteration is non-deterministic; the batch will be rejected
+	// with 409 regardless of which policy is encountered first because one of
+	// them always conflicts.
 	batchBody := []byte(`
 policies:
-  conflict-a:
+  fresh-policy:
     config: {}
     scope:
       targets:
         - host: 10.2.0.1
-  conflict-b:
+  pre-existing:
     config: {}
     scope:
       targets:
-        - host: 10.2.0.2
+        - host: 10.2.0.99
 `)
 	batchReq := httptest.NewRequest(http.MethodPost, "/api/v1/policies", bytes.NewBuffer(batchBody))
 	batchReq.Header.Set("Content-Type", "application/x-yaml")
 	batchW := httptest.NewRecorder()
 	s.Router().ServeHTTP(batchW, batchReq)
-	// Either conflict-a or conflict-b was processed first; in either case the
-	// response is a conflict or success for one of them. The important thing is
-	// that the rollback loop executed for whichever was started before the conflict.
-	// Acceptable outcomes: 201 (only conflict-a processed, conflict-b already exists)
-	// or 409 (conflict-b found before or after conflict-a was started).
-	require.True(t, batchW.Code == http.StatusConflict || batchW.Code == http.StatusCreated,
-		"unexpected status: %d body: %s", batchW.Code, batchW.Body.String())
+
+	// The batch must be rejected with 409 Conflict because "pre-existing" is in it.
+	require.Equal(t, http.StatusConflict, batchW.Code,
+		"batch containing an existing policy name must return 409")
+
+	// After the failed batch the pre-existing policy must still be running.
+	require.True(t, mgr.HasPolicy("pre-existing"),
+		"pre-existing policy must still be running after failed batch")
+
+	// The fresh-policy must NOT be permanently installed (it was either rolled
+	// back or never started, depending on iteration order).
+	require.False(t, mgr.HasPolicy("fresh-policy"),
+		"fresh-policy must not persist after a rolled-back or rejected batch")
 }
 
 // TestCreatePolicyStartErrorWithRollback sends a two-policy batch where the
@@ -578,9 +573,9 @@ policies:
 	require.Contains(t, resp.Detail, "nonexistent-profile-xyz")
 }
 
-// TestStartErrorOnUsedPort verifies that Start() sends an error on the returned
-// channel when the port is already in use, exercising the non-ErrServerClosed
-// error path.
+// TestStartErrorOnUsedPort verifies that Start() sends a non-nil error on the
+// returned channel when the port is already in use, exercising the
+// non-ErrServerClosed error path. A closed channel (no error) is a failure.
 func TestStartErrorOnUsedPort(t *testing.T) {
 	// Bind a port and hold it open so the server cannot listen on it.
 	blocker, err := net.Listen("tcp", "127.0.0.1:0")
@@ -593,14 +588,12 @@ func TestStartErrorOnUsedPort(t *testing.T) {
 	errCh := s.Start()
 
 	select {
-	case err, open := <-errCh:
-		if open {
-			// The channel delivered a real error (bind failed) OR was closed (clean
-			// shutdown). Both paths are expected; a real error is preferred here.
-			_ = err // may be "address already in use"
+	case startErr, open := <-errCh:
+		if !open {
+			t.Fatal("Start() closed the error channel without sending an error — expected a bind-failure error")
 		}
-		// channel closed OR error received → Start's error/close path was exercised
+		require.Error(t, startErr, "Start() must send a non-nil error when the port is already in use")
 	case <-time.After(3 * time.Second):
-		t.Fatal("Start() did not produce an error or close the channel within 3 s")
+		t.Fatal("Start() did not produce an error within 3 s")
 	}
 }

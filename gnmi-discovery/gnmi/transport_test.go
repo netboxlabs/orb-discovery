@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,13 +22,31 @@ import (
 // ---------------------------------------------------------------------------
 
 // testGNMIServer is a minimal in-process gNMI server whose behaviour is
-// controlled per-test via the handler fields.
+// controlled per-test via the handler fields. It also captures the last
+// incoming Get and Subscribe requests so tests can assert on them.
 type testGNMIServer struct {
 	gnmiproto.UnimplementedGNMIServer
 
 	capsHandler      func(context.Context, *gnmiproto.CapabilityRequest) (*gnmiproto.CapabilityResponse, error)
 	getHandler       func(context.Context, *gnmiproto.GetRequest) (*gnmiproto.GetResponse, error)
 	subscribeHandler func(gnmiproto.GNMI_SubscribeServer) error
+
+	// captured requests — written under mu, read after the handler returns
+	mu         sync.Mutex
+	lastGetReq *gnmiproto.GetRequest
+	lastSubReq *gnmiproto.SubscribeRequest
+}
+
+func (s *testGNMIServer) captureGet(req *gnmiproto.GetRequest) {
+	s.mu.Lock()
+	s.lastGetReq = req
+	s.mu.Unlock()
+}
+
+func (s *testGNMIServer) captureSubscribe(req *gnmiproto.SubscribeRequest) {
+	s.mu.Lock()
+	s.lastSubReq = req
+	s.mu.Unlock()
 }
 
 func (s *testGNMIServer) Capabilities(ctx context.Context, req *gnmiproto.CapabilityRequest) (*gnmiproto.CapabilityResponse, error) {
@@ -38,6 +57,7 @@ func (s *testGNMIServer) Capabilities(ctx context.Context, req *gnmiproto.Capabi
 }
 
 func (s *testGNMIServer) Get(ctx context.Context, req *gnmiproto.GetRequest) (*gnmiproto.GetResponse, error) {
+	s.captureGet(req)
 	if s.getHandler != nil {
 		return s.getHandler(ctx, req)
 	}
@@ -143,9 +163,11 @@ func TestGnmicSession_Capabilities_ServerError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 2 – GetOnce (happy path + error path)
+// Test 2 – GetOnce (happy path + error path + request assertion)
 // ---------------------------------------------------------------------------
 
+// TestGnmicSession_GetOnce_Success verifies a successful Get, asserts the
+// decoded notification, and asserts the captured request fields.
 func TestGnmicSession_GetOnce_Success(t *testing.T) {
 	hostnameVal, _ := hostnameJSONVal("spine1")
 
@@ -183,6 +205,17 @@ func TestGnmicSession_GetOnce_Success(t *testing.T) {
 	require.Len(t, n.Updates, 1)
 	assert.Equal(t, "/system/state/hostname", n.Updates[0].Path)
 	assert.Equal(t, "spine1", n.Updates[0].Value)
+
+	// Assert the request the transport sent to the server.
+	srv.mu.Lock()
+	capturedReq := srv.lastGetReq
+	srv.mu.Unlock()
+	require.NotNil(t, capturedReq, "server must have received a GetRequest")
+	// Encoding must be JSON_IETF.
+	assert.Equal(t, gnmiproto.Encoding_JSON_IETF, capturedReq.GetEncoding(),
+		"GetOnce must request JSON_IETF encoding")
+	// At least one path element matching the requested path must be present.
+	require.NotEmpty(t, capturedReq.GetPath(), "GetRequest must include at least one path")
 }
 
 func TestGnmicSession_GetOnce_ServerError(t *testing.T) {
@@ -206,15 +239,18 @@ func TestGnmicSession_GetOnce_ServerError(t *testing.T) {
 // Test 3 – Subscribe (Sample and OnChange)
 // ---------------------------------------------------------------------------
 
-// subscribeTestServer returns a Subscribe handler that sends one update
-// notification followed by sync_response=true, then blocks until the stream
-// context is cancelled (simulating a live STREAM subscription).
-func subscribeTestServer(_ string, hostname string) func(gnmiproto.GNMI_SubscribeServer) error {
+// subscribeTestServer returns a Subscribe handler that captures the incoming
+// request, sends one update notification followed by sync_response=true, then
+// blocks until the stream context is cancelled (simulating a live STREAM subscription).
+func subscribeTestServer(srv *testGNMIServer, hostname string) func(gnmiproto.GNMI_SubscribeServer) error {
 	return func(stream gnmiproto.GNMI_SubscribeServer) error {
 		// Read the incoming SubscribeRequest (gnmic sends it before we send anything).
-		if _, err := stream.Recv(); err != nil {
+		req, err := stream.Recv()
+		if err != nil {
 			return err
 		}
+		// Capture the request so tests can assert on it.
+		srv.captureSubscribe(req)
 
 		hostnameVal, _ := hostnameJSONVal(hostname)
 
@@ -256,16 +292,19 @@ func subscribeTestServer(_ string, hostname string) func(gnmiproto.GNMI_Subscrib
 func testSubscribeMode(t *testing.T, mode Mode) {
 	t.Helper()
 
-	srv := &testGNMIServer{
-		subscribeHandler: subscribeTestServer("/system/state/hostname", "leaf1"),
-	}
+	srv := &testGNMIServer{}
+	srv.subscribeHandler = subscribeTestServer(srv, "leaf1")
 	addr := startTestGNMIServer(t, srv)
 	sess := dialPlaintext(t, addr)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	notes, errs, err := sess.Subscribe(ctx, mode, []string{"/system/state/hostname"}, 100)
+	sampleInterval := 100
+	if mode == OnChange {
+		sampleInterval = 0
+	}
+	notes, errs, err := sess.Subscribe(ctx, mode, []string{"/system/state/hostname"}, sampleInterval)
 	require.NoError(t, err)
 	require.NotNil(t, notes)
 	require.NotNil(t, errs)
@@ -282,13 +321,41 @@ func testSubscribeMode(t *testing.T, mode Mode) {
 		t.Fatal("timed out waiting for update notification")
 	}
 
-	// Expect the sync marker.
+	// Expect the sync marker. Require ok==true AND SyncDone==true — a channel
+	// close instead of a real value must fail the test.
 	select {
 	case n, ok := <-notes:
-		require.True(t, ok, "notes channel closed before sync")
-		assert.True(t, n.SyncDone, "expected SyncDone=true marker")
+		require.True(t, ok, "notes channel closed before sync marker was delivered")
+		require.True(t, n.SyncDone, "expected SyncDone==true in the sync marker notification")
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for sync notification")
+	}
+
+	// Assert the captured SubscribeRequest fields.
+	srv.mu.Lock()
+	capturedSub := srv.lastSubReq
+	srv.mu.Unlock()
+	require.NotNil(t, capturedSub, "server must have received a SubscribeRequest")
+	subList := capturedSub.GetSubscribe()
+	require.NotNil(t, subList, "SubscribeRequest must contain a SubscriptionList")
+	// List mode must be STREAM.
+	assert.Equal(t, gnmiproto.SubscriptionList_STREAM, subList.GetMode(),
+		"subscription list mode must be STREAM")
+	// Encoding must be JSON_IETF.
+	assert.Equal(t, gnmiproto.Encoding_JSON_IETF, subList.GetEncoding(),
+		"subscription encoding must be JSON_IETF")
+	// Per-subscription mode must match what we asked for.
+	require.NotEmpty(t, subList.GetSubscription(), "SubscriptionList must contain at least one subscription")
+	sub := subList.GetSubscription()[0]
+	if mode == OnChange {
+		assert.Equal(t, gnmiproto.SubscriptionMode_ON_CHANGE, sub.GetMode(),
+			"OnChange mode must produce ON_CHANGE per-subscription mode")
+	} else {
+		assert.Equal(t, gnmiproto.SubscriptionMode_SAMPLE, sub.GetMode(),
+			"Sample mode must produce SAMPLE per-subscription mode")
+		// sampleInterval 100ms → SampleInterval must be set.
+		assert.Greater(t, sub.GetSampleInterval(), uint64(0),
+			"SAMPLE subscription must have SampleInterval > 0 when interval is given")
 	}
 
 	// Close and wait for channels to drain.
@@ -314,9 +381,8 @@ func TestGnmicSession_Subscribe_OnChangeMode(t *testing.T) {
 // branch inside Subscribe: a second Subscribe call on the same session cancels
 // the first producer before starting a new one.
 func TestGnmicSession_Subscribe_ReSubscribe(t *testing.T) {
-	srv := &testGNMIServer{
-		subscribeHandler: subscribeTestServer("/system/state/hostname", "leaf2"),
-	}
+	srv := &testGNMIServer{}
+	srv.subscribeHandler = subscribeTestServer(srv, "leaf2")
 	addr := startTestGNMIServer(t, srv)
 	sess := dialPlaintext(t, addr)
 
@@ -380,12 +446,15 @@ func TestGnmicSession_Subscribe_StreamClosedByServer(t *testing.T) {
 	notes, _, subErr := sess.Subscribe(ctx, Sample, []string{"/system"}, 0)
 	require.NoError(t, subErr)
 
-	// Receive the sync notification.
+	// Receive the sync notification — require it to be delivered (ok==true) with
+	// SyncDone==true; a channel close before delivery is also acceptable because
+	// the server closed the stream after sending sync.
 	select {
 	case n, ok := <-notes:
 		if ok {
 			assert.True(t, n.SyncDone)
 		}
+		// ok==false means the channel closed right after/before the sync — acceptable.
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for sync")
 	}
@@ -395,6 +464,10 @@ func TestGnmicSession_Subscribe_StreamClosedByServer(t *testing.T) {
 // Test 4 – Subscribe error path
 // ---------------------------------------------------------------------------
 
+// TestGnmicSession_Subscribe_ServerError verifies that a server-side error
+// eventually surfaces as a non-nil error on the errs channel. The test LOOPS
+// on the errs channel (with a timeout guard) so it fails if the channel closes
+// with no error rather than silently passing.
 func TestGnmicSession_Subscribe_ServerError(t *testing.T) {
 	srv := &testGNMIServer{
 		subscribeHandler: func(stream gnmiproto.GNMI_SubscribeServer) error {
@@ -413,19 +486,29 @@ func TestGnmicSession_Subscribe_ServerError(t *testing.T) {
 	notes, errs, err := sess.Subscribe(ctx, Sample, []string{"/system"}, 0)
 	require.NoError(t, err)
 
-	// gnmic may retry with backoff, so we wait up to a generous timeout for an
-	// error to arrive on the errs channel.
-	select {
-	case e, ok := <-errs:
-		if ok {
-			assert.Error(t, e)
+	// Loop reading errs until a non-nil error is observed or timeout elapses.
+	// gnmic may retry with backoff, so we give it a generous window.
+	deadline := time.After(8 * time.Second)
+	var gotErr error
+loop:
+	for {
+		select {
+		case e, ok := <-errs:
+			if !ok {
+				// errs closed without ever delivering a non-nil error
+				t.Fatal("errs channel closed with no non-nil error before timeout")
+			}
+			if e != nil {
+				gotErr = e
+				break loop
+			}
+		case <-notes:
+			// Drain any spurious notifications while waiting.
+		case <-deadline:
+			t.Fatal("timed out waiting for a non-nil subscribe error")
 		}
-		// ok==false means errs was closed — also acceptable (channel drained after error).
-	case <-notes:
-		// Drain any spurious notes while waiting.
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for subscribe error")
 	}
+	require.Error(t, gotErr, "subscribe must deliver a non-nil error when the server returns unavailable")
 
 	// Cancel context and close so no goroutines leak.
 	cancel()
@@ -451,7 +534,85 @@ drainLoop:
 }
 
 // ---------------------------------------------------------------------------
-// Test 5 – Dial branch coverage
+// Test 5 – Prefix join exercised through real transport
+// ---------------------------------------------------------------------------
+
+// TestGnmicSession_Subscribe_PrefixJoinViaTransport sends a response whose
+// Notification carries a Prefix and asserts that the delivered Update path is
+// the prefix joined with the leaf — this exercises convertNotification's prefix
+// join path via the real (in-process) transport, not just the unit-test helper.
+func TestGnmicSession_Subscribe_PrefixJoinViaTransport(t *testing.T) {
+	srv := &testGNMIServer{
+		subscribeHandler: func(stream gnmiproto.GNMI_SubscribeServer) error {
+			// Read initial subscribe request.
+			if _, err := stream.Recv(); err != nil {
+				return err
+			}
+			// Send a notification with a Prefix plus a relative leaf path.
+			if err := stream.Send(&gnmiproto.SubscribeResponse{
+				Response: &gnmiproto.SubscribeResponse_Update{
+					Update: &gnmiproto.Notification{
+						Prefix: &gnmiproto.Path{
+							Elem: []*gnmiproto.PathElem{
+								{Name: "interfaces"},
+								{Name: "interface", Key: map[string]string{"name": "Eth1"}},
+							},
+						},
+						Update: []*gnmiproto.Update{
+							{
+								Path: &gnmiproto.Path{
+									Elem: []*gnmiproto.PathElem{
+										{Name: "state"},
+										{Name: "oper-status"},
+									},
+								},
+								Val: &gnmiproto.TypedValue{
+									Value: &gnmiproto.TypedValue_StringVal{StringVal: "UP"},
+								},
+							},
+						},
+					},
+				},
+			}); err != nil {
+				return err
+			}
+			// Send sync_response then block.
+			if err := stream.Send(&gnmiproto.SubscribeResponse{
+				Response: &gnmiproto.SubscribeResponse_SyncResponse{SyncResponse: true},
+			}); err != nil {
+				return err
+			}
+			<-stream.Context().Done()
+			return nil
+		},
+	}
+	addr := startTestGNMIServer(t, srv)
+	sess := dialPlaintext(t, addr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	notes, _, err := sess.Subscribe(ctx, Sample, []string{"/interfaces"}, 0)
+	require.NoError(t, err)
+
+	// First notification — must have the prefix joined with the leaf.
+	select {
+	case n, ok := <-notes:
+		require.True(t, ok, "notes channel closed before update notification")
+		require.Len(t, n.Updates, 1)
+		// The full path must be prefix+leaf, not just the leaf.
+		assert.Equal(t,
+			"/interfaces/interface[name=Eth1]/state/oper-status",
+			n.Updates[0].Path,
+			"prefix must be joined with the leaf path via the real transport")
+		assert.Equal(t, "UP", n.Updates[0].Value)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for prefixed update")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 6 – Dial branch coverage
 // ---------------------------------------------------------------------------
 
 // TestGnmicDialer_WithCredentials dials a plaintext server with Username +
@@ -482,90 +643,88 @@ func TestGnmicDialer_WithCredentials(t *testing.T) {
 }
 
 // TestGnmicDialer_SkipVerifyBranch covers the SkipVerify option-append in
-// Dial. The port is closed / TLS-over-plaintext, so CreateGNMIClient may
-// succeed (gnmic buffers the connection attempt) or fail; either way the
-// SkipVerify branch runs.
+// Dial. gnmic dials lazily so CreateGNMIClient succeeds at construction time
+// even when the port is closed. The SkipVerify branch must be exercised and
+// Dial must return a non-nil session with no error.
 func TestGnmicDialer_SkipVerifyBranch(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	sess, err := (&GnmicDialer{}).Dial(ctx, TargetSpec{
-		Host:       "127.0.0.1:1", // no server; closed port
+		Host:       "127.0.0.1:1", // closed port; gnmic dials lazily
 		SkipVerify: true,
 	})
-	// We either get an error (CreateGNMIClient failed) or a session that
-	// will fail on first RPC — both are fine; we just need the branch covered.
-	if err != nil {
-		assert.Error(t, err)
-	} else {
-		_ = sess.Close()
-	}
+	require.NoError(t, err,
+		"SkipVerify with a lazy-dial gnmic must succeed at dial time")
+	require.NotNil(t, sess)
+	_ = sess.Close()
 }
 
 // TestGnmicDialer_CAFileBranch covers the CAFile / explicit-TLS branch in
-// Dial. We use a temp file for CAFile so the branch runs; TLS over a
-// plaintext server or closed port will produce an error from CreateGNMIClient
-// or the RPC itself.
+// Dial. gnmic's LoadCACertificates is lenient: a file whose PEM content is
+// absent or unparseable results in an empty (but valid) cert pool, so
+// CreateGNMIClient may succeed (gnmic dials lazily). The important thing is
+// that the TLSCA branch in Dial.go is exercised and the outcome is asserted
+// deterministically: if a session is returned it is closed.
 func TestGnmicDialer_CAFileBranch(t *testing.T) {
 	// Write a throwaway temp file to satisfy the non-empty CAFile check.
 	tmp, err := os.CreateTemp(t.TempDir(), "ca*.pem")
 	require.NoError(t, err)
+	_, _ = tmp.WriteString("not a real CA cert")
 	_ = tmp.Close()
 	caPath := tmp.Name()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	// gnmic dials lazily — CreateGNMIClient does not attempt a TLS handshake
+	// at construction time. An empty-pool CA file is accepted (no error), so
+	// Dial legitimately returns a session. Assert that explicitly and close it.
 	sess, dialErr := (&GnmicDialer{}).Dial(ctx, TargetSpec{
 		Host:   "127.0.0.1:1",
 		CAFile: caPath,
 	})
-	if dialErr != nil {
-		assert.Error(t, dialErr)
-	} else {
-		_ = sess.Close()
-	}
+	require.NoError(t, dialErr,
+		"CAFile branch with lazy-dial gnmic must succeed at dial time")
+	require.NotNil(t, sess)
+	_ = sess.Close()
 }
 
-// TestGnmicDialer_CertAndKeyBranch covers CertFile + KeyFile branches.
+// TestGnmicDialer_CertAndKeyBranch covers CertFile + KeyFile branches. The
+// temp files are not valid PEM material so Dial must fail.
 func TestGnmicDialer_CertAndKeyBranch(t *testing.T) {
 	tmp1, err := os.CreateTemp(t.TempDir(), "cert*.pem")
 	require.NoError(t, err)
+	_, _ = tmp1.WriteString("not a cert")
 	_ = tmp1.Close()
+
 	tmp2, err := os.CreateTemp(t.TempDir(), "key*.pem")
 	require.NoError(t, err)
+	_, _ = tmp2.WriteString("not a key")
 	_ = tmp2.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	sess, dialErr := (&GnmicDialer{}).Dial(ctx, TargetSpec{
+	_, dialErr := (&GnmicDialer{}).Dial(ctx, TargetSpec{
 		Host:     "127.0.0.1:1",
 		CertFile: tmp1.Name(),
 		KeyFile:  tmp2.Name(),
 	})
-	if dialErr != nil {
-		assert.Error(t, dialErr)
-	} else {
-		_ = sess.Close()
-	}
+	require.Error(t, dialErr,
+		"Dial with invalid cert/key material must fail")
 }
 
 // TestGnmicDialer_InvalidHostError covers the NewTarget / CreateGNMIClient
-// error-return paths for a malformed or unreachable host.
+// error-return paths for an empty host.
 func TestGnmicDialer_InvalidHostError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	// An empty address is likely to fail in NewTarget or CreateGNMIClient.
-	sess, err := (&GnmicDialer{}).Dial(ctx, TargetSpec{Host: ""})
-	if err != nil {
-		// Expected: the error must be wrapped with our message prefix.
-		assert.Contains(t, err.Error(), "gnmi dial")
-	} else {
-		// Unexpected success — clean up to avoid goroutine leak.
-		_ = sess.Close()
-	}
+	// An empty address is expected to fail in NewTarget or CreateGNMIClient.
+	_, err := (&GnmicDialer{}).Dial(ctx, TargetSpec{Host: ""})
+	require.Error(t, err, "Dial with empty host must return an error")
+	assert.Contains(t, err.Error(), "gnmi dial")
 }
 
 // ---------------------------------------------------------------------------

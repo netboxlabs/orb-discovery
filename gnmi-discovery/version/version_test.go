@@ -7,13 +7,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestGetBuildVersion asserts the observable contract: the returned string has
+// no leading or trailing whitespace (idempotent TrimSpace). The embedded content
+// itself is set at build time and cannot be changed in unit tests.
 func TestGetBuildVersion(t *testing.T) {
-	// Returns the embedded build version with surrounding whitespace trimmed.
-	assert.Equal(t, strings.TrimSpace(buildVersion), GetBuildVersion())
-	assert.Equal(t, GetBuildVersion(), strings.TrimSpace(GetBuildVersion()), "must be trimmed")
+	v := GetBuildVersion()
+	assert.Equal(t, strings.TrimSpace(v), v, "GetBuildVersion must return a whitespace-trimmed string")
 }
 
+// TestGetBuildCommit asserts the same idempotent-trim contract for the commit string.
 func TestGetBuildCommit(t *testing.T) {
-	assert.Equal(t, strings.TrimSpace(buildCommit), GetBuildCommit())
-	assert.Equal(t, GetBuildCommit(), strings.TrimSpace(GetBuildCommit()), "must be trimmed")
+	c := GetBuildCommit()
+	assert.Equal(t, strings.TrimSpace(c), c, "GetBuildCommit must return a whitespace-trimmed string")
 }

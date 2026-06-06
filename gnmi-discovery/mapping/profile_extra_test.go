@@ -342,6 +342,12 @@ func TestLoadProfilesWithLoggerSubdirSkipped(t *testing.T) {
 }
 
 func TestLoadProfilesWithLoggerUnreadableFileSkipped(t *testing.T) {
+	// os.Chmod(path, 0o000) is a no-op when running as root (e.g. in some CI
+	// containers), so skip the test rather than producing a false pass.
+	if os.Geteuid() == 0 {
+		t.Skip("chmod-based unreadable file is a no-op as root")
+	}
+
 	// A file that exists but cannot be read is skipped with a warning.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "locked.yaml")
@@ -357,6 +363,9 @@ func TestLoadProfilesWithLoggerUnreadableFileSkipped(t *testing.T) {
 	require.NoError(t, err) // unreadable file is skipped, not fatal
 	_, ok := store.Get("_base")
 	require.True(t, ok)
+	// The warning must mention the filename so the operator knows which file was skipped.
+	require.Contains(t, loggedMsg, "locked.yaml",
+		"warning log must mention the unreadable filename")
 }
 
 func TestLoadProfilesWithLoggerBadInheritanceSkipped(t *testing.T) {
