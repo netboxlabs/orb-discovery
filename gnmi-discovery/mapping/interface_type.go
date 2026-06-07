@@ -1,6 +1,9 @@
 package mapping
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // ocSpeedToKbps maps an OpenConfig openconfig-if-ethernet port-speed identityref
 // (module prefix already stripped by identityRefBase) to a NetBox interface speed
@@ -68,6 +71,16 @@ var defaultInterfacePatterns = []compiledIfacePattern{
 	{regexp.MustCompile(`^([Pp]ort-[Cc]hannel|Po)\d+`), "lag"},
 	{regexp.MustCompile(`^ae\d+`), "lag"},
 	{regexp.MustCompile(`^Bundle-Ether\d+`), "lag"},
+}
+
+// normalizeMAC upper-cases a MAC and rejects the all-zero address. Returns ""
+// when the input is empty or all-zero (so no MACAddress is emitted).
+func normalizeMAC(s string) string {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	if s == "" || s == "00:00:00:00:00:00" {
+		return ""
+	}
+	return s
 }
 
 // resolveInterfaceType resolves a NetBox interface type by precedence:

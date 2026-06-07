@@ -369,17 +369,16 @@ func translateInterfaces(profile *Profile, snap map[string]any, dev *diode.Devic
 			compiledExcludes = append(compiledExcludes, re)
 		}
 	}
-	type compiledPattern struct {
-		re  *regexp.Regexp
-		typ string
-	}
-	compiledPatterns := make([]compiledPattern, 0, len(userPatterns))
+	compiledPatterns := make([]compiledIfacePattern, 0, len(userPatterns))
 	for _, p := range userPatterns {
 		if re, err := regexp.Compile(p.Match); err == nil {
-			compiledPatterns = append(compiledPatterns, compiledPattern{re: re, typ: p.Type})
+			compiledPatterns = append(compiledPatterns, compiledIfacePattern{re: re, typ: p.Type})
 		}
 	}
 	typeLeafPath := profile.Interfaces.Keys["type"]
+	speedLeafPath := profile.Interfaces.Keys["speed"]
+	macLeafPath := profile.Interfaces.Keys["mac_address"]
+	lagLeafPath := profile.Interfaces.Keys["lag_member"]
 
 	var out []diode.Entity
 	for _, key := range order {
@@ -396,22 +395,17 @@ func translateInterfaces(profile *Profile, snap map[string]any, dev *diode.Devic
 			continue
 		}
 		// Resolve the interface type by precedence: user pattern (first match) ->
-		// OpenConfig state/type map -> policy default -> "other".
-		resolvedType := ""
-		for _, p := range compiledPatterns {
-			if p.re.MatchString(key) {
-				resolvedType = p.typ
-				break
-			}
+		// OpenConfig state/type map -> built-in name patterns -> speed-based media
+		// inference -> policy default -> "other". See resolveInterfaceType.
+		ocTypeBase := ""
+		if typeLeafPath != "" {
+			ocTypeBase = identityRefBase(leaves[typeLeafPath])
 		}
-		if resolvedType == "" && typeLeafPath != "" {
-			if nb, ok := ocInterfaceTypeToNetBox[identityRefBase(leaves[typeLeafPath])]; ok {
-				resolvedType = nb
-			}
+		speedEnum := ""
+		if speedLeafPath != "" {
+			speedEnum = identityRefBase(leaves[speedLeafPath])
 		}
-		if resolvedType == "" {
-			resolvedType = defaultType
-		}
+		resolvedType := resolveInterfaceType(key, ocTypeBase, speedEnum, defaultType, compiledPatterns)
 		iface := &diode.Interface{
 			Device: dev,
 			Name:   strptr(key),
@@ -439,6 +433,25 @@ func translateInterfaces(profile *Profile, snap map[string]any, dev *diode.Devic
 		if leafPath := profile.Interfaces.Keys["mtu"]; leafPath != "" {
 			if v, ok := leaves[leafPath]; ok {
 				iface.Mtu = toInt64Ptr(v)
+			}
+		}
+		if speedLeafPath != "" {
+			if kbps, ok := ocSpeedToKbps[speedEnum]; ok {
+				iface.Speed = &kbps
+			}
+		}
+		if macLeafPath != "" {
+			if v, ok := leaves[macLeafPath]; ok {
+				if mac := normalizeMAC(toStr(v)); mac != "" {
+					iface.PrimaryMacAddress = &diode.MACAddress{MacAddress: strptr(mac)}
+				}
+			}
+		}
+		if lagLeafPath != "" {
+			if v, ok := leaves[lagLeafPath]; ok {
+				if agg := strings.TrimSpace(toStr(v)); agg != "" {
+					iface.Lag = &diode.Interface{Device: dev, Name: strptr(agg)}
+				}
 			}
 		}
 		out = append(out, iface)

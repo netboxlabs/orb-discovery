@@ -511,3 +511,48 @@ func TestTranslateDiscoversManufacturer(t *testing.T) {
 		require.Equal(t, "Arista", *mods["Linecard1"].ModuleType.Manufacturer.Name)
 	})
 }
+
+func TestTranslateInterfacesEnrichment(t *testing.T) {
+	store, _ := LoadProfiles("")
+	base, _ := store.Get("_base")
+	dev := &diode.Device{Name: strptr("r1")}
+	snap := map[string]any{
+		// Ethernet1: 10G, real MAC, member of Port-Channel1
+		"/interfaces/interface[name=Ethernet1]/state/type":                  "iana-if-type:ethernetCsmacd",
+		"/interfaces/interface[name=Ethernet1]/ethernet/state/port-speed":   "openconfig-if-ethernet:SPEED_10GB",
+		"/interfaces/interface[name=Ethernet1]/ethernet/state/mac-address":  "00:1c:73:00:00:01",
+		"/interfaces/interface[name=Ethernet1]/ethernet/state/aggregate-id": "Port-Channel1",
+		// Ethernet2: all-zero MAC -> skipped; 1G -> 1000base-t
+		"/interfaces/interface[name=Ethernet2]/state/type":                 "iana-if-type:ethernetCsmacd",
+		"/interfaces/interface[name=Ethernet2]/ethernet/state/port-speed":  "openconfig-if-ethernet:SPEED_1GB",
+		"/interfaces/interface[name=Ethernet2]/ethernet/state/mac-address": "00:00:00:00:00:00",
+		// Port-Channel1: OC lag type
+		"/interfaces/interface[name=Port-Channel1]/state/type": "iana-if-type:ieee8023adLag",
+	}
+	ents := translateInterfaces(base, snap, dev, nil)
+	byName := map[string]*diode.Interface{}
+	for _, e := range ents {
+		if i, ok := e.(*diode.Interface); ok {
+			byName[*i.Name] = i
+		}
+	}
+
+	e1 := byName["Ethernet1"]
+	require.NotNil(t, e1)
+	require.NotNil(t, e1.Speed)
+	require.Equal(t, int64(10000000), *e1.Speed)
+	require.NotNil(t, e1.PrimaryMacAddress)
+	require.Equal(t, "00:1C:73:00:00:01", *e1.PrimaryMacAddress.MacAddress) // uppercased
+	require.NotNil(t, e1.Lag)
+	require.Equal(t, "Port-Channel1", *e1.Lag.Name)
+	require.Nil(t, e1.Lag.Type)                  // matcher-only stub
+	require.Equal(t, "10gbase-x-sfpp", *e1.Type) // speed-based (name has no media hint)
+
+	e2 := byName["Ethernet2"]
+	require.Nil(t, e2.PrimaryMacAddress) // all-zero MAC skipped
+	require.Equal(t, "1000base-t", *e2.Type)
+
+	po := byName["Port-Channel1"]
+	require.Equal(t, "lag", *po.Type) // OC state/type
+	require.Nil(t, po.Lag)            // the LAG itself has no aggregate-id
+}
