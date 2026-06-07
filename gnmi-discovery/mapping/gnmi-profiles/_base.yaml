@@ -14,12 +14,13 @@ interfaces:
     # ethernet media is not derivable from the type alone, so it falls through to
     # a user interface_patterns rule or the interface.if_type default.
     type: state/type
-    # H-2: speed (ethernet/state/port-speed) and lag_member
-    # (ethernet/state/aggregate-id) are intentionally NOT curated yet — the
-    # translator does not map them, so subscribing would only churn the model
-    # without changing the Diode payload. Add them back here together with their
-    # Interface.Speed / Interface.Lag mapping in translate.go (deferred
-    # enrichment; see spec §6 interfaces).
+    # Ethernet enrichment (openconfig-if-ethernet). port-speed is an identityref
+    # (SPEED_10GB...) mapped to Interface.Speed (kbps) and used for speed-based
+    # type inference; mac-address -> Interface.PrimaryMacAddress; aggregate-id ->
+    # Interface.Lag (member -> parent LAG). Mapped in translate.go / interface_type.go.
+    speed: ethernet/state/port-speed
+    mac_address: ethernet/state/mac-address
+    lag_member: ethernet/state/aggregate-id
 components:
   list_path: /components/component
   keys:
