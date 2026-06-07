@@ -55,4 +55,14 @@ func TestResolveInterfaceType(t *testing.T) {
 		resolveInterfaceType("Ethernet9", "ETHERNETCSMACD", "", "other", nil))
 	require.Equal(t, "mydefault",
 		resolveInterfaceType("weird0", "", "SPEED_UNKNOWN", "mydefault", nil))
+
+	// Juniper et- is intentionally NOT a built-in name rule (40G/100G ambiguous):
+	// it resolves via the authoritative speed tier instead.
+	require.Equal(t, "100gbase-x-qsfp28",
+		resolveInterfaceType("et-0/0/0", "ETHERNETCSMACD", "SPEED_100GB", "other", nil))
+	require.Equal(t, "40gbase-x-qsfpp",
+		resolveInterfaceType("et-0/0/0", "ETHERNETCSMACD", "SPEED_40GB", "other", nil))
+	// xe-/ge- remain media-encoding name rules (beat speed).
+	require.Equal(t, "10gbase-x-sfpp",
+		resolveInterfaceType("xe-0/0/0", "ETHERNETCSMACD", "SPEED_1GB", "other", nil))
 }

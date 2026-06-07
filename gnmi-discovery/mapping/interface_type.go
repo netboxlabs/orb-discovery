@@ -56,6 +56,11 @@ type compiledIfacePattern struct {
 // (speed-agnostic; gNMI's authoritative port-speed resolves Nokia rates instead).
 // The 2-letter abbreviations are anchored with \d so they don't over-match
 // unrelated names; the unambiguous long forms stay prefix-only.
+//
+// Juniper "et-" is also OMITTED: the et- prefix spans 40G AND 100G, so a fixed
+// name rule would mis-type half of them. device-discovery keeps et-→40G because
+// NAPALM often lacks speed, but gNMI reports an authoritative port-speed, so we
+// let the speed tier resolve et- rates. The unambiguous xe-/ge- are retained.
 var defaultInterfacePatterns = []compiledIfacePattern{
 	{regexp.MustCompile(`^(HundredGig|Hu\d)`), "100gbase-x-qsfp28"},
 	{regexp.MustCompile(`^(FortyGig|Fo\d)`), "40gbase-x-qsfpp"},
@@ -65,7 +70,6 @@ var defaultInterfacePatterns = []compiledIfacePattern{
 	{regexp.MustCompile(`^(TwoGig|Tw\d)`), "2.5gbase-t"},
 	{regexp.MustCompile(`^(GigabitEthernet|Gi)\d+`), "1000base-t"},
 	{regexp.MustCompile(`^(FastEthernet|Fa)\d+`), "100base-tx"},
-	{regexp.MustCompile(`^et-\d+/\d+/\d+`), "40gbase-x-qsfpp"},
 	{regexp.MustCompile(`^xe-\d+/\d+/\d+`), "10gbase-x-sfpp"},
 	{regexp.MustCompile(`^ge-\d+/\d+/\d+`), "1000base-t"},
 	{regexp.MustCompile(`^([Pp]ort-[Cc]hannel|Po)\d+`), "lag"},

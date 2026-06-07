@@ -449,7 +449,10 @@ func translateInterfaces(profile *Profile, snap map[string]any, dev *diode.Devic
 		}
 		if lagLeafPath != "" {
 			if v, ok := leaves[lagLeafPath]; ok {
-				if agg := strings.TrimSpace(toStr(v)); agg != "" {
+				// Skip a self-referential aggregate-id (agg == own name): the LAG
+				// aggregate interface carries no aggregate-id under OC semantics, so
+				// this only guards against a malformed target and avoids a self-LAG edge.
+				if agg := strings.TrimSpace(toStr(v)); agg != "" && agg != key {
 					iface.Lag = &diode.Interface{Device: dev, Name: strptr(agg)}
 				}
 			}

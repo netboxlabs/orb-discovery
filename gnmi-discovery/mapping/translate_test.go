@@ -556,3 +556,17 @@ func TestTranslateInterfacesEnrichment(t *testing.T) {
 	require.Equal(t, "lag", *po.Type) // OC state/type
 	require.Nil(t, po.Lag)            // the LAG itself has no aggregate-id
 }
+
+// A self-referential aggregate-id (agg == own name) must not produce a self-LAG.
+func TestTranslateInterfacesSelfLagGuard(t *testing.T) {
+	store, _ := LoadProfiles("")
+	base, _ := store.Get("_base")
+	dev := &diode.Device{Name: strptr("r1")}
+	snap := map[string]any{
+		"/interfaces/interface[name=Ethernet1]/state/type":                  "iana-if-type:ethernetCsmacd",
+		"/interfaces/interface[name=Ethernet1]/ethernet/state/aggregate-id": "Ethernet1",
+	}
+	ents := translateInterfaces(base, snap, dev, nil)
+	require.Len(t, ents, 1)
+	require.Nil(t, ents[0].(*diode.Interface).Lag)
+}
