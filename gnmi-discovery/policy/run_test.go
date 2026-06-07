@@ -93,5 +93,22 @@ func TestAnnotateRunIDCoversIPAddress(t *testing.T) {
 	require.Equal(t, "RID", iface.Device.Metadata["run_id"]) // and its Device
 }
 
+func TestAnnotateRunIDCoversInterfaceLag(t *testing.T) {
+	dev := &diode.Device{Name: strPtrT("r1")}
+	lag := &diode.Interface{Device: dev, Name: strPtrT("Port-Channel1")}
+	member := &diode.Interface{Device: dev, Name: strPtrT("Ethernet1"), Lag: lag}
+	annotateEntitiesWithRunID([]diode.Entity{dev, member}, "RID")
+	require.Equal(t, "RID", member.Metadata["run_id"])
+	require.Equal(t, "RID", lag.Metadata["run_id"]) // reached via member.Lag
+}
+
+// regression: an Interface with a Lag ref must convert to proto without recursing.
+func TestInterfaceLagNoReferenceCycle(t *testing.T) {
+	dev := &diode.Device{Name: strPtrT("r1")}
+	lag := &diode.Interface{Device: dev, Name: strPtrT("Port-Channel1")}
+	member := &diode.Interface{Device: dev, Name: strPtrT("Ethernet1"), Lag: lag}
+	require.NotNil(t, member.ConvertToProtoMessage())
+}
+
 // strPtrT returns a pointer to the given string value — test helper.
 func strPtrT(s string) *string { return &s }
