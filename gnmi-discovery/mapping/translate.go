@@ -236,6 +236,10 @@ func Translate(profile *Profile, snap map[string]any, defaults *config.Defaults,
 		}
 	}
 	entities = append(entities, vrfEntities...)
+	// Prefixes: derive the connected network of each discovered IP (VRF inherited
+	// from the IP, scoped to the device site). Must run after the VRF post-pass so
+	// IPAddress.Vrf is set.
+	entities = append(entities, translatePrefixes(entities, dev, defaults)...)
 	return entities
 }
 

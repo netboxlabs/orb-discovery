@@ -642,3 +642,29 @@ func TestTranslateVrfBinding(t *testing.T) {
 	require.NotNil(t, ip.Vrf)
 	require.Equal(t, "blue", *ip.Vrf.Name)
 }
+
+func TestTranslateEmitsPrefixes(t *testing.T) {
+	store, _ := LoadProfiles("")
+	base, _ := store.Get("_base")
+	snap := map[string]any{
+		"/system/state/hostname":                           "r1",
+		"/interfaces/interface[name=Ethernet2]/state/type": "iana-if-type:ethernetCsmacd",
+		"/interfaces/interface[name=Ethernet2]/subinterfaces/subinterface[index=0]/ipv4/addresses/address[ip=10.0.0.1]/state/prefix-length": float64(31),
+		"/network-instances/network-instance[name=blue]/state/type":                                                                         "openconfig-network-instance-types:L3VRF",
+		"/network-instances/network-instance[name=blue]/interfaces/interface[id=Ethernet2]/state/interface":                                 "Ethernet2",
+		"/network-instances/network-instance[name=blue]/interfaces/interface[id=Ethernet2]/state/subinterface":                              float64(0),
+	}
+	ents := Translate(base, snap, &config.Defaults{Site: "lab", Prefix: config.PrefixDefaults{Role: "mgmt"}}, "")
+	var pfx *diode.Prefix
+	for _, e := range ents {
+		if p, ok := e.(*diode.Prefix); ok {
+			pfx = p
+		}
+	}
+	require.NotNil(t, pfx)
+	require.Equal(t, "10.0.0.0/31", *pfx.Prefix)
+	require.Equal(t, "lab", *pfx.Scope.(*diode.Site).Name)
+	require.Equal(t, "mgmt", *pfx.Role.Name)
+	require.NotNil(t, pfx.Vrf)
+	require.Equal(t, "blue", *pfx.Vrf.Name) // VRF inherited from the IP (bound before the prefix pass)
+}
