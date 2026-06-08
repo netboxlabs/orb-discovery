@@ -85,15 +85,13 @@ func checkVid(i int64) (int64, bool) {
 	return i, true
 }
 
-// translateSwitchports reads the switched-vlan leaves out of snap, sets Mode /
-// UntaggedVlan / TaggedVlans on the interfaces in ifacesByName, and returns the
-// referenced VLAN entities (synthesized, deduped by vid, ascending). The rich
-// VLAN is shared between the interface refs and the top-level entity — VLAN has
-// no back-reference to Interface, so this is a DAG (no cycle, no matcher stub).
-func translateSwitchports(profile *Profile, snap map[string]any, dev *diode.Device, ifacesByName map[string]*diode.Interface) []diode.Entity {
+// translateSwitchports reads the switched-vlan leaves out of snap and sets Mode /
+// UntaggedVlan / TaggedVlans on the interfaces in ifacesByName, sourcing VLAN
+// objects from the shared builder b (which dedups by vid and owns emission).
+func translateSwitchports(profile *Profile, snap map[string]any, b *vlanBuilder, ifacesByName map[string]*diode.Interface) {
 	listPath := profile.Interfaces.ListPath
 	if listPath == "" {
-		return nil
+		return
 	}
 	type sp struct {
 		mode      string
@@ -130,34 +128,16 @@ func translateSwitchports(profile *Profile, snap map[string]any, dev *diode.Devi
 		}
 	}
 
-	cache := map[int64]*diode.VLAN{}
-	var vids []int64 // emission order
-	vlan := func(vid int64) *diode.VLAN {
-		if v, ok := cache[vid]; ok {
-			return v
-		}
-		id := vid
-		v := &diode.VLAN{
-			Vid:    &id,
-			Name:   strptr("VLAN" + strconv.FormatInt(vid, 10)),
-			Status: strptr("active"),
-			Site:   dev.Site,
-		}
-		cache[vid] = v
-		vids = append(vids, vid)
-		return v
-	}
-
 	sort.Strings(order)
 	for _, ifaceName := range order {
 		s := perIface[ifaceName]
 		mode, ok := ocVlanMode[s.mode]
 		if !ok {
-			continue // unknown/absent interface-mode -> no switchport mutation
+			continue
 		}
 		iface := ifacesByName[ifaceName]
 		if iface == nil {
-			continue // switchport on an interface we didn't emit (shouldn't happen)
+			continue
 		}
 		iface.Mode = strptr(mode)
 
@@ -167,30 +147,23 @@ func translateSwitchports(profile *Profile, snap map[string]any, dev *diode.Devi
 			if vid, okVid := safeVid(s.accessVid); okVid {
 				untaggedVid, haveUntagged = vid, true
 			}
-		} else { // tagged
+		} else {
 			if vid, okVid := safeVid(s.nativeVid); okVid {
 				untaggedVid, haveUntagged = vid, true
 			}
 		}
 		if haveUntagged {
-			iface.UntaggedVlan = vlan(untaggedVid)
+			iface.UntaggedVlan = b.get(untaggedVid)
 		}
 		if mode == "tagged" {
 			for _, vid := range expandTrunkVlans(s.trunkRaw) {
 				if haveUntagged && vid == untaggedVid {
 					continue
 				}
-				iface.TaggedVlans = append(iface.TaggedVlans, vlan(vid))
+				iface.TaggedVlans = append(iface.TaggedVlans, b.get(vid))
 			}
 		}
 	}
-
-	sort.Slice(vids, func(i, j int) bool { return vids[i] < vids[j] })
-	out := make([]diode.Entity, 0, len(vids))
-	for _, vid := range vids {
-		out = append(out, cache[vid])
-	}
-	return out
 }
 
 // expandTrunkVlans parses a trunk-vlans leaf-list value (a []any of vids and

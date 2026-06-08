@@ -199,16 +199,21 @@ func Translate(profile *Profile, snap map[string]any, defaults *config.Defaults,
 	entities = append(entities, ifaceEntities...)
 	entities = append(entities, translateComponents(profile, snap, dev, deviceMfg)...)
 	entities = append(entities, translateIPs(profile, snap, dev)...) // Device -> Interfaces -> Modules -> subifs+IPs
-	// Switchport VLAN membership mutates the base interfaces just emitted and
-	// appends the referenced VLAN entities. Index only the base interfaces (NOT
-	// the child subinterfaces translateIPs may emit).
+	// VLANs: build definitions (real names/status) + the shared builder, attach
+	// switchport membership, then force-emit every defined VLAN (even unreferenced).
+	vlanDefs := translateVlanDefinitions(snap)
+	vb := newVlanBuilder(dev, defaults, vlanDefs)
 	ifacesByName := map[string]*diode.Interface{}
 	for _, e := range ifaceEntities {
 		if i, ok := e.(*diode.Interface); ok && i.Name != nil {
 			ifacesByName[*i.Name] = i
 		}
 	}
-	entities = append(entities, translateSwitchports(profile, snap, dev, ifacesByName)...)
+	translateSwitchports(profile, snap, vb, ifacesByName)
+	for vid := range vlanDefs {
+		vb.get(vid) // ensure defined-but-unreferenced VLANs are emitted
+	}
+	entities = append(entities, vb.emitted()...)
 	return entities
 }
 

@@ -557,6 +557,37 @@ func TestTranslateInterfacesEnrichment(t *testing.T) {
 	require.Nil(t, po.Lag)            // the LAG itself has no aggregate-id
 }
 
+func TestTranslateVlanNamesAndInventory(t *testing.T) {
+	store, _ := LoadProfiles("")
+	base, _ := store.Get("_base")
+	snap := map[string]any{
+		"/system/state/hostname": "r1",
+		// switchport references vid 10
+		"/interfaces/interface[name=Ethernet1]/state/type":                                  "iana-if-type:ethernetCsmacd",
+		"/interfaces/interface[name=Ethernet1]/ethernet/switched-vlan/state/interface-mode": "ACCESS",
+		"/interfaces/interface[name=Ethernet1]/ethernet/switched-vlan/state/access-vlan":    float64(10),
+		// NI defines vid 10 (real name) and vid 99 (unreferenced)
+		"/network-instances/network-instance[name=default]/vlans/vlan[vlan-id=10]/state/name":   "users",
+		"/network-instances/network-instance[name=default]/vlans/vlan[vlan-id=10]/state/status": "ACTIVE",
+		"/network-instances/network-instance[name=default]/vlans/vlan[vlan-id=99]/state/name":   "mgmt",
+		"/network-instances/network-instance[name=default]/vlans/vlan[vlan-id=99]/state/status": "SUSPENDED",
+	}
+	defaults := &config.Defaults{Site: "lab", Vlan: config.VlanDefaults{Group: "lab-vlans"}}
+	ents := Translate(base, snap, defaults, "")
+	vlans := map[int64]*diode.VLAN{}
+	for _, e := range ents {
+		if v, ok := e.(*diode.VLAN); ok {
+			vlans[*v.Vid] = v
+		}
+	}
+	require.Equal(t, "users", *vlans[10].Name) // real name from NI subtree
+	require.Equal(t, "active", *vlans[10].Status)
+	require.NotNil(t, vlans[99]) // defined-but-unreferenced still emitted
+	require.Equal(t, "mgmt", *vlans[99].Name)
+	require.Equal(t, "reserved", *vlans[99].Status)      // SUSPENDED -> reserved
+	require.Equal(t, "lab-vlans", *vlans[10].Group.Name) // group default applied
+}
+
 // A self-referential aggregate-id (agg == own name) must not produce a self-LAG.
 func TestTranslateInterfacesSelfLagGuard(t *testing.T) {
 	store, _ := LoadProfiles("")

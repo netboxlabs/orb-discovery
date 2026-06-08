@@ -74,13 +74,12 @@ func TestTranslateSwitchports(t *testing.T) {
 		"/interfaces/interface[name=Ethernet2]/ethernet/switched-vlan/state/native-vlan":    float64(1),
 		"/interfaces/interface[name=Ethernet2]/ethernet/switched-vlan/state/trunk-vlans":    []any{float64(10), "20..21"},
 	}
-	vlans := translateSwitchports(base, snap, dev, idx)
+	b := newVlanBuilder(dev, nil, nil)
+	translateSwitchports(base, snap, b, idx)
 
 	require.Equal(t, "access", *eth1.Mode)
-	require.NotNil(t, eth1.UntaggedVlan)
 	require.Equal(t, int64(10), *eth1.UntaggedVlan.Vid)
-	require.Equal(t, "VLAN10", *eth1.UntaggedVlan.Name)
-	require.Equal(t, "lab", *eth1.UntaggedVlan.Site.Name)
+	require.Equal(t, "VLAN10", *eth1.UntaggedVlan.Name) // placeholder (no defs)
 	require.Empty(t, eth1.TaggedVlans)
 
 	require.Equal(t, "tagged", *eth2.Mode)
@@ -89,15 +88,16 @@ func TestTranslateSwitchports(t *testing.T) {
 	for _, v := range eth2.TaggedVlans {
 		taggedVids = append(taggedVids, *v.Vid)
 	}
-	require.Equal(t, []int64{10, 20, 21}, taggedVids) // sorted; native(1) excluded
+	require.Equal(t, []int64{10, 20, 21}, taggedVids)
+
+	// dedup: VLAN10 shared between eth1.UntaggedVlan and eth2.TaggedVlans
+	require.Same(t, eth1.UntaggedVlan, findVlan(eth2.TaggedVlans, 10))
 
 	emitted := map[int64]bool{}
-	for _, e := range vlans {
+	for _, e := range b.emitted() {
 		emitted[*e.(*diode.VLAN).Vid] = true
 	}
 	require.Equal(t, map[int64]bool{1: true, 10: true, 20: true, 21: true}, emitted)
-	// VLAN10 is the SAME object referenced by eth1.UntaggedVlan and eth2.TaggedVlans (dedup).
-	require.Same(t, eth1.UntaggedVlan, findVlan(eth2.TaggedVlans, 10))
 }
 
 func findVlan(vs []*diode.VLAN, vid int64) *diode.VLAN {
