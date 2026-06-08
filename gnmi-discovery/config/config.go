@@ -69,6 +69,15 @@ type InterfaceDefaults struct {
 	Tags        []string `yaml:"tags,omitempty"`
 }
 
+// VlanDefaults holds NetBox defaults applied to discovered VLANs.
+type VlanDefaults struct {
+	Group       string   `yaml:"group,omitempty"`
+	Tenant      string   `yaml:"tenant,omitempty"`
+	Role        string   `yaml:"role,omitempty"`
+	Tags        []string `yaml:"tags,omitempty"`
+	Description string   `yaml:"description,omitempty"`
+}
+
 // InterfacePattern maps an interface-name regex to a NetBox interface type.
 // Mirrors snmp-discovery's InterfacePattern so policy YAML is portable between
 // the two backends.
@@ -85,6 +94,7 @@ type Defaults struct {
 	Tags      []string          `yaml:"tags,omitempty"`
 	Device    DeviceDefaults    `yaml:"device,omitempty"`
 	Interface InterfaceDefaults `yaml:"interface,omitempty"`
+	Vlan      VlanDefaults      `yaml:"vlan,omitempty"`
 	// InterfacePatterns map interface-name regexes to NetBox types (first match
 	// wins) and take precedence over the discovered OpenConfig type and the
 	// Interface.Type default. InterfaceExcludePatterns are name regexes that skip
@@ -139,6 +149,7 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 		cp.Tags = cloneStrings(overrideDefaults.Tags)
 		cp.Device.Tags = cloneStrings(overrideDefaults.Device.Tags)
 		cp.Interface.Tags = cloneStrings(overrideDefaults.Interface.Tags)
+		cp.Vlan.Tags = cloneStrings(overrideDefaults.Vlan.Tags)
 		cp.InterfacePatterns = clonePatterns(overrideDefaults.InterfacePatterns)
 		cp.InterfaceExcludePatterns = cloneStrings(overrideDefaults.InterfaceExcludePatterns)
 		return &cp
@@ -150,6 +161,7 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 		cp.Tags = cloneStrings(policyDefaults.Tags)
 		cp.Device.Tags = cloneStrings(policyDefaults.Device.Tags)
 		cp.Interface.Tags = cloneStrings(policyDefaults.Interface.Tags)
+		cp.Vlan.Tags = cloneStrings(policyDefaults.Vlan.Tags)
 		cp.InterfacePatterns = clonePatterns(policyDefaults.InterfacePatterns)
 		cp.InterfaceExcludePatterns = cloneStrings(policyDefaults.InterfaceExcludePatterns)
 		return &cp
@@ -159,6 +171,7 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 	merged.Tags = cloneStrings(policyDefaults.Tags)
 	merged.Device.Tags = cloneStrings(policyDefaults.Device.Tags)
 	merged.Interface.Tags = cloneStrings(policyDefaults.Interface.Tags)
+	merged.Vlan.Tags = cloneStrings(policyDefaults.Vlan.Tags)
 	merged.InterfacePatterns = clonePatterns(policyDefaults.InterfacePatterns)
 	merged.InterfaceExcludePatterns = cloneStrings(policyDefaults.InterfaceExcludePatterns)
 
@@ -203,6 +216,21 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 	}
 	if len(overrideDefaults.InterfaceExcludePatterns) > 0 {
 		merged.InterfaceExcludePatterns = cloneStrings(overrideDefaults.InterfaceExcludePatterns)
+	}
+	if overrideDefaults.Vlan.Group != "" {
+		merged.Vlan.Group = overrideDefaults.Vlan.Group
+	}
+	if overrideDefaults.Vlan.Tenant != "" {
+		merged.Vlan.Tenant = overrideDefaults.Vlan.Tenant
+	}
+	if overrideDefaults.Vlan.Role != "" {
+		merged.Vlan.Role = overrideDefaults.Vlan.Role
+	}
+	if overrideDefaults.Vlan.Description != "" {
+		merged.Vlan.Description = overrideDefaults.Vlan.Description
+	}
+	if len(overrideDefaults.Vlan.Tags) > 0 {
+		merged.Vlan.Tags = cloneStrings(overrideDefaults.Vlan.Tags)
 	}
 	return &merged
 }

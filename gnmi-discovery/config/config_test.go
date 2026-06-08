@@ -232,6 +232,30 @@ func TestMergeDefaults(t *testing.T) {
 	})
 }
 
+func TestMergeDefaultsVlan(t *testing.T) {
+	policy := &Defaults{Site: "NYC", Vlan: VlanDefaults{Group: "g1", Tenant: "t1", Role: "r1", Tags: []string{"a"}, Description: "d1"}}
+	// nil override -> clone preserves vlan
+	got := MergeDefaults(policy, nil)
+	require.Equal(t, "g1", got.Vlan.Group)
+	require.Equal(t, "t1", got.Vlan.Tenant)
+	// override wins on non-empty fields, preserves the rest
+	override := &Defaults{Vlan: VlanDefaults{Group: "g2", Role: "r2"}}
+	got = MergeDefaults(policy, override)
+	require.Equal(t, "g2", got.Vlan.Group)       // overridden
+	require.Equal(t, "r2", got.Vlan.Role)        // overridden
+	require.Equal(t, "t1", got.Vlan.Tenant)      // preserved
+	require.Equal(t, "d1", got.Vlan.Description) // preserved
+
+	// no-alias contract: mutating the merged Vlan.Tags must not touch the source
+	// (mirrors the existing Device.Tags/Interface.Tags non-alias assertions).
+	src := &Defaults{Vlan: VlanDefaults{Tags: []string{"x"}}}
+	m := MergeDefaults(src, nil)
+	if len(m.Vlan.Tags) > 0 {
+		m.Vlan.Tags[0] = "MUT"
+	}
+	require.Equal(t, "x", src.Vlan.Tags[0])
+}
+
 func TestUnmarshalPolicy(t *testing.T) {
 	data := []byte(`
 policies:
