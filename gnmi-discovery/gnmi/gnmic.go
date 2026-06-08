@@ -392,6 +392,19 @@ func decodeTypedValue(tv *gnmiproto.TypedValue) any {
 			return float64(v.DecimalVal.GetDigits()) / math.Pow10(int(v.DecimalVal.GetPrecision())) //nolint:staticcheck
 		}
 		return nil
+	case *gnmiproto.TypedValue_LeaflistVal:
+		// A native leaf-list (e.g. trunk-vlans when a target ignores the json_ietf
+		// encoding hint): decode each element to a plain Go value, yielding []any —
+		// the same shape JSON_IETF produces, so downstream leaf-list consumers
+		// (e.g. mapping.expandTrunkVlans) handle both encodings uniformly.
+		if v.LeaflistVal == nil {
+			return nil
+		}
+		out := make([]any, 0, len(v.LeaflistVal.GetElement()))
+		for _, el := range v.LeaflistVal.GetElement() {
+			out = append(out, decodeTypedValue(el))
+		}
+		return out
 	default:
 		return tv.String()
 	}

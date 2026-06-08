@@ -154,6 +154,24 @@ func TestDecodeTypedValue_UintVal(t *testing.T) {
 	assert.Equal(t, uint64(1000), v)
 }
 
+func TestDecodeTypedValue_LeaflistVal(t *testing.T) {
+	// A native leaf-list (e.g. trunk-vlans when a target ignores json_ietf) must
+	// decode to []any of the per-element values, so leaf-list consumers see the
+	// same shape as the JSON_IETF array encoding.
+	tv := &gnmiproto.TypedValue{Value: &gnmiproto.TypedValue_LeaflistVal{
+		LeaflistVal: &gnmiproto.ScalarArray{Element: []*gnmiproto.TypedValue{
+			{Value: &gnmiproto.TypedValue_UintVal{UintVal: 20}},
+			{Value: &gnmiproto.TypedValue_StringVal{StringVal: "30..32"}},
+		}},
+	}}
+	result := decodeTypedValue(tv)
+	arr, ok := result.([]any)
+	require.True(t, ok, "expected []any, got %T", result)
+	require.Len(t, arr, 2)
+	assert.Equal(t, uint64(20), arr[0])
+	assert.Equal(t, "30..32", arr[1])
+}
+
 func TestDecodeTypedValue_BoolVal_True(t *testing.T) {
 	tv := &gnmiproto.TypedValue{Value: &gnmiproto.TypedValue_BoolVal{BoolVal: true}}
 	assert.Equal(t, true, decodeTypedValue(tv))
