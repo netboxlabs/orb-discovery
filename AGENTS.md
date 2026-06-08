@@ -15,6 +15,11 @@ titles must follow the convention below.
 - A required check (**Validate PR title**) blocks merge into `develop` when the
   title doesn't match the convention.
 
+> Note: git tags use the `<backend>/v<version>` form (e.g. `snmp-discovery/v1.2.3`).
+> The `semantic-release-monorepo` plugin renders the GitHub Release *title* with a
+> dash (`snmp-discovery-v1.2.3`); this is cosmetic — the tag and release ref keep
+> the slash form. This is intentional and not a bug.
+
 ## PR title convention (enforced)
 
 Use a Conventional Commits title with **one scope** from the allowlist:
@@ -43,8 +48,9 @@ Releasable backends — `feat`/`fix`/`perf` here cuts a release for that backend
 
 Other scopes:
 
-- `deps` — dependency bumps. `chore(deps)` cuts a **patch** for the backend
-  whose files the bump touched (e.g. `<backend>/go.mod`).
+- `deps` / `deps-dev` — dependency bumps (e.g. from Dependabot). `chore(deps)`
+  cuts a **patch** for the backend whose files the bump touched
+  (e.g. `<backend>/go.mod`); `chore(deps-dev)` does not release.
 - `ci` — CI / workflow changes (no release)
 - `docs` — documentation (no release)
 - `repo` — repo-wide / cross-cutting changes (no release)

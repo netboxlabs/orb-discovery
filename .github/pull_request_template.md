@@ -11,7 +11,7 @@ convention.
 
 - [ ] Title is `type(scope): subject` with a scope from the allowlist:
       `device-discovery`, `gnmi-discovery`, `network-discovery`,
-      `snmp-discovery`, `worker`, `ci`, `docs`, `deps`, `repo`.
+      `snmp-discovery`, `worker`, `ci`, `docs`, `deps`, `deps-dev`, `repo`.
 - [ ] Type reflects intent — `feat`/`fix`/`perf` and `chore(deps)` cut a release
       for the scoped backend; other types do not.
 - [ ] Changes are scoped to the backend named in the title (or use `repo`).
