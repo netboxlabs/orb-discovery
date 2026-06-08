@@ -195,9 +195,20 @@ func toTags(names []string) []*diode.Tag {
 func Translate(profile *Profile, snap map[string]any, defaults *config.Defaults, discoveredVendor string) []diode.Entity {
 	dev, deviceMfg := translateDevice(profile, snap, defaults, discoveredVendor)
 	entities := []diode.Entity{dev}
-	entities = append(entities, translateInterfaces(profile, snap, dev, defaults)...)
+	ifaceEntities := translateInterfaces(profile, snap, dev, defaults)
+	entities = append(entities, ifaceEntities...)
 	entities = append(entities, translateComponents(profile, snap, dev, deviceMfg)...)
 	entities = append(entities, translateIPs(profile, snap, dev)...) // Device -> Interfaces -> Modules -> subifs+IPs
+	// Switchport VLAN membership mutates the base interfaces just emitted and
+	// appends the referenced VLAN entities. Index only the base interfaces (NOT
+	// the child subinterfaces translateIPs may emit).
+	ifacesByName := map[string]*diode.Interface{}
+	for _, e := range ifaceEntities {
+		if i, ok := e.(*diode.Interface); ok && i.Name != nil {
+			ifacesByName[*i.Name] = i
+		}
+	}
+	entities = append(entities, translateSwitchports(profile, snap, dev, ifacesByName)...)
 	return entities
 }
 

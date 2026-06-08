@@ -3,6 +3,7 @@ package mapping
 import (
 	"testing"
 
+	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,4 +58,53 @@ func TestOCVlanMode(t *testing.T) {
 	require.Equal(t, "tagged", ocVlanMode["TRUNK"])
 	_, ok := ocVlanMode["BOGUS"]
 	require.False(t, ok)
+}
+
+func TestTranslateSwitchports(t *testing.T) {
+	store, _ := LoadProfiles("")
+	base, _ := store.Get("_base")
+	dev := &diode.Device{Name: strptr("r1"), Site: &diode.Site{Name: strptr("lab")}}
+	eth1 := &diode.Interface{Device: dev, Name: strptr("Ethernet1")}
+	eth2 := &diode.Interface{Device: dev, Name: strptr("Ethernet2")}
+	idx := map[string]*diode.Interface{"Ethernet1": eth1, "Ethernet2": eth2}
+	snap := map[string]any{
+		"/interfaces/interface[name=Ethernet1]/ethernet/switched-vlan/state/interface-mode": "ACCESS",
+		"/interfaces/interface[name=Ethernet1]/ethernet/switched-vlan/state/access-vlan":    float64(10),
+		"/interfaces/interface[name=Ethernet2]/ethernet/switched-vlan/state/interface-mode": "TRUNK",
+		"/interfaces/interface[name=Ethernet2]/ethernet/switched-vlan/state/native-vlan":    float64(1),
+		"/interfaces/interface[name=Ethernet2]/ethernet/switched-vlan/state/trunk-vlans":    []any{float64(10), "20..21"},
+	}
+	vlans := translateSwitchports(base, snap, dev, idx)
+
+	require.Equal(t, "access", *eth1.Mode)
+	require.NotNil(t, eth1.UntaggedVlan)
+	require.Equal(t, int64(10), *eth1.UntaggedVlan.Vid)
+	require.Equal(t, "VLAN10", *eth1.UntaggedVlan.Name)
+	require.Equal(t, "lab", *eth1.UntaggedVlan.Site.Name)
+	require.Empty(t, eth1.TaggedVlans)
+
+	require.Equal(t, "tagged", *eth2.Mode)
+	require.Equal(t, int64(1), *eth2.UntaggedVlan.Vid)
+	var taggedVids []int64
+	for _, v := range eth2.TaggedVlans {
+		taggedVids = append(taggedVids, *v.Vid)
+	}
+	require.Equal(t, []int64{10, 20, 21}, taggedVids) // sorted; native(1) excluded
+
+	emitted := map[int64]bool{}
+	for _, e := range vlans {
+		emitted[*e.(*diode.VLAN).Vid] = true
+	}
+	require.Equal(t, map[int64]bool{1: true, 10: true, 20: true, 21: true}, emitted)
+	// VLAN10 is the SAME object referenced by eth1.UntaggedVlan and eth2.TaggedVlans (dedup).
+	require.Same(t, eth1.UntaggedVlan, findVlan(eth2.TaggedVlans, 10))
+}
+
+func findVlan(vs []*diode.VLAN, vid int64) *diode.VLAN {
+	for _, v := range vs {
+		if *v.Vid == vid {
+			return v
+		}
+	}
+	return nil
 }
