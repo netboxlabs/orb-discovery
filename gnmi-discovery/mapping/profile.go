@@ -322,6 +322,13 @@ func (p *Profile) SubscribePaths() []string {
 			}
 		}
 	}
+	// The OpenConfig network-instance VLAN subtree is a standardized top-level path
+	// (independent of the interface list), so it is always subscribed. AllowsPath
+	// gates it symmetrically via parseNetworkInstanceVlanPath.
+	out = append(out,
+		"/network-instances/network-instance[name=*]/vlans/vlan[vlan-id=*]/state/name",
+		"/network-instances/network-instance[name=*]/vlans/vlan[vlan-id=*]/state/status",
+	)
 	sort.Strings(out)
 	return out
 }
@@ -341,6 +348,9 @@ func (p *Profile) AllowsPath(path string) bool {
 		return true
 	}
 	if _, _, ok := parseSwitchedVlanPath(path, p.Interfaces.ListPath); ok {
+		return true
+	}
+	if _, _, ok := parseNetworkInstanceVlanPath(path); ok {
 		return true
 	}
 	return false

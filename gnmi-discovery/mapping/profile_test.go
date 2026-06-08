@@ -184,6 +184,24 @@ func TestAllowsPathSwitchedVlan(t *testing.T) {
 	require.False(t, base.AllowsPath("/interfaces/interface[name=Ethernet1]/ethernet/switched-vlan/state/counters/in"))
 }
 
+func TestSubscribePathsIncludeNIVlans(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+	paths := base.SubscribePaths()
+	require.Contains(t, paths, "/network-instances/network-instance[name=*]/vlans/vlan[vlan-id=*]/state/name")
+	require.Contains(t, paths, "/network-instances/network-instance[name=*]/vlans/vlan[vlan-id=*]/state/status")
+}
+
+func TestAllowsPathNIVlans(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+	require.True(t, base.AllowsPath("/network-instances/network-instance[name=default]/vlans/vlan[vlan-id=10]/state/name"))
+	require.True(t, base.AllowsPath("/network-instances/network-instance[name=default]/vlans/vlan[vlan-id=10]/state/status"))
+	require.False(t, base.AllowsPath("/network-instances/network-instance[name=default]/vlans/vlan[vlan-id=10]/state/tpid"))
+}
+
 func TestAllowsDelete(t *testing.T) {
 	store, err := LoadProfiles("")
 	require.NoError(t, err)
