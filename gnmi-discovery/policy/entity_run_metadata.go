@@ -79,6 +79,10 @@ func annotateEntitiesWithRunID(entities []diode.Entity, runID string) {
 			if v != nil {
 				set(&v.Metadata)
 			}
+		case *diode.Prefix:
+			if v != nil {
+				set(&v.Metadata)
+			}
 		}
 	}
 }

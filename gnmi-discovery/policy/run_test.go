@@ -150,6 +150,18 @@ func TestVrfNoReferenceCycle(t *testing.T) {
 	require.NotNil(t, ip.ConvertToProtoMessage())
 }
 
+func TestAnnotateRunIDCoversPrefix(t *testing.T) {
+	pfx := &diode.Prefix{Prefix: strPtrT("10.0.0.0/31")}
+	annotateEntitiesWithRunID([]diode.Entity{pfx}, "RID")
+	require.Equal(t, "RID", pfx.Metadata["run_id"])
+}
+
+func TestPrefixNoReferenceCycle(t *testing.T) {
+	vrf := &diode.VRF{Name: strPtrT("blue")}
+	pfx := &diode.Prefix{Prefix: strPtrT("10.0.0.0/31"), Vrf: vrf, Scope: &diode.Site{Name: strPtrT("lab")}}
+	require.NotNil(t, pfx.ConvertToProtoMessage())
+}
+
 func int64Ptr(i int64) *int64 { return &i }
 
 // strPtrT returns a pointer to the given string value — test helper.
