@@ -586,6 +586,8 @@ func (r *Runner) selectProfile(t config.Target, caps *gnmi.CapabilitiesResult) *
 	if p.Name == "_base" {
 		metrics.GetProfileFallbacks().Add(r.ctx, 1) // count vendors that may need an overlay
 	}
+	r.logger.Info("selected profile",
+		"policy", r.name, "host", t.Host, "vendor", in.Vendor, "profile", p.Name)
 	return p
 }
 

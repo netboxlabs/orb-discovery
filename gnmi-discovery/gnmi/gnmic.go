@@ -248,37 +248,43 @@ var vendorCanonical = map[string]string{
 	"cumulus":  "Cumulus",
 	"mellanox": "Mellanox",
 	"huawei":   "Huawei",
+	"dell":     "Dell",
+	"sonic":    "SONiC", // NOS sentinel: used for profile selection. SONiC is a
+	// network OS, not a hardware vendor — chassis mfg-name (the real OEM) takes
+	// precedence as the device manufacturer; "SONiC" only surfaces when no OEM
+	// is discoverable (operator-overridable via defaults.device.manufacturer).
 }
 
 // vendorTokenOrder fixes the scan order over vendorCanonical so the first match
 // is deterministic across runs (map iteration order is randomized).
-var vendorTokenOrder = []string{"arista", "nokia", "cisco", "juniper", "nvidia", "cumulus", "mellanox", "huawei"}
+var vendorTokenOrder = []string{"arista", "nokia", "cisco", "juniper", "nvidia", "cumulus", "mellanox", "huawei", "dell", "sonic"}
 
 // mapCapabilities converts a raw gNMI CapabilityResponse to our CapabilitiesResult.
 func mapCapabilities(resp *gnmiproto.CapabilityResponse) *CapabilitiesResult {
 	result := &CapabilitiesResult{}
 
 	models := resp.GetSupportedModels()
-	// The first SupportedModel is frequently an OpenConfig model whose
-	// Organization is "OpenConfig working group", not the hardware vendor. Scan
-	// all model Organizations for a known hardware-vendor token and, on the first
-	// match, set Vendor to its clean canonical display name. If nothing matches,
-	// Vendor stays "" — we deliberately do NOT fall back to models[0]'s raw
-	// Organization, which would surface noise like "OpenConfig working group" as
-	// a literal NetBox manufacturer. The profile Store.Match still works because
-	// each canonical token is a substring of itself (and of the overlay aliases).
+	// Scan all SupportedModel Organizations for a known hardware-vendor token.
+	// We collect the best (lowest index in vendorTokenOrder) match across all
+	// models so that a higher-priority token (e.g. "dell") wins over a
+	// lower-priority one (e.g. "sonic") regardless of which model appears first
+	// in the list. If nothing matches, Vendor stays "" — we deliberately do NOT
+	// fall back to models[0]'s raw Organization, which would surface noise like
+	// "OpenConfig working group" as a literal NetBox manufacturer. The profile
+	// Store.Match still works because each canonical token is a substring of
+	// itself (and of the overlay aliases).
+	bestIdx := len(vendorTokenOrder) // sentinel: no match yet
 	for _, m := range models {
 		org := strings.ToLower(m.GetOrganization())
-		matched := false
-		for _, tok := range vendorTokenOrder {
+		for idx, tok := range vendorTokenOrder {
+			if idx >= bestIdx {
+				break // no improvement possible
+			}
 			if strings.Contains(org, tok) {
+				bestIdx = idx
 				result.Vendor = vendorCanonical[tok]
-				matched = true
 				break
 			}
-		}
-		if matched {
-			break
 		}
 	}
 	for _, m := range models {

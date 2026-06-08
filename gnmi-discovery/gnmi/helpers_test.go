@@ -599,3 +599,37 @@ func TestFakeDialer_DialReturnsSession(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, sess, got)
 }
+
+func TestMapCapabilities_KnownVendorDell(t *testing.T) {
+	resp := &gnmiproto.CapabilityResponse{
+		SupportedModels: []*gnmiproto.ModelData{
+			{Name: "dell-system", Organization: "Dell Inc."},
+		},
+	}
+	result := mapCapabilities(resp)
+	assert.Equal(t, "Dell", result.Vendor)
+}
+
+func TestMapCapabilities_KnownVendorSONiC(t *testing.T) {
+	resp := &gnmiproto.CapabilityResponse{
+		SupportedModels: []*gnmiproto.ModelData{
+			{Name: "sonic-system", Organization: "SONiC"},
+		},
+	}
+	result := mapCapabilities(resp)
+	assert.Equal(t, "SONiC", result.Vendor)
+}
+
+// A Dell-built SONiC box may advertise both tokens; "dell" is ordered before
+// "sonic" so the device attributes to the real OEM (Dell), not the NOS.
+func TestMapCapabilities_DellSonicPrefersDell(t *testing.T) {
+	resp := &gnmiproto.CapabilityResponse{
+		SupportedModels: []*gnmiproto.ModelData{
+			{Name: "openconfig-interfaces", Organization: "OpenConfig working group"},
+			{Name: "sonic-port", Organization: "SONiC"},
+			{Name: "dell-platform", Organization: "Dell Inc."},
+		},
+	}
+	result := mapCapabilities(resp)
+	assert.Equal(t, "Dell", result.Vendor)
+}
