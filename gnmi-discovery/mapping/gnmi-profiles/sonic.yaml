@@ -1,0 +1,15 @@
+# SONiC (community/Broadcom + Dell Enterprise SONiC). IMPORTANT: SONiC's default
+# management is the sonic-db (Redis) origin, NOT OpenConfig. _base discovery
+# REQUIRES the OpenConfig/Translib management framework enabled on the target;
+# otherwise these paths return little. We deliberately do NOT implement a sonic-db
+# translator (out of scope for an OpenConfig backend). Per-vendor leaf-path
+# overrides are DEFERRED until a capture exists. Known weak leaves to revisit:
+#   - network-instances/.../vlans ; route-distinguisher ; NI interface refs
+#   - components completeness ; SVI IPs ; some ethernet state leaves.
+# "SONiC" is a NOS, not a manufacturer: the device manufacturer resolves from the
+# chassis mfg-name (real OEM) and only falls to "SONiC" when no OEM is discoverable.
+# Interface name typing (Ethernet/PortChannel) is handled by the global
+# defaultInterfacePatterns and the speed tier, not here.
+extends: _base
+match:
+  vendor: sonic

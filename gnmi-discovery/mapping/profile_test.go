@@ -244,3 +244,24 @@ func TestAllowsDelete(t *testing.T) {
 	require.False(t, base.AllowsDelete("/interfaces/interface-state"))
 	require.False(t, base.AllowsDelete("/interfaces/interfaces"))
 }
+
+func TestMatchBundledVendorProfiles(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	cases := map[string]string{
+		"Cisco":   "cisco",
+		"Juniper": "juniper",
+		"Huawei":  "huawei",
+		"Dell":    "dell_os10",
+		"SONiC":   "sonic",
+	}
+	for vendor, want := range cases {
+		p := store.Match(MatchInput{Vendor: vendor})
+		require.Equal(t, want, p.Name, "vendor %q should select %q", vendor, want)
+		// Each overlay inherits _base paths (extends: _base).
+		require.Equal(t, "/system/state/hostname", p.Device.Hostname, "%s inherits _base", want)
+		require.Equal(t, "/interfaces/interface", p.Interfaces.ListPath, "%s inherits _base", want)
+	}
+	// An unknown vendor still falls back to _base.
+	require.Equal(t, "_base", store.Match(MatchInput{Vendor: "TotallyUnknown"}).Name)
+}
