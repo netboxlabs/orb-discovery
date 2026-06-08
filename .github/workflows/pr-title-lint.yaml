@@ -38,6 +38,7 @@ jobs:
             ci
             docs
             deps
+            deps-dev
             repo
           requireScope: true
           subjectPattern: ^(?![A-Z]).+$
