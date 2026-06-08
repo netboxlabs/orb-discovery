@@ -1,6 +1,6 @@
 [project]
 name = "netboxlabs-orb-worker"
-version = "1.0.0"  # Overwritten during the build process
+version = "1.99.0.dev0"  # Placeholder, overwritten by CI before build (worker-release.yaml: `toml set project.version`). Kept above all sibling pins so editable / pip-install-from-source flows resolve.
 description = "NetBox Labs, Worker backend for Orb Agent"
 readme = "README.md"
 requires-python = ">=3.10"
