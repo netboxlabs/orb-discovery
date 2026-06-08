@@ -67,6 +67,31 @@ func TestResolveInterfaceType(t *testing.T) {
 		resolveInterfaceType("xe-0/0/0", "ETHERNETCSMACD", "SPEED_1GB", "other", nil))
 }
 
+func TestResolveInterfaceTypeVendorNames(t *testing.T) {
+	// Huawei media names (authoritative, unambiguous prefixes).
+	require.Equal(t, "100gbase-x-qsfp28",
+		resolveInterfaceType("100GE1/0/1", "ETHERNETCSMACD", "", "other", nil))
+	require.Equal(t, "40gbase-x-qsfpp",
+		resolveInterfaceType("40GE1/0/1", "ETHERNETCSMACD", "", "other", nil))
+	require.Equal(t, "25gbase-x-sfp28",
+		resolveInterfaceType("25GE1/0/1", "ETHERNETCSMACD", "", "other", nil))
+	require.Equal(t, "10gbase-x-sfpp",
+		resolveInterfaceType("10GE1/0/1", "ETHERNETCSMACD", "", "other", nil))
+	require.Equal(t, "1000base-t",
+		resolveInterfaceType("GE1/0/1", "ETHERNETCSMACD", "", "other", nil))
+	// Huawei aggregate + SVI.
+	require.Equal(t, "lag",
+		resolveInterfaceType("Eth-Trunk10", "ETHERNETCSMACD", "", "other", nil))
+	require.Equal(t, "virtual",
+		resolveInterfaceType("Vlanif100", "ETHERNETCSMACD", "", "other", nil))
+	// SONiC / Dell port-channel (hyphen-less — the existing Po rule does NOT match).
+	require.Equal(t, "lag",
+		resolveInterfaceType("PortChannel01", "ETHERNETCSMACD", "", "other", nil))
+	// Ladder precedence intact: an OC state/type lag still beats a name guess.
+	require.Equal(t, "lag",
+		resolveInterfaceType("10GE1/0/1", "IEEE8023ADLAG", "", "other", nil))
+}
+
 func TestOCDuplex(t *testing.T) {
 	require.Equal(t, "full", ocDuplex["FULL"])
 	require.Equal(t, "half", ocDuplex["HALF"])

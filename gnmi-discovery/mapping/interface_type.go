@@ -83,6 +83,20 @@ var defaultInterfacePatterns = []compiledIfacePattern{
 	{regexp.MustCompile(`^([Pp]ort-[Cc]hannel|Po)\d+`), "lag"},
 	{regexp.MustCompile(`^ae\d+`), "lag"},
 	{regexp.MustCompile(`^Bundle-Ether\d+`), "lag"},
+	// Huawei VRP/CloudEngine media names (10GE/25GE/40GE/100GE, descending so the
+	// longer prefixes win; bare GE is Huawei 1G) plus Eth-Trunk (LAG) and Vlanif
+	// (SVI). These tokens are vendor-unique and do not collide with the rules
+	// above, so they benefit fallback-to-_base discovery too. PortChannel (no
+	// hyphen) covers SONiC/Dell — the `Po\d+` rule above requires a digit right
+	// after "Po" so it does not match "PortChannelNN".
+	{regexp.MustCompile(`^100GE\d`), "100gbase-x-qsfp28"},
+	{regexp.MustCompile(`^40GE\d`), "40gbase-x-qsfpp"},
+	{regexp.MustCompile(`^25GE\d`), "25gbase-x-sfp28"},
+	{regexp.MustCompile(`^10GE\d`), "10gbase-x-sfpp"},
+	{regexp.MustCompile(`^GE\d`), "1000base-t"},
+	{regexp.MustCompile(`^Eth-Trunk\d+`), "lag"},
+	{regexp.MustCompile(`^Vlanif\d+`), "virtual"},
+	{regexp.MustCompile(`^PortChannel\d+`), "lag"},
 }
 
 // normalizeMAC upper-cases a MAC and rejects the all-zero address. Returns ""
