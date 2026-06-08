@@ -40,6 +40,9 @@ func annotateEntitiesWithRunID(entities []diode.Entity, runID string) {
 						set(&vl.Metadata)
 					}
 				}
+				if v.Vrf != nil {
+					set(&v.Vrf.Metadata)
+				}
 			}
 		case *diode.Module:
 			if v != nil {
@@ -64,8 +67,15 @@ func annotateEntitiesWithRunID(entities []diode.Entity, runID string) {
 						set(&iface.Device.Metadata)
 					}
 				}
+				if v.Vrf != nil {
+					set(&v.Vrf.Metadata)
+				}
 			}
 		case *diode.VLAN:
+			if v != nil {
+				set(&v.Metadata)
+			}
+		case *diode.VRF:
 			if v != nil {
 				set(&v.Metadata)
 			}

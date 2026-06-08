@@ -129,6 +129,27 @@ func TestInterfaceVlanNoReferenceCycle(t *testing.T) {
 	require.NotNil(t, iface.ConvertToProtoMessage())
 }
 
+func TestAnnotateRunIDCoversVRF(t *testing.T) {
+	dev := &diode.Device{Name: strPtrT("r1")}
+	vrf := &diode.VRF{Name: strPtrT("blue")}
+	iface := &diode.Interface{Device: dev, Name: strPtrT("Ethernet2"), Vrf: vrf}
+	ip := &diode.IPAddress{Address: strPtrT("10.0.0.1/31"), AssignedObject: iface, Vrf: vrf}
+	annotateEntitiesWithRunID([]diode.Entity{dev, iface, ip, vrf}, "RID")
+	require.Equal(t, "RID", iface.Metadata["run_id"])
+	require.Equal(t, "RID", ip.Metadata["run_id"])
+	require.Equal(t, "RID", vrf.Metadata["run_id"])
+}
+
+// regression: an Interface + IPAddress with a VRF ref converts to proto cleanly.
+func TestVrfNoReferenceCycle(t *testing.T) {
+	dev := &diode.Device{Name: strPtrT("r1")}
+	vrf := &diode.VRF{Name: strPtrT("blue")}
+	iface := &diode.Interface{Device: dev, Name: strPtrT("Ethernet2"), Vrf: vrf}
+	ip := &diode.IPAddress{Address: strPtrT("10.0.0.1/31"), AssignedObject: iface, Vrf: vrf}
+	require.NotNil(t, iface.ConvertToProtoMessage())
+	require.NotNil(t, ip.ConvertToProtoMessage())
+}
+
 func int64Ptr(i int64) *int64 { return &i }
 
 // strPtrT returns a pointer to the given string value — test helper.
