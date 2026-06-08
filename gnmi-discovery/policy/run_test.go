@@ -110,5 +110,26 @@ func TestInterfaceLagNoReferenceCycle(t *testing.T) {
 	require.NotNil(t, member.ConvertToProtoMessage())
 }
 
+func TestAnnotateRunIDCoversVLANs(t *testing.T) {
+	dev := &diode.Device{Name: strPtrT("r1")}
+	v10 := &diode.VLAN{Vid: int64Ptr(10), Name: strPtrT("VLAN10")}
+	v20 := &diode.VLAN{Vid: int64Ptr(20), Name: strPtrT("VLAN20")}
+	iface := &diode.Interface{Device: dev, Name: strPtrT("Ethernet1"), UntaggedVlan: v10, TaggedVlans: []*diode.VLAN{v20}}
+	annotateEntitiesWithRunID([]diode.Entity{dev, iface, v10, v20}, "RID")
+	require.Equal(t, "RID", iface.Metadata["run_id"])
+	require.Equal(t, "RID", v10.Metadata["run_id"]) // top-level VLAN case
+	require.Equal(t, "RID", v20.Metadata["run_id"])
+}
+
+// regression: an Interface with VLAN refs converts to proto without recursing.
+func TestInterfaceVlanNoReferenceCycle(t *testing.T) {
+	dev := &diode.Device{Name: strPtrT("r1")}
+	v10 := &diode.VLAN{Vid: int64Ptr(10), Name: strPtrT("VLAN10")}
+	iface := &diode.Interface{Device: dev, Name: strPtrT("Ethernet1"), UntaggedVlan: v10}
+	require.NotNil(t, iface.ConvertToProtoMessage())
+}
+
+func int64Ptr(i int64) *int64 { return &i }
+
 // strPtrT returns a pointer to the given string value — test helper.
 func strPtrT(s string) *string { return &s }
