@@ -34,7 +34,7 @@ jobs:
       - name: Write package.json
         uses: DamianReeves/write-file-action@6929a9a6d1807689191dcc8bbe62b54d70a32b42 #v1.3
         with:
-          path: ./package.json
+          path: ./${{ env.APP_NAME }}/package.json
           write-mode: overwrite
           contents: |
             {
@@ -43,16 +43,18 @@ jobs:
               "devDependencies": {
                 "semantic-release": "^25.0.0-beta.6",
                 "semantic-release-export-data": "^1.0.1",
+                "semantic-release-monorepo": "^8.0.0",
                 "@semantic-release/changelog": "^6.0.3"
               }
             }
       - name: Write .releaserc.json
         uses: DamianReeves/write-file-action@6929a9a6d1807689191dcc8bbe62b54d70a32b42 #v1.3
         with:
-          path: ./.releaserc.json
+          path: ./${{ env.APP_NAME }}/.releaserc.json
           write-mode: overwrite
           contents: |
             {
+              "extends": "semantic-release-monorepo",
               "branches": "release",
               "repositoryUrl": "https://github.com/netboxlabs/orb-discovery",
               "debug": "true",
@@ -61,11 +63,10 @@ jobs:
                 ["semantic-release-export-data"],
                 ["@semantic-release/commit-analyzer", {
                   "releaseRules": [
-                    { "message": "*", "release": "patch"},
-                    { "message": "fix*", "release": "patch" },
-                    { "message": "feat*", "release": "minor" },
-                    { "message": "perf*",  "release": "major" },
-                    { "message": "major*",  "release": "major" }
+                    { "type": "fix", "release": "patch" },
+                    { "type": "feat", "release": "minor" },
+                    { "type": "perf", "release": "patch" },
+                    { "type": "chore", "scope": "deps", "release": "patch" }
                   ]
                 }],
                 "@semantic-release/release-notes-generator",
@@ -89,8 +90,10 @@ jobs:
               ]
             }
       - name: setup semantic-release
+        working-directory: ${{ env.APP_NAME }}
         run: npm install --legacy-peer-deps
       - name: release dry-run
+        working-directory: ${{ env.APP_NAME }}
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_SEMANTIC_RELEASE_WEBHOOK }}
         run: npx semantic-release --debug --dry-run
@@ -179,7 +182,7 @@ jobs:
       - name: Write package.json
         uses: DamianReeves/write-file-action@6929a9a6d1807689191dcc8bbe62b54d70a32b42 #v1.3
         with:
-          path: ./package.json
+          path: ./${{ env.APP_NAME }}/package.json
           write-mode: overwrite
           contents: |
             {
@@ -188,16 +191,18 @@ jobs:
               "devDependencies": {
                 "semantic-release": "^25.0.0-beta.6",
                 "semantic-release-export-data": "^1.0.1",
+                "semantic-release-monorepo": "^8.0.0",
                 "@semantic-release/changelog": "^6.0.3"
               }
             }
       - name: Write .releaserc.json
         uses: DamianReeves/write-file-action@6929a9a6d1807689191dcc8bbe62b54d70a32b42 #v1.3
         with:
-          path: ./.releaserc.json
+          path: ./${{ env.APP_NAME }}/.releaserc.json
           write-mode: overwrite
           contents: |
             {
+              "extends": "semantic-release-monorepo",
               "branches": "release",
               "repositoryUrl": "https://github.com/netboxlabs/orb-discovery",
               "debug": "true",
@@ -206,11 +211,10 @@ jobs:
                 ["semantic-release-export-data"],
                 ["@semantic-release/commit-analyzer", {
                   "releaseRules": [
-                    { "message": "*", "release": "patch"},
-                    { "message": "fix*", "release": "patch" },
-                    { "message": "feat*", "release": "minor" },
-                    { "message": "perf*",  "release": "major" },
-                    { "message": "major*",  "release": "major" }
+                    { "type": "fix", "release": "patch" },
+                    { "type": "feat", "release": "minor" },
+                    { "type": "perf", "release": "patch" },
+                    { "type": "chore", "scope": "deps", "release": "patch" }
                   ]
                 }],
                 "@semantic-release/release-notes-generator",
@@ -234,8 +238,10 @@ jobs:
               ]
             }
       - name: setup semantic-release
+        working-directory: ${{ env.APP_NAME }}
         run: npm install --legacy-peer-deps
       - name: Release
+        working-directory: ${{ env.APP_NAME }}
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_OBSERVABILITY_RELEASE_WEBHOOK }}
         run: npx semantic-release --debug
