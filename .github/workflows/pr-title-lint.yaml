@@ -42,4 +42,4 @@ jobs:
           requireScope: true
           subjectPattern: ^(?![A-Z]).+$
           subjectPatternError: |
-            The subject "{subject}" must start with a lowercase letter and not be empty.
+            The subject "{subject}" must not start with an uppercase letter and must not be empty.
