@@ -557,6 +557,30 @@ func TestTranslateInterfacesEnrichment(t *testing.T) {
 	require.Nil(t, po.Lag)            // the LAG itself has no aggregate-id
 }
 
+func TestTranslateInterfaceDuplex(t *testing.T) {
+	store, _ := LoadProfiles("")
+	base, _ := store.Get("_base")
+	dev := &diode.Device{Name: strptr("r1")}
+	snap := map[string]any{
+		"/interfaces/interface[name=Ethernet1]/state/type":                            "iana-if-type:ethernetCsmacd",
+		"/interfaces/interface[name=Ethernet1]/ethernet/state/negotiated-duplex-mode": "FULL",
+		"/interfaces/interface[name=Ethernet2]/state/type":                            "iana-if-type:ethernetCsmacd",
+		"/interfaces/interface[name=Ethernet2]/ethernet/state/negotiated-duplex-mode": "HALF",
+		"/interfaces/interface[name=Ethernet3]/state/type":                            "iana-if-type:ethernetCsmacd",
+	}
+	ents := translateInterfaces(base, snap, dev, nil)
+	byName := map[string]*diode.Interface{}
+	for _, e := range ents {
+		if i, ok := e.(*diode.Interface); ok {
+			byName[*i.Name] = i
+		}
+	}
+	require.NotNil(t, byName["Ethernet1"].Duplex)
+	require.Equal(t, "full", *byName["Ethernet1"].Duplex)
+	require.Equal(t, "half", *byName["Ethernet2"].Duplex)
+	require.Nil(t, byName["Ethernet3"].Duplex)
+}
+
 func TestTranslateVlanNamesAndInventory(t *testing.T) {
 	store, _ := LoadProfiles("")
 	base, _ := store.Get("_base")

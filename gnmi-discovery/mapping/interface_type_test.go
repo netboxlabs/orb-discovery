@@ -66,3 +66,10 @@ func TestResolveInterfaceType(t *testing.T) {
 	require.Equal(t, "10gbase-x-sfpp",
 		resolveInterfaceType("xe-0/0/0", "ETHERNETCSMACD", "SPEED_1GB", "other", nil))
 }
+
+func TestOCDuplex(t *testing.T) {
+	require.Equal(t, "full", ocDuplex["FULL"])
+	require.Equal(t, "half", ocDuplex["HALF"])
+	_, ok := ocDuplex["AUTO"]
+	require.False(t, ok)
+}

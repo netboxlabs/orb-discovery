@@ -421,6 +421,7 @@ func translateInterfaces(profile *Profile, snap map[string]any, dev *diode.Devic
 	speedLeafPath := profile.Interfaces.Keys["speed"]
 	macLeafPath := profile.Interfaces.Keys["mac_address"]
 	lagLeafPath := profile.Interfaces.Keys["lag_member"]
+	duplexLeafPath := profile.Interfaces.Keys["duplex"]
 
 	var out []diode.Entity
 	for _, key := range order {
@@ -497,6 +498,11 @@ func translateInterfaces(profile *Profile, snap map[string]any, dev *diode.Devic
 				if agg := strings.TrimSpace(toStr(v)); agg != "" && agg != key {
 					iface.Lag = &diode.Interface{Device: dev, Name: strptr(agg)}
 				}
+			}
+		}
+		if duplexLeafPath != "" {
+			if d, ok := ocDuplex[identityRefBase(leaves[duplexLeafPath])]; ok {
+				iface.Duplex = strptr(d)
 			}
 		}
 		out = append(out, iface)

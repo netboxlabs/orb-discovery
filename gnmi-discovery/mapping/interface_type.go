@@ -43,6 +43,14 @@ var ocSpeedToType = map[string]string{
 	"SPEED_400GB":  "400gbase-x-qsfp112",
 }
 
+// ocDuplex maps an OpenConfig negotiated-duplex-mode (identityRefBase-normalized:
+// upper, prefix-stripped) to a NetBox interface duplex. Only the operational
+// FULL/HALF are mapped; AUTO/absent leave Duplex unset.
+var ocDuplex = map[string]string{
+	"FULL": "full",
+	"HALF": "half",
+}
+
 // compiledIfacePattern is a name regex paired with the NetBox type it implies.
 type compiledIfacePattern struct {
 	re  *regexp.Regexp

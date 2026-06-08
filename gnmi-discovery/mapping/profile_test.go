@@ -223,6 +223,14 @@ func TestAllowsPathVrf(t *testing.T) {
 	require.False(t, base.AllowsPath("/network-instances/network-instance[name=blue]/state/router-id"))
 }
 
+func TestSubscribePathsIncludeDuplex(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+	require.Contains(t, base.SubscribePaths(), "/interfaces/interface[name=*]/ethernet/state/negotiated-duplex-mode")
+	require.True(t, base.AllowsPath("/interfaces/interface[name=Ethernet1]/ethernet/state/negotiated-duplex-mode"))
+}
+
 func TestAllowsDelete(t *testing.T) {
 	store, err := LoadProfiles("")
 	require.NoError(t, err)

@@ -21,6 +21,7 @@ interfaces:
     speed: ethernet/state/port-speed
     mac_address: ethernet/state/mac-address
     lag_member: ethernet/state/aggregate-id
+    duplex: ethernet/state/negotiated-duplex-mode
 components:
   list_path: /components/component
   keys:
