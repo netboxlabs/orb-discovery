@@ -256,6 +256,26 @@ func TestMergeDefaultsVlan(t *testing.T) {
 	require.Equal(t, "x", src.Vlan.Tags[0])
 }
 
+func TestMergeDefaultsPrefix(t *testing.T) {
+	policy := &Defaults{Site: "NYC", Prefix: PrefixDefaults{Role: "r1", Tenant: "t1", Tags: []string{"a"}, Description: "d1"}}
+	got := MergeDefaults(policy, nil)
+	require.Equal(t, "r1", got.Prefix.Role)
+	require.Equal(t, "t1", got.Prefix.Tenant)
+	override := &Defaults{Prefix: PrefixDefaults{Role: "r2"}}
+	got = MergeDefaults(policy, override)
+	require.Equal(t, "r2", got.Prefix.Role)        // overridden
+	require.Equal(t, "t1", got.Prefix.Tenant)      // preserved
+	require.Equal(t, "d1", got.Prefix.Description) // preserved
+
+	// no-alias: mutating merged Prefix.Tags must not touch the source
+	src := &Defaults{Prefix: PrefixDefaults{Tags: []string{"x"}}}
+	m := MergeDefaults(src, nil)
+	if len(m.Prefix.Tags) > 0 {
+		m.Prefix.Tags[0] = "MUT"
+	}
+	require.Equal(t, "x", src.Prefix.Tags[0])
+}
+
 func TestUnmarshalPolicy(t *testing.T) {
 	data := []byte(`
 policies:
