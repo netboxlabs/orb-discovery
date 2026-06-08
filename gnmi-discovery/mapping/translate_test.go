@@ -601,3 +601,44 @@ func TestTranslateInterfacesSelfLagGuard(t *testing.T) {
 	require.Len(t, ents, 1)
 	require.Nil(t, ents[0].(*diode.Interface).Lag)
 }
+
+func TestTranslateVrfBinding(t *testing.T) {
+	store, _ := LoadProfiles("")
+	base, _ := store.Get("_base")
+	snap := map[string]any{
+		"/system/state/hostname":                           "r1",
+		"/interfaces/interface[name=Ethernet2]/state/type": "iana-if-type:ethernetCsmacd",
+		"/interfaces/interface[name=Ethernet2]/subinterfaces/subinterface[index=0]/ipv4/addresses/address[ip=10.0.0.1]/state/prefix-length": float64(31),
+		"/interfaces/interface[name=Ethernet1]/state/type":                                                     "iana-if-type:ethernetCsmacd",
+		"/network-instances/network-instance[name=blue]/state/type":                                            "openconfig-network-instance-types:L3VRF",
+		"/network-instances/network-instance[name=blue]/state/route-distinguisher":                             "65000:1",
+		"/network-instances/network-instance[name=blue]/interfaces/interface[id=Ethernet2]/state/interface":    "Ethernet2",
+		"/network-instances/network-instance[name=blue]/interfaces/interface[id=Ethernet2]/state/subinterface": float64(0),
+		"/network-instances/network-instance[name=default]/state/type":                                         "openconfig-network-instance-types:DEFAULT_INSTANCE",
+		"/network-instances/network-instance[name=default]/interfaces/interface[id=Ethernet1]/state/interface": "Ethernet1",
+	}
+	ents := Translate(base, snap, &config.Defaults{Site: "lab"}, "")
+
+	var vrf *diode.VRF
+	ifaces := map[string]*diode.Interface{}
+	var ip *diode.IPAddress
+	for _, e := range ents {
+		switch v := e.(type) {
+		case *diode.VRF:
+			vrf = v
+		case *diode.Interface:
+			ifaces[*v.Name] = v
+		case *diode.IPAddress:
+			ip = v
+		}
+	}
+	require.NotNil(t, vrf)
+	require.Equal(t, "blue", *vrf.Name)
+	require.NotNil(t, ifaces["Ethernet2"].Vrf)
+	require.Equal(t, "blue", *ifaces["Ethernet2"].Vrf.Name)
+	require.Same(t, vrf, ifaces["Ethernet2"].Vrf)
+	require.Nil(t, ifaces["Ethernet1"].Vrf)
+	require.NotNil(t, ip)
+	require.NotNil(t, ip.Vrf)
+	require.Equal(t, "blue", *ip.Vrf.Name)
+}

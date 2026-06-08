@@ -175,8 +175,11 @@ func AssignPrimaryIP(entities []diode.Entity, hostIP string) {
 			continue
 		}
 		// Matcher-only stub — Address only, no AssignedObject (breaks the
-		// IP -> Interface -> Device cycle). Carry Vrf here too if/when VRF lands.
+		// IP -> Interface -> Device cycle). Vrf is carried so per-VRF matching works.
 		stub := &diode.IPAddress{Address: ip.Address}
+		if ip.Vrf != nil {
+			stub.Vrf = ip.Vrf
+		}
 		if strings.Contains(bare, ":") {
 			dev.PrimaryIp6 = stub
 		} else {

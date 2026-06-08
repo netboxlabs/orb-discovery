@@ -214,6 +214,28 @@ func Translate(profile *Profile, snap map[string]any, defaults *config.Defaults,
 		vb.get(vid) // ensure defined-but-unreferenced VLANs are emitted
 	}
 	entities = append(entities, vb.emitted()...)
+	// VRFs: emit L3VRF network-instances and bind Vrf on member interfaces (and
+	// their IPs), subinterface-precise via the interface-entity name.
+	vrfEntities, vrfByIface := translateVrfs(snap)
+	if len(vrfByIface) > 0 {
+		for _, e := range entities {
+			switch v := e.(type) {
+			case *diode.Interface:
+				if v.Name != nil {
+					if vrf := vrfByIface[*v.Name]; vrf != nil {
+						v.Vrf = vrf
+					}
+				}
+			case *diode.IPAddress:
+				if iface, ok := v.AssignedObject.(*diode.Interface); ok && iface != nil && iface.Name != nil {
+					if vrf := vrfByIface[*iface.Name]; vrf != nil {
+						v.Vrf = vrf
+					}
+				}
+			}
+		}
+	}
+	entities = append(entities, vrfEntities...)
 	return entities
 }
 

@@ -147,3 +147,21 @@ func TestAssignPrimaryIPNoReferenceCycle(t *testing.T) {
 	require.NotNil(t, dev.ConvertToProtoMessage())
 	require.NotNil(t, rich.ConvertToProtoMessage())
 }
+
+func TestAssignPrimaryIPCarriesVrf(t *testing.T) {
+	dev := &diode.Device{Name: strptr("r1")}
+	vrf := &diode.VRF{Name: strptr("blue")}
+	entities := []diode.Entity{
+		dev,
+		&diode.IPAddress{
+			Address: strptr("10.7.7.7/32"), Vrf: vrf,
+			AssignedObject: &diode.Interface{Device: dev, Name: strptr("Loopback0"), Vrf: vrf},
+		},
+	}
+	AssignPrimaryIP(entities, "10.7.7.7")
+	require.NotNil(t, dev.PrimaryIp4)
+	require.Equal(t, "10.7.7.7/32", *dev.PrimaryIp4.Address)
+	require.Nil(t, dev.PrimaryIp4.AssignedObject) // still matcher-only stub
+	require.NotNil(t, dev.PrimaryIp4.Vrf)         // but VRF carried for per-VRF matching
+	require.Equal(t, "blue", *dev.PrimaryIp4.Vrf.Name)
+}
