@@ -6,7 +6,7 @@
 
 This repo enforces a Conventional Commits PR title with a scope from the
 allowlist (`type(scope): subject`). The title becomes the squashed commit message
-and drives the per-backend release. See [`AGENTS.md`](../AGENTS.md) for the full
+and drives the per-backend release. See [`AGENTS.md`](/AGENTS.md) for the full
 convention.
 
 - [ ] Title is `type(scope): subject` with a scope from the allowlist:
