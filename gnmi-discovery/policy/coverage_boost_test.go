@@ -423,6 +423,30 @@ func TestSelectProfileVendorMatch(t *testing.T) {
 	require.NotEqual(t, "_base", p.Name, "Arista vendor string must match an Arista profile")
 }
 
+// TestSelectProfilePrefersNOS verifies that the NOS hint biases profile
+// selection: a Dell-built SONiC box (Vendor "Dell", NOS "SONiC") selects the
+// sonic overlay, not dell_os10 — while plain Dell OS10 (no NOS) selects dell_os10.
+func TestSelectProfilePrefersNOS(t *testing.T) {
+	t.Parallel()
+	store, err := mapping.LoadProfiles("")
+	require.NoError(t, err)
+
+	r := &Runner{
+		ctx:    context.Background(),
+		name:   "sel-nos",
+		states: map[string]*targetState{"h:1": {}, "h:2": {}},
+		logger: slog.Default(),
+		store:  store,
+		policy: config.Policy{Config: config.PolicyConfig{}},
+	}
+
+	dellSonic := r.selectProfile(config.Target{Host: "h:1"}, &gnmi.CapabilitiesResult{Vendor: "Dell", NOS: "SONiC"})
+	require.Equal(t, "sonic", dellSonic.Name, "NOS hint SONiC must select the sonic overlay over dell_os10")
+
+	dellOS10 := r.selectProfile(config.Target{Host: "h:2"}, &gnmi.CapabilitiesResult{Vendor: "Dell"})
+	require.Equal(t, "dell_os10", dellOS10.Name, "plain Dell (no NOS) selects dell_os10")
+}
+
 // TestSelectProfileNilCaps verifies that nil capabilities fall back to _base.
 func TestSelectProfileNilCaps(t *testing.T) {
 	t.Parallel()

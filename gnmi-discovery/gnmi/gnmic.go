@@ -249,15 +249,24 @@ var vendorCanonical = map[string]string{
 	"mellanox": "Mellanox",
 	"huawei":   "Huawei",
 	"dell":     "Dell",
-	"sonic":    "SONiC", // NOS sentinel: used for profile selection. SONiC is a
-	// network OS, not a hardware vendor — chassis mfg-name (the real OEM) takes
-	// precedence as the device manufacturer; "SONiC" only surfaces when no OEM
-	// is discoverable (operator-overridable via defaults.device.manufacturer).
 }
 
 // vendorTokenOrder fixes the scan order over vendorCanonical so the first match
 // is deterministic across runs (map iteration order is randomized).
-var vendorTokenOrder = []string{"arista", "nokia", "cisco", "juniper", "nvidia", "cumulus", "mellanox", "huawei", "dell", "sonic"}
+var vendorTokenOrder = []string{"arista", "nokia", "cisco", "juniper", "nvidia", "cumulus", "mellanox", "huawei", "dell"}
+
+// nosCanonical maps a network-OS token (as it may appear in a SupportedModel
+// Organization) to its canonical name. A NOS is software that runs on hardware
+// from a separate OEM, so it is detected independently of vendorCanonical and
+// never becomes a device Manufacturer — it only biases profile selection.
+// SONiC is the case in point: a Dell/Edgecore/etc. box runs SONiC, so the
+// manufacturer stays the hardware OEM while the profile is the sonic overlay.
+var nosCanonical = map[string]string{
+	"sonic": "SONiC",
+}
+
+// nosTokenOrder fixes the NOS scan order (deterministic; map order is randomized).
+var nosTokenOrder = []string{"sonic"}
 
 // mapCapabilities converts a raw gNMI CapabilityResponse to our CapabilitiesResult.
 func mapCapabilities(resp *gnmiproto.CapabilityResponse) *CapabilitiesResult {
@@ -266,13 +275,12 @@ func mapCapabilities(resp *gnmiproto.CapabilityResponse) *CapabilitiesResult {
 	models := resp.GetSupportedModels()
 	// Scan all SupportedModel Organizations for a known hardware-vendor token.
 	// We collect the best (lowest index in vendorTokenOrder) match across all
-	// models so that a higher-priority token (e.g. "dell") wins over a
-	// lower-priority one (e.g. "sonic") regardless of which model appears first
-	// in the list. If nothing matches, Vendor stays "" — we deliberately do NOT
-	// fall back to models[0]'s raw Organization, which would surface noise like
-	// "OpenConfig working group" as a literal NetBox manufacturer. The profile
-	// Store.Match still works because each canonical token is a substring of
-	// itself (and of the overlay aliases).
+	// models so a higher-priority token wins regardless of which model appears
+	// first in the list. If nothing matches, Vendor stays "" — we deliberately do
+	// NOT fall back to models[0]'s raw Organization, which would surface noise
+	// like "OpenConfig working group" as a literal NetBox manufacturer. The
+	// profile Store.Match still works because each canonical token is a substring
+	// of itself (and of the overlay aliases).
 	bestIdx := len(vendorTokenOrder) // sentinel: no match yet
 	for _, m := range models {
 		org := strings.ToLower(m.GetOrganization())
@@ -283,6 +291,23 @@ func mapCapabilities(resp *gnmiproto.CapabilityResponse) *CapabilitiesResult {
 			if strings.Contains(org, tok) {
 				bestIdx = idx
 				result.Vendor = vendorCanonical[tok]
+				break
+			}
+		}
+	}
+	// Network-OS detection is independent of the hardware vendor: a Dell-built
+	// SONiC box matches both "dell" (Vendor/manufacturer) and "sonic" (NOS, which
+	// biases profile selection). Same lowest-index-wins scan over nosTokenOrder.
+	nosIdx := len(nosTokenOrder)
+	for _, m := range models {
+		org := strings.ToLower(m.GetOrganization())
+		for idx, tok := range nosTokenOrder {
+			if idx >= nosIdx {
+				break
+			}
+			if strings.Contains(org, tok) {
+				nosIdx = idx
+				result.NOS = nosCanonical[tok]
 				break
 			}
 		}

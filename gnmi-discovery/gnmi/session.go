@@ -22,7 +22,15 @@ type Notification struct {
 // path, so we do not model it here — the runner attempts ON_CHANGE and falls
 // back on the Subscribe rejection instead.
 type CapabilitiesResult struct {
-	Vendor    string
+	// Vendor is the canonical hardware-vendor (manufacturer) display name derived
+	// from a SupportedModel Organization token (e.g. "Cisco", "Dell"). It feeds
+	// both the device Manufacturer fallback and profile selection.
+	Vendor string
+	// NOS is the canonical network-OS name when one is detected (e.g. "SONiC").
+	// A NOS is NOT a hardware manufacturer, so it never sets Vendor; it is used
+	// ONLY to bias profile selection (a Dell-built SONiC box selects the sonic
+	// overlay while its manufacturer still resolves to the hardware OEM, Dell).
+	NOS       string
 	Models    []string
 	Encodings []string
 }

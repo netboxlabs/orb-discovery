@@ -610,6 +610,8 @@ func TestMapCapabilities_KnownVendorDell(t *testing.T) {
 	assert.Equal(t, "Dell", result.Vendor)
 }
 
+// SONiC is a network OS, not a hardware vendor: it sets NOS (which biases
+// profile selection) and leaves Vendor empty (so it never becomes a manufacturer).
 func TestMapCapabilities_KnownVendorSONiC(t *testing.T) {
 	resp := &gnmiproto.CapabilityResponse{
 		SupportedModels: []*gnmiproto.ModelData{
@@ -617,12 +619,14 @@ func TestMapCapabilities_KnownVendorSONiC(t *testing.T) {
 		},
 	}
 	result := mapCapabilities(resp)
-	assert.Equal(t, "SONiC", result.Vendor)
+	assert.Equal(t, "", result.Vendor, "SONiC must not be a manufacturer")
+	assert.Equal(t, "SONiC", result.NOS)
 }
 
-// A Dell-built SONiC box may advertise both tokens; "dell" is ordered before
-// "sonic" so the device attributes to the real OEM (Dell), not the NOS.
-func TestMapCapabilities_DellSonicPrefersDell(t *testing.T) {
+// A Dell-built SONiC box advertises both tokens. The hardware vendor (Dell) and
+// the NOS (SONiC) are detected on independent scans: Vendor=Dell drives the
+// manufacturer, NOS=SONiC biases profile selection toward the sonic overlay.
+func TestMapCapabilities_DellSonicSeparateSignals(t *testing.T) {
 	resp := &gnmiproto.CapabilityResponse{
 		SupportedModels: []*gnmiproto.ModelData{
 			{Name: "openconfig-interfaces", Organization: "OpenConfig working group"},
@@ -632,4 +636,5 @@ func TestMapCapabilities_DellSonicPrefersDell(t *testing.T) {
 	}
 	result := mapCapabilities(resp)
 	assert.Equal(t, "Dell", result.Vendor)
+	assert.Equal(t, "SONiC", result.NOS)
 }

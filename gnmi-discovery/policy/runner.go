@@ -71,6 +71,7 @@ type targetState struct {
 	LastSync       time.Time // last completed initial-sync / snapshot boundary
 	LastFlush      time.Time // last successful Diode ingest
 	LastError      string
+	lastProfile    string // last profile selected for this host; gates the selection log
 }
 
 // NewRunner creates a runner for a policy.
@@ -580,14 +581,31 @@ func (r *Runner) selectProfile(t config.Target, caps *gnmi.CapabilitiesResult) *
 	}
 	in := mapping.MatchInput{}
 	if caps != nil {
+		// Profile selection prefers the network-OS hint over the hardware vendor:
+		// a Dell-built SONiC box (Vendor "Dell", NOS "SONiC") selects the sonic
+		// overlay while its manufacturer still resolves to Dell in Translate.
 		in.Vendor = caps.Vendor
+		if caps.NOS != "" {
+			in.Vendor = caps.NOS
+		}
 	}
 	p := r.store.Match(in)
 	if p.Name == "_base" {
 		metrics.GetProfileFallbacks().Add(r.ctx, 1) // count vendors that may need an overlay
 	}
-	r.logger.Info("selected profile",
-		"policy", r.name, "host", t.Host, "vendor", in.Vendor, "profile", p.Name)
+	// Log only when the selected profile changes for this host, so a flapping
+	// target reconnecting on the backoff loop does not re-emit the line every time.
+	changed := false
+	r.setState(t.Host, func(s *targetState) {
+		if s.lastProfile != p.Name {
+			s.lastProfile = p.Name
+			changed = true
+		}
+	})
+	if changed {
+		r.logger.Info("selected profile",
+			"policy", r.name, "host", t.Host, "vendor", in.Vendor, "profile", p.Name)
+	}
 	return p
 }
 
