@@ -128,7 +128,14 @@ func newVlanBuilder(dev *diode.Device, defaults *config.Defaults, defs map[int64
 	if defaults != nil {
 		v := defaults.Vlan
 		if v.Group != "" {
-			b.group = &diode.VLANGroup{Name: strptr(v.Group), Slug: strptr(slugify(v.Group)), Scope: b.site}
+			g := &diode.VLANGroup{Name: strptr(v.Group), Slug: strptr(slugify(v.Group))}
+			// Only set Scope when we have a real site. Assigning a typed-nil
+			// *diode.Site to the Scope interface would make it non-nil, causing the
+			// SDK to emit a bogus empty-site scope.
+			if b.site != nil {
+				g.Scope = b.site
+			}
+			b.group = g
 		}
 		if v.Tenant != "" {
 			b.tenant = &diode.Tenant{Name: strptr(v.Tenant)}

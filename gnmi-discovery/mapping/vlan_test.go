@@ -100,6 +100,18 @@ func TestVlanBuilder(t *testing.T) {
 	require.Equal(t, []int64{10, 20, 99}, vids)
 }
 
+// A group with no device site must leave Scope nil (not a typed-nil *Site that
+// would serialize as a bogus empty-site scope).
+func TestVlanBuilderGroupNilSiteScope(t *testing.T) {
+	dev := &diode.Device{Name: strptr("r1")} // no Site
+	b := newVlanBuilder(dev, &config.Defaults{Vlan: config.VlanDefaults{Group: "g"}}, nil)
+	v := b.get(10)
+	require.NotNil(t, v.Group)
+	require.Nil(t, v.Group.Scope)
+	require.Nil(t, v.Site)
+	require.NotNil(t, v.ConvertToProtoMessage()) // serializes cleanly
+}
+
 func TestVlanGroupNoReferenceCycle(t *testing.T) {
 	dev := &diode.Device{Name: strptr("r1"), Site: &diode.Site{Name: strptr("lab")}}
 	b := newVlanBuilder(dev, &config.Defaults{Vlan: config.VlanDefaults{Group: "g"}}, nil)
