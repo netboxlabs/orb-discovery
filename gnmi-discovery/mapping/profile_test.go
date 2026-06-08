@@ -164,6 +164,26 @@ func TestAllowsPathInterfaceEnrichment(t *testing.T) {
 	require.False(t, base.AllowsPath("/interfaces/interface[name=Ethernet1]/ethernet/state/counters/in-octets"))
 }
 
+func TestSubscribePathsIncludeSwitchedVlan(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+	paths := base.SubscribePaths()
+	require.Contains(t, paths, "/interfaces/interface[name=*]/ethernet/switched-vlan/state/interface-mode")
+	require.Contains(t, paths, "/interfaces/interface[name=*]/ethernet/switched-vlan/state/trunk-vlans")
+	require.Contains(t, paths, "/interfaces/interface[name=*]/aggregation/switched-vlan/state/access-vlan")
+	require.Contains(t, paths, "/interfaces/interface[name=*]/aggregation/switched-vlan/state/native-vlan")
+}
+
+func TestAllowsPathSwitchedVlan(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+	require.True(t, base.AllowsPath("/interfaces/interface[name=Ethernet1]/ethernet/switched-vlan/state/interface-mode"))
+	require.True(t, base.AllowsPath("/interfaces/interface[name=Po1]/aggregation/switched-vlan/state/trunk-vlans"))
+	require.False(t, base.AllowsPath("/interfaces/interface[name=Ethernet1]/ethernet/switched-vlan/state/counters/in"))
+}
+
 func TestAllowsDelete(t *testing.T) {
 	store, err := LoadProfiles("")
 	require.NoError(t, err)

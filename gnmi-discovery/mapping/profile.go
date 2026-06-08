@@ -311,6 +311,17 @@ func (p *Profile) SubscribePaths() []string {
 			base+"/ipv6/addresses/address[ip=*]/state/prefix-length",
 		)
 	}
+	// The OpenConfig switched-vlan subtree is standardized across vendors, so it
+	// is always subscribed under both the ethernet and aggregation containers.
+	// AllowsPath gates the same leaves symmetrically via parseSwitchedVlanPath.
+	if p.Interfaces.ListPath != "" {
+		base := p.Interfaces.ListPath + "[" + p.Interfaces.listKey() + "=*]"
+		for _, container := range []string{"ethernet", "aggregation"} {
+			for _, leaf := range []string{"interface-mode", "access-vlan", "native-vlan", "trunk-vlans"} {
+				out = append(out, base+"/"+container+"/switched-vlan/state/"+leaf)
+			}
+		}
+	}
 	sort.Strings(out)
 	return out
 }
@@ -327,6 +338,9 @@ func (p *Profile) AllowsPath(path string) bool {
 		return true
 	}
 	if _, _, _, _, leaf, ok := parseIPAddressPath(path, p.Interfaces.ListPath); ok && leaf == "state/prefix-length" {
+		return true
+	}
+	if _, _, ok := parseSwitchedVlanPath(path, p.Interfaces.ListPath); ok {
 		return true
 	}
 	return false
