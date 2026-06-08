@@ -202,6 +202,27 @@ func TestAllowsPathNIVlans(t *testing.T) {
 	require.False(t, base.AllowsPath("/network-instances/network-instance[name=default]/vlans/vlan[vlan-id=10]/state/tpid"))
 }
 
+func TestSubscribePathsIncludeVrf(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+	paths := base.SubscribePaths()
+	require.Contains(t, paths, "/network-instances/network-instance[name=*]/state/type")
+	require.Contains(t, paths, "/network-instances/network-instance[name=*]/state/route-distinguisher")
+	require.Contains(t, paths, "/network-instances/network-instance[name=*]/interfaces/interface[id=*]/state/interface")
+	require.Contains(t, paths, "/network-instances/network-instance[name=*]/interfaces/interface[id=*]/state/subinterface")
+}
+
+func TestAllowsPathVrf(t *testing.T) {
+	store, err := LoadProfiles("")
+	require.NoError(t, err)
+	base, _ := store.Get("_base")
+	require.True(t, base.AllowsPath("/network-instances/network-instance[name=blue]/state/type"))
+	require.True(t, base.AllowsPath("/network-instances/network-instance[name=blue]/state/route-distinguisher"))
+	require.True(t, base.AllowsPath("/network-instances/network-instance[name=blue]/interfaces/interface[id=Ethernet2]/state/interface"))
+	require.False(t, base.AllowsPath("/network-instances/network-instance[name=blue]/state/router-id"))
+}
+
 func TestAllowsDelete(t *testing.T) {
 	store, err := LoadProfiles("")
 	require.NoError(t, err)

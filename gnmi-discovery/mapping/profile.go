@@ -329,6 +329,16 @@ func (p *Profile) SubscribePaths() []string {
 		"/network-instances/network-instance[name=*]/vlans/vlan[vlan-id=*]/state/name",
 		"/network-instances/network-instance[name=*]/vlans/vlan[vlan-id=*]/state/status",
 	)
+	// The OpenConfig network-instance VRF state and membership leaves are
+	// standardized top-level paths (independent of the interface list), so they
+	// are always subscribed. AllowsPath gates them symmetrically via
+	// parseNetworkInstanceStatePath and parseNetworkInstanceIfacePath.
+	out = append(out,
+		"/network-instances/network-instance[name=*]/state/type",
+		"/network-instances/network-instance[name=*]/state/route-distinguisher",
+		"/network-instances/network-instance[name=*]/interfaces/interface[id=*]/state/interface",
+		"/network-instances/network-instance[name=*]/interfaces/interface[id=*]/state/subinterface",
+	)
 	sort.Strings(out)
 	return out
 }
@@ -351,6 +361,12 @@ func (p *Profile) AllowsPath(path string) bool {
 		return true
 	}
 	if _, _, ok := parseNetworkInstanceVlanPath(path); ok {
+		return true
+	}
+	if _, _, ok := parseNetworkInstanceStatePath(path); ok {
+		return true
+	}
+	if _, _, _, ok := parseNetworkInstanceIfacePath(path); ok {
 		return true
 	}
 	return false
