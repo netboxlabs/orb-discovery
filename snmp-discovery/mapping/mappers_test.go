@@ -3180,6 +3180,22 @@ func TestIPAddressMapper_Map_VRFNameEmptyWarns(t *testing.T) {
 	assert.Contains(t, logOut, "VRF defaults dropped: name is empty",
 		"expected a warning surfacing the misconfiguration in the logs")
 	assert.Contains(t, logOut, "65000:100", "warning should include the dropped Rd value for debugging")
+	assert.Contains(t, logOut, "override_defaults",
+		"warning should also point at the per-target override path, not only the policy-level path")
+
+	// Rate-limit: applyDefaults runs per discovered IP. With the same
+	// misconfig, subsequent calls must NOT keep appending duplicate
+	// warnings to the log — sync.Once gates it to one line per mapper.
+	buf.Reset()
+	for i := 0; i < 5; i++ {
+		// Reset the entity registry between calls so each iteration
+		// is treated as a fresh row (otherwise Map() short-circuits on
+		// the cached registry entry from the first call).
+		registry = mapping.NewEntityRegistry(logger)
+		mapper.Map(values, mappingEntry, registry, defaults)
+	}
+	assert.NotContains(t, buf.String(), "VRF defaults dropped",
+		"warning must fire at most once per mapper lifetime; subsequent calls must stay silent")
 }
 
 func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {

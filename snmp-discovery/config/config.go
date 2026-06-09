@@ -28,9 +28,13 @@ type VrfParameters struct {
 //
 // The scalar form populates only Name (Rd left empty), which differs
 // from the pre-fix behaviour where the agent silently set Rd=Name.
-// Explicit YAML null (vrf: null, vrf: ~) is treated as zero value so
-// operators can clear inherited VRF defaults without naming a VRF
-// literally "null".
+//
+// Explicit YAML null (vrf: null, vrf: ~) decodes to the zero value
+// instead of the literal string "null" — this is decode safety to
+// avoid creating a phantom VRF named "null". It does NOT, by itself,
+// clear an inherited VRF default at override merge time: MergeDefaults
+// treats the zero value the same way as an absent override key
+// (non-empty-wins, matching every other override_defaults field).
 func (v *VrfParameters) UnmarshalYAML(node *yaml.Node) error {
 	// Reset up front so a stale receiver (re-decoded into the same
 	// struct) doesn't keep Rd / Description / Comments / Tags from a

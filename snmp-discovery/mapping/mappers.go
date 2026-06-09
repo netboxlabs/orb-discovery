@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -30,6 +31,11 @@ const (
 // IPAddressMapper is a struct that maps IP addresses to entities
 type IPAddressMapper struct {
 	logger *slog.Logger
+	// vrfMisconfigWarnOnce fires the "VRF fields set but no Name"
+	// warning at most once per mapper lifetime. applyDefaults runs per
+	// discovered IP address, so without rate-limiting a misconfigured
+	// policy would flood the logs with one identical line per row.
+	vrfMisconfigWarnOnce sync.Once
 }
 
 // NewIPAddressMapper creates a new IPAddressMapper
@@ -119,14 +125,22 @@ func (m *IPAddressMapper) applyDefaults(entity *diode.IPAddress, defaults *confi
 			// — there is nothing to attach without Name, so the row is
 			// dropped silently in the proto. Surface a warning so the
 			// operator sees the misconfiguration in the logs instead of
-			// wondering why the IPs have no VRF.
-			m.logger.Warn(
-				"VRF defaults dropped: name is empty but other VRF fields are set; set defaults.ip_address.vrf.name (or the policy-level vrf scalar) to enable VRF emission",
-				"rd", vrfDefaults.Rd,
-				"description", vrfDefaults.Description,
-				"comments", vrfDefaults.Comments,
-				"tags", vrfDefaults.Tags,
-			)
+			// wondering why the IPs have no VRF. Rate-limit to once per
+			// mapper lifetime since applyDefaults runs per IP — without
+			// this guard a misconfigured policy would emit one identical
+			// warning per discovered address.
+			m.vrfMisconfigWarnOnce.Do(func() {
+				m.logger.Warn(
+					"VRF defaults dropped: name is empty but other VRF fields are set; "+
+						"set defaults.ip_address.vrf.name in the policy (or "+
+						"targets[].override_defaults.ip_address.vrf.name) to enable VRF emission. "+
+						"This warning is logged once per discovery run; subsequent IPs with the same misconfig will be silently skipped.",
+					"rd", vrfDefaults.Rd,
+					"description", vrfDefaults.Description,
+					"comments", vrfDefaults.Comments,
+					"tags", vrfDefaults.Tags,
+				)
+			})
 		}
 	}
 }
