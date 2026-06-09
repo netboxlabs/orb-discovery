@@ -377,12 +377,14 @@ func TestIPAddressMapper_Map(t *testing.T) {
 			assert.Equal(t, tt.expectedEntity.Description, ipAddress.Description)
 			assert.Equal(t, tt.expectedEntity.Role, ipAddress.Role)
 			if tt.expectedEntity.Vrf != nil {
-				assert.NotNil(t, ipAddress.Vrf)
+				require.NotNil(t, ipAddress.Vrf,
+					"expected a VRF, got nil — subsequent field assertions would panic")
 				assert.Equal(t, tt.expectedEntity.Vrf.Name, ipAddress.Vrf.Name)
 				assert.Equal(t, tt.expectedEntity.Vrf.Rd, ipAddress.Vrf.Rd)
 				assert.Equal(t, tt.expectedEntity.Vrf.Description, ipAddress.Vrf.Description)
 				assert.Equal(t, tt.expectedEntity.Vrf.Comments, ipAddress.Vrf.Comments)
-				assert.Equal(t, len(tt.expectedEntity.Vrf.Tags), len(ipAddress.Vrf.Tags))
+				require.Len(t, ipAddress.Vrf.Tags, len(tt.expectedEntity.Vrf.Tags),
+					"VRF tag count mismatch — would panic on per-element indexing below")
 				for i, expectedTag := range tt.expectedEntity.Vrf.Tags {
 					assert.Equal(t, expectedTag.Name, ipAddress.Vrf.Tags[i].Name)
 				}
