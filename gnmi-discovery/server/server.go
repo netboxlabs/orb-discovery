@@ -191,12 +191,18 @@ func (s *Server) createPolicy(c *gin.Context) {
 		// same name can't both observe "absent" and one silently succeed — the
 		// loser deterministically gets 409.
 		if err := s.manager.StartPolicy(name, pol); err != nil {
+			// Classify the conflict on the ORIGINAL StartPolicy error, before the
+			// rollback loop mutates err — otherwise a failing StopPolicy below would
+			// flatten the chain and mask ErrPolicyExists (→ wrong 400 instead of 409).
+			isConflict := errors.Is(err, policy.ErrPolicyExists)
+			// Roll back policies started earlier in this batch; join rollback
+			// failures into err for the message (errors.Join preserves the chain).
 			for _, p := range rPolicies {
 				if sErr := s.manager.StopPolicy(p); sErr != nil {
-					err = fmt.Errorf("%v: %v", err, sErr)
+					err = errors.Join(err, sErr)
 				}
 			}
-			if errors.Is(err, policy.ErrPolicyExists) {
+			if isConflict {
 				c.IndentedJSON(http.StatusConflict, Response{"policy '" + name + "' already exists"})
 				return
 			}

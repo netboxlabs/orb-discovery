@@ -12,7 +12,7 @@ install-dev-tools:
 	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 	@go install github.com/jandelgado/gcov2lcov@latest
 
-.PHONY: build
+.PHONY: clean
 clean:
 	@rm -rf ${BUILD_DIR}/*
 
