@@ -526,7 +526,7 @@ func TestRunnerEmitsVrf(t *testing.T) {
 			assert.NoError(t, err)
 
 			ingestCalled := make(chan bool, 1)
-			mockClient.On("Ingest", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			mockClient.On("Ingest", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 				entities := args.Get(1).([]diode.Entity)
 				assert.NotEmpty(t, entities, "expected at least one IPAddress entity")
 				ip := entities[0].(*diode.IPAddress)
