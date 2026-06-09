@@ -273,7 +273,8 @@ policies:
 }
 
 func TestCreatePolicyBodyTooLarge(t *testing.T) {
-	// Send a body larger than 1 MiB to exercise the MaxBytesReader error branch.
+	// Send a body larger than 1 MiB to exercise the MaxBytesReader error branch,
+	// which must surface as 413 Request Entity Too Large (not a generic 400).
 	s := NewServer("127.0.0.1", 0, slog.Default(), newTestManager(t), "v0")
 	// Build a body slightly over 1 MiB.
 	bigBody := strings.NewReader(strings.Repeat("x", 1<<20+1))
@@ -282,7 +283,7 @@ func TestCreatePolicyBodyTooLarge(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.Router().ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 }
 
 // --- deletePolicy ---

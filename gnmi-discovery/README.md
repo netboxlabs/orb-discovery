@@ -296,8 +296,8 @@ docker run --net=host \
 > | http code | content-type | response |
 > |-----------|--------------|----------|
 > | `200` | `application/json; charset=UTF-8` | `{"detail":"policy 'policy_name' was deleted"}` |
-> | `400` | `application/json; charset=UTF-8` | Any other policy deletion error |
-> | `404` | `application/json; charset=UTF-8` | `{"detail":"policy 'policy_name' not found"}` |
+> | `404` | `application/json; charset=UTF-8` | `{"detail":"policy not found"}` |
+> | `500` | `application/json; charset=UTF-8` | `{"detail":"<error>"}` (policy stop failure) |
 
 ##### Example cURL
 

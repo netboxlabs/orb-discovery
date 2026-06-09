@@ -222,6 +222,11 @@ func (m *Manager) HasPolicy(name string) bool {
 // pre-check.
 var ErrPolicyExists = errors.New("policy already exists")
 
+// ErrPolicyNotFound is returned by StopPolicy when no policy of that name is
+// running. The check-and-delete is atomic under the manager lock, so the HTTP
+// handler can map this to 404 without a separate (racy) pre-check.
+var ErrPolicyNotFound = errors.New("policy not found")
+
 // StartPolicy starts a policy.
 func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 	if len(policy.Scope.Targets) == 0 {
@@ -264,7 +269,7 @@ func (m *Manager) StopPolicy(name string) error {
 	}
 	m.mu.Unlock()
 	if !ok {
-		return nil
+		return ErrPolicyNotFound
 	}
 	return r.Stop()
 }

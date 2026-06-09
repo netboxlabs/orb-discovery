@@ -169,6 +169,11 @@ func (s *Server) createPolicy(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			c.IndentedJSON(http.StatusRequestEntityTooLarge, Response{"request body exceeds the 1 MiB limit"})
+			return
+		}
 		c.IndentedJSON(http.StatusBadRequest, Response{err.Error()})
 		return
 	}
@@ -216,16 +221,17 @@ func (s *Server) createPolicy(c *gin.Context) {
 }
 
 func (s *Server) deletePolicy(c *gin.Context) {
-	policy := c.Param("policy")
-	if !s.manager.HasPolicy(policy) {
+	name := c.Param("policy")
+	// StopPolicy atomically removes the policy under the manager lock and returns
+	// ErrPolicyNotFound when it wasn't running, so a single call classifies the
+	// result — no racy HasPolicy pre-check that could 200 on a concurrent delete.
+	switch err := s.manager.StopPolicy(name); {
+	case errors.Is(err, policy.ErrPolicyNotFound):
 		c.IndentedJSON(http.StatusNotFound, Response{"policy not found"})
-		return
-	}
-
-	if err := s.manager.StopPolicy(policy); err != nil {
+	case err != nil:
 		c.IndentedJSON(http.StatusInternalServerError, Response{err.Error()})
-	} else {
-		c.IndentedJSON(http.StatusOK, Response{"policy '" + policy + "' was deleted"})
+	default:
+		c.IndentedJSON(http.StatusOK, Response{"policy '" + name + "' was deleted"})
 	}
 }
 

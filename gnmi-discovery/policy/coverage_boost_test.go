@@ -92,7 +92,7 @@ func TestManagerStartPolicyExists(t *testing.T) {
 func TestManagerStopPolicyUnknown(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
-	require.NoError(t, m.StopPolicy("ghost"), "StopPolicy on unknown name must return nil")
+	require.ErrorIs(t, m.StopPolicy("ghost"), ErrPolicyNotFound, "StopPolicy on unknown name must return ErrPolicyNotFound")
 	require.False(t, m.HasPolicy("ghost"))
 }
 

@@ -95,11 +95,15 @@ func main() {
 	ctx := context.Background()
 
 	if otelEndpoint != nil && *otelEndpoint != "" {
-		if err := metrics.SetupMetricsExport(ctx, logger, *otelEndpoint, *otelExportPeriod); err != nil {
+		// Resolve ${ENV} placeholders like the diode/profiles flags do, so
+		// --otel-endpoint '${OTEL_ENDPOINT}' targets the real collector instead of
+		// exporting to the literal placeholder.
+		resolvedOtel := env.ResolveEnvOrExit(*otelEndpoint)
+		if err := metrics.SetupMetricsExport(ctx, logger, resolvedOtel, *otelExportPeriod); err != nil {
 			logger.Error("failed to setup metrics export", "error", err)
 			os.Exit(1)
 		}
-		logger.Info("metrics export configured", "endpoint", *otelEndpoint, "period_seconds", *otelExportPeriod)
+		logger.Info("metrics export configured", "endpoint", resolvedOtel, "period_seconds", *otelExportPeriod)
 	}
 
 	dialer := &gnmi.GnmicDialer{}
