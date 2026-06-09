@@ -13,7 +13,7 @@ import (
 // lets operators attach a Route Distinguisher (and richer metadata) to
 // the discovered IP addresses' VRF so NetBox can match an existing
 // (name, rd) tuple instead of being forced into the legacy rd=name
-// fallback (orb-agent#389).
+// fallback.
 type VrfParameters struct {
 	Name        string   `yaml:"name"`
 	Rd          string   `yaml:"rd,omitempty"`
