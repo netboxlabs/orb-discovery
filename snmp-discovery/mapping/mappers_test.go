@@ -1,6 +1,7 @@
 package mapping_test
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"os"
@@ -388,6 +389,9 @@ func TestIPAddressMapper_Map(t *testing.T) {
 				for i, expectedTag := range tt.expectedEntity.Vrf.Tags {
 					assert.Equal(t, expectedTag.Name, ipAddress.Vrf.Tags[i].Name)
 				}
+			} else {
+				assert.Nil(t, ipAddress.Vrf,
+					"expected no VRF on the emitted IPAddress, got one")
 			}
 			if tt.expectedEntity.Tags != nil {
 				assert.Equal(t, len(tt.expectedEntity.Tags), len(ipAddress.Tags))
@@ -3122,6 +3126,60 @@ func TestMaskToPrefixSize(t *testing.T) {
 			_ = tt.expectError // Both paths now produce the same result.
 		})
 	}
+}
+
+// TestIPAddressMapper_Map_VRFNameEmptyWarns locks in the gate behaviour
+// when an operator sets VRF sub-fields (Rd, Description, Comments, Tags)
+// without a Name. The row drops silently in the proto (NetBox VRF
+// matching keys on Name + Rd, and there's nothing to attach without
+// Name), but the mapper emits a WARNING so the misconfiguration is
+// visible in the logs instead of silently producing IPs with no VRF.
+func TestIPAddressMapper_Map_VRFNameEmptyWarns(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	registry := mapping.NewEntityRegistry(logger)
+	mapper := mapping.NewIPAddressMapper(logger)
+
+	values := map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+		"1.3.6.1.2.1.4.20.1.1.10.0.0.1": {
+			OID:    "1.3.6.1.2.1.4.20.1.1.10.0.0.1",
+			Index:  "10.0.0.1",
+			Parent: "1.3.6.1.2.1.4.20.1.1",
+			Value:  "10.0.0.1",
+			Type:   mapping.IPAddress,
+		},
+	}
+	mappingEntry := &mapping.Entry{
+		OID:    "1.3.6.1.2.1.4.20.1.1",
+		Entity: "ipAddress",
+		Field:  "_id",
+		MappingEntries: []mapping.Entry{
+			{
+				OID:    "1.3.6.1.2.1.4.20.1.1",
+				Entity: "ipAddress",
+				Field:  "address",
+			},
+		},
+	}
+	defaults := &config.Defaults{
+		IPAddress: config.IPAddressDefaults{
+			Vrf: config.VrfParameters{
+				Rd:          "65000:100",
+				Description: "leftover sub-fields",
+				Tags:        []string{"orphan"},
+			},
+		},
+	}
+
+	entity := mapper.Map(values, mappingEntry, registry, defaults)
+	require.NotNil(t, entity)
+	ip := entity.(*diode.IPAddress)
+	assert.Nil(t, ip.Vrf, "VRF must NOT be emitted when Name is empty even if other VRF fields are set")
+	logOut := buf.String()
+	assert.Contains(t, logOut, "VRF defaults dropped: name is empty",
+		"expected a warning surfacing the misconfiguration in the logs")
+	assert.Contains(t, logOut, "65000:100", "warning should include the dropped Rd value for debugging")
 }
 
 func TestIPAddressMapper_Map_AddressPrefixSize(t *testing.T) {

@@ -87,27 +87,47 @@ func (m *IPAddressMapper) applyDefaults(entity *diode.IPAddress, defaults *confi
 	if entity.Role == nil && entityDefaults.Role != "" {
 		entity.Role = &entityDefaults.Role
 	}
-	if entity.Vrf == nil && entityDefaults.Vrf.Name != "" {
+	if entity.Vrf == nil {
 		vrfDefaults := entityDefaults.Vrf
-		vrf := &diode.VRF{Name: &vrfDefaults.Name}
-		if vrfDefaults.Rd != "" {
-			vrf.Rd = &vrfDefaults.Rd
-		}
-		if vrfDefaults.Description != "" {
-			vrf.Description = &vrfDefaults.Description
-		}
-		if vrfDefaults.Comments != "" {
-			vrf.Comments = &vrfDefaults.Comments
-		}
-		if len(vrfDefaults.Tags) > 0 {
-			tags := make([]*diode.Tag, 0, len(vrfDefaults.Tags))
-			for _, t := range vrfDefaults.Tags {
-				tagName := t
-				tags = append(tags, &diode.Tag{Name: &tagName})
+		switch {
+		case vrfDefaults.Name != "":
+			vrf := &diode.VRF{Name: &vrfDefaults.Name}
+			if vrfDefaults.Rd != "" {
+				vrf.Rd = &vrfDefaults.Rd
 			}
-			vrf.Tags = tags
+			if vrfDefaults.Description != "" {
+				vrf.Description = &vrfDefaults.Description
+			}
+			if vrfDefaults.Comments != "" {
+				vrf.Comments = &vrfDefaults.Comments
+			}
+			if len(vrfDefaults.Tags) > 0 {
+				tags := make([]*diode.Tag, 0, len(vrfDefaults.Tags))
+				for _, t := range vrfDefaults.Tags {
+					tagName := t
+					tags = append(tags, &diode.Tag{Name: &tagName})
+				}
+				vrf.Tags = tags
+			}
+			entity.Vrf = vrf
+		case vrfDefaults.Rd != "", vrfDefaults.Description != "",
+			vrfDefaults.Comments != "", len(vrfDefaults.Tags) > 0:
+			// One or more VRF sub-fields were configured but Name is empty,
+			// either via a policy default like `vrf: {rd: "65000:100"}` with
+			// no name OR a per-target override that refines fields without
+			// inheriting a policy-level Name. NetBox VRFs match on (name, rd)
+			// — there is nothing to attach without Name, so the row is
+			// dropped silently in the proto. Surface a warning so the
+			// operator sees the misconfiguration in the logs instead of
+			// wondering why the IPs have no VRF.
+			m.logger.Warn(
+				"VRF defaults dropped: name is empty but other VRF fields are set; set defaults.ip_address.vrf.name (or the policy-level vrf scalar) to enable VRF emission",
+				"rd", vrfDefaults.Rd,
+				"description", vrfDefaults.Description,
+				"comments", vrfDefaults.Comments,
+				"tags", vrfDefaults.Tags,
+			)
 		}
-		entity.Vrf = vrf
 	}
 }
 
