@@ -127,6 +127,79 @@ func TestMergeDefaults(t *testing.T) {
 		assert.Equal(t, "Policy Comments", result.IPAddress.Comments) // Not overridden
 	})
 
+	t.Run("Override IPAddress VRF field-by-field", func(t *testing.T) {
+		// Per-target override should be able to refine a single VrfParameters
+		// field (e.g. rd) without having to restate the rest of the policy's
+		// VRF config. Matches the Device/VLAN/Interface override pattern.
+		policyDefaults := &Defaults{
+			IPAddress: IPAddressDefaults{
+				Vrf: VrfParameters{
+					Name:        "prod",
+					Rd:          "65000:100",
+					Description: "Prod VRF",
+					Comments:    "policy comments",
+					Tags:        []string{"policy"},
+				},
+			},
+		}
+
+		t.Run("override only Rd", func(t *testing.T) {
+			overrideDefaults := &Defaults{
+				IPAddress: IPAddressDefaults{
+					Vrf: VrfParameters{Rd: "65000:200"},
+				},
+			}
+			result := MergeDefaults(policyDefaults, overrideDefaults)
+			assert.Equal(t, "prod", result.IPAddress.Vrf.Name)
+			assert.Equal(t, "65000:200", result.IPAddress.Vrf.Rd) // override won
+			assert.Equal(t, "Prod VRF", result.IPAddress.Vrf.Description)
+			assert.Equal(t, "policy comments", result.IPAddress.Vrf.Comments)
+			assert.Equal(t, []string{"policy"}, result.IPAddress.Vrf.Tags)
+		})
+
+		t.Run("override only Name", func(t *testing.T) {
+			overrideDefaults := &Defaults{
+				IPAddress: IPAddressDefaults{
+					Vrf: VrfParameters{Name: "edge-vrf"},
+				},
+			}
+			result := MergeDefaults(policyDefaults, overrideDefaults)
+			assert.Equal(t, "edge-vrf", result.IPAddress.Vrf.Name) // override won
+			assert.Equal(t, "65000:100", result.IPAddress.Vrf.Rd)  // inherited
+			assert.Equal(t, "Prod VRF", result.IPAddress.Vrf.Description)
+		})
+
+		t.Run("override all VRF fields", func(t *testing.T) {
+			overrideDefaults := &Defaults{
+				IPAddress: IPAddressDefaults{
+					Vrf: VrfParameters{
+						Name:        "edge-vrf",
+						Rd:          "65000:200",
+						Description: "Edge VRF",
+						Comments:    "override comments",
+						Tags:        []string{"override"},
+					},
+				},
+			}
+			result := MergeDefaults(policyDefaults, overrideDefaults)
+			assert.Equal(t, "edge-vrf", result.IPAddress.Vrf.Name)
+			assert.Equal(t, "65000:200", result.IPAddress.Vrf.Rd)
+			assert.Equal(t, "Edge VRF", result.IPAddress.Vrf.Description)
+			assert.Equal(t, "override comments", result.IPAddress.Vrf.Comments)
+			assert.Equal(t, []string{"override"}, result.IPAddress.Vrf.Tags)
+		})
+
+		t.Run("empty override leaves VRF untouched", func(t *testing.T) {
+			overrideDefaults := &Defaults{}
+			result := MergeDefaults(policyDefaults, overrideDefaults)
+			assert.Equal(t, "prod", result.IPAddress.Vrf.Name)
+			assert.Equal(t, "65000:100", result.IPAddress.Vrf.Rd)
+			assert.Equal(t, "Prod VRF", result.IPAddress.Vrf.Description)
+			assert.Equal(t, "policy comments", result.IPAddress.Vrf.Comments)
+			assert.Equal(t, []string{"policy"}, result.IPAddress.Vrf.Tags)
+		})
+	})
+
 	t.Run("Override InterfacePatterns replaces entire array", func(t *testing.T) {
 		policyDefaults := &Defaults{
 			InterfacePatterns: []InterfacePattern{

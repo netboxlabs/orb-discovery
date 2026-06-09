@@ -180,8 +180,24 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 	if overrideDefaults.IPAddress.Tenant != "" {
 		merged.IPAddress.Tenant = overrideDefaults.IPAddress.Tenant
 	}
+	// Merge VRF defaults field-by-field so a per-target override can refine
+	// a single VrfParameters knob (e.g. rd) without having to restate every
+	// other field already set at the policy level. Matches the
+	// Device/VLAN/Interface non-zero-value-wins pattern.
 	if overrideDefaults.IPAddress.Vrf.Name != "" {
-		merged.IPAddress.Vrf = overrideDefaults.IPAddress.Vrf
+		merged.IPAddress.Vrf.Name = overrideDefaults.IPAddress.Vrf.Name
+	}
+	if overrideDefaults.IPAddress.Vrf.Rd != "" {
+		merged.IPAddress.Vrf.Rd = overrideDefaults.IPAddress.Vrf.Rd
+	}
+	if overrideDefaults.IPAddress.Vrf.Description != "" {
+		merged.IPAddress.Vrf.Description = overrideDefaults.IPAddress.Vrf.Description
+	}
+	if overrideDefaults.IPAddress.Vrf.Comments != "" {
+		merged.IPAddress.Vrf.Comments = overrideDefaults.IPAddress.Vrf.Comments
+	}
+	if len(overrideDefaults.IPAddress.Vrf.Tags) > 0 {
+		merged.IPAddress.Vrf.Tags = overrideDefaults.IPAddress.Vrf.Tags
 	}
 
 	// Merge Interface defaults
