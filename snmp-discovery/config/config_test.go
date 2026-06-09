@@ -658,4 +658,43 @@ func TestVrfParameters_UnmarshalYAML(t *testing.T) {
 		err := yaml.Unmarshal(raw, &pc)
 		require.Error(t, err)
 	})
+
+	t.Run("explicit null clears to zero value", func(t *testing.T) {
+		// `vrf: null` / `vrf: ~` MUST NOT produce a VRF named "null" —
+		// callers want this shape to clear any inherited default.
+		for _, raw := range [][]byte{
+			[]byte("defaults:\n  ip_address:\n    vrf: null\n"),
+			[]byte("defaults:\n  ip_address:\n    vrf: ~\n"),
+		} {
+			var pc PolicyConfig
+			require.NoError(t, yaml.Unmarshal(raw, &pc))
+			assert.Empty(t, pc.Defaults.IPAddress.Vrf.Name,
+				"vrf: null / vrf: ~ MUST decode to zero value, not Name=\"null\"")
+			assert.Empty(t, pc.Defaults.IPAddress.Vrf.Rd)
+		}
+	})
+
+	t.Run("re-decode into populated receiver clears stale fields", func(t *testing.T) {
+		// If the same VrfParameters value is re-used across decodes
+		// (e.g. tests, layered configs), the scalar form must NOT
+		// leave stale Rd / Description / Comments / Tags behind. Drive
+		// the receiver through the full ScalarNode path by unmarshaling
+		// a wrapper map and pulling out the resolved Vrf field.
+		v := VrfParameters{
+			Name:        "stale",
+			Rd:          "65000:999",
+			Description: "stale-desc",
+			Comments:    "stale-comments",
+			Tags:        []string{"stale"},
+		}
+		wrapper := struct {
+			Vrf VrfParameters `yaml:"vrf"`
+		}{Vrf: v}
+		require.NoError(t, yaml.Unmarshal([]byte("vrf: production\n"), &wrapper))
+		assert.Equal(t, "production", wrapper.Vrf.Name)
+		assert.Empty(t, wrapper.Vrf.Rd, "stale Rd must be cleared by scalar re-decode")
+		assert.Empty(t, wrapper.Vrf.Description)
+		assert.Empty(t, wrapper.Vrf.Comments)
+		assert.Empty(t, wrapper.Vrf.Tags)
+	})
 }

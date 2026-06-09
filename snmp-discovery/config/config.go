@@ -28,9 +28,21 @@ type VrfParameters struct {
 //
 // The scalar form populates only Name (Rd left empty), which differs
 // from the pre-fix behaviour where the agent silently set Rd=Name.
+// Explicit YAML null (vrf: null, vrf: ~) is treated as zero value so
+// operators can clear inherited VRF defaults without naming a VRF
+// literally "null".
 func (v *VrfParameters) UnmarshalYAML(node *yaml.Node) error {
+	// Reset up front so a stale receiver (re-decoded into the same
+	// struct) doesn't keep Rd / Description / Comments / Tags from a
+	// previous pass when the new YAML only sets Name via the scalar
+	// form.
+	*v = VrfParameters{}
 	switch node.Kind {
 	case yaml.ScalarNode:
+		// YAML null tag: leave the struct as the zero value.
+		if node.Tag == "!!null" {
+			return nil
+		}
 		v.Name = node.Value
 		return nil
 	case yaml.MappingNode:
