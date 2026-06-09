@@ -659,9 +659,14 @@ func TestVrfParameters_UnmarshalYAML(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("explicit null clears to zero value", func(t *testing.T) {
-		// `vrf: null` / `vrf: ~` MUST NOT produce a VRF named "null" —
-		// callers want this shape to clear any inherited default.
+	t.Run("explicit null decodes to zero value", func(t *testing.T) {
+		// Decode-safety contract: `vrf: null` / `vrf: ~` MUST NOT
+		// produce a VRF named "null". Whether the resulting zero value
+		// actually clears an inherited VRF at MergeDefaults time is a
+		// separate concern — MergeDefaults follows the same
+		// non-empty-wins pattern as every other override field, so
+		// `vrf: null` and an absent `vrf` key are indistinguishable
+		// during merge. This test only asserts the decode boundary.
 		for _, raw := range [][]byte{
 			[]byte("defaults:\n  ip_address:\n    vrf: null\n"),
 			[]byte("defaults:\n  ip_address:\n    vrf: ~\n"),
