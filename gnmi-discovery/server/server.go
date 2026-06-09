@@ -63,7 +63,7 @@ func metricsMiddleware() gin.HandlerFunc {
 		if apiMetric := metrics.GetAPIRequests(); apiMetric != nil {
 			apiMetric.Add(c.Request.Context(), 1,
 				metric.WithAttributes(
-					attribute.String("endpoint", c.Request.URL.Path),
+					attribute.String("endpoint", c.FullPath()),
 					attribute.String("method", c.Request.Method),
 					attribute.Int("status", c.Writer.Status()),
 				),
@@ -75,7 +75,7 @@ func metricsMiddleware() gin.HandlerFunc {
 			duration := float64(time.Since(startTime).Milliseconds())
 			apiMetric.Record(c.Request.Context(), duration,
 				metric.WithAttributes(
-					attribute.String("endpoint", c.Request.URL.Path),
+					attribute.String("endpoint", c.FullPath()),
 					attribute.String("method", c.Request.Method),
 					attribute.Int("status", c.Writer.Status()),
 				),
@@ -182,24 +182,23 @@ func (s *Server) createPolicy(c *gin.Context) {
 	s.logger.Info("received policies", "policy_count", len(policies))
 
 	rPolicies := []string{}
-	for name, policy := range policies {
-		s.logger.Debug("starting policy", "policy", name, "targets", len(policy.Scope.Targets), "mode", policy.Config.Mode)
-		if s.manager.HasPolicy(name) {
-			for _, p := range rPolicies {
-				if err = s.manager.StopPolicy(p); err != nil {
-					c.IndentedJSON(http.StatusInternalServerError, Response{err.Error()})
-					return
-				}
-			}
-			c.IndentedJSON(http.StatusConflict, Response{"policy '" + name + "' already exists"})
-			return
-		}
+	for name, pol := range policies {
+		s.logger.Debug("starting policy", "policy", name, "targets", len(pol.Scope.Targets), "mode", pol.Config.Mode)
 
-		if err := s.manager.StartPolicy(name, policy); err != nil {
+		// StartPolicy performs an atomic check-and-insert under the manager lock and
+		// returns ErrPolicyExists if the name is already running. We rely on that
+		// (rather than a separate HasPolicy pre-check) so concurrent POSTs of the
+		// same name can't both observe "absent" and one silently succeed — the
+		// loser deterministically gets 409.
+		if err := s.manager.StartPolicy(name, pol); err != nil {
 			for _, p := range rPolicies {
 				if sErr := s.manager.StopPolicy(p); sErr != nil {
 					err = fmt.Errorf("%v: %v", err, sErr)
 				}
+			}
+			if errors.Is(err, policy.ErrPolicyExists) {
+				c.IndentedJSON(http.StatusConflict, Response{"policy '" + name + "' already exists"})
+				return
 			}
 			c.IndentedJSON(http.StatusBadRequest, Response{err.Error()})
 			return

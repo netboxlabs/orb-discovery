@@ -75,16 +75,17 @@ func TestManagerStartPolicyUnknownProfile(t *testing.T) {
 	require.Contains(t, err.Error(), "unknown profile")
 }
 
-// TestManagerStartPolicyIdempotent verifies that a second StartPolicy for the
-// same name is a no-op (returns nil and does NOT add a second runner).
-func TestManagerStartPolicyIdempotent(t *testing.T) {
+// TestManagerStartPolicyExists verifies that a second StartPolicy for the same
+// name returns ErrPolicyExists (so the HTTP handler maps it to 409) and does NOT
+// add a second runner — the check-and-insert is atomic under the manager lock.
+func TestManagerStartPolicyExists(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
 	pol := minimalPolicy("10.0.0.1:9339")
 
 	require.NoError(t, m.StartPolicy("p1", pol))
 	defer func() { _ = m.StopPolicy("p1") }()
-	require.NoError(t, m.StartPolicy("p1", pol), "second StartPolicy for same name must be nil")
+	require.ErrorIs(t, m.StartPolicy("p1", pol), ErrPolicyExists, "second StartPolicy for same name must return ErrPolicyExists")
 }
 
 // TestManagerStopPolicyUnknown verifies that stopping a non-existent policy is a no-op.
@@ -364,18 +365,20 @@ func TestFilterNotificationDeletes(t *testing.T) {
 		logger: slog.Default(),
 	}
 
-	// For the delete path we need a path that AllowsDelete accepts.  AllowsDelete
-	// returns true when the path overlaps a curated subtree.  We use an interface
-	// subpath which the _base profile curates.
-	allowedDelete := "/interfaces/interface[name=Eth1]"
-	disallowedDelete := "/network-instances/network-instance[name=default]"
+	// AllowsDelete accepts paths overlapping a curated subtree. Interface and
+	// network-instance (VRF/VLAN removal) deletes are curated and must survive;
+	// an out-of-scope subtree (e.g. /acl) must be dropped.
+	ifaceDelete := "/interfaces/interface[name=Eth1]"
+	niDelete := "/network-instances/network-instance[name=blue]"
+	disallowedDelete := "/acl/acl-sets[name=foo]"
 
 	n := gnmi.Notification{
-		Deletes: []string{allowedDelete, disallowedDelete},
+		Deletes: []string{ifaceDelete, niDelete, disallowedDelete},
 	}
 	out := r.filterNotification(n, profile)
-	require.Len(t, out.Deletes, 1, "only the curated-subtree delete must survive")
-	require.Equal(t, allowedDelete, out.Deletes[0])
+	require.Len(t, out.Deletes, 2, "curated interface + network-instance deletes survive; /acl is dropped")
+	require.Contains(t, out.Deletes, ifaceDelete)
+	require.Contains(t, out.Deletes, niDelete)
 }
 
 // TestFilterNotificationNoUpdatesNoDeletes verifies that a notification with

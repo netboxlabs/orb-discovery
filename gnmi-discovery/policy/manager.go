@@ -216,6 +216,12 @@ func (m *Manager) HasPolicy(name string) bool {
 	return ok
 }
 
+// ErrPolicyExists is returned by StartPolicy when a policy of the same name is
+// already running. The check-and-insert is atomic under the manager lock, so
+// the HTTP handler can map this to 409 Conflict without a separate (racy)
+// pre-check.
+var ErrPolicyExists = errors.New("policy already exists")
+
 // StartPolicy starts a policy.
 func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 	if len(policy.Scope.Targets) == 0 {
@@ -234,7 +240,7 @@ func (m *Manager) StartPolicy(name string, policy config.Policy) error {
 	m.mu.Lock()
 	if _, ok := m.policies[name]; ok {
 		m.mu.Unlock()
-		return nil // already running
+		return ErrPolicyExists // already running
 	}
 	r, err := NewRunner(m.ctx, m.logger, name, policy, m.client, m.dialer, m.store)
 	if err != nil {

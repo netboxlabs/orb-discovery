@@ -238,7 +238,11 @@ func TestAllowsDelete(t *testing.T) {
 	require.True(t, base.AllowsDelete("/interfaces/interface[name=Ethernet1]")) // list-entry delete
 	require.True(t, base.AllowsDelete("/interfaces/interface"))                 // whole list (ancestor)
 	require.True(t, base.AllowsDelete("/components/component[name=Linecard1]"))
-	require.False(t, base.AllowsDelete("/network-instances/network-instance[name=default]")) // out of scope
+	// network-instance deletes (VRF removal, and VLAN/interface entries beneath
+	// it) must be honored so ON_CHANGE removals reconcile out of the model.
+	require.True(t, base.AllowsDelete("/network-instances/network-instance[name=blue]"))
+	require.True(t, base.AllowsDelete("/network-instances/network-instance[name=default]/vlans/vlan[vlan-id=10]"))
+	require.True(t, base.AllowsDelete("/network-instances/network-instance")) // whole list (ancestor)
 	require.False(t, base.AllowsDelete("/acl/acl-sets"))
 	// HIGH: a similarly-named sibling must NOT be treated as within scope
 	require.False(t, base.AllowsDelete("/interfaces/interface-state"))

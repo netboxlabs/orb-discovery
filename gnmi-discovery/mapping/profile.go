@@ -372,17 +372,27 @@ func (p *Profile) AllowsPath(path string) bool {
 	return false
 }
 
+// networkInstanceList is the OpenConfig network-instance list root. Deletes
+// under it (a removed VRF, or a removed VLAN/interface beneath it) must be
+// honored so ON_CHANGE removals reconcile out of the model promptly, matching
+// the network-instance subtrees AllowsPath already accepts for updates.
+const networkInstanceList = "/network-instances/network-instance"
+
 // AllowsDelete reports whether a delete path falls within the curated subtrees
-// (the interfaces list, the components list, or the device leaves / their
-// ancestors). This bounds the blast radius of an unexpected delete so a target
-// cannot wipe unrelated state; a legitimate list-entry or subtree delete inside
-// a curated area is allowed (M-2). `within` is true when either path is a prefix
-// of the other (covers both "delete a child" and "delete an ancestor").
+// (the interfaces list, the components list, the network-instance list, or the
+// device leaves / their ancestors). This bounds the blast radius of an
+// unexpected delete so a target cannot wipe unrelated state; a legitimate
+// list-entry or subtree delete inside a curated area is allowed (M-2).
+// pathOverlaps is true when either path is a prefix of the other (covers both
+// "delete a child" and "delete an ancestor").
 func (p *Profile) AllowsDelete(path string) bool {
 	if p.Interfaces.ListPath != "" && pathOverlaps(path, p.Interfaces.ListPath) {
 		return true
 	}
 	if p.Components.ListPath != "" && pathOverlaps(path, p.Components.ListPath) {
+		return true
+	}
+	if pathOverlaps(path, networkInstanceList) {
 		return true
 	}
 	return pathOverlaps(path, p.Device.Hostname) || pathOverlaps(path, p.Device.OSVersion)
