@@ -1,6 +1,50 @@
 package config
 
-import "time"
+import (
+	"fmt"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+// VrfParameters mirrors device-discovery's VrfParameters: a polymorphic
+// config primitive that accepts either a scalar string (interpreted as
+// VRF Name) or a map of {name, rd, description, comments, tags}. This
+// lets operators attach a Route Distinguisher (and richer metadata) to
+// the discovered IP addresses' VRF so NetBox can match an existing
+// (name, rd) tuple instead of being forced into the legacy rd=name
+// fallback (orb-agent#389).
+type VrfParameters struct {
+	Name        string   `yaml:"name"`
+	Rd          string   `yaml:"rd,omitempty"`
+	Description string   `yaml:"description,omitempty"`
+	Comments    string   `yaml:"comments,omitempty"`
+	Tags        []string `yaml:"tags,omitempty"`
+}
+
+// UnmarshalYAML accepts both shapes:
+//   - scalar:  vrf: production
+//   - mapping: vrf: {name: production, rd: "65000:100"}
+//
+// The scalar form populates only Name (Rd left empty), which differs
+// from the pre-fix behaviour where the agent silently set Rd=Name.
+func (v *VrfParameters) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		v.Name = node.Value
+		return nil
+	case yaml.MappingNode:
+		type alias VrfParameters
+		var a alias
+		if err := node.Decode(&a); err != nil {
+			return err
+		}
+		*v = VrfParameters(a)
+		return nil
+	default:
+		return fmt.Errorf("vrf: expected string or mapping, got node kind %d", node.Kind)
+	}
+}
 
 // Status represents the status of the snmp-discovery service
 type Status struct {
@@ -38,12 +82,12 @@ type Authentication struct {
 
 // IPAddressDefaults represents default values for a specific entity type
 type IPAddressDefaults struct {
-	Description string   `yaml:"description,omitempty"`
-	Tags        []string `yaml:"tags,omitempty"`
-	Comments    string   `yaml:"comments,omitempty"`
-	Role        string   `yaml:"role,omitempty"`
-	Tenant      string   `yaml:"tenant,omitempty"`
-	Vrf         string   `yaml:"vrf,omitempty"`
+	Description string        `yaml:"description,omitempty"`
+	Tags        []string      `yaml:"tags,omitempty"`
+	Comments    string        `yaml:"comments,omitempty"`
+	Role        string        `yaml:"role,omitempty"`
+	Tenant      string        `yaml:"tenant,omitempty"`
+	Vrf         VrfParameters `yaml:"vrf,omitempty"`
 }
 
 // InterfaceDefaults represents default values for a specific entity type
@@ -136,7 +180,7 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 	if overrideDefaults.IPAddress.Tenant != "" {
 		merged.IPAddress.Tenant = overrideDefaults.IPAddress.Tenant
 	}
-	if overrideDefaults.IPAddress.Vrf != "" {
+	if overrideDefaults.IPAddress.Vrf.Name != "" {
 		merged.IPAddress.Vrf = overrideDefaults.IPAddress.Vrf
 	}
 

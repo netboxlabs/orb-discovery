@@ -287,7 +287,7 @@ func TestIPAddressMapper_Map(t *testing.T) {
 					Description: "IP Address specific description",
 					Tenant:      "ip-address-tenant",
 					Role:        "ip-address-role",
-					Vrf:         "ip-address-vrf",
+					Vrf:         config.VrfParameters{Name: "ip-address-vrf"},
 				},
 			},
 			expectedEntity: &diode.IPAddress{
@@ -297,9 +297,62 @@ func TestIPAddressMapper_Map(t *testing.T) {
 					Name: mapping.StringPtr("ip-address-tenant"),
 				},
 				Role: mapping.StringPtr("ip-address-role"),
+				// Scalar form: Vrf.Name set, Vrf.Rd left nil so NetBox can
+				// match an existing VRF whose rd column is null. The
+				// pre-fix rd=name hardcode is the behaviour change.
 				Vrf: &diode.VRF{
 					Name: mapping.StringPtr("ip-address-vrf"),
-					Rd:   mapping.StringPtr("ip-address-vrf"),
+				},
+			},
+			expectError: false,
+		},
+		{
+			// Rich VrfParameters form propagates Rd / Description /
+			// Comments / Tags onto the emitted diode.VRF.
+			name: "ipAddress with rich VRF defaults (name + rd + description + comments + tags)",
+			values: map[mapping.ObjectIDIndex]*mapping.ObjectIDValue{
+				"1.3.6.1.2.1.4.20.1.1.192.168.1.1": {
+					OID:    "1.3.6.1.2.1.4.20.1.1.192.168.1.1",
+					Index:  "192.168.1.1",
+					Parent: "1.3.6.1.2.1.4.20.1.1",
+					Value:  "192.168.1.1",
+					Type:   mapping.IPAddress,
+				},
+			},
+			mappingEntry: &mapping.Entry{
+				OID:    "1.3.6.1.2.1.4.20.1.1",
+				Entity: "ipAddress",
+				Field:  "_id",
+				MappingEntries: []mapping.Entry{
+					{
+						OID:    "1.3.6.1.2.1.4.20.1.1",
+						Entity: "ipAddress",
+						Field:  "address",
+					},
+				},
+			},
+			defaults: &config.Defaults{
+				IPAddress: config.IPAddressDefaults{
+					Vrf: config.VrfParameters{
+						Name:        "prod",
+						Rd:          "65000:100",
+						Description: "Prod VRF",
+						Comments:    "Imported via SNMP",
+						Tags:        []string{"auto", "vrf"},
+					},
+				},
+			},
+			expectedEntity: &diode.IPAddress{
+				Address: mapping.StringPtr("192.168.1.1/32"),
+				Vrf: &diode.VRF{
+					Name:        mapping.StringPtr("prod"),
+					Rd:          mapping.StringPtr("65000:100"),
+					Description: mapping.StringPtr("Prod VRF"),
+					Comments:    mapping.StringPtr("Imported via SNMP"),
+					Tags: []*diode.Tag{
+						{Name: mapping.StringPtr("auto")},
+						{Name: mapping.StringPtr("vrf")},
+					},
 				},
 			},
 			expectError: false,

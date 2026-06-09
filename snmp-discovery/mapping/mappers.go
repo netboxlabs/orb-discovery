@@ -87,11 +87,27 @@ func (m *IPAddressMapper) applyDefaults(entity *diode.IPAddress, defaults *confi
 	if entity.Role == nil && entityDefaults.Role != "" {
 		entity.Role = &entityDefaults.Role
 	}
-	if entity.Vrf == nil && entityDefaults.Vrf != "" {
-		entity.Vrf = &diode.VRF{
-			Name: &entityDefaults.Vrf,
-			Rd:   &entityDefaults.Vrf,
+	if entity.Vrf == nil && entityDefaults.Vrf.Name != "" {
+		vrfDefaults := entityDefaults.Vrf
+		vrf := &diode.VRF{Name: &vrfDefaults.Name}
+		if vrfDefaults.Rd != "" {
+			vrf.Rd = &vrfDefaults.Rd
 		}
+		if vrfDefaults.Description != "" {
+			vrf.Description = &vrfDefaults.Description
+		}
+		if vrfDefaults.Comments != "" {
+			vrf.Comments = &vrfDefaults.Comments
+		}
+		if len(vrfDefaults.Tags) > 0 {
+			tags := make([]*diode.Tag, 0, len(vrfDefaults.Tags))
+			for _, t := range vrfDefaults.Tags {
+				tagName := t
+				tags = append(tags, &diode.Tag{Name: &tagName})
+			}
+			vrf.Tags = tags
+		}
+		entity.Vrf = vrf
 	}
 }
 
