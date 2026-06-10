@@ -32,6 +32,7 @@ from device_discovery.translate_chassis import (
     validate_chassis_payload,
 )
 from device_discovery.translate_modules import emit_modules_if_requested
+from device_discovery.vrf import build_discovered_vrfs
 
 logger = logging.getLogger(__name__)
 
@@ -661,12 +662,21 @@ def translate_data(data: dict) -> Iterable[Entity]:
 
     _resolve_platform(data, options)
 
+    # Discovered VRFs (gated upstream by options.discover_vrfs — the runner
+    # only populates data["network_instances"] when the option is on).
+    discovered_vrfs, iface_vrf_map = build_discovered_vrfs(
+        data.get("network_instances"), defaults,
+    )
+
     chassis_members = validate_chassis_payload(data.get("chassis_members"))
     if device_info and chassis_members is not None:
-        entities.extend(translate_as_stack(data, chassis_members, defaults, options))
+        entities.extend(translate_as_stack(
+            data, chassis_members, defaults, options, iface_vrf_map=iface_vrf_map,
+        ))
         _apply_interface_vlan_associations(
             data, [e for e in entities if e.HasField("interface")], defaults, options, new_stubs,
         )
+        entities.extend(Entity(vrf=vrf) for vrf in discovered_vrfs)
         _emit_vlans_and_stubs(entities, data.get("vlan"), defaults, new_stubs)
         return entities
 
@@ -686,6 +696,7 @@ def translate_data(data: dict) -> Iterable[Entity]:
             device_for_interfaces, interfaces, interfaces_ip, defaults,
             iface_module_map=iface_module_map,
             options=options,
+            iface_vrf_map=iface_vrf_map,
         )
         # assign_primary_ip must run before the Device is wrapped into Entity
         # because Entity(device=...) copies the message; subsequent mutations
@@ -698,5 +709,8 @@ def translate_data(data: dict) -> Iterable[Entity]:
         entities.extend(module_entities)
         entities.extend(interface_related_entities)
 
+    # Emit discovered VRFs as standalone entities too, so VRFs whose
+    # interfaces carry no IPs (or no interfaces at all) still land in NetBox.
+    entities.extend(Entity(vrf=vrf) for vrf in discovered_vrfs)
     _emit_vlans_and_stubs(entities, data.get("vlan"), defaults, new_stubs)
     return entities
