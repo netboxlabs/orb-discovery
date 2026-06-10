@@ -5,6 +5,7 @@
 import logging
 import time
 from datetime import datetime, timedelta
+from typing import NamedTuple
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -25,6 +26,13 @@ from worker.package_finder import maybe_evict
 from worker.policy.run import RunStatus, RunStore
 
 logger = logging.getLogger(__name__)
+
+
+class _RunOutcome(NamedTuple):
+    """What _execute_run reports back to its caller."""
+
+    entity_count: int
+    produce_seconds: float
 
 
 class PolicyRunner:
@@ -210,7 +218,9 @@ class PolicyRunner:
 
         return ingest_callback
 
-    def _execute_run(self, client, produce_entities, *, source: str | None = None) -> int:
+    def _execute_run(
+        self, client, produce_entities, *, source: str | None = None
+    ) -> _RunOutcome:
         """
         Create a run, produce + ingest entities through it, record COMPLETED/FAILED.
 
@@ -219,6 +229,10 @@ class PolicyRunner:
         entities (e.g. the backend's ``run()`` raising) is still recorded as a
         FAILED run rather than vanishing before the run is created. Re-raises on
         failure.
+
+        The returned ``_RunOutcome.produce_seconds`` covers the producer call
+        only — not chunking, ingest, or run-store writes — so callers can
+        report truthful production timing.
         """
         run_metadata = {
             "name": self.metadata.name,
@@ -230,7 +244,9 @@ class PolicyRunner:
         run = self.run_store.create_run(policy_name=self.name, metadata=run_metadata)
         entity_count = 0
         try:
+            produce_start = time.perf_counter()
             entities_list = list(produce_entities())
+            produce_seconds = time.perf_counter() - produce_start
             entity_count = len(entities_list)
             apply_run_id_to_entities(entities_list, run.id)
             metadata = {
@@ -246,7 +262,7 @@ class PolicyRunner:
                 error=None,
                 entity_count=entity_count,
             )
-            return entity_count
+            return _RunOutcome(entity_count, produce_seconds)
         except Exception as exc:
             self.run_store.update_run(
                 policy_name=self.name,
@@ -297,13 +313,14 @@ class PolicyRunner:
         exec_start_time = time.perf_counter()
         try:
             logger.debug(f"Policy {self.name}: Starting backend execution")
-            entity_count = self._execute_run(
+            outcome = self._execute_run(
                 client, lambda: backend.run(self.name, policy), source=None
             )
-            elapsed = time.perf_counter() - exec_start_time
-            logger.debug(f"Policy {self.name}: Backend execution completed in {elapsed:.3f} seconds")
+            logger.debug(
+                f"Policy {self.name}: Backend execution completed in {outcome.produce_seconds:.3f} seconds"
+            )
             logger.info(
-                f"Policy {self.name}: Successfully ingested {entity_count} entities"
+                f"Policy {self.name}: Successfully ingested {outcome.entity_count} entities"
             )
 
             run_success = get_metric("backend_execution_success")

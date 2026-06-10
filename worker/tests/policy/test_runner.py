@@ -2,6 +2,8 @@
 # Copyright 2025 NetBox Labs Inc
 """NetBox Labs - Policy Manager Unit Tests."""
 
+import re
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -559,6 +561,38 @@ def test_run_with_multiple_chunks(
 
         # Verify log messages for successful ingestion
         assert "Successfully ingested 10 entities" in caplog.text
+
+
+def test_run_backend_execution_log_excludes_ingest_time(
+    policy_runner,
+    sample_policy,
+    mock_diode_client,
+    mock_backend,
+    caplog,
+    mock_run_store,
+):
+    """The 'Backend execution completed in' line times the backend only, not ingest."""
+    policy_runner.name = "test_policy"
+    policy_runner.run_store = mock_run_store
+
+    entity = ingester_pb2.Entity()
+    entity.device.name = "dev1"
+    mock_backend.run.return_value = [entity]
+
+    def slow_ingest(*args, **kwargs):
+        time.sleep(0.25)
+        response = MagicMock()
+        response.errors = []
+        return response
+
+    mock_diode_client.ingest.side_effect = slow_ingest
+
+    with caplog.at_level("DEBUG"):
+        policy_runner.run(mock_diode_client, mock_backend, sample_policy)
+
+    match = re.search(r"Backend execution completed in ([0-9.]+) seconds", caplog.text)
+    assert match, "expected the backend-execution debug line to be logged"
+    assert float(match.group(1)) < 0.2, "logged duration must not include client.ingest time"
 
 
 def test_run_chunk_ingestion_error(
