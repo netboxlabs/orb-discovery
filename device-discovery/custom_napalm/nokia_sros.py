@@ -818,7 +818,10 @@ def _nokia_sros_get_network_instances_impl(driver, name: str = "") -> dict:
     ):
         svc_el = vprn.find("configure_ns:service-name", _NSMAP)
         svc_name = (svc_el.text or "").strip() if svc_el is not None else ""
-        if not svc_name:
+        # Never let a VPRN row overwrite the seeded DEFAULT_INSTANCE —
+        # "Base" is the global routing table, not an L3VRF. Mirrors the
+        # IOS-XR drivers' guard against rows named "default".
+        if not svc_name or svc_name == "Base":
             continue
         rd_el = vprn.find(
             "configure_ns:bgp-ipvpn/configure_ns:mpls/configure_ns:route-distinguisher",
