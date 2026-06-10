@@ -8,7 +8,13 @@ from device_discovery.policy.models import Defaults, IpamParameters, Options
 from device_discovery.translate import translate_data
 
 
-def _data(network_instances=None, defaults=None, interfaces=None, interfaces_ip=None):
+def _data(
+    network_instances=None,
+    defaults=None,
+    interfaces=None,
+    interfaces_ip=None,
+    options=None,
+):
     """Build a translate_data payload for a single-device discovery cycle."""
     return {
         "driver": "eos",
@@ -30,7 +36,7 @@ def _data(network_instances=None, defaults=None, interfaces=None, interfaces_ip=
             "Management1": {"ipv4": {"192.168.0.1": {"prefix_length": 24}}},
         },
         "defaults": defaults or Defaults(),
-        "options": Options(),
+        "options": options or Options(discover_vrfs=True),
         "network_instances": network_instances,
     }
 
@@ -157,6 +163,17 @@ def test_no_network_instances_emits_no_vrfs():
     entities = list(translate_data(_data(network_instances=None)))
     kinds = _by_kind(entities)
     assert kinds["vrf"] == []
+
+
+def test_option_off_ignores_network_instances_payload():
+    """With discover_vrfs off, a pre-populated payload emits no VRFs."""
+    entities = list(
+        translate_data(_data(network_instances=_INSTANCES, options=Options()))
+    )
+    kinds = _by_kind(entities)
+    assert kinds["vrf"] == []
+    assert all(not ip.HasField("vrf") for ip in kinds["ip_address"])
+    assert all(not p.HasField("vrf") for p in kinds["prefix"])
 
 
 @pytest.fixture
