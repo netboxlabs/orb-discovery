@@ -19,7 +19,11 @@ from napalm.base.base import NetworkDriver
 
 from custom_napalm.eos import EOSDriver
 from custom_napalm.ios import IOSDriver
+from custom_napalm.iosxr import IOSXRDriver
+from custom_napalm.iosxr_netconf import IOSXRNETCONFDriver
 from custom_napalm.junos import JunOSDriver
+from custom_napalm.nokia_srl import SRLDriver
+from custom_napalm.nokia_sros import SROSDriver
 from custom_napalm.nxos import NXOSDriver
 from custom_napalm.nxos_ssh import NXOSSSHDriver
 from device_discovery.policy.models import Config, Defaults, Options
@@ -112,9 +116,11 @@ def test_collect_network_instances_swallows_not_implemented(caplog) -> None:
     assert any("Error getting network instances" in r.message for r in caplog.records)
 
 
-# Pins the inheritance assumption VRF discovery relies on: these drivers get
-# a real get_network_instances() from upstream NAPALM (not the base-class
-# stub that raises NotImplementedError). Catches upstream drift.
+# Pins the support matrix VRF discovery relies on: these drivers carry a real
+# get_network_instances() — inherited from upstream NAPALM (ios/eos/junos/
+# nxos/nxos_ssh) or implemented in custom_napalm (iosxr/iosxr_netconf/
+# nokia_sros/nokia_srl) — not the base-class stub that raises
+# NotImplementedError. Catches upstream drift and accidental removals.
 @pytest.mark.parametrize(
     "driver_cls",
     [
@@ -123,6 +129,10 @@ def test_collect_network_instances_swallows_not_implemented(caplog) -> None:
         pytest.param(JunOSDriver, id="junos"),
         pytest.param(NXOSDriver, id="nxos"),
         pytest.param(NXOSSSHDriver, id="nxos_ssh"),
+        pytest.param(IOSXRDriver, id="iosxr"),
+        pytest.param(IOSXRNETCONFDriver, id="iosxr_netconf"),
+        pytest.param(SROSDriver, id="nokia_sros"),
+        pytest.param(SRLDriver, id="nokia_srl"),
     ],
 )
 def test_driver_implements_get_network_instances(driver_cls) -> None:
