@@ -570,9 +570,15 @@ def build_interface_entities(
         _attach_module_ref(interface, if_name, iface_module_map)
         interface_entities[if_name] = interface
         entities.append(Entity(interface=interface))
-        entities.extend(translate_interface_ips(
-            interface, interfaces_ip, defaults, options=options, iface_vrf_map=iface_vrf_map,
-        ))
+        entities.extend(
+            translate_interface_ips(
+                interface,
+                interfaces_ip,
+                defaults,
+                options=options,
+                iface_vrf_map=iface_vrf_map,
+            )
+        )
 
     for if_name in sorted(interfaces_ip.keys(), key=interface_sort_key):
         if if_name in interface_entities:
@@ -584,8 +590,14 @@ def build_interface_entities(
         _attach_module_ref(interface, if_name, iface_module_map)
         interface_entities[if_name] = interface
         entities.append(Entity(interface=interface))
-        entities.extend(translate_interface_ips(
-            interface, interfaces_ip, defaults, options=options, iface_vrf_map=iface_vrf_map,
-        ))
+        entities.extend(
+            translate_interface_ips(
+                interface,
+                interfaces_ip,
+                defaults,
+                options=options,
+                iface_vrf_map=iface_vrf_map,
+            )
+        )
 
     return entities
