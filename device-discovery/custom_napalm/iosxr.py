@@ -323,6 +323,11 @@ def _iosxr_get_network_instances_impl(driver, name: str = "") -> dict:
         raw = driver.device._execute_show("show vrf all detail")
     except (ConnectError, IOSXRTimeoutError, InvalidInputError, XMLCLIError) as e:
         logger.warning("iosxr.get_network_instances: show vrf all detail failed: %s", e)
+        # Deliberately {} (not the seeded default instance): a transport
+        # failure means the device state is unknown, and an empty dict is
+        # the unambiguous "discovery failed" signal. The seeded default is
+        # returned only on paths where the device DID respond — there the
+        # default table is a platform invariant, not fabricated knowledge.
         return {}
 
     instances: dict = {"default": _iosxr_default_instance()}

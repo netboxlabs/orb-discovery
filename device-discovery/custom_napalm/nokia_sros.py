@@ -797,6 +797,11 @@ def _nokia_sros_get_network_instances_impl(driver, name: str = "") -> dict:
         reply = driver.conn.get(filter=_FILTER_NETWORK_INSTANCES)
     except NCClientError as e:
         logger.warning("nokia_sros.get_network_instances: VPRN RPC failed: %s", e)
+        # Deliberately {} (not the seeded default instance): a transport
+        # failure means the device state is unknown, and an empty dict is
+        # the unambiguous "discovery failed" signal. The seeded default is
+        # returned only on paths where the device DID respond — there the
+        # default table is a platform invariant, not fabricated knowledge.
         return {}
     if getattr(reply, "data_xml", None) is None:
         logger.warning(

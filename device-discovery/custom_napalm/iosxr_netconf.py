@@ -318,6 +318,11 @@ def _iosxr_netconf_get_network_instances_impl(driver, name: str = "") -> dict:
         reply = driver.device.get(filter=("subtree", _VRF_FILTER))
     except NCClientError as e:
         logger.warning("iosxr_netconf.get_network_instances: NETCONF get failed: %s", e)
+        # Deliberately {} (not the seeded default instance): a transport
+        # failure means the device state is unknown, and an empty dict is
+        # the unambiguous "discovery failed" signal. The seeded default is
+        # returned only on paths where the device DID respond — there the
+        # default table is a platform invariant, not fabricated knowledge.
         return {}
     xml_text = getattr(reply, "xml", None) or getattr(reply, "data_xml", None) or ""
     instances: dict = {"default": _iosxr_netconf_default_instance()}
