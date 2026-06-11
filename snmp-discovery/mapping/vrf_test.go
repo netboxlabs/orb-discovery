@@ -57,7 +57,7 @@ func TestDecodeOctetStringIndexWithTail(t *testing.T) {
 	assert.Equal(t, "RED", name)
 	assert.Equal(t, []int{42}, tail)
 	// No tail variant
-	name, ok2 := decodeOctetStringIndex("3.82.69.68", 0)
+	name, ok2 := decodeOctetStringIndex("3.82.69.68")
 	require.True(t, ok2)
 	assert.Equal(t, "RED", name)
 	// Non-printable octets fail the row
@@ -204,6 +204,103 @@ func TestAttachVrfs_OverwritesDefaultsAndSkipsNonMembers(t *testing.T) {
 	// Non-member keeps its defaults VRF.
 	assert.Equal(t, "from-defaults", *ipOther.Vrf.Name)
 	assert.Nil(t, ipUnassigned.Vrf)
+}
+
+func TestAttachVrfs_SyncsPrimaryIPSnapshotsAndVCMasterRefs(t *testing.T) {
+	vrfName := "MGMT"
+	vrf := &diode.VRF{Name: &vrfName}
+	iface := &diode.Interface{}
+	addr := "10.0.0.1/24"
+	ip := &diode.IPAddress{Address: &addr, AssignedObject: iface}
+	// Snapshot copies taken at map time (distinct structs, same address),
+	// as assignPrimaryIP / the VC master-ref stubs produce them.
+	devSnapshot := &diode.IPAddress{Address: &addr}
+	vcStub := &diode.IPAddress{Address: &addr}
+	memberStub := &diode.IPAddress{Address: &addr}
+	dev := &diode.Device{PrimaryIp4: devSnapshot}
+	vc := &diode.VirtualChassis{Master: &diode.Device{PrimaryIp4: vcStub}}
+	member := &diode.Device{
+		VirtualChassis: &diode.VirtualChassis{
+			Master: &diode.Device{PrimaryIp4: memberStub},
+		},
+	}
+	otherAddr := "192.0.2.9/32"
+	untouched := &diode.IPAddress{Address: &otherAddr}
+	devOther := &diode.Device{PrimaryIp4: untouched}
+
+	AttachVrfs(
+		[]diode.Entity{dev, vc, member, devOther, ip},
+		map[int]*diode.VRF{1: vrf},
+		map[*diode.Interface]int{iface: 1},
+	)
+
+	require.Same(t, vrf, ip.Vrf)
+	assert.Same(t, vrf, devSnapshot.Vrf, "Device.PrimaryIp4 snapshot must re-sync")
+	assert.Same(t, vrf, vcStub.Vrf, "VirtualChassis master-ref stub must re-sync")
+	assert.Same(t, vrf, memberStub.Vrf, "member VC master-ref stub must re-sync")
+	assert.Nil(t, untouched.Vrf, "non-member primary IP stays untouched")
+}
+
+func TestDecodeRouteDistinguisher_PaddedDisplayForms(t *testing.T) {
+	logger := slog.Default()
+	// 8-char padded display forms must not fall into the binary path.
+	assert.Equal(t, "65000:1", decodeRouteDistinguisher(" 65000:1", logger))
+	assert.Equal(t, "65000:1", decodeRouteDistinguisher("65000:1\x00", logger))
+	assert.Equal(t, "65000:10", decodeRouteDistinguisher("65000:10", logger))
+	// REGRESSION PIN: binary RDs lead with 0x00 type bytes (and may end
+	// in 0x00 data bytes) — display-form trimming must never reach the
+	// binary path's input.
+	rdLeadingAndTrailingNul := string([]byte{0, 0, 0xfd, 0xe8, 0, 0, 1, 0})
+	assert.Equal(t, "65000:256", decodeRouteDistinguisher(rdLeadingAndTrailingNul, logger))
+}
+
+func TestTranslateVrfs_LowerTierCannotAddNamesWhenTier1HasRecords(t *testing.T) {
+	red := oidIdx("RED")
+	// Tier 1 enumerates RED with no membership anywhere; the cisco tier
+	// knows an internal iVRF the standards arc deliberately omits — it
+	// may refine RED's membership but must NOT introduce new VRFs.
+	oids := ObjectIDValueMap{
+		oidMplsL3VpnVrfRD + "." + red: octets("65000:100"),
+		oidCvVrfName + ".1":           octets("RED"),
+		oidCvVrfName + ".2":           octets("__internal_ivrf"),
+		oidCvVrfInterface + ".1.6":    octets("1"),
+		oidCvVrfInterface + ".2.7":    octets("1"),
+	}
+	entities, byIfIndex := TranslateVrfs(oids, nil, slog.Default())
+	require.Len(t, entities, 1)
+	vrf := entities[0].(*diode.VRF)
+	assert.Equal(t, "RED", *vrf.Name)
+	assert.Same(t, vrf, byIfIndex[6], "matching-name membership merges in")
+	_, leaked := byIfIndex[7]
+	assert.False(t, leaked, "non-matching lower-tier VRF must not leak")
+}
+
+func TestOctetsToString_UTF8NamesAccepted(t *testing.T) {
+	// "café" — RFC 4382 names are SnmpAdminString (UTF-8).
+	name, ok := octetsToString([]int{0x63, 0x61, 0x66, 0xc3, 0xa9})
+	require.True(t, ok)
+	assert.Equal(t, "café", name)
+	// Control characters and invalid UTF-8 still fail the row.
+	_, ok = octetsToString([]int{0x63, 0x01})
+	assert.False(t, ok)
+	_, ok = octetsToString([]int{0xc3, 0x28})
+	assert.False(t, ok)
+}
+
+func TestTranslateVrfs_SplitArcAgentMergesMembership(t *testing.T) {
+	red := oidIdx("RED")
+	// Tier-1 exposes only the RD table; membership lives on the legacy arc.
+	oids := ObjectIDValueMap{
+		oidMplsL3VpnVrfRD + "." + red:             octets("65000:100"),
+		oidMplsVpnIfConfLegacy + "." + red + ".4": octets("1"),
+	}
+	entities, byIfIndex := TranslateVrfs(oids, nil, slog.Default())
+	require.Len(t, entities, 1)
+	vrf := entities[0].(*diode.VRF)
+	assert.Equal(t, "RED", *vrf.Name)
+	require.NotNil(t, vrf.Rd)
+	assert.Equal(t, "65000:100", *vrf.Rd, "tier-1 RD must survive the merge")
+	assert.Same(t, vrf, byIfIndex[4], "legacy-arc membership must merge in")
 }
 
 func TestVrfWalkGating(t *testing.T) {

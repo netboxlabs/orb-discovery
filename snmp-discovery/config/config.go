@@ -119,8 +119,10 @@ func (v VrfParameters) IsZero() bool {
 
 // VrfForFamily resolves the effective VRF defaults for an address family
 // ("ipv4" or "ipv6"): the family-specific override wins when any of its
-// fields is set; otherwise the AF-agnostic Vrf applies.
-func (d *IPAddressDefaults) VrfForFamily(family string) VrfParameters {
+// fields is set; otherwise the AF-agnostic Vrf applies. The second return
+// names the knob that resolved ("vrf", "vrf_ipv4", "vrf_ipv6") so callers
+// can reference it in diagnostics without re-deriving the selection.
+func (d *IPAddressDefaults) VrfForFamily(family string) (VrfParameters, string) {
 	var af VrfParameters
 	switch family {
 	case "ipv4":
@@ -129,9 +131,9 @@ func (d *IPAddressDefaults) VrfForFamily(family string) VrfParameters {
 		af = d.VrfIpv6
 	}
 	if !af.IsZero() {
-		return af
+		return af, "vrf_" + family
 	}
-	return d.Vrf
+	return d.Vrf, "vrf"
 }
 
 // InterfaceDefaults represents default values for a specific entity type

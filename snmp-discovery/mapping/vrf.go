@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
@@ -71,11 +73,15 @@ func TranslateVrfs(
 	logger *slog.Logger,
 ) ([]diode.Entity, map[int]*diode.VRF) {
 	records := collectNameIndexedVrfs(oids, oidMplsL3VpnVrfRD, oidMplsL3VpnIfConf, logger)
-	if len(records) == 0 {
-		records = collectNameIndexedVrfs(oids, oidMplsVpnVrfRDLegacy, oidMplsVpnIfConfLegacy, logger)
+	if !hasVrfMembership(records) {
+		// A tier with VRF rows but zero membership (an agent exposing
+		// only the RD table on this arc) still falls through, merging
+		// the lower tier's data so split-arc agents keep their
+		// interface attachment.
+		mergeVrfRecords(records, collectNameIndexedVrfs(oids, oidMplsVpnVrfRDLegacy, oidMplsVpnIfConfLegacy, logger))
 	}
-	if len(records) == 0 {
-		records = collectCiscoVrfs(oids, logger)
+	if !hasVrfMembership(records) {
+		mergeVrfRecords(records, collectCiscoVrfs(oids, logger))
 	}
 	if len(records) == 0 {
 		return nil, nil
@@ -121,6 +127,13 @@ func TranslateVrfs(
 // device state and wins over the configured defaults (which remain the
 // fallback for every other address) — mirroring device-discovery's
 // precedence. Interfaces outside the map are left untouched.
+//
+// Device.PrimaryIp4/6 (and the VirtualChassis master-ref stubs derived
+// from them during stack translation) hold SNAPSHOT copies of the IP
+// taken at map time — before this attach ran — so they are re-synced by
+// address here. Without that, the primary-IP reference and the IPAddress
+// entity would disagree on the VRF, and NetBox (whose IP identity is
+// address+vrf) would create duplicate IPAddress objects.
 func AttachVrfs(
 	entities []diode.Entity,
 	vrfByIfIndex map[int]*diode.VRF,
@@ -129,6 +142,7 @@ func AttachVrfs(
 	if len(vrfByIfIndex) == 0 || len(ifIndexByIface) == 0 {
 		return
 	}
+	vrfByAddress := make(map[string]*diode.VRF)
 	for _, e := range entities {
 		ip, ok := e.(*diode.IPAddress)
 		if !ok {
@@ -144,8 +158,51 @@ func AttachVrfs(
 		}
 		if vrf, hit := vrfByIfIndex[idx]; hit {
 			ip.Vrf = vrf
+			if ip.Address != nil {
+				vrfByAddress[*ip.Address] = vrf
+			}
 		}
 	}
+	if len(vrfByAddress) == 0 {
+		return
+	}
+	syncSnapshot := func(snapshot *diode.IPAddress) {
+		if snapshot == nil || snapshot.Address == nil {
+			return
+		}
+		if vrf, ok := vrfByAddress[*snapshot.Address]; ok {
+			snapshot.Vrf = vrf
+		}
+	}
+	syncDevice := func(dev *diode.Device) {
+		if dev == nil {
+			return
+		}
+		syncSnapshot(dev.PrimaryIp4)
+		syncSnapshot(dev.PrimaryIp6)
+		if dev.VirtualChassis != nil {
+			syncDeviceShallow(dev.VirtualChassis.Master, syncSnapshot)
+		}
+	}
+	for _, e := range entities {
+		switch v := e.(type) {
+		case *diode.Device:
+			syncDevice(v)
+		case *diode.VirtualChassis:
+			syncDeviceShallow(v.Master, syncSnapshot)
+		}
+	}
+}
+
+// syncDeviceShallow re-syncs the primary-IP stubs on a VC master ref
+// without recursing into its own VirtualChassis (master refs are built
+// non-recursive by design).
+func syncDeviceShallow(dev *diode.Device, syncSnapshot func(*diode.IPAddress)) {
+	if dev == nil {
+		return
+	}
+	syncSnapshot(dev.PrimaryIp4)
+	syncSnapshot(dev.PrimaryIp6)
 }
 
 // collectNameIndexedVrfs reads one RD column (indexed by the VRF name as
@@ -168,7 +225,7 @@ func collectNameIndexedVrfs(
 	}
 	for oid, value := range oids {
 		if suffix, ok := oidSuffix(oid, rdColumn); ok {
-			name, decoded := decodeOctetStringIndex(suffix, 0)
+			name, decoded := decodeOctetStringIndex(suffix)
 			if !decoded {
 				logger.Debug("vrf: undecodable VRF-name index, skipping row",
 					"oid", oid)
@@ -250,9 +307,44 @@ func oidSuffix(oid, column string) (string, bool) {
 
 // decodeOctetStringIndex decodes an SNMP octet-string table index from its
 // OID suffix form. See decodeOctetStringIndexWithTail.
-func decodeOctetStringIndex(suffix string, _ int) (string, bool) {
+func decodeOctetStringIndex(suffix string) (string, bool) {
 	name, _, ok := decodeOctetStringIndexWithTail(suffix, 0)
 	return name, ok
+}
+
+// hasVrfMembership reports whether any record carries interface members.
+func hasVrfMembership(records map[string]*vrfRecord) bool {
+	for _, rec := range records {
+		if len(rec.ifIndexes) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// mergeVrfRecords folds src into dst: membership unions per name and the
+// RD keeps dst's value when already set. Names new to dst are adopted
+// ONLY when dst is empty — when a higher tier already enumerated the
+// VRFs, lower tiers may only refine membership for those names, never
+// introduce additional VRFs (e.g. CISCO-VRF-MIB internal iVRFs that the
+// standards arc deliberately does not expose).
+func mergeVrfRecords(dst, src map[string]*vrfRecord) {
+	adoptNew := len(dst) == 0
+	for name, srcRec := range src {
+		dstRec, ok := dst[name]
+		if !ok {
+			if adoptNew {
+				dst[name] = srcRec
+			}
+			continue
+		}
+		if dstRec.rd == "" {
+			dstRec.rd = srcRec.rd
+		}
+		for ifIndex := range srcRec.ifIndexes {
+			dstRec.ifIndexes[ifIndex] = struct{}{}
+		}
+	}
 }
 
 // decodeOctetStringIndexWithTail decodes a length-prefixed octet-string
@@ -293,10 +385,24 @@ func octetsToString(octets []int) (string, bool) {
 	}
 	b := make([]byte, len(octets))
 	for i, o := range octets {
-		if o < 0x20 || o > 0x7e {
+		// Reject raw control bytes and anything outside the byte range;
+		// multi-byte UTF-8 sequences are allowed — RFC 4382's
+		// mplsL3VpnVrfName is an SnmpAdminString (UTF-8).
+		if o < 0x20 || o > 0xff || o == 0x7f {
 			return "", false
 		}
 		b[i] = byte(o)
+	}
+	if !utf8.Valid(b) {
+		return "", false
+	}
+	// Reject encoded control characters too (C1 range like U+0085
+	// arrives as a valid multi-byte sequence the per-octet check above
+	// can't see).
+	for _, r := range string(b) {
+		if unicode.IsControl(r) {
+			return "", false
+		}
 	}
 	return string(b), true
 }
@@ -307,11 +413,16 @@ func octetsToString(octets []int) (string, bool) {
 // RDs return "" so the rd field stays off the wire and the VRF matches
 // NetBox records whose rd column is null.
 func decodeRouteDistinguisher(raw string, logger *slog.Logger) string {
-	if raw == "" {
+	// Some agents pad display-form RDs with whitespace or NULs; classify
+	// the display form against a TRIMMED COPY ONLY — the original bytes
+	// must reach the binary path untouched, because every RFC 4382
+	// binary RD starts with a 0x00 type byte that trimming would eat.
+	trimmed := strings.Trim(raw, " \t\r\n\x00")
+	if trimmed == "" {
 		return ""
 	}
-	if vrfDisplayRdRe.MatchString(raw) {
-		return raw
+	if vrfDisplayRdRe.MatchString(trimmed) {
+		return trimmed
 	}
 	if len(raw) != 8 {
 		logger.Debug("vrf: unrecognized RD form, emitting VRF without rd",

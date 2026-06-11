@@ -77,9 +77,13 @@ func TestVrfForFamily_Resolution(t *testing.T) {
 		Vrf:     config.VrfParameters{Name: "any"},
 		VrfIpv6: config.VrfParameters{Rd: "65000:6"},
 	}
-	assert.Equal(t, "any", d.VrfForFamily("ipv4").Name)
+	v4, knob4 := d.VrfForFamily("ipv4")
+	assert.Equal(t, "any", v4.Name)
+	assert.Equal(t, "vrf", knob4)
 	// Any set field on the AF override selects it wholesale — even a
 	// nameless one (which the mapper then warns about and drops).
-	assert.Equal(t, "", d.VrfForFamily("ipv6").Name)
-	assert.Equal(t, "65000:6", d.VrfForFamily("ipv6").Rd)
+	v6, knob6 := d.VrfForFamily("ipv6")
+	assert.Equal(t, "", v6.Name)
+	assert.Equal(t, "vrf_ipv6", knob6)
+	assert.Equal(t, "65000:6", v6.Rd)
 }

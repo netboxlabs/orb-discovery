@@ -103,7 +103,7 @@ func (m *IPAddressMapper) applyDefaults(entity *diode.IPAddress, defaults *confi
 		if entity.Address != nil && strings.Contains(*entity.Address, ":") {
 			family = "ipv6"
 		}
-		vrfDefaults := entityDefaults.VrfForFamily(family)
+		vrfDefaults, vrfKnob := entityDefaults.VrfForFamily(family)
 		switch {
 		case vrfDefaults.Name != "":
 			vrf := &diode.VRF{Name: &vrfDefaults.Name}
@@ -140,10 +140,16 @@ func (m *IPAddressMapper) applyDefaults(entity *diode.IPAddress, defaults *confi
 			// warning per discovered address.
 			m.vrfMisconfigWarnOnce.Do(func() {
 				m.logger.Warn(
-					"VRF defaults dropped: name is empty but other VRF fields are set; "+
-						"set defaults.ip_address.vrf.name in the policy (or "+
-						"targets[].override_defaults.ip_address.vrf.name) to enable VRF emission. "+
-						"This warning is logged once per discovery run; subsequent IPs with the same misconfig will be silently skipped.",
+					fmt.Sprintf(
+						"VRF defaults dropped: name is empty but other VRF fields are set; "+
+							"set defaults.ip_address.%[1]s.name in the policy (or "+
+							"targets[].override_defaults.ip_address.%[1]s.name) to enable VRF emission. "+
+							"Note: a per-AF override (vrf_ipv4 / vrf_ipv6) replaces the AF-agnostic "+
+							"vrf wholesale for its family — it does not inherit vrf.name. "+
+							"This warning is logged once per discovery run; subsequent IPs with the same misconfig will be silently skipped.",
+						vrfKnob,
+					),
+					"knob", vrfKnob,
 					"rd", vrfDefaults.Rd,
 					"description", vrfDefaults.Description,
 					"comments", vrfDefaults.Comments,
