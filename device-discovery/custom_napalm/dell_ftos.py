@@ -824,15 +824,25 @@ def _ftos_expand_member_name(token: str) -> str:
     return f"{full} {rest}" if full and rest else token
 
 
+# Wrapped member lines align under the Interfaces column (far right of the
+# 34-char name + id columns); VRF rows start at the left margin. Requiring
+# deep indentation keeps a short uppercase VRF name row ("RED  1  Gi 1/7")
+# from ever being mistaken for a continuation of the previous VRF.
+_FTOS_CONTINUATION_MIN_INDENT = 8
+
+
 def _ftos_is_member_continuation(line: str) -> bool:
     """
     True when a line holds only wrapped member tokens (no name/id columns).
 
     A continuation like ``Te 1/20`` would otherwise satisfy the row regex
-    ("Te" as the name, "1" as the id) — but unlike a real row, removing
-    every member token (plus separators) from a continuation leaves
-    nothing behind.
+    ("Te" as the name, "1" as the id) — but unlike a real row, a
+    continuation is deeply indented under the Interfaces column AND
+    removing every member token (plus separators) leaves nothing behind.
     """
+    indent = len(line) - len(line.lstrip())
+    if indent < _FTOS_CONTINUATION_MIN_INDENT:
+        return False
     residue = _FTOS_VRF_MEMBER_RE.sub("", line).replace(",", "").strip()
     return not residue
 

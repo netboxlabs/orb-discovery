@@ -1,4 +1,16 @@
 {
+  "RED": {
+    "interfaces": {
+      "interface": {
+        "GigabitEthernet 1/7": {}
+      }
+    },
+    "name": "RED",
+    "state": {
+      "route_distinguisher": ""
+    },
+    "type": "L3VRF"
+  },
   "blue": {
     "interfaces": {
       "interface": {

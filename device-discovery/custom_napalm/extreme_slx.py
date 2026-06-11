@@ -264,6 +264,58 @@ _MGMT_VRF_RE = re.compile(
     r"^\s*(Management\s+\S+)\s+\S+\s+(\S+)\s",
     re.IGNORECASE,
 )
+# Regex fallback for VRF discovery when the ntc-template fails entirely —
+# the interface + Vrf columns of every known interface type. Mirrors
+# _INTF_IP_FALLBACK_RE so a single unparseable row can't empty the whole
+# VRF discovery result.
+_INTF_VRF_FALLBACK_RE = re.compile(
+    r"^\s*((?:Ethernet|Management|Port-channel|Loopback|Ve)\s+\S+)\s+\S+\s+(\S+)\s",
+    re.IGNORECASE,
+)
+
+
+def _slx_vrf_memberships(output: str) -> list[tuple[str, str]]:
+    """
+    Extract (interface, vrf) pairs from ``show ip interface brief`` output.
+
+    Management rows are pre-stripped before template parsing (the
+    ntc-template error-exits on them) and recovered with _MGMT_VRF_RE;
+    when the template fails on any other row, the whole output falls back
+    to _INTF_VRF_FALLBACK_RE — the same contract get_interfaces_ip()
+    follows for addresses.
+    """
+    memberships: list[tuple[str, str]] = []
+    filtered = "\n".join(
+        line for line in output.splitlines() if not _MGMT_LINE_RE.match(line)
+    )
+    try:
+        rows = parse_output(
+            platform="extreme_slxos",
+            command="show ip interface brief",
+            data=filtered,
+        )
+    except (TextFSMError, ParsingException):
+        logger.warning(
+            "slxos: ntc-template failed for 'show ip interface brief'; "
+            "falling back to regex for VRF discovery",
+            exc_info=True,
+        )
+        for line in output.splitlines():
+            m = _INTF_VRF_FALLBACK_RE.match(line)
+            if m:
+                memberships.append((m.group(1).strip(), m.group(2).strip()))
+        return memberships
+    memberships.extend(
+        ((row.get("interface") or "").strip(), (row.get("vrf") or "").strip())
+        for row in rows
+    )
+    # Recover the pre-stripped Management rows' Vrf column (the fallback
+    # branch above already covers them).
+    for line in output.splitlines():
+        m = _MGMT_VRF_RE.match(line)
+        if m:
+            memberships.append((m.group(1).strip(), m.group(2).strip()))
+    return memberships
 # Regex fallback covering all known interface types, used when ntc-template
 # parse_output() fails entirely so no interface address is silently dropped.
 _INTF_IP_FALLBACK_RE = re.compile(
@@ -730,34 +782,9 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
             },
         }
         output = self.device.send_command("show ip interface brief")
-        rows: list[dict] = []
+        memberships: list[tuple[str, str]] = []
         if output and output.strip():
-            filtered = "\n".join(
-                line for line in output.splitlines()
-                if not _MGMT_LINE_RE.match(line)
-            )
-            try:
-                rows = parse_output(
-                    platform="extreme_slxos",
-                    command="show ip interface brief",
-                    data=filtered,
-                )
-            except (TextFSMError, ParsingException):
-                logger.warning(
-                    "slxos: show ip interface brief parse failed for "
-                    "network instances",
-                    exc_info=True,
-                )
-        memberships = [
-            ((row.get("interface") or "").strip(), (row.get("vrf") or "").strip())
-            for row in rows
-        ]
-        # Recover the pre-stripped Management rows' Vrf column.
-        if output:
-            for line in output.splitlines():
-                m = _MGMT_VRF_RE.match(line)
-                if m:
-                    memberships.append((m.group(1).strip(), m.group(2).strip()))
+            memberships = _slx_vrf_memberships(output)
         for ifname, vrf_name in memberships:
             # default-vrf rows belong to the seeded DEFAULT_INSTANCE.
             if not vrf_name or not ifname or vrf_name == "default-vrf":
