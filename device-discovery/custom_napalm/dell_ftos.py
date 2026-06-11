@@ -791,7 +791,11 @@ def _ftos_member_tokens(text: str) -> list[str]:
             if not item:
                 continue
             if "/" in item:
-                head = item.rsplit("/", 1)[0]
+                # Derive the inheritable head from the LEFT side of a
+                # range so "1/3-1/5" yields head "1", not "1/3-1".
+                left = item.partition("-")[0]
+                if "/" in left:
+                    head = left.rsplit("/", 1)[0]
                 tokens.append(f"{abbrev} {item}")
             elif head:
                 tokens.append(f"{abbrev} {head}/{item}")

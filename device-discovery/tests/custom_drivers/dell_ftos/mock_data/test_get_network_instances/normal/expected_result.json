@@ -62,6 +62,21 @@
     },
     "type": "L3VRF"
   },
+  "orange": {
+    "interfaces": {
+      "interface": {
+        "GigabitEthernet 2/3": {},
+        "GigabitEthernet 2/4": {},
+        "GigabitEthernet 2/5": {},
+        "GigabitEthernet 2/7": {}
+      }
+    },
+    "name": "orange",
+    "state": {
+      "route_distinguisher": ""
+    },
+    "type": "L3VRF"
+  },
   "red": {
     "interfaces": {
       "interface": {
