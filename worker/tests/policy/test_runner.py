@@ -253,12 +253,48 @@ def test_run_success(
     policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
     # Assertions
-    mock_backend.run.assert_called_once_with(policy_runner.name, sample_policy)
+    mock_backend.run.assert_called_once_with(
+        policy_runner.name,
+        sample_policy,
+        source="scheduled",
+        run_id="11111111-1111-1111-1111-111111111111",
+    )
     # Should call ingest once for the single chunk
     mock_diode_client.ingest.assert_called_once()
     # Check that entities were passed correctly
     call_args = mock_diode_client.ingest.call_args[1]["entities"]
     assert len(call_args) == 3
+
+
+def test_run_legacy_backend_without_kwargs_gets_bare_call(
+    policy_runner,
+    sample_policy,
+    mock_diode_client,
+    mock_run_store,
+    caplog,
+):
+    """A backend whose run() lacks **kwargs is called bare, with a warning."""
+
+    class LegacyBackend:
+        def __init__(self):
+            self.calls = []
+
+        def run(self, policy_name, policy):
+            self.calls.append((policy_name, policy))
+            entity = ingester_pb2.Entity()
+            entity.device.name = "legacy-dev"
+            return [entity]
+
+    backend = LegacyBackend()
+    policy_runner.name = "test_policy"
+    policy_runner.run_store = mock_run_store
+    mock_diode_client.ingest.return_value.errors = []
+
+    with caplog.at_level("WARNING"):
+        policy_runner.run(mock_diode_client, backend, sample_policy)
+
+    assert backend.calls == [("test_policy", sample_policy)]
+    assert "does not declare **kwargs" in caplog.text
 
 
 def test_run_passes_metadata_to_ingest(
@@ -323,7 +359,12 @@ def test_run_ingestion_errors(
         policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
     # Assertions
-    mock_backend.run.assert_called_once_with(policy_runner.name, sample_policy)
+    mock_backend.run.assert_called_once_with(
+        policy_runner.name,
+        sample_policy,
+        source="scheduled",
+        run_id="11111111-1111-1111-1111-111111111111",
+    )
     mock_diode_client.ingest.assert_called_once()
     assert (
         "Policy test_policy: Chunk ingestion failed: ['error1', 'error2']"
@@ -351,7 +392,12 @@ def test_run_backend_exception(
         policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
     # Assertions
-    mock_backend.run.assert_called_once_with(policy_runner.name, sample_policy)
+    mock_backend.run.assert_called_once_with(
+        policy_runner.name,
+        sample_policy,
+        source="scheduled",
+        run_id="11111111-1111-1111-1111-111111111111",
+    )
     mock_diode_client.ingest.assert_not_called()  # Client ingestion should not be called
     assert "Policy test_policy: Backend error" in caplog.text
 
@@ -423,7 +469,12 @@ def test_metrics_during_policy_lifecycle(
 
         policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
-        mock_backend.run.assert_called_once_with(policy_runner.name, sample_policy)
+        mock_backend.run.assert_called_once_with(
+            policy_runner.name,
+            sample_policy,
+            source="scheduled",
+            run_id="11111111-1111-1111-1111-111111111111",
+        )
         mock_diode_client.ingest.assert_called_once()
 
         mock_policy_executions.add.assert_called_once_with(1, {"policy": "test_policy"})
@@ -874,7 +925,12 @@ def test_run_unaffected_by_callback(
 
     policy_runner.run(mock_diode_client, mock_backend, sample_policy)
 
-    mock_backend.run.assert_called_once_with("test_policy", sample_policy)
+    mock_backend.run.assert_called_once_with(
+        "test_policy",
+        sample_policy,
+        source="scheduled",
+        run_id="11111111-1111-1111-1111-111111111111",
+    )
     mock_diode_client.ingest.assert_called_once()
     mock_run_store.update_run.assert_called_once()
     update_kwargs = mock_run_store.update_run.call_args.kwargs

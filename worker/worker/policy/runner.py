@@ -2,6 +2,7 @@
 # Copyright 2025 NetBox Labs Inc
 """Orb Worker Policy Runner."""
 
+import inspect
 import logging
 import time
 from dataclasses import dataclass
@@ -210,7 +211,7 @@ class PolicyRunner:
                 return
             try:
                 self._execute_run(
-                    self._diode_client, lambda: entities, source="ingest_callback"
+                    self._diode_client, lambda run_id: entities, source="ingest_callback"
                 )
             except IngestError:
                 raise
@@ -225,11 +226,11 @@ class PolicyRunner:
         """
         Create a run, produce + ingest entities through it, record COMPLETED/FAILED.
 
-        ``produce_entities`` is a zero-arg callable invoked INSIDE the run's
-        try-block — after ``create_run`` — so a failure while producing the
-        entities (e.g. the backend's ``run()`` raising) is still recorded as a
-        FAILED run rather than vanishing before the run is created. Re-raises on
-        failure.
+        ``produce_entities`` is a callable receiving ``run_id`` (the id of the
+        run created here), invoked INSIDE the run's try-block — after
+        ``create_run`` — so a failure while producing the entities (e.g. the
+        backend's ``run()`` raising) is still recorded as a FAILED run rather
+        than vanishing before the run is created. Re-raises on failure.
 
         The returned ``_RunOutcome.produce_seconds`` covers the producer call
         only — not chunking, ingest, or run-store writes — so callers can
@@ -246,7 +247,7 @@ class PolicyRunner:
         entity_count = 0
         try:
             produce_start = time.perf_counter()
-            entities_list = list(produce_entities())
+            entities_list = list(produce_entities(run_id=run.id))
             produce_seconds = time.perf_counter() - produce_start
             entity_count = len(entities_list)
             apply_run_id_to_entities(entities_list, run.id)
@@ -315,7 +316,7 @@ class PolicyRunner:
         try:
             logger.debug(f"Policy {self.name}: Starting backend execution")
             outcome = self._execute_run(
-                client, lambda: backend.run(self.name, policy), source=None
+                client, self._build_entity_producer(backend, policy), source=None
             )
             logger.debug(
                 f"Policy {self.name}: Backend execution completed in {outcome.produce_seconds:.3f} seconds"
@@ -362,6 +363,29 @@ class PolicyRunner:
                     "app_version": self.metadata.app_version,
                 },
             )
+
+    def _build_entity_producer(self, backend: Backend, policy: Policy):
+        """
+        Bind ``backend.run`` for ``_execute_run``, passing per-tick context when accepted.
+
+        Backends whose ``run()`` declares ``**kwargs`` receive
+        ``source="scheduled"`` and ``run_id``; legacy two-argument signatures
+        get the bare call (with a warning) so they keep working without a
+        coordinated upgrade.
+        """
+        accepts_kwargs = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in inspect.signature(backend.run).parameters.values()
+        )
+        if accepts_kwargs:
+            return lambda run_id: backend.run(
+                self.name, policy, source="scheduled", run_id=run_id
+            )
+        logger.warning(
+            f"Policy {self.name}: backend run() does not declare **kwargs; "
+            "per-tick context (source, run_id) will not be passed"
+        )
+        return lambda run_id: backend.run(self.name, policy)
 
     def stop(self):
         """Stop the policy runner."""

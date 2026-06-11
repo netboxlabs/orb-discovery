@@ -107,12 +107,14 @@ class Backend:
         ----
             policy_name (str): The name of the policy.
             policy (Policy): The policy to run.
-            **kwargs: Passive forward-compat door. The worker passes nothing
-                through it in v1; future minor releases may add per-tick
-                context (e.g. ``source="scheduled"|"trigger"``, ``run_id``).
-                Concrete backends are encouraged to declare ``**kwargs`` so
-                additive kwargs ride into the contract without a coordinated
-                upgrade.
+            **kwargs: Per-tick context from the worker. When the overriding
+                signature declares ``**kwargs``, the worker passes
+                ``source="scheduled"`` and ``run_id`` (the worker-side run
+                identifier, also stamped on the produced entities' metadata).
+                Legacy signatures without ``**kwargs`` keep working — the
+                worker detects them and falls back to the bare two-argument
+                call — but declare ``**kwargs`` so future additive context
+                rides into the contract without a coordinated upgrade.
 
         Returns:
         -------
