@@ -39,6 +39,11 @@ logger = logging.getLogger(__name__)
 _INVMGR_NS = "http://cisco.com/ns/yang/Cisco-IOS-XR-invmgr-oper"
 _NS_MAP = {"imo": _INVMGR_NS}  # prefix matches upstream napalm.iosxr_netconf convention
 
+# NETCONF replies are untrusted device input — disable entity resolution
+# and network access so a hostile payload can't XXE local files. Used by
+# every XML parse in this driver.
+_SAFE_XML_PARSER = ETREE.XMLParser(resolve_entities=False, no_network=True)
+
 # Focused subtree filter: just the entity name + inv-basic-bag fields we
 # need. Empty leaf elements ("<name/>") mean "select all instances". Mirrors
 # the upstream FACTS_RPC_REQ pattern in napalm/iosxr_netconf/constants.py.
@@ -118,7 +123,10 @@ def _iosxr_netconf_rows_from_xml(xml_text: str) -> list[dict]:
     if not xml_text:
         return []
     try:
-        root = ETREE.fromstring(xml_text.encode("utf-8") if isinstance(xml_text, str) else xml_text)
+        root = ETREE.fromstring(
+            xml_text.encode("utf-8") if isinstance(xml_text, str) else xml_text,
+            parser=_SAFE_XML_PARSER,
+        )
     except ETREE.XMLSyntaxError as e:
         logger.warning("iosxr_netconf.get_modules: XML parse failed: %s", e)
         return []
@@ -259,10 +267,6 @@ def _iosxr_netconf_get_modules_impl(driver) -> dict | None:
 
 _MPLS_VPN_NS = "http://cisco.com/ns/yang/Cisco-IOS-XR-mpls-vpn-oper"
 _VPN_NS_MAP = {"mvo": _MPLS_VPN_NS}
-
-# NETCONF replies are untrusted device input — disable entity resolution
-# and network access so a hostile payload can't XXE local files.
-_SAFE_XML_PARSER = ETREE.XMLParser(resolve_entities=False, no_network=True)
 
 # Focused subtree filter on the L3VPN operational model — the same data
 # source "show vrf all detail" renders. One RPC returns every VRF with its
