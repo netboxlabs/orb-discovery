@@ -1,10 +1,7 @@
 {
   "default": {
     "interfaces": {
-      "interface": {
-        "ethernet-1/1.0": {},
-        "ethernet-1/2.0": {}
-      }
+      "interface": {}
     },
     "name": "default",
     "state": {

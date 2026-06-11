@@ -117,24 +117,39 @@ def test_collect_network_instances_swallows_not_implemented(caplog) -> None:
 
 
 # Pins the support matrix VRF discovery relies on: these drivers carry a real
-# get_network_instances() — inherited from upstream NAPALM (ios/eos/junos/
-# nxos/nxos_ssh) or implemented in custom_napalm (iosxr/iosxr_netconf/
-# nokia_sros/nokia_srl) — not the base-class stub that raises
-# NotImplementedError. Catches upstream drift and accidental removals.
+# get_network_instances() and it lives in the expected package — inherited
+# from upstream NAPALM (ios/eos/junos/nxos/nxos_ssh) or implemented in
+# custom_napalm (iosxr/iosxr_netconf/nokia_sros/nokia_srl). Asserting the
+# owning module (not just "is not the base-class stub") also catches the
+# case where upstream grows its own NotImplementedError-raising override,
+# which a bare identity check against NetworkDriver would miss.
 @pytest.mark.parametrize(
-    "driver_cls",
+    ("driver_cls", "expected_module_prefix"),
     [
-        pytest.param(IOSDriver, id="ios"),
-        pytest.param(EOSDriver, id="eos"),
-        pytest.param(JunOSDriver, id="junos"),
-        pytest.param(NXOSDriver, id="nxos"),
-        pytest.param(NXOSSSHDriver, id="nxos_ssh"),
-        pytest.param(IOSXRDriver, id="iosxr"),
-        pytest.param(IOSXRNETCONFDriver, id="iosxr_netconf"),
-        pytest.param(SROSDriver, id="nokia_sros"),
-        pytest.param(SRLDriver, id="nokia_srl"),
+        pytest.param(IOSDriver, "napalm.", id="ios"),
+        pytest.param(EOSDriver, "napalm.", id="eos"),
+        pytest.param(JunOSDriver, "napalm.", id="junos"),
+        pytest.param(NXOSDriver, "napalm.", id="nxos"),
+        pytest.param(NXOSSSHDriver, "napalm.", id="nxos_ssh"),
+        pytest.param(IOSXRDriver, "custom_napalm.", id="iosxr"),
+        pytest.param(IOSXRNETCONFDriver, "custom_napalm.", id="iosxr_netconf"),
+        pytest.param(SROSDriver, "custom_napalm.", id="nokia_sros"),
+        pytest.param(SRLDriver, "custom_napalm.", id="nokia_srl"),
     ],
 )
-def test_driver_implements_get_network_instances(driver_cls) -> None:
-    """Driver overrides the NAPALM base-class get_network_instances stub."""
-    assert driver_cls.get_network_instances is not NetworkDriver.get_network_instances
+def test_driver_implements_get_network_instances(
+    driver_cls, expected_module_prefix
+) -> None:
+    """get_network_instances is owned by the expected package, not a stub."""
+    owner = next(
+        klass
+        for klass in driver_cls.__mro__
+        if "get_network_instances" in klass.__dict__
+    )
+    assert (
+        owner is not NetworkDriver
+    ), f"{driver_cls.__name__} resolves to the NAPALM base-class stub"
+    assert owner.__module__.startswith(expected_module_prefix), (
+        f"{driver_cls.__name__}.get_network_instances is owned by "
+        f"{owner.__module__}, expected {expected_module_prefix}*"
+    )

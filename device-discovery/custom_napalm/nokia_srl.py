@@ -584,13 +584,19 @@ class SRLDriver(_napalm_base.NetworkDriver):
             raw_type = type_hits[0] if type_hits else ""
             ni_type = _SRL_NI_TYPE_MAP.get(raw_type, raw_type)
             rd_hits = rds.get(ni_name) or []
+            # Default-instance membership is left empty like the other
+            # batch drivers: the discovery pipeline only consumes VRF
+            # memberships, and every interface not claimed by a VRF is
+            # in the default table by definition.
+            if ni_type == "DEFAULT_INSTANCE":
+                members: dict = {}
+            else:
+                members = {ifname: {} for ifname in ifaces.get(ni_name) or []}
             instances[ni_name] = {
                 "name": ni_name,
                 "type": ni_type,
                 "state": {"route_distinguisher": rd_hits[0] if rd_hits else ""},
-                "interfaces": {
-                    "interface": {ifname: {} for ifname in ifaces.get(ni_name) or []},
-                },
+                "interfaces": {"interface": members},
             }
         if name:
             return {name: instances[name]} if name in instances else {}
