@@ -117,23 +117,52 @@ func (v VrfParameters) IsZero() bool {
 		v.Comments == "" && len(v.Tags) == 0
 }
 
-// VrfForFamily resolves the effective VRF defaults for an address family
-// ("ipv4" or "ipv6"): the family-specific override wins when any of its
-// fields is set; otherwise the AF-agnostic Vrf applies. The second return
-// names the knob that resolved ("vrf", "vrf_ipv4", "vrf_ipv6") so callers
-// can reference it in diagnostics without re-deriving the selection.
-func (d *IPAddressDefaults) VrfForFamily(family string) (VrfParameters, string) {
+// resolveVrfForFamily implements the shared per-AF selection rule: the
+// family-specific override wins when any of its fields is set; otherwise
+// the AF-agnostic vrf applies. The second return names the knob that
+// resolved ("vrf", "vrf_ipv4", "vrf_ipv6") for diagnostics.
+func resolveVrfForFamily(vrf, v4, v6 VrfParameters, family string) (VrfParameters, string) {
 	var af VrfParameters
 	switch family {
 	case "ipv4":
-		af = d.VrfIpv4
+		af = v4
 	case "ipv6":
-		af = d.VrfIpv6
+		af = v6
 	}
 	if !af.IsZero() {
 		return af, "vrf_" + family
 	}
-	return d.Vrf, "vrf"
+	return vrf, "vrf"
+}
+
+// VrfForFamily resolves the effective VRF defaults for an address family
+// ("ipv4" or "ipv6"). See resolveVrfForFamily.
+func (d *IPAddressDefaults) VrfForFamily(family string) (VrfParameters, string) {
+	return resolveVrfForFamily(d.Vrf, d.VrfIpv4, d.VrfIpv6, family)
+}
+
+// PrefixDefaults represents default values applied to derived Prefix
+// entities. Mirrors device-discovery's defaults.prefix block.
+type PrefixDefaults struct {
+	Description string        `yaml:"description,omitempty"`
+	Tags        []string      `yaml:"tags,omitempty"`
+	Comments    string        `yaml:"comments,omitempty"`
+	Role        string        `yaml:"role,omitempty"`
+	Tenant      string        `yaml:"tenant,omitempty"`
+	Vrf         VrfParameters `yaml:"vrf,omitempty"`
+	VrfIpv4     VrfParameters `yaml:"vrf_ipv4,omitempty"`
+	VrfIpv6     VrfParameters `yaml:"vrf_ipv6,omitempty"`
+	// Explicit prefix scope. Setting either puts the operator in
+	// "explicit mode" and the propagate_defaults_to_prefix_scope cascade
+	// is skipped wholesale.
+	ScopeSite     string `yaml:"scope_site,omitempty"`
+	ScopeLocation string `yaml:"scope_location,omitempty"`
+}
+
+// VrfForFamily resolves the effective prefix VRF defaults for an address
+// family. See resolveVrfForFamily.
+func (d *PrefixDefaults) VrfForFamily(family string) (VrfParameters, string) {
+	return resolveVrfForFamily(d.Vrf, d.VrfIpv4, d.VrfIpv6, family)
 }
 
 // InterfaceDefaults represents default values for a specific entity type
@@ -176,6 +205,7 @@ type Defaults struct {
 	Role                     string             `yaml:"role,omitempty"`
 	AssetTag                 string             `yaml:"asset_tag,omitempty"`
 	IPAddress                IPAddressDefaults  `yaml:"ip_address,omitempty"`
+	Prefix                   PrefixDefaults     `yaml:"prefix,omitempty"`
 	Interface                InterfaceDefaults  `yaml:"interface,omitempty"`
 	Device                   DeviceDefaults     `yaml:"device,omitempty"`
 	VLAN                     VLANDefaults       `yaml:"vlan,omitempty"`
@@ -254,6 +284,32 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 	mergeVrfParameters(&merged.IPAddress.Vrf, &overrideDefaults.IPAddress.Vrf)
 	mergeVrfParameters(&merged.IPAddress.VrfIpv4, &overrideDefaults.IPAddress.VrfIpv4)
 	mergeVrfParameters(&merged.IPAddress.VrfIpv6, &overrideDefaults.IPAddress.VrfIpv6)
+
+	// Merge Prefix defaults
+	if overrideDefaults.Prefix.Description != "" {
+		merged.Prefix.Description = overrideDefaults.Prefix.Description
+	}
+	if len(overrideDefaults.Prefix.Tags) > 0 {
+		merged.Prefix.Tags = overrideDefaults.Prefix.Tags
+	}
+	if overrideDefaults.Prefix.Comments != "" {
+		merged.Prefix.Comments = overrideDefaults.Prefix.Comments
+	}
+	if overrideDefaults.Prefix.Role != "" {
+		merged.Prefix.Role = overrideDefaults.Prefix.Role
+	}
+	if overrideDefaults.Prefix.Tenant != "" {
+		merged.Prefix.Tenant = overrideDefaults.Prefix.Tenant
+	}
+	if overrideDefaults.Prefix.ScopeSite != "" {
+		merged.Prefix.ScopeSite = overrideDefaults.Prefix.ScopeSite
+	}
+	if overrideDefaults.Prefix.ScopeLocation != "" {
+		merged.Prefix.ScopeLocation = overrideDefaults.Prefix.ScopeLocation
+	}
+	mergeVrfParameters(&merged.Prefix.Vrf, &overrideDefaults.Prefix.Vrf)
+	mergeVrfParameters(&merged.Prefix.VrfIpv4, &overrideDefaults.Prefix.VrfIpv4)
+	mergeVrfParameters(&merged.Prefix.VrfIpv6, &overrideDefaults.Prefix.VrfIpv6)
 
 	// Merge Interface defaults
 	if overrideDefaults.Interface.Description != "" {
@@ -346,6 +402,29 @@ type Options struct {
 	// interfaces, taking precedence over the vrf / vrf_ipv4 / vrf_ipv6
 	// defaults for those interfaces.
 	DiscoverVrfs *bool `yaml:"discover_vrfs,omitempty"`
+
+	// Tri-state pointer; unset defaults to TRUE — Prefix entities are
+	// derived from every discovered IP address (network of address/len),
+	// matching device-discovery's behavior. Set false to opt out.
+	EmitPrefixes *bool `yaml:"emit_prefixes,omitempty"`
+
+	// When true AND no explicit defaults.prefix.scope_* is set,
+	// defaults.site cascades to Prefix scope site and defaults.location
+	// to Prefix scope location (the more specific location wins).
+	// Defaults to false. Mirrors device-discovery.
+	PropagateDefaultsToPrefixScope *bool `yaml:"propagate_defaults_to_prefix_scope,omitempty"`
+}
+
+// PrefixEmissionEnabled returns the effective emit_prefixes toggle,
+// defaulting to TRUE.
+func (o *Options) PrefixEmissionEnabled() bool {
+	return o == nil || o.EmitPrefixes == nil || *o.EmitPrefixes
+}
+
+// PrefixScopeCascadeEnabled returns the effective
+// propagate_defaults_to_prefix_scope toggle, defaulting to false.
+func (o *Options) PrefixScopeCascadeEnabled() bool {
+	return o != nil && o.PropagateDefaultsToPrefixScope != nil && *o.PropagateDefaultsToPrefixScope
 }
 
 // VrfDiscoveryEnabled returns the effective discover_vrfs toggle,

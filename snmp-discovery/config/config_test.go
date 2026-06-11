@@ -590,6 +590,35 @@ func TestMergeDefaults_PerAfVrf_FieldLevelNoBleed(t *testing.T) {
 	assert.Equal(t, "65000:1", merged.IPAddress.Vrf.Rd)
 }
 
+func TestMergeDefaults_PrefixBlock(t *testing.T) {
+	policy := &Defaults{Prefix: PrefixDefaults{
+		Description: "policy-desc",
+		Role:        "policy-role",
+		ScopeSite:   "policy-site",
+		Vrf:         VrfParameters{Name: "policy-vrf", Rd: "65000:1"},
+	}}
+	override := &Defaults{Prefix: PrefixDefaults{
+		Tenant:        "override-tenant",
+		ScopeLocation: "override-loc",
+		Comments:      "override-comments",
+		Tags:          []string{"o"},
+		Vrf:           VrfParameters{Rd: "65000:9"},
+		VrfIpv6:       VrfParameters{Name: "six"},
+	}}
+	merged := MergeDefaults(policy, override)
+	assert.Equal(t, "policy-desc", merged.Prefix.Description)
+	assert.Equal(t, "policy-role", merged.Prefix.Role)
+	assert.Equal(t, "policy-site", merged.Prefix.ScopeSite)
+	assert.Equal(t, "override-tenant", merged.Prefix.Tenant)
+	assert.Equal(t, "override-loc", merged.Prefix.ScopeLocation)
+	assert.Equal(t, "override-comments", merged.Prefix.Comments)
+	assert.Equal(t, []string{"o"}, merged.Prefix.Tags)
+	// Field-level vrf refinement: rd overridden, name preserved.
+	assert.Equal(t, "policy-vrf", merged.Prefix.Vrf.Name)
+	assert.Equal(t, "65000:9", merged.Prefix.Vrf.Rd)
+	assert.Equal(t, "six", merged.Prefix.VrfIpv6.Name)
+}
+
 func TestIPAddressDefaults_PerAfVrf_YAMLPolymorphic(t *testing.T) {
 	raw := []byte(`
 defaults:

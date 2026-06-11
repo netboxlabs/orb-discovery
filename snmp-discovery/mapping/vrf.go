@@ -134,15 +134,18 @@ func TranslateVrfs(
 // address here. Without that, the primary-IP reference and the IPAddress
 // entity would disagree on the VRF, and NetBox (whose IP identity is
 // address+vrf) would create duplicate IPAddress objects.
+// AttachVrfs returns the address→VRF map of the attachments it made so
+// downstream passes (prefix derivation) can carry the discovered VRF onto
+// containers of the same addresses.
 func AttachVrfs(
 	entities []diode.Entity,
 	vrfByIfIndex map[int]*diode.VRF,
 	ifIndexByIface map[*diode.Interface]int,
-) {
-	if len(vrfByIfIndex) == 0 || len(ifIndexByIface) == 0 {
-		return
-	}
+) map[string]*diode.VRF {
 	vrfByAddress := make(map[string]*diode.VRF)
+	if len(vrfByIfIndex) == 0 || len(ifIndexByIface) == 0 {
+		return vrfByAddress
+	}
 	for _, e := range entities {
 		ip, ok := e.(*diode.IPAddress)
 		if !ok {
@@ -164,7 +167,7 @@ func AttachVrfs(
 		}
 	}
 	if len(vrfByAddress) == 0 {
-		return
+		return vrfByAddress
 	}
 	syncSnapshot := func(snapshot *diode.IPAddress) {
 		if snapshot == nil || snapshot.Address == nil {
@@ -192,6 +195,7 @@ func AttachVrfs(
 			syncDeviceShallow(v.Master, syncSnapshot)
 		}
 	}
+	return vrfByAddress
 }
 
 // syncDeviceShallow re-syncs the primary-IP stubs on a VC master ref
