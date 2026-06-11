@@ -696,3 +696,64 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
             info = _slx_aggregate_to_switchport(data)
             result[port] = classify_switchport(info)
         return result
+
+    def get_network_instances(self, name: str = "") -> dict:
+        """
+        Return network instances (SLX-OS VRFs), NAPALM OC shape.
+
+        Derived from the Vrf column of ``show ip interface brief`` — the
+        same template-parsed rows get_interfaces_ip() consumes, so member
+        names join exactly. ``default-vrf`` is the global routing table
+        (DEFAULT_INSTANCE, empty membership); ``mgmt-vrf`` is a real VRF
+        and is kept. Limitations: enumeration is membership-derived (an
+        interface-less VRF does not appear), route distinguishers are not
+        collected (they live in ``show vrf detail``), and Management
+        interfaces are pre-stripped before template parsing (the
+        ntc-template error-exits on those rows) so their mgmt-vrf
+        membership is not recorded.
+        """
+        instances: dict = {
+            "default-vrf": {
+                "name": "default-vrf",
+                "type": "DEFAULT_INSTANCE",
+                "state": {"route_distinguisher": ""},
+                "interfaces": {"interface": {}},
+            },
+        }
+        output = self.device.send_command("show ip interface brief")
+        rows: list[dict] = []
+        if output and output.strip():
+            filtered = "\n".join(
+                line for line in output.splitlines()
+                if not _MGMT_LINE_RE.match(line)
+            )
+            try:
+                rows = parse_output(
+                    platform="extreme_slxos",
+                    command="show ip interface brief",
+                    data=filtered,
+                )
+            except (TextFSMError, ParsingException):
+                logger.warning(
+                    "slxos: show ip interface brief parse failed for "
+                    "network instances",
+                    exc_info=True,
+                )
+        for row in rows:
+            vrf_name = (row.get("vrf") or "").strip()
+            ifname = (row.get("interface") or "").strip()
+            # default-vrf rows belong to the seeded DEFAULT_INSTANCE.
+            if not vrf_name or not ifname or vrf_name == "default-vrf":
+                continue
+            instances.setdefault(
+                vrf_name,
+                {
+                    "name": vrf_name,
+                    "type": "L3VRF",
+                    "state": {"route_distinguisher": ""},
+                    "interfaces": {"interface": {}},
+                },
+            )["interfaces"]["interface"][ifname] = {}
+        if name:
+            return {name: instances[name]} if name in instances else {}
+        return instances
