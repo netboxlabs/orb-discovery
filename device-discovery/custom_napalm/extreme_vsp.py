@@ -598,7 +598,12 @@ class VSPDriver(_napalm_base.NetworkDriver):
             },
         }
         raw = self.device.send_command("show ip vrf")
-        for vrf_name in _vsp_parse_show_ip_vrf(raw or ""):
+        vrf_names = _vsp_parse_show_ip_vrf(raw or "")
+        if name:
+            # Apply the name filter before the per-VRF membership commands
+            # so a single-VRF request doesn't pay N+1 CLI round-trips.
+            vrf_names = [v for v in vrf_names if v == name]
+        for vrf_name in vrf_names:
             # Never let a row overwrite the seeded DEFAULT_INSTANCE.
             if vrf_name == "GlobalRouter":
                 continue

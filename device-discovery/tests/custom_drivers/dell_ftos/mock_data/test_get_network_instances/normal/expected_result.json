@@ -34,6 +34,22 @@
     },
     "type": "DEFAULT_INSTANCE"
   },
+  "green": {
+    "interfaces": {
+      "interface": {
+        "TenGigabitEthernet 0/14": {},
+        "TenGigabitEthernet 0/16": {},
+        "TenGigabitEthernet 0/17": {},
+        "fortyGigE 0/48": {},
+        "fortyGigE 0/52": {}
+      }
+    },
+    "name": "green",
+    "state": {
+      "route_distinguisher": ""
+    },
+    "type": "L3VRF"
+  },
   "management": {
     "interfaces": {
       "interface": {

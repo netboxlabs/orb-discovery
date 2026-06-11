@@ -765,8 +765,39 @@ class FTOSDriver(_napalm_base.NetworkDriver):
 # header ("VRF-Name  VRF-ID  Interfaces") never matches — its second
 # column is not numeric.
 _FTOS_VRF_ROW_RE = re.compile(r"^\s*(?P<name>\S+)\s+(?P<vrf_id>\d+)\b(?P<rest>.*)$")
-# Abbreviated member tokens: "Gi 1/2", "Vl 100", "Ma 1/1", "Te 1/3-1/5".
-_FTOS_VRF_MEMBER_RE = re.compile(r"\b([A-Z][a-zA-Z]{0,2} \d[\d/.\-]*)")
+# Abbreviated member groups: one interface abbreviation followed by a
+# comma-compressed number list — "Gi 1/2", "Te 1/3-1/5", and Dell's
+# compressed forms "Te 0/14,16-17" / "Fo 0/48,52,56,60" where the numbers
+# after the first inherit its slot head. A comma followed by a space starts
+# a new group ("Gi 1/2, Vl 100"), matching the documented column layout.
+_FTOS_VRF_GROUP_RE = re.compile(
+    r"\b([A-Z][a-zA-Z]{0,2}) (\d[\d/.\-]*(?:,[\d/.\-]+)*)"
+)
+
+
+def _ftos_member_tokens(text: str) -> list[str]:
+    """
+    Expand abbreviated member groups into one "<Abbrev> <position>" token each.
+
+    Within a group's comma list, items carrying a "/" set the slot head;
+    bare numbers and bare ranges inherit the most recent head
+    ("Te 0/14,16-17" → "Te 0/14", "Te 0/16-17").
+    """
+    tokens: list[str] = []
+    for abbrev, numlist in _FTOS_VRF_GROUP_RE.findall(text):
+        head = ""
+        for item in numlist.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            if "/" in item:
+                head = item.rsplit("/", 1)[0]
+                tokens.append(f"{abbrev} {item}")
+            elif head:
+                tokens.append(f"{abbrev} {head}/{item}")
+            else:
+                tokens.append(f"{abbrev} {item}")
+    return tokens
 # show ip vrf abbreviations → the full interface names the dell_force10
 # ntc-templates emit (and therefore how get_interfaces()/get_interfaces_ip()
 # key interfaces — the VRF→IP join is by exact name). Unknown abbreviations
@@ -843,7 +874,7 @@ def _ftos_is_member_continuation(line: str) -> bool:
     indent = len(line) - len(line.lstrip())
     if indent < _FTOS_CONTINUATION_MIN_INDENT:
         return False
-    residue = _FTOS_VRF_MEMBER_RE.sub("", line).replace(",", "").strip()
+    residue = _FTOS_VRF_GROUP_RE.sub("", line).replace(",", "").strip()
     return not residue
 
 
@@ -871,7 +902,7 @@ def _ftos_parse_show_ip_vrf(raw: str) -> dict[str, list[str]]:
             current = m.group("name")
             members_by_vrf.setdefault(current, [])
             member_text = m.group("rest")
-        for token in _FTOS_VRF_MEMBER_RE.findall(member_text):
+        for token in _ftos_member_tokens(member_text):
             members_by_vrf[current].extend(
                 _ftos_expand_member_name(t)
                 for t in _ftos_expand_member_range(token)
