@@ -265,9 +265,11 @@ _MGMT_VRF_RE = re.compile(
     re.IGNORECASE,
 )
 # Regex fallback for VRF discovery when the ntc-template fails entirely —
-# the interface + Vrf columns of every known interface type. Mirrors
-# _INTF_IP_FALLBACK_RE so a single unparseable row can't empty the whole
-# VRF discovery result.
+# the interface + Vrf columns of the same interface-type set
+# _INTF_IP_FALLBACK_RE covers, so a single unparseable row can't empty the
+# whole VRF discovery result. Other row types (e.g. Tunnel) are skipped by
+# design: interface discovery doesn't emit them either, so their VRF
+# membership could never join an Interface/IP entity.
 _INTF_VRF_FALLBACK_RE = re.compile(
     r"^\s*((?:Ethernet|Management|Port-channel|Loopback|Ve)\s+\S+)\s+\S+\s+(\S+)\s",
     re.IGNORECASE,
