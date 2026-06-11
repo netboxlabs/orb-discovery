@@ -4,8 +4,8 @@
 
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import NamedTuple
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -28,7 +28,8 @@ from worker.policy.run import RunStatus, RunStore
 logger = logging.getLogger(__name__)
 
 
-class _RunOutcome(NamedTuple):
+@dataclass
+class _RunOutcome:
     """What _execute_run reports back to its caller."""
 
     entity_count: int
