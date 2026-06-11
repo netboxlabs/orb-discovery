@@ -12,9 +12,12 @@ import (
 )
 
 // oidIdx encodes a VRF name into its length-prefixed OID index form.
+// Iterates BYTES, not runes — RFC 4382 indexes are octet strings, so a
+// multi-byte UTF-8 name contributes one sub-identifier per byte.
 func oidIdx(name string) string {
-	out := strconv.Itoa(len(name))
-	for _, c := range name {
+	b := []byte(name)
+	out := strconv.Itoa(len(b))
+	for _, c := range b {
 		out += "." + strconv.Itoa(int(c))
 	}
 	return out

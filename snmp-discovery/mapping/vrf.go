@@ -19,10 +19,11 @@ import (
 const (
 	// Tier 1 — MPLS-L3VPN-STD-MIB (RFC 4382): the standards path.
 	// mplsL3VpnVrfRD is indexed by the VRF name (length-prefixed octets)
-	// and its value is the route distinguisher; mplsL3VpnIfConfRowStatus
-	// is indexed by vrfName + ifIndex and carries the membership.
+	// and its value is the route distinguisher; mplsL3VpnIfVpnClassification
+	// (IfConfTable, mplsL3VpnConf 1) is indexed by vrfName + ifIndex and
+	// carries the membership.
 	oidMplsL3VpnVrfRD  = "1.3.6.1.2.1.10.166.11.1.2.2.1.4"
-	oidMplsL3VpnIfConf = "1.3.6.1.2.1.10.166.11.1.1.1.1.2"
+	oidMplsL3VpnIfConf = "1.3.6.1.2.1.10.166.11.1.2.1.1.2"
 	// Tier 2 — the pre-standard MPLS-VPN-MIB (experimental arc), same
 	// table shapes; still common on older Cisco IOS.
 	oidMplsVpnVrfRDLegacy  = "1.3.6.1.3.118.1.2.2.1.3"
@@ -356,7 +357,8 @@ func mergeVrfRecords(dst, src map[string]*vrfRecord) {
 // mplsL3VpnIfConf index: vrfName + ifIndex). When the leading
 // sub-identifier doesn't look like a valid length prefix, the IMPLIED
 // (unprefixed) encoding is tried as a fallback — agents disagree here.
-// All name octets must be printable ASCII; anything else fails the row.
+// Name octets must form valid, control-character-free UTF-8 (RFC 4382's
+// mplsL3VpnVrfName is an SnmpAdminString); anything else fails the row.
 func decodeOctetStringIndexWithTail(suffix string, tailLen int) (string, []int, bool) {
 	parts := strings.Split(suffix, ".")
 	ints := make([]int, len(parts))
