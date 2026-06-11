@@ -121,7 +121,7 @@ def test_collect_network_instances_swallows_not_implemented(caplog) -> None:
 # from upstream NAPALM (ios/eos/junos/nxos/nxos_ssh) or implemented in
 # custom_napalm (iosxr/iosxr_netconf/nokia_sros/nokia_srl). Asserting the
 # owning module (not just "is not the base-class stub") also catches the
-# case where upstream grows its own NotImplementedError-raising override,
+# case where a wrapper driver accidentally shadows the upstream getter,
 # which a bare identity check against NetworkDriver would miss.
 @pytest.mark.parametrize(
     ("driver_cls", "expected_module_prefix"),
