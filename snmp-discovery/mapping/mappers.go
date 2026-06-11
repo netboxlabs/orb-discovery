@@ -94,7 +94,16 @@ func (m *IPAddressMapper) applyDefaults(entity *diode.IPAddress, defaults *confi
 		entity.Role = &entityDefaults.Role
 	}
 	if entity.Vrf == nil {
-		vrfDefaults := entityDefaults.Vrf
+		// Resolve the per-address-family VRF: vrf_ipv4 / vrf_ipv6 win for
+		// their family, falling back to the AF-agnostic vrf. The entity's
+		// address is always set before applyDefaults runs (the caller
+		// returns early on empty addresses), so the family discriminator
+		// is the address literal itself.
+		family := "ipv4"
+		if entity.Address != nil && strings.Contains(*entity.Address, ":") {
+			family = "ipv6"
+		}
+		vrfDefaults := entityDefaults.VrfForFamily(family)
 		switch {
 		case vrfDefaults.Name != "":
 			vrf := &diode.VRF{Name: &vrfDefaults.Name}

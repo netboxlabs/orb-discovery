@@ -104,6 +104,34 @@ type IPAddressDefaults struct {
 	Role        string        `yaml:"role,omitempty"`
 	Tenant      string        `yaml:"tenant,omitempty"`
 	Vrf         VrfParameters `yaml:"vrf,omitempty"`
+	// Per-address-family overrides mirroring device-discovery: when set,
+	// the family-specific VRF wins for that AF's IP addresses; otherwise
+	// the AF-agnostic Vrf above applies.
+	VrfIpv4 VrfParameters `yaml:"vrf_ipv4,omitempty"`
+	VrfIpv6 VrfParameters `yaml:"vrf_ipv6,omitempty"`
+}
+
+// IsZero reports whether no VrfParameters field is set.
+func (v VrfParameters) IsZero() bool {
+	return v.Name == "" && v.Rd == "" && v.Description == "" &&
+		v.Comments == "" && len(v.Tags) == 0
+}
+
+// VrfForFamily resolves the effective VRF defaults for an address family
+// ("ipv4" or "ipv6"): the family-specific override wins when any of its
+// fields is set; otherwise the AF-agnostic Vrf applies.
+func (d *IPAddressDefaults) VrfForFamily(family string) VrfParameters {
+	var af VrfParameters
+	switch family {
+	case "ipv4":
+		af = d.VrfIpv4
+	case "ipv6":
+		af = d.VrfIpv6
+	}
+	if !af.IsZero() {
+		return af
+	}
+	return d.Vrf
 }
 
 // InterfaceDefaults represents default values for a specific entity type
@@ -153,6 +181,25 @@ type Defaults struct {
 	InterfaceExcludePatterns []string           `yaml:"interface_exclude_patterns,omitempty"`
 }
 
+// mergeVrfParameters overlays non-zero override fields onto dst in place.
+func mergeVrfParameters(dst, override *VrfParameters) {
+	if override.Name != "" {
+		dst.Name = override.Name
+	}
+	if override.Rd != "" {
+		dst.Rd = override.Rd
+	}
+	if override.Description != "" {
+		dst.Description = override.Description
+	}
+	if override.Comments != "" {
+		dst.Comments = override.Comments
+	}
+	if len(override.Tags) > 0 {
+		dst.Tags = override.Tags
+	}
+}
+
 // MergeDefaults merges target-level override defaults with policy-level defaults
 // Target overrides take precedence over policy defaults for non-zero values
 func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
@@ -199,22 +246,12 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 	// Merge VRF defaults field-by-field so a per-target override can refine
 	// a single VrfParameters knob (e.g. rd) without having to restate every
 	// other field already set at the policy level. Matches the
-	// Device/VLAN/Interface non-zero-value-wins pattern.
-	if overrideDefaults.IPAddress.Vrf.Name != "" {
-		merged.IPAddress.Vrf.Name = overrideDefaults.IPAddress.Vrf.Name
-	}
-	if overrideDefaults.IPAddress.Vrf.Rd != "" {
-		merged.IPAddress.Vrf.Rd = overrideDefaults.IPAddress.Vrf.Rd
-	}
-	if overrideDefaults.IPAddress.Vrf.Description != "" {
-		merged.IPAddress.Vrf.Description = overrideDefaults.IPAddress.Vrf.Description
-	}
-	if overrideDefaults.IPAddress.Vrf.Comments != "" {
-		merged.IPAddress.Vrf.Comments = overrideDefaults.IPAddress.Vrf.Comments
-	}
-	if len(overrideDefaults.IPAddress.Vrf.Tags) > 0 {
-		merged.IPAddress.Vrf.Tags = overrideDefaults.IPAddress.Vrf.Tags
-	}
+	// Device/VLAN/Interface non-zero-value-wins pattern. The per-AF
+	// overrides merge the same way, each against its own policy-level
+	// counterpart only — an override vrf_ipv4 never bleeds into vrf.
+	mergeVrfParameters(&merged.IPAddress.Vrf, &overrideDefaults.IPAddress.Vrf)
+	mergeVrfParameters(&merged.IPAddress.VrfIpv4, &overrideDefaults.IPAddress.VrfIpv4)
+	mergeVrfParameters(&merged.IPAddress.VrfIpv6, &overrideDefaults.IPAddress.VrfIpv6)
 
 	// Merge Interface defaults
 	if overrideDefaults.Interface.Description != "" {

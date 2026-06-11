@@ -567,6 +567,46 @@ func TestMergeDefaults_AssetTag_NoOverride(t *testing.T) {
 	assert.Equal(t, "POLICY-TAG", merged.AssetTag)
 }
 
+func TestMergeDefaults_PerAfVrf_FieldLevelNoBleed(t *testing.T) {
+	policy := &Defaults{IPAddress: IPAddressDefaults{
+		Vrf:     VrfParameters{Name: "any", Rd: "65000:1"},
+		VrfIpv4: VrfParameters{Name: "four", Description: "v4 desc"},
+	}}
+	override := &Defaults{IPAddress: IPAddressDefaults{
+		VrfIpv4: VrfParameters{Rd: "65000:44"},
+		VrfIpv6: VrfParameters{Name: "six"},
+	}}
+	merged := MergeDefaults(policy, override)
+
+	// Field-level refinement: override rd lands without clearing the
+	// policy-level name/description of the SAME knob.
+	assert.Equal(t, "four", merged.IPAddress.VrfIpv4.Name)
+	assert.Equal(t, "65000:44", merged.IPAddress.VrfIpv4.Rd)
+	assert.Equal(t, "v4 desc", merged.IPAddress.VrfIpv4.Description)
+	// New knob introduced by override only.
+	assert.Equal(t, "six", merged.IPAddress.VrfIpv6.Name)
+	// No bleed between knobs: the AF-agnostic vrf is untouched.
+	assert.Equal(t, "any", merged.IPAddress.Vrf.Name)
+	assert.Equal(t, "65000:1", merged.IPAddress.Vrf.Rd)
+}
+
+func TestIPAddressDefaults_PerAfVrf_YAMLPolymorphic(t *testing.T) {
+	raw := []byte(`
+defaults:
+  ip_address:
+    vrf: anycast
+    vrf_ipv4: { name: four, rd: "65000:4" }
+    vrf_ipv6: six
+`)
+	var pc PolicyConfig
+	require.NoError(t, yaml.Unmarshal(raw, &pc))
+	assert.Equal(t, "anycast", pc.Defaults.IPAddress.Vrf.Name)
+	assert.Equal(t, "four", pc.Defaults.IPAddress.VrfIpv4.Name)
+	assert.Equal(t, "65000:4", pc.Defaults.IPAddress.VrfIpv4.Rd)
+	assert.Equal(t, "six", pc.Defaults.IPAddress.VrfIpv6.Name)
+	assert.Equal(t, "", pc.Defaults.IPAddress.VrfIpv6.Rd)
+}
+
 func TestPolicyOptions_DiscoverModulesDefaultsToOff(t *testing.T) {
 	raw := []byte(`
 options:
