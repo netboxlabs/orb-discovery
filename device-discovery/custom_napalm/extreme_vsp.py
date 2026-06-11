@@ -367,7 +367,9 @@ def _vsp_parse_show_ip_vrf(raw: str) -> list[str]:
         stripped = line.strip()
         if not stripped or stripped.startswith(("=", "-")):
             continue
-        m = _VSP_VRF_ROW_RE.match(line)
+        # Match against the stripped line so indented VRF rows (releases
+        # vary in table padding) are not silently skipped.
+        m = _VSP_VRF_ROW_RE.match(stripped)
         if m and m.group("name") not in names:
             names.append(m.group("name"))
     return names

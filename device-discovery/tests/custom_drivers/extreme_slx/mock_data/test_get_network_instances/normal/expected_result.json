@@ -63,5 +63,17 @@
       "route_distinguisher": ""
     },
     "type": "DEFAULT_INSTANCE"
+  },
+  "mgmt-vrf": {
+    "interfaces": {
+      "interface": {
+        "Management 0": {}
+      }
+    },
+    "name": "mgmt-vrf",
+    "state": {
+      "route_distinguisher": ""
+    },
+    "type": "L3VRF"
   }
 }

@@ -24,3 +24,4 @@ Ve 546                 10.11.84.2           DEMO-VLT-LAB-02                     
 Ve 547                 10.11.85.2           DEMO-VLT-LAB-02                               up                        up
 Ve 548                 172.16.0.2           DEMO-VLT-LAB-01                               up                        up
 Ve 734                 10.224.8.137         ABC-PUBLIC-LEGACY                             administratively down     down
+Management 0           10.255.255.1/24      mgmt-vrf                                      up                        up

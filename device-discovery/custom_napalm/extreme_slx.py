@@ -257,6 +257,13 @@ _MGMT_IP_RE = re.compile(
     r"^\s*(Management\s+\S+)\s+(\d[\d.]+(?:/\d+)?)\s",
     re.IGNORECASE,
 )
+# Same pre-stripped Management rows, but capturing the Vrf column so VRF
+# discovery doesn't lose mgmt-vrf membership (or the VRF itself when it
+# appears only on Management interfaces).
+_MGMT_VRF_RE = re.compile(
+    r"^\s*(Management\s+\S+)\s+\S+\s+(\S+)\s",
+    re.IGNORECASE,
+)
 # Regex fallback covering all known interface types, used when ntc-template
 # parse_output() fails entirely so no interface address is silently dropped.
 _INTF_IP_FALLBACK_RE = re.compile(
@@ -705,12 +712,14 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
         same template-parsed rows get_interfaces_ip() consumes, so member
         names join exactly. ``default-vrf`` is the global routing table
         (DEFAULT_INSTANCE, empty membership); ``mgmt-vrf`` is a real VRF
-        and is kept. Limitations: enumeration is membership-derived (an
-        interface-less VRF does not appear), route distinguishers are not
-        collected (they live in ``show vrf detail``), and Management
-        interfaces are pre-stripped before template parsing (the
-        ntc-template error-exits on those rows) so their mgmt-vrf
-        membership is not recorded.
+        and is kept. Management interfaces are pre-stripped before
+        template parsing (the ntc-template error-exits on those rows)
+        and recovered with a dedicated regex — mirroring how
+        get_interfaces_ip() recovers their addresses — so mgmt-vrf
+        survives even when it appears only on Management interfaces.
+        Limitations: enumeration is membership-derived (an interface-less
+        VRF does not appear) and route distinguishers are not collected
+        (they live in ``show vrf detail``).
         """
         instances: dict = {
             "default-vrf": {
@@ -739,9 +748,17 @@ class SLXOSDriver(_napalm_base.NetworkDriver):
                     "network instances",
                     exc_info=True,
                 )
-        for row in rows:
-            vrf_name = (row.get("vrf") or "").strip()
-            ifname = (row.get("interface") or "").strip()
+        memberships = [
+            ((row.get("interface") or "").strip(), (row.get("vrf") or "").strip())
+            for row in rows
+        ]
+        # Recover the pre-stripped Management rows' Vrf column.
+        if output:
+            for line in output.splitlines():
+                m = _MGMT_VRF_RE.match(line)
+                if m:
+                    memberships.append((m.group(1).strip(), m.group(2).strip()))
+        for ifname, vrf_name in memberships:
             # default-vrf rows belong to the seeded DEFAULT_INSTANCE.
             if not vrf_name or not ifname or vrf_name == "default-vrf":
                 continue
