@@ -597,6 +597,22 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 		mapping.AttachIfaceModules(entitiesForTarget, ifaceModuleMap, ifIndexByIface)
 	}
 
+	// VRF discovery: translate the walked VRF MIB rows (the columns are
+	// only in the walk set when discover_vrfs is on) and attach the
+	// discovered VRFs to the IP addresses of their member interfaces by
+	// ifIndex — overwriting the vrf / vrf_ipv4 / vrf_ipv6 defaults for
+	// those interfaces, which remain the fallback everywhere else. Runs
+	// after stack translation so both single-device and stack paths are
+	// covered; VRF entities append at the tail like VLANs (IP-attached
+	// refs reconcile against them by name+rd).
+	if r.config.Options.VrfDiscoveryEnabled() {
+		vrfEntities, vrfByIfIndex := mapping.TranslateVrfs(oids, targetDefaults, r.logger)
+		if len(vrfEntities) > 0 {
+			mapping.AttachVrfs(entitiesForTarget, vrfByIfIndex, ifIndexByIface)
+			entitiesForTarget = append(entitiesForTarget, vrfEntities...)
+		}
+	}
+
 	entities = append(entities, entitiesForTarget...)
 
 	// Update discovered hosts gauge

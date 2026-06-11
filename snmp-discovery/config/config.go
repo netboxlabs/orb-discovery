@@ -336,6 +336,20 @@ type Options struct {
 	//   "full"      → linecards plus per-transceiver sub-bays; populates
 	//                 Interface.Module on physical ports
 	DiscoverModules *string `yaml:"discover_modules,omitempty"`
+
+	// Tri-state pointer so unset (default = off) is distinguishable from
+	// an explicit false. When true, the VRF MIB tables (MPLS-L3VPN-STD-MIB,
+	// the legacy MPLS-VPN-MIB, CISCO-VRF-MIB) are walked and discovered
+	// VRFs are emitted and attached to the IP addresses of their member
+	// interfaces, taking precedence over the vrf / vrf_ipv4 / vrf_ipv6
+	// defaults for those interfaces.
+	DiscoverVrfs *bool `yaml:"discover_vrfs,omitempty"`
+}
+
+// VrfDiscoveryEnabled returns the effective discover_vrfs toggle,
+// defaulting to false.
+func (o *Options) VrfDiscoveryEnabled() bool {
+	return o != nil && o.DiscoverVrfs != nil && *o.DiscoverVrfs
 }
 
 // ModuleDiscoveryMode returns the effective mode, defaulting to "off".
