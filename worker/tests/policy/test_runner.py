@@ -266,6 +266,24 @@ def test_run_success(
     assert len(call_args) == 3
 
 
+def test_run_with_empty_delta_is_noop_completed(
+    policy_runner, sample_policy, mock_diode_client, mock_backend, mock_run_store
+):
+    """A run producing zero entities (empty delta) records a COMPLETED no-op, no ingest call."""
+    policy_runner.name = "test_policy"
+    policy_runner.run_store = mock_run_store
+
+    mock_backend.run.return_value = []
+
+    policy_runner.run(mock_diode_client, mock_backend, sample_policy)
+
+    mock_diode_client.ingest.assert_not_called()
+    mock_run_store.update_run.assert_called_once()
+    update_kwargs = mock_run_store.update_run.call_args.kwargs
+    assert update_kwargs["status"] == RunStatus.COMPLETED
+    assert update_kwargs["entity_count"] == 0
+
+
 def test_run_legacy_backend_without_kwargs_gets_bare_call(
     policy_runner,
     sample_policy,
@@ -755,6 +773,33 @@ def test_ingest_callback_entities_happy_path(
     mock_run_store.update_run.assert_called_once()
     update_kwargs = mock_run_store.update_run.call_args.kwargs
     assert update_kwargs["status"] == RunStatus.COMPLETED
+
+
+def test_ingest_callback_empty_entities_is_noop_completed(
+    policy_runner,
+    sample_policy,
+    sample_diode_config,
+    mock_load_class,
+    mock_diode_client,
+    mock_run_store,
+):
+    """Callback with an empty entity list records a COMPLETED no-op run, no ingest call."""
+    with patch.object(policy_runner.scheduler, "start"), patch.object(
+        policy_runner.scheduler, "add_job"
+    ):
+        policy_runner.setup("policy1", sample_diode_config, sample_policy, mock_run_store)
+
+    callback = _extract_callback(mock_load_class.return_value)
+    client_instance = mock_diode_client.return_value
+
+    result = callback(entities=[])
+
+    assert result is None
+    client_instance.ingest.assert_not_called()
+    mock_run_store.update_run.assert_called_once()
+    update_kwargs = mock_run_store.update_run.call_args.kwargs
+    assert update_kwargs["status"] == RunStatus.COMPLETED
+    assert update_kwargs["entity_count"] == 0
 
 
 def test_ingest_callback_error_path(

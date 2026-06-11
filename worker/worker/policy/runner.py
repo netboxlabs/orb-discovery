@@ -279,12 +279,20 @@ class PolicyRunner:
         """
         Send entities to the Diode client.
 
+        An empty entity list is a valid no-op (e.g. an incremental run that
+        found no changes since its watermark) — Diode's ingester rejects an
+        empty batch with ``entities is empty`` — so nothing is sent and the
+        run completes with ``entity_count=0``.
+
         Delegates chunking to the SDK's ``create_message_chunks``, which owns
         the gRPC message-size threshold (3 MB default, a safe margin below the
         4 MB ceiling) and returns a single chunk when the payload already fits.
 
-        Returns the number of chunks actually sent (1 if not chunked).
+        Returns the number of chunks actually sent (0 for an empty list, 1 if
+        not chunked).
         """
+        if not entities_list:
+            return 0
         chunks = create_message_chunks(entities_list)
         for chunk in chunks:
             response = client.ingest(entities=chunk, metadata=metadata)
