@@ -609,7 +609,7 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 	if r.config.Options.VrfDiscoveryEnabled() {
 		vrfEntities, vrfByIfIndex := mapping.TranslateVrfs(oids, targetDefaults, r.logger)
 		if len(vrfEntities) > 0 {
-			vrfByAddress = mapping.AttachVrfs(entitiesForTarget, vrfByIfIndex, ifIndexByIface)
+			vrfByAddress = mapping.AttachVrfs(entitiesForTarget, vrfByIfIndex, ifIndexByIface, r.logger)
 			entitiesForTarget = append(entitiesForTarget, vrfEntities...)
 		}
 	}

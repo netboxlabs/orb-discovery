@@ -137,11 +137,17 @@ func TranslateVrfs(
 // address+vrf) would create duplicate IPAddress objects.
 // AttachVrfs returns the address→VRF map of the attachments it made so
 // downstream passes (prefix derivation) can carry the discovered VRF onto
-// containers of the same addresses.
+// containers of the same addresses. The map is single-valued per address:
+// the SNMP pipeline guarantees one IPAddress entity per address string
+// per walk (the IP tables are address-indexed and the modern/legacy
+// overlap is deduped), so a conflict can only come from callers handing
+// in synthetic entity slices — guarded with first-wins plus a warning so
+// it can never silently rewrite snapshots or drop a (prefix, VRF) pair.
 func AttachVrfs(
 	entities []diode.Entity,
 	vrfByIfIndex map[int]*diode.VRF,
 	ifIndexByIface map[*diode.Interface]int,
+	logger *slog.Logger,
 ) map[string]*diode.VRF {
 	vrfByAddress := make(map[string]*diode.VRF)
 	if len(vrfByIfIndex) == 0 || len(ifIndexByIface) == 0 {
@@ -162,9 +168,20 @@ func AttachVrfs(
 		}
 		if vrf, hit := vrfByIfIndex[idx]; hit {
 			ip.Vrf = vrf
-			if ip.Address != nil {
-				vrfByAddress[*ip.Address] = vrf
+			if ip.Address == nil {
+				continue
 			}
+			if existing, dup := vrfByAddress[*ip.Address]; dup && existing != vrf {
+				logger.Warn(
+					"vrf: same address attached in two VRFs; keeping the first "+
+						"for primary-IP sync and prefix derivation",
+					"address", *ip.Address,
+					"kept", strVal(existing.Name),
+					"dropped", strVal(vrf.Name),
+				)
+				continue
+			}
+			vrfByAddress[*ip.Address] = vrf
 		}
 	}
 	if len(vrfByAddress) == 0 {
@@ -197,6 +214,14 @@ func AttachVrfs(
 		}
 	}
 	return vrfByAddress
+}
+
+// strVal dereferences a string pointer for logging, tolerating nil.
+func strVal(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // syncDeviceShallow re-syncs the primary-IP stubs on a VC master ref

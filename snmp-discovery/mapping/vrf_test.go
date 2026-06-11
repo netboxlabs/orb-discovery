@@ -200,6 +200,7 @@ func TestAttachVrfs_OverwritesDefaultsAndSkipsNonMembers(t *testing.T) {
 	AttachVrfs(entities,
 		map[int]*diode.VRF{10: vrf},
 		map[*diode.Interface]int{ifaceMember: 10, ifaceOther: 20},
+		slog.Default(),
 	)
 
 	// Discovered VRF overwrote the defaults-derived one on the member.
@@ -207,6 +208,32 @@ func TestAttachVrfs_OverwritesDefaultsAndSkipsNonMembers(t *testing.T) {
 	// Non-member keeps its defaults VRF.
 	assert.Equal(t, "from-defaults", *ipOther.Vrf.Name)
 	assert.Nil(t, ipUnassigned.Vrf)
+}
+
+func TestAttachVrfs_SameAddressTwoVrfsKeepsFirstInAddressMap(t *testing.T) {
+	redName, blueName := "RED", "BLUE"
+	red := &diode.VRF{Name: &redName}
+	blue := &diode.VRF{Name: &blueName}
+	ifaceRed := &diode.Interface{}
+	ifaceBlue := &diode.Interface{}
+	addr := "10.0.0.1/24"
+	addrCopy := addr
+	ipRed := &diode.IPAddress{Address: &addr, AssignedObject: ifaceRed}
+	ipBlue := &diode.IPAddress{Address: &addrCopy, AssignedObject: ifaceBlue}
+
+	vrfByAddress := AttachVrfs(
+		[]diode.Entity{ipRed, ipBlue},
+		map[int]*diode.VRF{1: red, 2: blue},
+		map[*diode.Interface]int{ifaceRed: 1, ifaceBlue: 2},
+		slog.Default(),
+	)
+
+	// Each IP keeps its own interface's VRF...
+	assert.Same(t, red, ipRed.Vrf)
+	assert.Same(t, blue, ipBlue.Vrf)
+	// ...but the address map keeps the first VRF seen, so primary-IP sync
+	// and prefix derivation stay deterministic.
+	assert.Same(t, red, vrfByAddress[addr])
 }
 
 func TestAttachVrfs_SyncsPrimaryIPSnapshotsAndVCMasterRefs(t *testing.T) {
@@ -235,6 +262,7 @@ func TestAttachVrfs_SyncsPrimaryIPSnapshotsAndVCMasterRefs(t *testing.T) {
 		[]diode.Entity{dev, vc, member, devOther, ip},
 		map[int]*diode.VRF{1: vrf},
 		map[*diode.Interface]int{iface: 1},
+		slog.Default(),
 	)
 
 	require.Same(t, vrf, ip.Vrf)
