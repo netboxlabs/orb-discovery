@@ -889,6 +889,52 @@ func TestAssetTagWalkGating_ChildEntry(t *testing.T) {
 		"asset tag child column must be walked with discover_asset_tags on")
 }
 
+// TestAssetTagWalkGating_VendorEntry tests the vendor-scoped path through
+// objectIDsForVendor: a chassis_asset child entry under a vendor-scoped
+// parent must be excluded from VendorObjectIDs when discover_asset_tags is
+// off, and included when the option is on.
+func TestAssetTagWalkGating_VendorEntry(t *testing.T) {
+	const (
+		vendor      = "cisco"
+		parentOID   = "1.3.6.1.2.1.47.1.1.1"
+		serialOID   = ".1.3.6.1.2.1.47.1.1.1.1.11"
+		assetTagOID = ".1.3.6.1.2.1.47.1.1.1.1.15"
+	)
+
+	// Vendor-scoped chassis_inventory parent with a chassis_asset child.
+	mappings := []config.MappingEntry{
+		{
+			OID: parentOID, Entity: "chassis_inventory", Field: "_id", IdentifierSize: 2,
+			Vendor: vendor,
+			MappingEntries: []config.MappingEntry{
+				{OID: serialOID, Entity: "chassis_inventory", Field: "serialNumber"},
+				{OID: assetTagOID, Entity: "chassis_asset", Field: "assetID"},
+			},
+		},
+	}
+	logger := slog.Default()
+
+	// Case 1: discover_asset_tags off (default Options{}).
+	off, err := NewConfig(mappings, logger, nil, nil, nil, config.Options{})
+	require.NoError(t, err)
+	vend := off.VendorObjectIDs(vendor)
+	_, hasAsset := vend[assetTagOID]
+	assert.False(t, hasAsset,
+		"vendor asset tag child column must not be walked with discover_asset_tags off")
+	_, hasSerial := vend[serialOID]
+	assert.True(t, hasSerial,
+		"sibling chassis_inventory serial column must remain present when asset tag is off")
+
+	// Case 2: discover_asset_tags on.
+	enabled := true
+	on, err := NewConfig(mappings, logger, nil, nil, nil, config.Options{DiscoverAssetTags: &enabled})
+	require.NoError(t, err)
+	vend = on.VendorObjectIDs(vendor)
+	_, hasAsset = vend[assetTagOID]
+	assert.True(t, hasAsset,
+		"vendor asset tag child column must be walked with discover_asset_tags on")
+}
+
 // stubManufacturers and stubDeviceLookup satisfy the data.ManufacturerRetriever
 // and data.DeviceRetriever interfaces with harmless no-op implementations so
 // that chassis tests can run through the full DeviceMapper code path without
@@ -1259,7 +1305,7 @@ func TestTranslateAsStack_StackMemberTagCollidingWithDefaultsSuppressed(t *testi
 	}
 }
 
-// TestResolveAssetTags_MasterRowAgreementIsNotCollision guards Fix 2: when
+// TestResolveAssetTags_MasterRowAgreementIsNotCollision: when
 // members[0] (the master row, sorted by ID) carries the same tag as
 // masterTag, that is agreement with the operator's configured default — not
 // a collision. The tag must be absent from the result (it's already on the

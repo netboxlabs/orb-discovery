@@ -488,6 +488,7 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 		if Entry.Entity == string(VLANEntityType) ||
 			Entry.Entity == string(InterfaceVLANEntityType) ||
 			Entry.Entity == string(ChassisInventoryEntityType) ||
+			Entry.Entity == string(ChassisModuleEntityType) ||
 			Entry.Entity == string(ChassisAssetEntityType) ||
 			Entry.Entity == string(VrfEntityType) {
 			postPassPrefixes = append(postPassPrefixes, m.OID+".")
@@ -1337,10 +1338,10 @@ func (m *ObjectIDMapper) groupByObjectIDIndex(objectIDs ObjectIDValueMap) map[Ob
 }
 
 // isPostPassOIDPrefix reports whether the given OID belongs to an
-// entity type that is consumed exclusively by a post-pass handler (today:
-// vlan and interface_vlan, both routed through VlanMapper; and
-// chassis_inventory, routed to TranslateAsStack at the runner level — it
-// does not implement the postPassMapper interface).
+// entity type that is consumed exclusively by a post-pass handler.
+// The covered types are all post-pass-only entity types registered in
+// NewConfig's postPassPrefixes slice; the exact set is authoritative
+// there rather than in this comment so the two cannot diverge.
 //
 // Uses the pre-computed postPassPrefixes slice (populated in NewConfig)
 // instead of resolving the parent entry via getMappingEntry, which
@@ -1468,13 +1469,20 @@ func (m *Config) inetAddressEntryFor(objectID string) *Entry {
 	return best
 }
 
-// ObjectIDs returns the ObjectIDs that the ObjectIDMapper can map
+// ObjectIDs returns the OIDs that the ObjectIDMapper can map.
+// Feature-gated entity types (chassis_module, vrf, chassis_asset) are
+// excluded when their corresponding option is off, consistent with
+// GenericObjectIDs and VendorObjectIDs.
 func (m *Config) ObjectIDs() map[string]int {
+	skipped := m.skippedWalkEntities()
 	objectIDs := make(map[string]int)
 	for _, entry := range m.mapping {
 		// If the entry has child mapping entries, add the child OIDs
 		if len(entry.MappingEntries) > 0 {
 			for _, childEntry := range entry.MappingEntries {
+				if skipped[childEntry.Entity] {
+					continue
+				}
 				if childEntry.IdentifierSize == 0 {
 					objectIDs[childEntry.OID] = 1
 				} else {
@@ -1483,6 +1491,9 @@ func (m *Config) ObjectIDs() map[string]int {
 				}
 			}
 		} else {
+			if skipped[entry.Entity] {
+				continue
+			}
 			// If no child entries, add the parent OID itself
 			if entry.IdentifierSize == 0 {
 				objectIDs[entry.OID] = 1
@@ -1511,27 +1522,35 @@ func (m *Config) VendorObjectIDs(vendor string) map[string]int {
 	return m.objectIDsForVendor(vendor, false)
 }
 
+// skippedWalkEntities returns the pseudo-entity types whose columns
+// must be excluded from the walk set because their consuming feature
+// is disabled. Walking them would be wasted SNMP work: each is
+// consumed exclusively by an option-gated post-pass.
+//
+//   - chassis_module: ENTITY-MIB entPhysicalDescr / entPhysicalVendorType,
+//     consumed by the module / module bay post-pass. Off by default;
+//     enabled at mode linecards or full.
+//   - vrf: VRF MIB columns consumed exclusively by the runner-level
+//     TranslateVrfs pass.
+//   - chassis_asset: entPhysicalAssetID consumed exclusively by the
+//     TranslateAsStack asset-tag post-pass.
+func (m *Config) skippedWalkEntities() map[string]bool {
+	return map[string]bool{
+		string(ChassisModuleEntityType): m.options.ModuleDiscoveryMode() == config.DiscoverModulesOff,
+		string(VrfEntityType):           !m.options.VrfDiscoveryEnabled(),
+		string(ChassisAssetEntityType):  !m.options.AssetTagDiscoveryEnabled(),
+	}
+}
+
 // objectIDsForVendor is the shared implementation behind GenericObjectIDs
 // and VendorObjectIDs. When generic==true it selects entries with an empty
 // Vendor field; otherwise it selects entries matching the given vendor string.
 // Child-expansion follows the same rules as ObjectIDs.
 //
-// Gating: child entries flagged with entity "chassis_module" (ENTITY-MIB
-// entPhysicalDescr / entPhysicalVendorType) are consumed exclusively by
-// the module / module bay post-pass. When discover_modules is off (the
-// default), TranslateModulesWithAlias short-circuits before reading them,
-// so walking those columns is wasted SNMP work on large modular chassis.
-// Skip them from the walk set in mode=off; include them in linecards / full.
+// Feature-gated entity types are excluded via skippedWalkEntities so that
+// walking them is suppressed when their consuming option is off.
 func (m *Config) objectIDsForVendor(vendor string, generic bool) map[string]int {
-	skipChassisModule := m.options.ModuleDiscoveryMode() == config.DiscoverModulesOff
-	// VRF MIB columns are consumed exclusively by the runner-level
-	// TranslateVrfs pass; walking them with discover_vrfs off would be
-	// wasted SNMP work, so they are excluded from the walk set entirely.
-	skipVrf := !m.options.VrfDiscoveryEnabled()
-	// entPhysicalAssetID is consumed exclusively by the TranslateAsStack
-	// post-pass; walking it with discover_asset_tags off would be wasted
-	// SNMP work, so it is excluded from the walk set entirely.
-	skipAssetTag := !m.options.AssetTagDiscoveryEnabled()
+	skipped := m.skippedWalkEntities()
 	out := make(map[string]int)
 	for _, entry := range m.mapping {
 		if generic {
@@ -1545,13 +1564,7 @@ func (m *Config) objectIDsForVendor(vendor string, generic bool) map[string]int 
 		}
 		if len(entry.MappingEntries) > 0 {
 			for _, childEntry := range entry.MappingEntries {
-				if skipChassisModule && childEntry.Entity == string(ChassisModuleEntityType) {
-					continue
-				}
-				if skipVrf && childEntry.Entity == string(VrfEntityType) {
-					continue
-				}
-				if skipAssetTag && childEntry.Entity == string(ChassisAssetEntityType) {
+				if skipped[childEntry.Entity] {
 					continue
 				}
 				if childEntry.IdentifierSize == 0 {
@@ -1561,13 +1574,7 @@ func (m *Config) objectIDsForVendor(vendor string, generic bool) map[string]int 
 				}
 			}
 		} else {
-			if skipChassisModule && entry.Entity == string(ChassisModuleEntityType) {
-				continue
-			}
-			if skipVrf && entry.Entity == string(VrfEntityType) {
-				continue
-			}
-			if skipAssetTag && entry.Entity == string(ChassisAssetEntityType) {
+			if skipped[entry.Entity] {
 				continue
 			}
 			if entry.IdentifierSize == 0 {
