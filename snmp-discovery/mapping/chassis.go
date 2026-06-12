@@ -42,6 +42,7 @@ func (m *ChassisInventoryMapper) Map(
 // as a top-level chassis (class=3, containedIn=0). The ID is the
 // derived logical member id (see deriveMemberID); EntPhysicalIndex is
 // the raw row index used for entAliasMappingTable chain walks.
+// AssetTag is the trimmed entPhysicalAssetID value ("" when unset or not walked).
 type ChassisMember struct {
 	ID               int
 	EntPhysicalIndex string
@@ -49,6 +50,7 @@ type ChassisMember struct {
 	Model            string
 	EntName          string
 	ParentRelPos     int
+	AssetTag         string
 }
 
 // ChassisInventory is the deduped, validated, member-id-sorted set of
@@ -71,6 +73,7 @@ const (
 	oidEntPhysicalName        = ".1.3.6.1.2.1.47.1.1.1.1.7."
 	oidEntPhysicalSerialNum   = ".1.3.6.1.2.1.47.1.1.1.1.11."
 	oidEntPhysicalModelName   = ".1.3.6.1.2.1.47.1.1.1.1.13."
+	oidEntPhysicalAssetID     = ".1.3.6.1.2.1.47.1.1.1.1.15."
 
 	entPhysicalClassChassis = "3"
 	entPhysicalClassStack   = "11"
@@ -139,6 +142,7 @@ func extractInventory(oids ObjectIDValueMap, logger *slog.Logger) ChassisInvento
 			Model:            trimSNMPString(oids[oidEntPhysicalModelName+idx].Value),
 			EntName:          trimSNMPString(oids[oidEntPhysicalName+idx].Value),
 			ParentRelPos:     parentRel,
+			AssetTag:         trimSNMPString(oids[oidEntPhysicalAssetID+idx].Value),
 		})
 	}
 
