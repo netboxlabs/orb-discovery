@@ -1138,3 +1138,35 @@ func TestAssetTagClaimer_Semantics(t *testing.T) {
 	// A different tag has no prior owner: host-B can claim it.
 	assert.True(t, claimB("TAG-002"), "host-B must be able to claim an unclaimed tag")
 }
+
+// TestAssetTagClaimer_PortDistinguishesTargets: two agents on the same
+// host behind different SNMP ports are distinct devices (the runner's
+// job identity is host:port), so claims must be keyed by the full
+// target identity — a cloned tag on the second port must be suppressed.
+func TestAssetTagClaimer_PortDistinguishesTargets(t *testing.T) {
+	r := &Runner{
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		assetTagOwners: map[string]string{},
+	}
+
+	claim161 := r.assetTagClaimer("10.0.0.1:161")
+	claim1161 := r.assetTagClaimer("10.0.0.1:1161")
+
+	assert.True(t, claim161("CLONED"), "first port claims the tag")
+	assert.False(t, claim1161("CLONED"),
+		"same host on a different port is a different target; cloned tag must be suppressed")
+}
+
+// TestAssetTagClaimer_NilMapLazyInit: a Runner built as a literal
+// (without NewRunner) must not panic on the first claim — the claimer
+// lazily initializes the ownership map under the mutex.
+func TestAssetTagClaimer_NilMapLazyInit(t *testing.T) {
+	r := &Runner{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+
+	claim := r.assetTagClaimer("10.0.0.1:161")
+	assert.NotPanics(t, func() {
+		assert.True(t, claim("TAG-001"), "first claim on lazily-initialized map must succeed")
+	})
+	assert.False(t, r.assetTagClaimer("10.0.0.2:161")("TAG-001"),
+		"ownership recorded in the lazily-created map must suppress cross-target claims")
+}
