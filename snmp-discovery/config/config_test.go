@@ -669,11 +669,6 @@ func TestPolicyOptions_DiscoverModulesParsed(t *testing.T) {
 	}
 }
 
-// TestVrfParameters_UnmarshalYAML locks in the dual-shape contract:
-// defaults.ip_address.vrf accepts either a scalar string (interpreted as
-// VRF Name; Rd left empty so NetBox can match an existing VRF whose rd
-// column is null) OR a map with name / rd / description / comments /
-// tags (the rich form, matching device-discovery's VrfParameters).
 func TestAssetTagDiscoveryEnabled(t *testing.T) {
 	var nilOpts *Options
 	assert.False(t, nilOpts.AssetTagDiscoveryEnabled(), "nil Options must be off")
@@ -686,6 +681,11 @@ func TestAssetTagDiscoveryEnabled(t *testing.T) {
 	assert.True(t, (&Options{DiscoverAssetTags: &on}).AssetTagDiscoveryEnabled())
 }
 
+// TestVrfParameters_UnmarshalYAML locks in the dual-shape contract:
+// defaults.ip_address.vrf accepts either a scalar string (interpreted as
+// VRF Name; Rd left empty so NetBox can match an existing VRF whose rd
+// column is null) OR a map with name / rd / description / comments /
+// tags (the rich form, matching device-discovery's VrfParameters).
 func TestVrfParameters_UnmarshalYAML(t *testing.T) {
 	t.Run("scalar string populates Name only", func(t *testing.T) {
 		raw := []byte("defaults:\n  ip_address:\n    vrf: production\n")
