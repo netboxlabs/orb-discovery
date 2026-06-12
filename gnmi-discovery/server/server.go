@@ -146,7 +146,7 @@ func (s *Server) getStatus(c *gin.Context) {
 	// Fix #1: copy s.stat into a local to avoid a data race — multiple goroutines
 	// serve GET /api/v1/status concurrently and must not mutate the shared struct.
 	st := s.stat
-	st.UpTimeSeconds = int64(time.Since(s.stat.StartTime).Seconds())
+	st.UpTimeSeconds = int64(time.Since(st.StartTime).Seconds())
 	response := StatusResponse{
 		Status:   st,
 		Policies: s.manager.GetPolicyStatuses(),

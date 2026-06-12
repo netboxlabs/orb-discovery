@@ -327,6 +327,7 @@ func TestEnsurePort(t *testing.T) {
 		"[2001:db8::1]:830":        "[2001:db8::1]:830",                       // bracketed IPv6 with port (unchanged)
 		"[2001:db8::1]":            fmt.Sprintf("[2001:db8::1]:%d", dp),       // bracketed IPv6, no port
 		"a:b:c":                    "a:b:c",                                   // malformed host:port -> untouched
+		"fe80::1%eth0":             fmt.Sprintf("[fe80::1%%eth0]:%d", dp),     // zone-qualified IPv6 -> bracketed
 	}
 	for in, want := range cases {
 		require.Equal(t, want, ensurePort(in), "ensurePort(%q)", in)

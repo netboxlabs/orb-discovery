@@ -51,6 +51,7 @@ policies:
         - host: "2001:db8::1"
         - host: "[2001:db8::2]:57400"
         - host: "10.0.0.5:6030"
+        - host: "fe80::1%eth0"
 `)
 	policies, err := m.ParsePolicies(data)
 	require.NoError(t, err)
@@ -58,10 +59,12 @@ policies:
 		policies["p1"].Scope.Targets[0].Host,
 		policies["p1"].Scope.Targets[1].Host,
 		policies["p1"].Scope.Targets[2].Host,
+		policies["p1"].Scope.Targets[3].Host,
 	}
 	require.Equal(t, "[2001:db8::1]:9339", hosts[0])  // bare IPv6 bracketed + default port
 	require.Equal(t, "[2001:db8::2]:57400", hosts[1]) // already has port -> untouched
 	require.Equal(t, "10.0.0.5:6030", hosts[2])       // already has port -> untouched
+	require.Equal(t, "[fe80::1%eth0]:9339", hosts[3]) // zone-qualified IPv6 bracketed + default port
 }
 
 func TestValidateRejectsBadMode(t *testing.T) {

@@ -186,11 +186,18 @@ func ensurePort(h string) string {
 	// has no port; never rewrite a value that already carries colons but isn't a
 	// recognizable IPv6 literal (a malformed host:port like "a:b:c"), so the
 	// dial/validation error points at the real bad value.
+	//
+	// net.ParseIP rejects a zone id, so validate against the zone-stripped host
+	// (fe80::1%eth0 -> fe80::1) while still bracketing the original (with zone).
+	ipPart := h
+	if i := strings.IndexByte(h, '%'); i >= 0 {
+		ipPart = h[:i]
+	}
 	switch {
 	case strings.HasPrefix(h, "[") && strings.HasSuffix(h, "]"):
 		return fmt.Sprintf("%s:%d", h, config.DefaultGNMIPort) // bracketed IPv6, no port
-	case net.ParseIP(h) != nil && strings.Contains(h, ":"):
-		return fmt.Sprintf("[%s]:%d", h, config.DefaultGNMIPort) // bare IPv6 literal -> bracket
+	case net.ParseIP(ipPart) != nil && strings.Contains(h, ":"):
+		return fmt.Sprintf("[%s]:%d", h, config.DefaultGNMIPort) // bare IPv6 literal (incl. zone) -> bracket
 	case strings.Contains(h, ":"):
 		return h // malformed host:port -> leave untouched
 	default:
