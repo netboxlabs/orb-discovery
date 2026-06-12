@@ -100,8 +100,14 @@ func TestTranslateAppliesRichDefaults(t *testing.T) {
 	}
 	require.NotNil(t, eth)
 	require.Equal(t, "discovered", *eth.Description) // default applied (no leaf description present)
-	require.Len(t, eth.Tags, 1)
-	require.Equal(t, "if-tag", *eth.Tags[0].Name)
+	// Interface tags = global defaults.tags + interface-level tags (defaults.tags
+	// applies to all entities, like the Device path above).
+	ifTags := map[string]bool{}
+	for _, tg := range eth.Tags {
+		ifTags[*tg.Name] = true
+	}
+	require.Len(t, eth.Tags, 2)
+	require.True(t, ifTags["managed"] && ifTags["if-tag"])
 }
 
 // TestToInt64PtrUintTypes verifies that uint variants (as produced by the gNMI

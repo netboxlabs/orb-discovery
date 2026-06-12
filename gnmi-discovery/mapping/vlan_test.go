@@ -65,7 +65,7 @@ func TestTranslateVlanDefinitions(t *testing.T) {
 func TestVlanBuilder(t *testing.T) {
 	dev := &diode.Device{Name: strptr("r1"), Site: &diode.Site{Name: strptr("lab")}}
 	defs := map[int64]vlanDef{10: {name: "users", status: "ACTIVE"}, 20: {name: "voice", status: "SUSPENDED"}}
-	defaults := &config.Defaults{Vlan: config.VlanDefaults{Group: "Lab VLANs", Tenant: "acme", Role: "data", Tags: []string{"managed"}}}
+	defaults := &config.Defaults{Tags: []string{"global"}, Vlan: config.VlanDefaults{Group: "Lab VLANs", Tenant: "acme", Role: "data", Tags: []string{"managed"}}}
 	b := newVlanBuilder(dev, defaults, defs)
 
 	v10 := b.get(10)
@@ -81,7 +81,13 @@ func TestVlanBuilder(t *testing.T) {
 	require.Equal(t, "lab", *scopeSite.Name)
 	require.Equal(t, "acme", *v10.Tenant.Name)
 	require.Equal(t, "data", *v10.Role.Name)
-	require.Len(t, v10.Tags, 1)
+	// VLAN tags = global defaults.tags + vlan-level tags.
+	vlanTags := map[string]bool{}
+	for _, tg := range v10.Tags {
+		vlanTags[*tg.Name] = true
+	}
+	require.Len(t, v10.Tags, 2)
+	require.True(t, vlanTags["global"] && vlanTags["managed"])
 
 	v20 := b.get(20)
 	require.Equal(t, "reserved", *v20.Status)

@@ -26,7 +26,7 @@ func TestTranslatePrefixes(t *testing.T) {
 		ipEnt("10.7.7.7/32", nil),
 		ipEnt("bogus", nil),
 	}
-	defaults := &config.Defaults{Prefix: config.PrefixDefaults{Role: "mgmt", Tenant: "acme", Tags: []string{"auto"}}}
+	defaults := &config.Defaults{Tags: []string{"global"}, Prefix: config.PrefixDefaults{Role: "mgmt", Tenant: "acme", Tags: []string{"auto"}}}
 	ents := translatePrefixes(entities, dev, defaults)
 
 	got := map[string]*diode.Prefix{}
@@ -52,7 +52,13 @@ func TestTranslatePrefixes(t *testing.T) {
 	require.Nil(t, p.Vrf)
 	require.Equal(t, "mgmt", *p.Role.Name)
 	require.Equal(t, "acme", *p.Tenant.Name)
-	require.Len(t, p.Tags, 1)
+	// Prefix tags = global defaults.tags + prefix-level tags.
+	pfxTags := map[string]bool{}
+	for _, tg := range p.Tags {
+		pfxTags[*tg.Name] = true
+	}
+	require.Len(t, p.Tags, 2)
+	require.True(t, pfxTags["global"] && pfxTags["auto"])
 	require.Equal(t, "blue", *got["10.0.0.0/31@blue"].Vrf.Name)
 }
 

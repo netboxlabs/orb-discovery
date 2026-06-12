@@ -143,7 +143,9 @@ func newVlanBuilder(dev *diode.Device, defaults *config.Defaults, defs map[int64
 		if v.Role != "" {
 			b.role = &diode.Role{Name: strptr(v.Role)}
 		}
-		b.tags = toTags(v.Tags)
+		// VLAN tags = policy-level tags + vlan-level tags (defaults.tags applies to
+		// all entities, mirroring the Device path).
+		b.tags = toTags(append(append([]string{}, defaults.Tags...), v.Tags...))
 		b.desc = v.Description
 	}
 	return b

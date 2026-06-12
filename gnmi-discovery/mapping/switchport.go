@@ -67,6 +67,12 @@ func safeVid(v any) (int64, bool) {
 	case uint64:
 		return checkVid(int64(n))
 	case float64:
+		// Bounds-check before converting: an out-of-range float -> int64 is
+		// implementation-defined in Go. Reject NaN (n != n) and anything outside
+		// the VID range; values within it convert safely (checkVid re-validates).
+		if n != n || n < float64(minVid) || n > float64(maxVid) {
+			return 0, false
+		}
 		return checkVid(int64(n))
 	case string:
 		i, err := strconv.ParseInt(strings.TrimSpace(n), 10, 64)

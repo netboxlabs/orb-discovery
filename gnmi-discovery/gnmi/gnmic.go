@@ -35,20 +35,24 @@ func (d *GnmicDialer) Dial(ctx context.Context, spec TargetSpec) (Session, error
 		opts = append(opts, gapi.Password(spec.Password))
 	}
 
-	// TLS logic: explicit CA/cert/key wins; then SkipVerify; else Insecure (plaintext).
-	if spec.CAFile != "" || spec.CertFile != "" || spec.KeyFile != "" {
-		if spec.CAFile != "" {
-			opts = append(opts, gapi.TLSCA(spec.CAFile))
-		}
-		if spec.CertFile != "" {
-			opts = append(opts, gapi.TLSCert(spec.CertFile))
-		}
-		if spec.KeyFile != "" {
-			opts = append(opts, gapi.TLSKey(spec.KeyFile))
-		}
-	} else if spec.SkipVerify {
+	// TLS logic: explicit CA/cert/key supplies verification/mTLS material;
+	// skip_verify disables target-cert verification and is honored INDEPENDENTLY
+	// of that material (e.g. mTLS against a self-signed device cert); with neither
+	// TLS material nor skip_verify, fall back to plaintext (insecure).
+	hasTLSMaterial := spec.CAFile != "" || spec.CertFile != "" || spec.KeyFile != ""
+	if spec.CAFile != "" {
+		opts = append(opts, gapi.TLSCA(spec.CAFile))
+	}
+	if spec.CertFile != "" {
+		opts = append(opts, gapi.TLSCert(spec.CertFile))
+	}
+	if spec.KeyFile != "" {
+		opts = append(opts, gapi.TLSKey(spec.KeyFile))
+	}
+	if spec.SkipVerify {
 		opts = append(opts, gapi.SkipVerify(true))
-	} else {
+	}
+	if !hasTLSMaterial && !spec.SkipVerify {
 		opts = append(opts, gapi.Insecure(true))
 	}
 

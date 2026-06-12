@@ -1,6 +1,7 @@
 package mapping
 
 import (
+	"math"
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -38,6 +39,15 @@ func TestSafeVid(t *testing.T) {
 	for _, in := range []any{0, 4095, -1, true, false, "x", "", nil} {
 		_, ok := safeVid(in)
 		require.False(t, ok)
+	}
+	// Out-of-range / non-finite floats are rejected BEFORE the int64 conversion
+	// (an out-of-range float->int64 is implementation-defined in Go).
+	for _, in := range []any{
+		float64(0), float64(4095), float64(-1), 1e18,
+		math.NaN(), math.Inf(1), math.Inf(-1),
+	} {
+		_, ok := safeVid(in)
+		require.False(t, ok, "float %v must be rejected", in)
 	}
 	v, _ := safeVid("4094")
 	require.Equal(t, int64(4094), v)

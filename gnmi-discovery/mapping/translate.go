@@ -396,7 +396,9 @@ func translateInterfaces(profile *Profile, snap map[string]any, dev *diode.Devic
 			defaultType = defaults.Interface.Type
 		}
 		ifDefaultDesc = defaults.Interface.Description
-		ifTags = toTags(defaults.Interface.Tags)
+		// Interface tags = policy-level tags + interface-level tags (defaults.tags
+		// applies to all entities, mirroring the Device path).
+		ifTags = toTags(append(append([]string{}, defaults.Tags...), defaults.Interface.Tags...))
 		userPatterns = defaults.InterfacePatterns
 		excludePatterns = defaults.InterfaceExcludePatterns
 	}
