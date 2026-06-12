@@ -14,8 +14,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
@@ -328,12 +326,6 @@ func sortByID(members []ChassisMember) []ChassisMember {
 	return members
 }
 
-// strPtrCopy returns a pointer to a copy of s.
-func strPtrCopy(s string) *string {
-	c := s
-	return &c
-}
-
 // strDeref dereferences p or returns "" when nil.
 func strDeref(p *string) string {
 	if p == nil {
@@ -375,95 +367,71 @@ func deriveMemberID(m ChassisMember, ordinalFallback int) int {
 	return ordinalFallback
 }
 
-// assetTagPlaceholders enumerates well-known not-really-an-asset-tag
-// values agents report when no tag was provisioned (vendor defaults,
-// lazy golden-config stamps). Matched exactly, case-insensitively,
-// after trimming — never by prefix/substring, so real tags like
-// "NA1234" pass. The list is deliberately conservative: a false
-// positive here silently drops a legitimate tag.
-var assetTagPlaceholders = map[string]struct{}{
-	"unknown":       {},
-	"n/a":           {},
-	"na":            {},
-	"none":          {},
-	"null":          {},
-	"nil":           {},
-	"default":       {},
-	"unspecified":   {},
-	"unassigned":    {},
-	"not specified": {},
-	"not available": {},
-	"no asset tag":  {},
-	"tbd":           {},
-	"0":             {},
-}
-
-// validAssetTagText reports whether tag is well-formed UTF-8 with no
-// control characters. SNMP OctetStrings are raw bytes; a garbage value
-// must not become Device.asset_tag, NetBox's unique, highest-precedence
-// device matcher.
-func validAssetTagText(tag string) bool {
-	if !utf8.ValidString(tag) {
-		return false
-	}
-	for _, r := range tag {
-		if unicode.IsControl(r) {
-			return false
+// resolveAssetTags maps member ID -> the entPhysicalAssetID value that
+// is safe to emit for that chassis row. Returns nil when every member
+// has an empty tag (fast-exit, no allocation). Filter order per row:
+//
+//  1. empty — silent skip;
+//  2. vetAssetTag — rejects invalid UTF-8, control bytes, well-known
+//     placeholders, and values exceeding assetTagMaxLen (warn-logged);
+//  3. masterTag collision — members[0] (lowest ID, sorted ascending)
+//     carrying the same tag as the operator-supplied defaults agrees
+//     with the default and is dropped at Debug level; any other member
+//     sharing masterTag is a genuine collision and is warn-logged;
+//  4. duplicate across chassis rows — two or more rows sharing the same
+//     tag after the earlier filters would create a NetBox uniqueness
+//     violation; both are warn-logged and dropped.
+//
+// Dropping is required, not cosmetic: asset_tag is unique in NetBox
+// and is the Diode plugin's highest-precedence device matcher, so a
+// duplicate would collapse two devices onto one NetBox row.
+// Callers pass inv.Members which is ID-sorted ascending; members[0]
+// is always the master row.
+func resolveAssetTags(members []ChassisMember, masterTag string, logger *slog.Logger) map[int]string {
+	// Early exit: skip allocation when nothing was walked.
+	hasTag := false
+	for _, m := range members {
+		if m.AssetTag != "" {
+			hasTag = true
+			break
 		}
 	}
-	return true
-}
+	if !hasTag {
+		return nil
+	}
 
-// resolveAssetTags maps member ID -> the entPhysicalAssetID value that
-// is safe to emit for that chassis row. Drops, with a warn log:
-//   - values exceeding NetBox's 50-char asset_tag column (assetTagMaxLen);
-//   - well-known placeholder values (assetTagPlaceholders);
-//   - non-empty values shared by two or more rows of this target;
-//   - values colliding with masterTag (the operator-supplied
-//     defaults asset_tag already on the target device).
-//
-// Empty values (absent column, or NUL/whitespace-only — already trimmed
-// by extractInventory) are silently absent from the result. Dropping is
-// required, not cosmetic: asset_tag is unique in NetBox and is the
-// Diode plugin's highest-precedence device matcher, so a duplicate
-// would collapse two devices onto one NetBox row.
-func resolveAssetTags(members []ChassisMember, masterTag string, logger *slog.Logger) map[int]string {
-	counts := map[string]int{}
+	counts := make(map[string]int, len(members))
 	for _, m := range members {
 		if m.AssetTag != "" {
 			counts[m.AssetTag]++
 		}
 	}
-	out := make(map[int]string, len(counts))
-	for _, m := range members {
+
+	out := make(map[int]string, len(members))
+	for i, m := range members {
 		tag := m.AssetTag
 		if tag == "" {
 			continue
 		}
-		if !validAssetTagText(tag) {
-			logger.Warn("asset tag skipped: non-printable or invalid UTF-8 value",
+		if reason, ok := vetAssetTag(tag); !ok {
+			logger.Warn("asset tag skipped: "+reason,
 				"member_id", m.ID, "entPhysicalIndex", m.EntPhysicalIndex)
 			continue
 		}
-		if _, placeholder := assetTagPlaceholders[strings.ToLower(tag)]; placeholder {
-			logger.Warn("asset tag skipped: placeholder value",
-				"asset_tag", tag, "member_id", m.ID)
-			continue
-		}
-		runeLen := utf8.RuneCountInString(tag)
-		if runeLen > assetTagMaxLen {
-			logger.Warn("asset tag skipped: exceeds NetBox max length",
-				"max_length", assetTagMaxLen, "value_length", runeLen,
-				"member_id", m.ID, "entPhysicalIndex", m.EntPhysicalIndex)
+		if masterTag != "" && tag == masterTag {
+			if i == 0 {
+				// The device's own row agreeing with the operator's
+				// configured default is healthy, not a collision.
+				logger.Debug("asset tag agrees with defaults asset_tag",
+					"member_id", m.ID)
+			} else {
+				logger.Warn("asset tag skipped: collides with defaults asset_tag",
+					"asset_tag", tag, "member_id", m.ID)
+			}
 			continue
 		}
 		if counts[tag] > 1 {
 			logger.Warn("asset tag skipped: duplicate across chassis rows",
-				"asset_tag", tag, "member_id", m.ID)
-			continue
-		}
-		if masterTag != "" && tag == masterTag {
-			logger.Warn("asset tag skipped: collides with defaults asset_tag",
 				"asset_tag", tag, "member_id", m.ID)
 			continue
 		}
@@ -517,7 +485,7 @@ func TranslateAsStack(
 		s := inv.Members[0].Serial
 		master.Serial = &s
 		if tag, ok := assetTags[inv.Members[0].ID]; ok && master.AssetTag == nil {
-			master.AssetTag = strPtrCopy(tag)
+			master.AssetTag = StringPtr(tag)
 		}
 		return entities
 	}
@@ -536,14 +504,14 @@ func TranslateAsStack(
 			mfg = master.DeviceType.Manufacturer
 		}
 		master.DeviceType = &diode.DeviceType{
-			Model:        strPtrCopy(lowest.Model),
+			Model:        StringPtr(lowest.Model),
 			Manufacturer: mfg,
 		}
 	}
 
 	// Must precede buildMasterRef so the matcher stub carries the same asset_tag as the rich master.
 	if tag, ok := assetTags[lowest.ID]; ok && master.AssetTag == nil {
-		master.AssetTag = strPtrCopy(tag)
+		master.AssetTag = StringPtr(tag)
 	}
 
 	vcName := ""
@@ -563,7 +531,7 @@ func TranslateAsStack(
 	for _, m := range inv.Members[1:] {
 		dev := buildMemberDevice(master, m, masterRef, vcName)
 		if tag, ok := assetTags[m.ID]; ok {
-			dev.AssetTag = strPtrCopy(tag)
+			dev.AssetTag = StringPtr(tag)
 		}
 		memberByID[m.ID] = dev
 		memberDevices = append(memberDevices, dev)

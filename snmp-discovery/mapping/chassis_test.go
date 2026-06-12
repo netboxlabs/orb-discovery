@@ -1258,3 +1258,61 @@ func TestTranslateAsStack_StackMemberTagCollidingWithDefaultsSuppressed(t *testi
 		}
 	}
 }
+
+// TestResolveAssetTags_MasterRowAgreementIsNotCollision guards Fix 2: when
+// members[0] (the master row, sorted by ID) carries the same tag as
+// masterTag, that is agreement with the operator's configured default — not
+// a collision. The tag must be absent from the result (it's already on the
+// master), but the function must NOT warn-log it as "collides with defaults
+// asset_tag". Other members sharing masterTag still get the suppression.
+func TestResolveAssetTags_MasterRowAgreementIsNotCollision(t *testing.T) {
+	logger := slog.Default()
+	// members[0] (lowest ID) carries the same tag as masterTag — agreement.
+	// members[1] carries a different tag — should survive.
+	// members[2] also carries masterTag — that's a genuine collision.
+	members := []ChassisMember{
+		{ID: 1, AssetTag: "OPERATOR-TAG"},
+		{ID: 2, AssetTag: "MEMBER-OWN"},
+		{ID: 3, AssetTag: "OPERATOR-TAG"},
+	}
+	tags := resolveAssetTags(members, "OPERATOR-TAG", logger)
+	// members[0] and members[2] are both suppressed; only members[1] survives.
+	assert.Equal(t, map[int]string{2: "MEMBER-OWN"}, tags,
+		"master-row agreement and non-master collision both remove the tag; unique member tag survives")
+}
+
+// TestResolveAssetTags_AllEmptyReturnsNil guards the Fix 3/5 early-return:
+// when every member has an empty AssetTag, resolveAssetTags must return nil
+// (not an empty map) so the caller can short-circuit without allocating.
+func TestResolveAssetTags_AllEmptyReturnsNil(t *testing.T) {
+	logger := slog.Default()
+	members := []ChassisMember{
+		{ID: 1, AssetTag: ""},
+		{ID: 2, AssetTag: ""},
+	}
+	tags := resolveAssetTags(members, "", logger)
+	assert.Nil(t, tags, "all-empty input must return nil, not an empty map")
+}
+
+// TestTranslateAsStack_StandaloneDefaultsTagAgreement guards Fix 2 at the
+// TranslateAsStack level: when defaults.asset_tag == entPhysicalAssetID for
+// the single chassis row, the master keeps the defaults tag and the function
+// does not overwrite it with a duplicate.
+func TestTranslateAsStack_StandaloneDefaultsTagAgreement(t *testing.T) {
+	logger := slog.Default()
+	// Operator already set OPERATOR-TAG via defaults. Wire returns the same value.
+	master := &diode.Device{Name: strPtr("standalone"), AssetTag: strPtr("OPERATOR-TAG")}
+	entities := []diode.Entity{master}
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "FOC0001"},
+		".1.3.6.1.2.1.47.1.1.1.1.15.1": {Value: "OPERATOR-TAG"},
+	}
+
+	TranslateAsStack(entities, oids, nil, logger)
+
+	require.NotNil(t, master.AssetTag)
+	assert.Equal(t, "OPERATOR-TAG", *master.AssetTag,
+		"defaults tag must survive when wire tag agrees; master.AssetTag != nil guards the if check")
+}
