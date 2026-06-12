@@ -3,6 +3,7 @@ package mapping
 import (
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -1055,4 +1056,148 @@ func TestTranslateAsStack_AliasTableDroppedMemberSkipsWithWarn(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "interface aliased to surviving chassis row must remain in output")
+}
+
+func TestResolveAssetTags_HappyPathAndValidation(t *testing.T) {
+	logger := slog.Default()
+	long := strings.Repeat("x", 51)
+	members := []ChassisMember{
+		{ID: 1, AssetTag: "ASSET-001"},
+		{ID: 2, AssetTag: ""},   // empty -> absent from result
+		{ID: 3, AssetTag: long}, // >50 runes -> warn + skip
+	}
+	tags := resolveAssetTags(members, "", logger)
+	assert.Equal(t, map[int]string{1: "ASSET-001"}, tags)
+}
+
+func TestResolveAssetTags_DuplicatesSuppressedEverywhere(t *testing.T) {
+	logger := slog.Default()
+	members := []ChassisMember{
+		{ID: 1, AssetTag: "DUP"},
+		{ID: 2, AssetTag: "DUP"},
+		{ID: 3, AssetTag: "UNIQUE"},
+	}
+	tags := resolveAssetTags(members, "", logger)
+	assert.Equal(t, map[int]string{3: "UNIQUE"}, tags,
+		"a tag shared by two chassis rows must be dropped from both")
+}
+
+func TestResolveAssetTags_DefaultsCollisionSuppressed(t *testing.T) {
+	logger := slog.Default()
+	members := []ChassisMember{
+		{ID: 1, AssetTag: "FROM-DEFAULTS"},
+		{ID: 2, AssetTag: "OK"},
+	}
+	tags := resolveAssetTags(members, "FROM-DEFAULTS", logger)
+	assert.Equal(t, map[int]string{2: "OK"}, tags,
+		"a row tag equal to the operator-supplied defaults tag must be dropped")
+}
+
+func TestTranslateAsStack_StandaloneSetsAssetTag(t *testing.T) {
+	logger := slog.Default()
+	master := &diode.Device{Name: strPtr("standalone")}
+	entities := []diode.Entity{master}
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "FOC0001"},
+		".1.3.6.1.2.1.47.1.1.1.1.15.1": {Value: "ASSET-STANDALONE"},
+	}
+
+	TranslateAsStack(entities, oids, nil, logger)
+
+	require.NotNil(t, master.AssetTag)
+	assert.Equal(t, "ASSET-STANDALONE", *master.AssetTag)
+}
+
+func TestTranslateAsStack_StandaloneDefaultsAssetTagWins(t *testing.T) {
+	logger := slog.Default()
+	master := &diode.Device{Name: strPtr("standalone"), AssetTag: strPtr("OPERATOR-TAG")}
+	entities := []diode.Entity{master}
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "FOC0001"},
+		".1.3.6.1.2.1.47.1.1.1.1.15.1": {Value: "WIRE-TAG"},
+	}
+
+	TranslateAsStack(entities, oids, nil, logger)
+
+	assert.Equal(t, "OPERATOR-TAG", *master.AssetTag,
+		"defaults.asset_tag must not be overwritten by entPhysicalAssetID")
+}
+
+func TestTranslateAsStack_StandaloneEmptyAssetTagLeavesUnset(t *testing.T) {
+	logger := slog.Default()
+	master := &diode.Device{Name: strPtr("standalone")}
+	entities := []diode.Entity{master}
+	oids := ObjectIDValueMap{
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "FOC0001"},
+		".1.3.6.1.2.1.47.1.1.1.1.15.1": {Value: "\x00\x00"},
+	}
+
+	TranslateAsStack(entities, oids, nil, logger)
+
+	assert.Nil(t, master.AssetTag, "NUL-only entPhysicalAssetID must leave AssetTag unset")
+}
+
+func TestTranslateAsStack_StackPerMemberAssetTags(t *testing.T) {
+	logger := slog.Default()
+	master := &diode.Device{
+		Name: strPtr("3850-stack.example"),
+		DeviceType: &diode.DeviceType{
+			Model:        strPtr("WS-C3850-48P"),
+			Manufacturer: &diode.Manufacturer{Name: strPtr("Cisco")},
+		},
+	}
+	entities := []diode.Entity{master}
+	oids := fixtureCisco3850TwoMemberStack()
+	// Per-row tags layered onto the shared fixture (indices 1 and 1000).
+	oids[".1.3.6.1.2.1.47.1.1.1.1.15.1"] = Value{Value: "ASSET-M1"}
+	oids[".1.3.6.1.2.1.47.1.1.1.1.15.1000"] = Value{Value: "ASSET-M2"}
+
+	out := TranslateAsStack(entities, oids, map[*diode.Interface]int{}, logger)
+
+	var members []*diode.Device
+	var vc *diode.VirtualChassis
+	for _, e := range out {
+		switch v := e.(type) {
+		case *diode.VirtualChassis:
+			vc = v
+		case *diode.Device:
+			if v != master {
+				members = append(members, v)
+			}
+		}
+	}
+	require.NotNil(t, master.AssetTag)
+	assert.Equal(t, "ASSET-M1", *master.AssetTag, "master gets its own chassis row's tag")
+	require.NotNil(t, vc)
+	require.NotNil(t, vc.Master)
+	require.NotNil(t, vc.Master.AssetTag)
+	assert.Equal(t, "ASSET-M1", *vc.Master.AssetTag,
+		"masterRef must carry the same matcher fields as the rich master")
+	require.Len(t, members, 1)
+	require.NotNil(t, members[0].AssetTag)
+	assert.Equal(t, "ASSET-M2", *members[0].AssetTag, "member gets its own per-row tag")
+}
+
+func TestTranslateAsStack_StackDuplicateAssetTagsSuppressed(t *testing.T) {
+	logger := slog.Default()
+	master := &diode.Device{Name: strPtr("3850-stack.example")}
+	entities := []diode.Entity{master}
+	oids := fixtureCisco3850TwoMemberStack()
+	oids[".1.3.6.1.2.1.47.1.1.1.1.15.1"] = Value{Value: "SAME"}
+	oids[".1.3.6.1.2.1.47.1.1.1.1.15.1000"] = Value{Value: "SAME"}
+
+	out := TranslateAsStack(entities, oids, map[*diode.Interface]int{}, logger)
+
+	assert.Nil(t, master.AssetTag, "duplicate tag must be suppressed on master")
+	for _, e := range out {
+		if d, ok := e.(*diode.Device); ok && d != master {
+			assert.Nil(t, d.AssetTag, "duplicate tag must be suppressed on members")
+		}
+	}
 }

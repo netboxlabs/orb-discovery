@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
@@ -276,9 +277,12 @@ func buildMasterRef(master *diode.Device) *diode.Device {
 //     "Switch 2" is intentionally not used: it would produce poor
 //     NetBox names and collide across stacks in the same site).
 //   - Serial = per-member entPhysicalSerialNum.
-//   - AssetTag = nil (CLEARED — Diode's highest-precedence matcher
-//     for dcim.device is unique on asset_tag; defaults.device.asset_tag
-//     applied to N members would collapse them onto one NetBox row).
+//   - AssetTag = nil here; the caller sets a per-row entPhysicalAssetID
+//     value afterwards when asset tag discovery produced one for this
+//     member. defaults.device.asset_tag is never copied to members —
+//     Diode's highest-precedence matcher for dcim.device is unique on
+//     asset_tag, so one operator-supplied tag applied to N members
+//     would collapse them onto one NetBox row.
 //   - VcPosition = member.ID; VirtualChassis = {Name: vcName, Master: masterRef}.
 //   - DeviceType from member.Model when populated, else inherit master's.
 //   - Site / Tenant / Role / Platform / Location inherited from master.
@@ -370,6 +374,52 @@ func deriveMemberID(m ChassisMember, ordinalFallback int) int {
 	return ordinalFallback
 }
 
+// resolveAssetTags maps member ID -> the entPhysicalAssetID value that
+// is safe to emit for that chassis row. Drops, with a warn log:
+//   - values exceeding NetBox's 50-char asset_tag column (assetTagMaxLen);
+//   - non-empty values shared by two or more rows of this target;
+//   - values colliding with masterTag (the operator-supplied
+//     defaults asset_tag already on the target device).
+//
+// Empty values (absent column, or NUL/whitespace-only — already trimmed
+// by extractInventory) are silently absent from the result. Dropping is
+// required, not cosmetic: asset_tag is unique in NetBox and is the
+// Diode plugin's highest-precedence device matcher, so a duplicate
+// would collapse two devices onto one NetBox row.
+func resolveAssetTags(members []ChassisMember, masterTag string, logger *slog.Logger) map[int]string {
+	counts := map[string]int{}
+	for _, m := range members {
+		if m.AssetTag != "" {
+			counts[m.AssetTag]++
+		}
+	}
+	out := make(map[int]string, len(counts))
+	for _, m := range members {
+		tag := m.AssetTag
+		if tag == "" {
+			continue
+		}
+		if utf8.RuneCountInString(tag) > assetTagMaxLen {
+			logger.Warn("asset tag skipped: exceeds NetBox max length",
+				"max_length", assetTagMaxLen, "member_id", m.ID,
+				"entPhysicalIndex", m.EntPhysicalIndex)
+			continue
+		}
+		if counts[tag] > 1 {
+			logger.Warn("asset tag skipped: duplicate across chassis rows",
+				"asset_tag", tag, "member_id", m.ID)
+			continue
+		}
+		if masterTag != "" && tag == masterTag {
+			logger.Warn("asset tag skipped: collides with defaults asset_tag",
+				"asset_tag", tag, "member_id", m.ID)
+			continue
+		}
+		out[m.ID] = tag
+	}
+	return out
+}
+
 // TranslateAsStack inspects the raw oids map for ENTITY-MIB chassis
 // inventory. Three outcomes:
 //
@@ -404,10 +454,19 @@ func TranslateAsStack(
 		return entities
 	}
 
+	// Asset tags from entPhysicalAssetID (column walked only when
+	// discover_asset_tags is on — absent data makes this a no-op).
+	// strDeref(master.AssetTag) carries the operator-supplied defaults
+	// value into the collision check.
+	assetTags := resolveAssetTags(inv.Members, strDeref(master.AssetTag), logger)
+
 	// Standalone (1 chassis row): set Serial, return unchanged shape.
 	if !inv.IsStack() {
 		s := inv.Members[0].Serial
 		master.Serial = &s
+		if tag, ok := assetTags[inv.Members[0].ID]; ok && master.AssetTag == nil {
+			master.AssetTag = strPtrCopy(tag)
+		}
 		return entities
 	}
 
@@ -430,6 +489,10 @@ func TranslateAsStack(
 		}
 	}
 
+	if tag, ok := assetTags[lowest.ID]; ok && master.AssetTag == nil {
+		master.AssetTag = strPtrCopy(tag)
+	}
+
 	vcName := ""
 	if master.Name != nil {
 		vcName = *master.Name
@@ -446,6 +509,9 @@ func TranslateAsStack(
 	memberDevices := make([]*diode.Device, 0, len(inv.Members)-1)
 	for _, m := range inv.Members[1:] {
 		dev := buildMemberDevice(master, m, masterRef, vcName)
+		if tag, ok := assetTags[m.ID]; ok {
+			dev.AssetTag = strPtrCopy(tag)
+		}
 		memberByID[m.ID] = dev
 		memberDevices = append(memberDevices, dev)
 	}
