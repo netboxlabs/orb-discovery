@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -t
 
 FROM alpine:3.23
 
-RUN apk --no-cache upgrade
+RUN apk update && apk --no-cache upgrade
 
 # Copy the binary
 COPY --from=builder /build/snmp-discovery /usr/local/bin/snmp-discovery
