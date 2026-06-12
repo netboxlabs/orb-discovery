@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -279,7 +280,7 @@ func buildMasterRef(master *diode.Device) *diode.Device {
 //   - Serial = per-member entPhysicalSerialNum.
 //   - AssetTag = nil here; the caller sets a per-row entPhysicalAssetID
 //     value afterwards when asset tag discovery produced one for this
-//     member. defaults.device.asset_tag is never copied to members —
+//     member. defaults.asset_tag is never copied to members —
 //     Diode's highest-precedence matcher for dcim.device is unique on
 //     asset_tag, so one operator-supplied tag applied to N members
 //     would collapse them onto one NetBox row.
@@ -374,6 +375,22 @@ func deriveMemberID(m ChassisMember, ordinalFallback int) int {
 	return ordinalFallback
 }
 
+// validAssetTagText reports whether tag is well-formed UTF-8 with no
+// control characters. SNMP OctetStrings are raw bytes; a garbage value
+// must not become Device.asset_tag, NetBox's unique, highest-precedence
+// device matcher.
+func validAssetTagText(tag string) bool {
+	if !utf8.ValidString(tag) {
+		return false
+	}
+	for _, r := range tag {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
 // resolveAssetTags maps member ID -> the entPhysicalAssetID value that
 // is safe to emit for that chassis row. Drops, with a warn log:
 //   - values exceeding NetBox's 50-char asset_tag column (assetTagMaxLen);
@@ -397,6 +414,11 @@ func resolveAssetTags(members []ChassisMember, masterTag string, logger *slog.Lo
 	for _, m := range members {
 		tag := m.AssetTag
 		if tag == "" {
+			continue
+		}
+		if !validAssetTagText(tag) {
+			logger.Warn("asset tag skipped: non-printable or invalid UTF-8 value",
+				"member_id", m.ID, "entPhysicalIndex", m.EntPhysicalIndex)
 			continue
 		}
 		runeLen := utf8.RuneCountInString(tag)

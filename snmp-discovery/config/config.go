@@ -408,7 +408,7 @@ type Options struct {
 	// entPhysicalAssetID column is walked with the chassis inventory
 	// and discovered values populate Device.asset_tag — the standalone
 	// chassis row's tag goes on the target device; each virtual-chassis
-	// member gets its own per-row tag. defaults.device.asset_tag, when
+	// member gets its own per-row tag. defaults.asset_tag, when
 	// set, takes precedence on the target device. asset_tag is the
 	// Diode plugin's highest-precedence device matcher, so duplicate
 	// tags within one target are suppressed rather than emitted.

@@ -1093,6 +1093,18 @@ func TestResolveAssetTags_DefaultsCollisionSuppressed(t *testing.T) {
 		"a row tag equal to the operator-supplied defaults tag must be dropped")
 }
 
+func TestResolveAssetTags_GarbageValuesSuppressed(t *testing.T) {
+	logger := slog.Default()
+	members := []ChassisMember{
+		{ID: 1, AssetTag: "ASSET\x07001"},                  // embedded control byte
+		{ID: 2, AssetTag: string([]byte{0xff, 0xfe, 'A'})}, // invalid UTF-8
+		{ID: 3, AssetTag: "ASSET-OK"},
+	}
+	tags := resolveAssetTags(members, "", logger)
+	assert.Equal(t, map[int]string{3: "ASSET-OK"}, tags,
+		"control bytes and invalid UTF-8 must be suppressed")
+}
+
 func TestTranslateAsStack_StandaloneSetsAssetTag(t *testing.T) {
 	logger := slog.Default()
 	master := &diode.Device{Name: strPtr("standalone")}
