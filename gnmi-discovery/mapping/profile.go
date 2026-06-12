@@ -163,6 +163,14 @@ func LoadProfilesWithLogger(overrideDir string, logger *slog.Logger) (*Store, er
 		}
 	}
 
+	// Snapshot the bundled profiles by name so a bad override that reuses a
+	// bundled filename can fall back to the built-in (below) instead of deleting
+	// it when its inheritance fails to resolve.
+	bundled := make(map[string]*Profile, len(raw))
+	for name, p := range raw {
+		bundled[name] = p
+	}
+
 	if overrideDir != "" {
 		dirEntries, err := os.ReadDir(overrideDir)
 		if err != nil {
@@ -197,6 +205,20 @@ func LoadProfilesWithLogger(overrideDir string, logger *slog.Logger) (*Store, er
 	for name := range raw {
 		p, err := resolve(name, raw, map[string]bool{})
 		if err != nil {
+			// A bad override that reuses a bundled filename must not delete the
+			// built-in: restore the bundled profile and re-resolve it so a typo in
+			// e.g. /profiles/arista_eos.yaml falls back to the bundled Arista.
+			if b, ok := bundled[name]; ok && raw[name] != b {
+				raw[name] = b
+				if bp, berr := resolve(name, raw, map[string]bool{}); berr == nil {
+					if logger != nil {
+						logger.Warn("gNMI profile override failed to resolve; falling back to bundled profile",
+							"profile", name, "error", err)
+					}
+					resolved[name] = bp
+					continue
+				}
+			}
 			// A semantically-bad profile (unresolved `extends` or an inheritance
 			// cycle) must not crash startup — skip and log it, like a bad parse.
 			// _base has no `extends` so it always resolves; the matcher still has

@@ -48,6 +48,23 @@ func TestMatchFallsBackToBase(t *testing.T) {
 	require.Equal(t, "_base", p.Name)
 }
 
+// TestOverrideBadExtendsFallsBackToBundled verifies that an override reusing a
+// bundled filename but with an unresolvable `extends` does NOT delete the
+// built-in — the bundled profile is restored and remains selectable.
+func TestOverrideBadExtendsFallsBackToBundled(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "arista_eos.yaml"), []byte(`
+extends: nonexistent_parent
+match:
+  vendor: Arista
+`), 0o600))
+	store, err := LoadProfiles(dir)
+	require.NoError(t, err)
+	p := store.Match(MatchInput{Vendor: "Arista"})
+	require.Equal(t, "arista_eos", p.Name, "bad override must fall back to bundled arista_eos, not delete it")
+	require.Equal(t, "/system/state/hostname", p.Device.Hostname) // bundled inherits _base
+}
+
 func TestMatchByVendor(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "acme.yaml"), []byte(`
