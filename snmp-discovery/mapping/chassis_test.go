@@ -800,6 +800,27 @@ func TestTranslateAsStack_JunosQFX_4MemberVC(t *testing.T) {
 	assert.Equal(t, "vc-edge-01-2", *fpc2Iface.Device.Name)
 }
 
+func TestExtractInventory_CarriesAssetTag(t *testing.T) {
+	logger := slog.Default()
+	oids := ObjectIDValueMap{
+		// Row 1: tag present (with NUL padding to prove trimming).
+		".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1":  {Value: "1"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "SER-1"},
+		".1.3.6.1.2.1.47.1.1.1.1.15.1": {Value: "ASSET-001 \x00\x00"},
+		// Row 2: no .15 column at all -> empty tag.
+		".1.3.6.1.2.1.47.1.1.1.1.4.1000":  {Value: "0"},
+		".1.3.6.1.2.1.47.1.1.1.1.5.1000":  {Value: "3"},
+		".1.3.6.1.2.1.47.1.1.1.1.6.1000":  {Value: "2"},
+		".1.3.6.1.2.1.47.1.1.1.1.11.1000": {Value: "SER-2"},
+	}
+	inv := extractInventory(oids, logger)
+	assert.Len(t, inv.Members, 2)
+	assert.Equal(t, "ASSET-001", inv.Members[0].AssetTag, "NUL/whitespace padding trimmed")
+	assert.Equal(t, "", inv.Members[1].AssetTag, "absent column -> empty tag")
+}
+
 func TestAssetTagWalkGating(t *testing.T) {
 	mappings := []config.MappingEntry{
 		{OID: "1.3.6.1.2.1.47.1.1.1.1.15", Entity: "chassis_asset", Field: "assetID"},
@@ -827,26 +848,6 @@ func TestAssetTagWalkGating(t *testing.T) {
 // Assertions:
 //   - with Options{} (off): .15 is ABSENT, sibling .11 (serial) IS present
 //   - with DiscoverAssetTags: &true: .15 IS present
-func TestExtractInventory_CarriesAssetTag(t *testing.T) {
-	logger := slog.Default()
-	oids := ObjectIDValueMap{
-		// Row 1: tag present (with NUL padding to prove trimming).
-		".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
-		".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
-		".1.3.6.1.2.1.47.1.1.1.1.6.1":  {Value: "1"},
-		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "SER-1"},
-		".1.3.6.1.2.1.47.1.1.1.1.15.1": {Value: "ASSET-001\x00\x00"},
-		// Row 2: no .15 column at all -> empty tag.
-		".1.3.6.1.2.1.47.1.1.1.1.4.1000":  {Value: "0"},
-		".1.3.6.1.2.1.47.1.1.1.1.5.1000":  {Value: "3"},
-		".1.3.6.1.2.1.47.1.1.1.1.6.1000":  {Value: "2"},
-		".1.3.6.1.2.1.47.1.1.1.1.11.1000": {Value: "SER-2"},
-	}
-	inv := extractInventory(oids, logger)
-	assert.Len(t, inv.Members, 2)
-	assert.Equal(t, "ASSET-001", inv.Members[0].AssetTag, "NUL padding trimmed")
-	assert.Equal(t, "", inv.Members[1].AssetTag, "absent column -> empty tag")
-}
 
 func TestAssetTagWalkGating_ChildEntry(t *testing.T) {
 	const (
