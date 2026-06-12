@@ -674,6 +674,18 @@ func TestPolicyOptions_DiscoverModulesParsed(t *testing.T) {
 // VRF Name; Rd left empty so NetBox can match an existing VRF whose rd
 // column is null) OR a map with name / rd / description / comments /
 // tags (the rich form, matching device-discovery's VrfParameters).
+func TestAssetTagDiscoveryEnabled(t *testing.T) {
+	var nilOpts *Options
+	assert.False(t, nilOpts.AssetTagDiscoveryEnabled(), "nil Options must be off")
+	assert.False(t, (&Options{}).AssetTagDiscoveryEnabled(), "unset must default off")
+
+	off := false
+	assert.False(t, (&Options{DiscoverAssetTags: &off}).AssetTagDiscoveryEnabled())
+
+	on := true
+	assert.True(t, (&Options{DiscoverAssetTags: &on}).AssetTagDiscoveryEnabled())
+}
+
 func TestVrfParameters_UnmarshalYAML(t *testing.T) {
 	t.Run("scalar string populates Name only", func(t *testing.T) {
 		raw := []byte("defaults:\n  ip_address:\n    vrf: production\n")
