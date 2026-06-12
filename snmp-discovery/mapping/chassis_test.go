@@ -848,7 +848,6 @@ func TestAssetTagWalkGating(t *testing.T) {
 // Assertions:
 //   - with Options{} (off): .15 is ABSENT, sibling .11 (serial) IS present
 //   - with DiscoverAssetTags: &true: .15 IS present
-
 func TestAssetTagWalkGating_ChildEntry(t *testing.T) {
 	const (
 		parentOID   = "1.3.6.1.2.1.47.1.1.1"
