@@ -505,7 +505,7 @@ func TestTranslateAsStack_StandaloneSetsSerialAndReturnsUnchangedShape(t *testin
 		".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "FOC0001"},
 	}
 
-	out := TranslateAsStack(entities, oids, nil, logger)
+	out := TranslateAsStack(entities, oids, nil, nil, logger)
 
 	assert.Len(t, out, 2, "shape unchanged on standalone")
 	assert.Equal(t, "FOC0001", *master.Serial)
@@ -527,7 +527,7 @@ func TestTranslateAsStack_TwoMemberStackEmitsVCAndMember(t *testing.T) {
 	// No alias-table coverage in this fixture — ifName parsing drives routing.
 	ifIndexByIface := map[*diode.Interface]int{}
 
-	out := TranslateAsStack(entities, fixtureCisco3850TwoMemberStack(), ifIndexByIface, logger)
+	out := TranslateAsStack(entities, fixtureCisco3850TwoMemberStack(), ifIndexByIface, nil, logger)
 
 	// master + VC + 1 member + 2 interfaces = 5
 	var vc *diode.VirtualChassis
@@ -582,7 +582,7 @@ func TestTranslateAsStack_CiscoStackWiseVirtual_EmitsVCAndMember(t *testing.T) {
 	entities := []diode.Entity{master, ifaceM1, ifaceM2}
 	ifIndexByIface := map[*diode.Interface]int{}
 
-	out := TranslateAsStack(entities, fixtureCiscoCat9400xStackWiseVirtual(), ifIndexByIface, logger)
+	out := TranslateAsStack(entities, fixtureCiscoCat9400xStackWiseVirtual(), ifIndexByIface, nil, logger)
 
 	var vc *diode.VirtualChassis
 	var members []*diode.Device
@@ -645,7 +645,7 @@ func TestTranslateAsStack_DroppedMemberIfaceSkippedWithWarn(t *testing.T) {
 		".1.3.6.1.2.1.47.1.1.1.1.11.40": {Value: "S3"},
 	}
 
-	out := TranslateAsStack(entities, oids, nil, logger)
+	out := TranslateAsStack(entities, oids, nil, nil, logger)
 
 	// Orphan (Gi2/0/1) is excluded.
 	for _, e := range out {
@@ -687,7 +687,7 @@ func TestTranslateAsStack_IPRoutedToMemberViaAssignedObject(t *testing.T) {
 	}
 	entities := []diode.Entity{master, memberIP}
 
-	out := TranslateAsStack(entities, fixtureCisco3850TwoMemberStack(), nil, logger)
+	out := TranslateAsStack(entities, fixtureCisco3850TwoMemberStack(), nil, nil, logger)
 
 	// The IP survived and its nested Interface.Device now points at member-2.
 	var seenIP *diode.IPAddress
@@ -737,7 +737,7 @@ func TestTranslateAsStack_OrphanIPFiltered(t *testing.T) {
 		".1.3.6.1.2.1.47.1.1.1.1.11.40": {Value: "S3"},
 	}
 
-	out := TranslateAsStack(entities, oids, nil, logger)
+	out := TranslateAsStack(entities, oids, nil, nil, logger)
 
 	for _, e := range out {
 		_, isIP := e.(*diode.IPAddress)
@@ -758,7 +758,7 @@ func TestTranslateAsStack_ArubaCX_2MemberVSF(t *testing.T) {
 	memberIface := &diode.Interface{Name: strPtr("2/1/24"), Device: master}
 	entities := []diode.Entity{master, memberIface}
 
-	out := TranslateAsStack(entities, fixtureArubaCX2MemberVSF(), nil, logger)
+	out := TranslateAsStack(entities, fixtureArubaCX2MemberVSF(), nil, nil, logger)
 
 	var members []*diode.Device
 	for _, e := range out {
@@ -784,7 +784,7 @@ func TestTranslateAsStack_JunosQFX_4MemberVC(t *testing.T) {
 	fpc2Iface := &diode.Interface{Name: strPtr("xe-2/0/0"), Device: master}
 	entities := []diode.Entity{master, fpc2Iface}
 
-	out := TranslateAsStack(entities, fixtureJunosQFX4MemberVC(), nil, logger)
+	out := TranslateAsStack(entities, fixtureJunosQFX4MemberVC(), nil, nil, logger)
 
 	var members []*diode.Device
 	for _, e := range out {
@@ -1007,7 +1007,7 @@ func TestTranslateAsStack_Idempotent_ThroughFullMapperPipeline(t *testing.T) {
 		oids := build()
 		ents := mapper.MapObjectIDsToEntity(oids)
 		ifIdx := mapper.InterfacesByIfIndex()
-		return TranslateAsStack(ents, oids, ifIdx, logger)
+		return TranslateAsStack(ents, oids, ifIdx, nil, logger)
 	}
 
 	a := run()
@@ -1084,7 +1084,7 @@ func TestTranslateAsStack_AliasTableDroppedMemberSkipsWithWarn(t *testing.T) {
 	}
 
 	warnLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	out := TranslateAsStack(entities, oids, ifIndexByIface, warnLogger)
+	out := TranslateAsStack(entities, oids, ifIndexByIface, nil, warnLogger)
 
 	// droppedIface (Gi2/0/24, ifIndex 99 → dropped member 2) must be absent.
 	for _, e := range out {
@@ -1188,7 +1188,7 @@ func TestTranslateAsStack_StandaloneSetsAssetTag(t *testing.T) {
 		".1.3.6.1.2.1.47.1.1.1.1.15.1": {Value: "ASSET-STANDALONE"},
 	}
 
-	TranslateAsStack(entities, oids, nil, logger)
+	TranslateAsStack(entities, oids, nil, nil, logger)
 
 	require.NotNil(t, master.AssetTag)
 	assert.Equal(t, "ASSET-STANDALONE", *master.AssetTag)
@@ -1205,7 +1205,7 @@ func TestTranslateAsStack_StandaloneDefaultsAssetTagWins(t *testing.T) {
 		".1.3.6.1.2.1.47.1.1.1.1.15.1": {Value: "WIRE-TAG"},
 	}
 
-	TranslateAsStack(entities, oids, nil, logger)
+	TranslateAsStack(entities, oids, nil, nil, logger)
 
 	assert.Equal(t, "OPERATOR-TAG", *master.AssetTag,
 		"defaults.asset_tag must not be overwritten by entPhysicalAssetID")
@@ -1222,7 +1222,7 @@ func TestTranslateAsStack_StandaloneEmptyAssetTagLeavesUnset(t *testing.T) {
 		".1.3.6.1.2.1.47.1.1.1.1.15.1": {Value: "\x00\x00"},
 	}
 
-	TranslateAsStack(entities, oids, nil, logger)
+	TranslateAsStack(entities, oids, nil, nil, logger)
 
 	assert.Nil(t, master.AssetTag, "NUL-only entPhysicalAssetID must leave AssetTag unset")
 }
@@ -1242,7 +1242,7 @@ func TestTranslateAsStack_StackPerMemberAssetTags(t *testing.T) {
 	oids[".1.3.6.1.2.1.47.1.1.1.1.15.1"] = Value{Value: "ASSET-M1"}
 	oids[".1.3.6.1.2.1.47.1.1.1.1.15.1000"] = Value{Value: "ASSET-M2"}
 
-	out := TranslateAsStack(entities, oids, map[*diode.Interface]int{}, logger)
+	out := TranslateAsStack(entities, oids, map[*diode.Interface]int{}, nil, logger)
 
 	var members []*diode.Device
 	var vc *diode.VirtualChassis
@@ -1276,7 +1276,7 @@ func TestTranslateAsStack_StackDuplicateAssetTagsSuppressed(t *testing.T) {
 	oids[".1.3.6.1.2.1.47.1.1.1.1.15.1"] = Value{Value: "SAME"}
 	oids[".1.3.6.1.2.1.47.1.1.1.1.15.1000"] = Value{Value: "SAME"}
 
-	out := TranslateAsStack(entities, oids, map[*diode.Interface]int{}, logger)
+	out := TranslateAsStack(entities, oids, map[*diode.Interface]int{}, nil, logger)
 
 	assert.Nil(t, master.AssetTag, "duplicate tag must be suppressed on master")
 	for _, e := range out {
@@ -1295,7 +1295,7 @@ func TestTranslateAsStack_StackMemberTagCollidingWithDefaultsSuppressed(t *testi
 	// the master -> must be suppressed to avoid matcher collision.
 	oids[".1.3.6.1.2.1.47.1.1.1.1.15.1000"] = Value{Value: "OPERATOR-TAG"}
 
-	out := TranslateAsStack(entities, oids, map[*diode.Interface]int{}, logger)
+	out := TranslateAsStack(entities, oids, map[*diode.Interface]int{}, nil, logger)
 
 	assert.Equal(t, "OPERATOR-TAG", *master.AssetTag, "defaults tag preserved on master")
 	for _, e := range out {
@@ -1356,9 +1356,79 @@ func TestTranslateAsStack_StandaloneDefaultsTagAgreement(t *testing.T) {
 		".1.3.6.1.2.1.47.1.1.1.1.15.1": {Value: "OPERATOR-TAG"},
 	}
 
-	TranslateAsStack(entities, oids, nil, logger)
+	TranslateAsStack(entities, oids, nil, nil, logger)
 
 	require.NotNil(t, master.AssetTag)
 	assert.Equal(t, "OPERATOR-TAG", *master.AssetTag,
 		"defaults tag must survive when wire tag agrees; master.AssetTag != nil guards the if check")
+}
+
+// TestTranslateAsStack_ClaimRejectionSuppressesTag verifies that a
+// claimAssetTag callback returning false suppresses the tag application
+// without affecting other fields.
+//
+// Case 1: standalone device — valid wire tag, claimer always returns
+// false → master.AssetTag must remain nil.
+//
+// Case 2: two-member stack — claimer rejects only the member tag
+// "ASSET-M2" → master keeps its own tag, member emitted without one.
+func TestTranslateAsStack_ClaimRejectionSuppressesTag(t *testing.T) {
+	t.Run("standalone_claimer_rejects", func(t *testing.T) {
+		logger := slog.Default()
+		master := &diode.Device{Name: strPtr("standalone")}
+		entities := []diode.Entity{master}
+		oids := ObjectIDValueMap{
+			".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+			".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+			".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "FOC-STANDALONE"},
+			".1.3.6.1.2.1.47.1.1.1.1.15.1": {Value: "ASSET-STANDALONE"},
+		}
+		alwaysReject := func(_ string) bool { return false }
+
+		TranslateAsStack(entities, oids, nil, alwaysReject, logger)
+
+		assert.Nil(t, master.AssetTag, "claimer returning false must suppress standalone tag")
+	})
+
+	t.Run("stack_member_tag_rejected", func(t *testing.T) {
+		logger := slog.Default()
+		master := &diode.Device{
+			Name:       strPtr("stack.example"),
+			DeviceType: &diode.DeviceType{Model: strPtr("WS-C3850-48P")},
+		}
+		entities := []diode.Entity{master}
+		oids := ObjectIDValueMap{
+			// Member 1 (master)
+			".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+			".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+			".1.3.6.1.2.1.47.1.1.1.1.6.1":  {Value: "1"},
+			".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "SERIAL-M1"},
+			".1.3.6.1.2.1.47.1.1.1.1.15.1": {Value: "ASSET-M1"},
+			// Member 2
+			".1.3.6.1.2.1.47.1.1.1.1.4.2":  {Value: "0"},
+			".1.3.6.1.2.1.47.1.1.1.1.5.2":  {Value: "3"},
+			".1.3.6.1.2.1.47.1.1.1.1.6.2":  {Value: "2"},
+			".1.3.6.1.2.1.47.1.1.1.1.11.2": {Value: "SERIAL-M2"},
+			".1.3.6.1.2.1.47.1.1.1.1.15.2": {Value: "ASSET-M2"},
+		}
+		// Claimer allows ASSET-M1 but rejects ASSET-M2.
+		rejectM2 := func(tag string) bool { return tag != "ASSET-M2" }
+
+		out := TranslateAsStack(entities, oids, nil, rejectM2, logger)
+
+		// master (lowest id = 1) must carry ASSET-M1.
+		require.NotNil(t, master.AssetTag, "master tag must be set when claimer allows it")
+		assert.Equal(t, "ASSET-M1", *master.AssetTag)
+
+		// Member 2 Device must be present but without AssetTag.
+		var member2 *diode.Device
+		for _, e := range out {
+			if d, ok := e.(*diode.Device); ok && d.VcPosition != nil && *d.VcPosition == 2 {
+				member2 = d
+				break
+			}
+		}
+		require.NotNil(t, member2, "member 2 Device must be emitted")
+		assert.Nil(t, member2.AssetTag, "member 2 tag must be suppressed by claimer")
+	})
 }

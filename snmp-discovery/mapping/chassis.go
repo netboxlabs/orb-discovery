@@ -457,12 +457,20 @@ func resolveAssetTags(members []ChassisMember, masterTag string, logger *slog.Lo
 // case alias-table routing is skipped and ifName parsing drives all
 // routing decisions.
 //
+// claimAssetTag, when non-nil, is consulted once per tag at
+// application time; returning false suppresses the tag (used by the
+// runner to prevent the same wire tag appearing on devices from
+// different targets of one policy — NetBox asset_tag is unique and
+// the highest-precedence Diode matcher, so cross-target duplicates
+// would merge two devices onto one record). nil means always allow.
+//
 // Must be called from the runner AFTER mapper.MapObjectIDsToEntity
 // returns and BEFORE annotate*/Ingest. See runner.go.
 func TranslateAsStack(
 	entities []diode.Entity,
 	oids ObjectIDValueMap,
 	ifIndexByIface map[*diode.Interface]int,
+	claimAssetTag func(tag string) bool,
 	logger *slog.Logger,
 ) []diode.Entity {
 	master := CurrentDeviceFrom(entities)
@@ -480,11 +488,16 @@ func TranslateAsStack(
 	// value into the collision check.
 	assetTags := resolveAssetTags(inv.Members, strDeref(master.AssetTag), logger)
 
+	// Nil-safe wrapper: claimAssetTag == nil means always allow.
+	claim := func(tag string) bool {
+		return claimAssetTag == nil || claimAssetTag(tag)
+	}
+
 	// Standalone (1 chassis row): set Serial, return unchanged shape.
 	if !inv.IsStack() {
 		s := inv.Members[0].Serial
 		master.Serial = &s
-		if tag, ok := assetTags[inv.Members[0].ID]; ok && master.AssetTag == nil {
+		if tag, ok := assetTags[inv.Members[0].ID]; ok && master.AssetTag == nil && claim(tag) {
 			master.AssetTag = StringPtr(tag)
 		}
 		return entities
@@ -510,7 +523,7 @@ func TranslateAsStack(
 	}
 
 	// Must precede buildMasterRef so the matcher stub carries the same asset_tag as the rich master.
-	if tag, ok := assetTags[lowest.ID]; ok && master.AssetTag == nil {
+	if tag, ok := assetTags[lowest.ID]; ok && master.AssetTag == nil && claim(tag) {
 		master.AssetTag = StringPtr(tag)
 	}
 
@@ -530,7 +543,7 @@ func TranslateAsStack(
 	memberDevices := make([]*diode.Device, 0, len(inv.Members)-1)
 	for _, m := range inv.Members[1:] {
 		dev := buildMemberDevice(master, m, masterRef, vcName)
-		if tag, ok := assetTags[m.ID]; ok {
+		if tag, ok := assetTags[m.ID]; ok && claim(tag) {
 			dev.AssetTag = StringPtr(tag)
 		}
 		memberByID[m.ID] = dev

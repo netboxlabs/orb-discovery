@@ -1103,3 +1103,38 @@ func TestNewRunner_RangeScheduledWithCron(t *testing.T) {
 	assert.False(t, nextRuns[1].IsZero(), "second next run must be a real future time, not zero — proves this is a cron job not a one-time job")
 	assert.True(t, nextRuns[1].After(nextRuns[0]), "cron next runs must be strictly increasing")
 }
+
+// TestAssetTagClaimer_Semantics tests the per-policy claim logic directly.
+// First claim: allowed and recorded. Same-host re-claim: allowed.
+// Cross-host claim: rejected with warn log. Map state reflects ownership.
+func TestAssetTagClaimer_Semantics(t *testing.T) {
+	r := &Runner{
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		assetTagOwners: map[string]string{},
+	}
+
+	claimA := r.assetTagClaimer("host-A")
+	claimB := r.assetTagClaimer("host-B")
+
+	// First claim by host-A: must succeed.
+	assert.True(t, claimA("TAG-001"), "first claim must be allowed")
+
+	// Verify ownership recorded.
+	r.assetTagOwnersMu.Lock()
+	assert.Equal(t, "host-A", r.assetTagOwners["TAG-001"])
+	r.assetTagOwnersMu.Unlock()
+
+	// Same-host re-claim on next cycle: must succeed.
+	assert.True(t, claimA("TAG-001"), "same-host re-claim must be allowed")
+
+	// Cross-host claim: must be rejected.
+	assert.False(t, claimB("TAG-001"), "cross-host claim must be suppressed")
+
+	// Ownership must remain with the original host.
+	r.assetTagOwnersMu.Lock()
+	assert.Equal(t, "host-A", r.assetTagOwners["TAG-001"], "ownership must not transfer on rejected claim")
+	r.assetTagOwnersMu.Unlock()
+
+	// A different tag has no prior owner: host-B can claim it.
+	assert.True(t, claimB("TAG-002"), "host-B must be able to claim an unclaimed tag")
+}
