@@ -153,13 +153,16 @@ jobs:
           echo $BUILD_COMMIT > ./gnmi-discovery/version/BUILD_COMMIT.txt
           echo $BUILD_VERSION > ./gnmi-discovery/version/BUILD_VERSION.txt
 
-      - name: Build image and push
+      # Build only — gnmi-discovery is experimental and has no DockerHub repo yet,
+      # so push is disabled. This still validates the multi-arch image build.
+      # Flip push to true (and ensure netboxlabs/gnmi-discovery exists) to publish.
+      - name: Build image
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: gnmi-discovery
           file: gnmi-discovery/docker/Dockerfile
           platforms: linux/amd64, linux/arm64
-          push: true
+          push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
