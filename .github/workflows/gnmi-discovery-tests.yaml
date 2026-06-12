@@ -1,8 +1,8 @@
 name: gNMI Discovery - test
 on:
   push:
-    branches:
-      - "!release"
+    branches-ignore:
+      - release
     paths:
       - "gnmi-discovery/**"
       - "!gnmi-discovery/docker/**"

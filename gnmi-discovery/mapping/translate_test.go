@@ -1,6 +1,7 @@
 package mapping
 
 import (
+	"math"
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -131,6 +132,16 @@ func TestToInt64PtrUintTypes(t *testing.T) {
 			require.NotNil(t, got, "toInt64Ptr returned nil for %T(%v)", tc.in, tc.in)
 			require.Equal(t, tc.want, *got)
 		})
+	}
+}
+
+// TestToInt64PtrFloatGuard verifies that finite in-range floats convert but
+// NaN/Inf/out-of-int64-range floats return nil (an out-of-range float -> int64
+// is implementation-defined in Go, so a hostile MTU must not slip through).
+func TestToInt64PtrFloatGuard(t *testing.T) {
+	require.Equal(t, int64(9000), *toInt64Ptr(float64(9000)))
+	for _, bad := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), 1e300, -1e300} {
+		require.Nil(t, toInt64Ptr(bad), "toInt64Ptr(%v) must be nil", bad)
 	}
 }
 

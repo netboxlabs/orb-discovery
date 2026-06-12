@@ -2,6 +2,7 @@ package mapping
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -60,6 +61,12 @@ func toInt64Ptr(v any) *int64 {
 		x := int64(n)
 		return &x
 	case float64:
+		// Guard before converting: an out-of-range float -> int64 is
+		// implementation-defined in Go, so a malformed decoded value could become a
+		// surprising (possibly negative) result. Reject NaN/Inf/out-of-range.
+		if math.IsNaN(n) || math.IsInf(n, 0) || n < math.MinInt64 || n > math.MaxInt64 {
+			return nil
+		}
 		x := int64(n)
 		return &x
 	case string:

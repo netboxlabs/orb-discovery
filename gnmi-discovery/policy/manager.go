@@ -182,15 +182,20 @@ func ensurePort(h string) string {
 	if _, _, err := net.SplitHostPort(h); err == nil {
 		return h // already host:port (handles bracketed IPv6 too)
 	}
-	// SplitHostPort failed → no usable port present. Only bracket a genuine bare
-	// IPv6 literal (parses as an IP and contains ':'); bracketing on a bare
-	// strings.Contains(":") test would mangle malformed host:port values like
-	// "host:abc" into "[host:abc]:9339". Everything else (hostname, IPv4, or an
-	// already-bracketed literal) just gets the default port appended.
-	if ip := net.ParseIP(h); ip != nil && strings.Contains(h, ":") {
-		return fmt.Sprintf("[%s]:%d", h, config.DefaultGNMIPort)
+	// SplitHostPort failed. Append the default port only when the input clearly
+	// has no port; never rewrite a value that already carries colons but isn't a
+	// recognizable IPv6 literal (a malformed host:port like "a:b:c"), so the
+	// dial/validation error points at the real bad value.
+	switch {
+	case strings.HasPrefix(h, "[") && strings.HasSuffix(h, "]"):
+		return fmt.Sprintf("%s:%d", h, config.DefaultGNMIPort) // bracketed IPv6, no port
+	case net.ParseIP(h) != nil && strings.Contains(h, ":"):
+		return fmt.Sprintf("[%s]:%d", h, config.DefaultGNMIPort) // bare IPv6 literal -> bracket
+	case strings.Contains(h, ":"):
+		return h // malformed host:port -> leave untouched
+	default:
+		return fmt.Sprintf("%s:%d", h, config.DefaultGNMIPort) // hostname / IPv4, no port
 	}
-	return fmt.Sprintf("%s:%d", h, config.DefaultGNMIPort)
 }
 
 func (m *Manager) resolveEnv(policy *config.Policy) error {
