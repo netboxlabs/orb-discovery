@@ -35,11 +35,11 @@ func (d *GnmicDialer) Dial(ctx context.Context, spec TargetSpec) (Session, error
 		opts = append(opts, gapi.Password(spec.Password))
 	}
 
-	// TLS logic: explicit CA/cert/key supplies verification/mTLS material;
-	// skip_verify disables target-cert verification and is honored INDEPENDENTLY
-	// of that material (e.g. mTLS against a self-signed device cert); with neither
-	// TLS material nor skip_verify, fall back to plaintext (insecure).
-	hasTLSMaterial := spec.CAFile != "" || spec.CertFile != "" || spec.KeyFile != ""
+	// TLS is the default (secure by default): explicit CA/cert/key supply
+	// verification/mTLS material; skip_verify keeps TLS but does not verify the
+	// target cert (honored INDEPENDENTLY of that material, e.g. mTLS against a
+	// self-signed device cert). Plaintext requires an EXPLICIT insecure opt-in.
+	// With none of these set, gnmic establishes TLS using the system root CAs.
 	if spec.CAFile != "" {
 		opts = append(opts, gapi.TLSCA(spec.CAFile))
 	}
@@ -52,7 +52,7 @@ func (d *GnmicDialer) Dial(ctx context.Context, spec TargetSpec) (Session, error
 	if spec.SkipVerify {
 		opts = append(opts, gapi.SkipVerify(true))
 	}
-	if !hasTLSMaterial && !spec.SkipVerify {
+	if spec.Insecure {
 		opts = append(opts, gapi.Insecure(true))
 	}
 

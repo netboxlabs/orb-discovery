@@ -94,8 +94,9 @@ policies:
         - host: 10.0.0.11:6030       # Arista EOS default gNMI port
           username: ${GNMI_USER}     # ${ENV_VAR} syntax supported
           password: ${GNMI_PASS}
-          tls:
-            skip_verify: true
+          tls:                       # TLS is the default (system root CAs)
+            skip_verify: true        # keep TLS but don't verify the target cert
+            insecure: false          # opt-in PLAINTEXT (no TLS) — off by default
             ca: /run/secrets/ca.pem  # optional mTLS
             cert: /run/secrets/cert.pem
             key: /run/secrets/key.pem

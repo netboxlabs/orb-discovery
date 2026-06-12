@@ -73,6 +73,7 @@ type TargetSpec struct {
 	Username   string
 	Password   string
 	SkipVerify bool
+	Insecure   bool // explicit opt-in to plaintext (no TLS); default is TLS
 	CAFile     string
 	CertFile   string
 	KeyFile    string

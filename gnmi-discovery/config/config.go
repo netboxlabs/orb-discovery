@@ -30,7 +30,12 @@ type Status struct {
 
 // TLSConfig holds per-target TLS settings.
 type TLSConfig struct {
+	// SkipVerify keeps TLS but does not verify the target certificate (e.g. a
+	// self-signed device cert). Insecure is an explicit opt-in to PLAINTEXT (no
+	// TLS at all). With neither set and no CA/cert/key, the dialer uses TLS with
+	// the system root CAs (secure by default).
 	SkipVerify bool   `yaml:"skip_verify,omitempty"`
+	Insecure   bool   `yaml:"insecure,omitempty"`
 	CAFile     string `yaml:"ca,omitempty"`
 	CertFile   string `yaml:"cert,omitempty"`
 	KeyFile    string `yaml:"key,omitempty"`

@@ -101,7 +101,7 @@ func dialPlaintext(t *testing.T, addr string) Session {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	sess, err := (&GnmicDialer{}).Dial(ctx, TargetSpec{Host: addr})
+	sess, err := (&GnmicDialer{}).Dial(ctx, TargetSpec{Host: addr, Insecure: true})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sess.Close() })
 	return sess
@@ -439,7 +439,7 @@ func TestGnmicSession_Subscribe_StreamClosedByServer(t *testing.T) {
 	// dialPlaintext already registers a Cleanup close.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	sess, err := (&GnmicDialer{}).Dial(ctx, TargetSpec{Host: addr})
+	sess, err := (&GnmicDialer{}).Dial(ctx, TargetSpec{Host: addr, Insecure: true})
 	require.NoError(t, err)
 	defer func() { _ = sess.Close() }()
 
@@ -632,6 +632,7 @@ func TestGnmicDialer_WithCredentials(t *testing.T) {
 		Host:     addr,
 		Username: "admin",
 		Password: "secret",
+		Insecure: true, // plaintext test server
 	})
 	require.NoError(t, err)
 	defer func() { _ = sess.Close() }()
@@ -640,6 +641,29 @@ func TestGnmicDialer_WithCredentials(t *testing.T) {
 	caps, err := sess.Capabilities(ctx)
 	require.NoError(t, err)
 	assert.NotNil(t, caps)
+}
+
+// TestGnmicDialer_SecureByDefault verifies that a TargetSpec with no TLS material,
+// no skip_verify, and no insecure opt-in defaults to TLS — so an RPC against the
+// PLAINTEXT test server fails the TLS handshake rather than silently downgrading.
+func TestGnmicDialer_SecureByDefault(t *testing.T) {
+	srv := &testGNMIServer{
+		capsHandler: func(_ context.Context, _ *gnmiproto.CapabilityRequest) (*gnmiproto.CapabilityResponse, error) {
+			return &gnmiproto.CapabilityResponse{GNMIVersion: "0.7.0"}, nil
+		},
+	}
+	addr := startTestGNMIServer(t, srv)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	sess, err := (&GnmicDialer{}).Dial(ctx, TargetSpec{Host: addr}) // no Insecure -> TLS
+	require.NoError(t, err)                                         // gnmic dials lazily
+	defer func() { _ = sess.Close() }()
+
+	// The RPC triggers the handshake; TLS against a plaintext server must error.
+	_, err = sess.Capabilities(ctx)
+	require.Error(t, err, "default (TLS) dial must not succeed against a plaintext server")
 }
 
 // TestGnmicDialer_SkipVerifyBranch covers the SkipVerify option-append in
