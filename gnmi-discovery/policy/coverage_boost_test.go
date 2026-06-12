@@ -13,6 +13,7 @@ package policy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -88,7 +89,7 @@ func TestManagerStartPolicyExists(t *testing.T) {
 	require.ErrorIs(t, m.StartPolicy("p1", pol), ErrPolicyExists, "second StartPolicy for same name must return ErrPolicyExists")
 }
 
-// TestManagerStopPolicyUnknown verifies that stopping a non-existent policy is a no-op.
+// TestManagerStopPolicyUnknown verifies that stopping a non-existent policy returns ErrPolicyNotFound.
 func TestManagerStopPolicyUnknown(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
@@ -312,6 +313,23 @@ policies:
 func TestEnsurePortEmpty(t *testing.T) {
 	t.Parallel()
 	require.Equal(t, "", ensurePort(""))
+}
+
+func TestEnsurePort(t *testing.T) {
+	t.Parallel()
+	dp := config.DefaultGNMIPort
+	cases := map[string]string{
+		"10.0.0.1":                 fmt.Sprintf("10.0.0.1:%d", dp),            // IPv4, no port
+		"10.0.0.1:830":             "10.0.0.1:830",                            // IPv4 with port (unchanged)
+		"router1.example.com":      fmt.Sprintf("router1.example.com:%d", dp), // hostname, no port
+		"router1.example.com:9339": "router1.example.com:9339",                // hostname with port (unchanged)
+		"2001:db8::1":              fmt.Sprintf("[2001:db8::1]:%d", dp),       // bare IPv6 literal -> bracketed
+		"[2001:db8::1]:830":        "[2001:db8::1]:830",                       // bracketed IPv6 with port (unchanged)
+		"[2001:db8::1]":            fmt.Sprintf("[2001:db8::1]:%d", dp),       // bracketed IPv6, no port
+	}
+	for in, want := range cases {
+		require.Equal(t, want, ensurePort(in), "ensurePort(%q)", in)
+	}
 }
 
 // ─── filterNotification ──────────────────────────────────────────────────────

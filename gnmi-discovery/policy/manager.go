@@ -182,11 +182,15 @@ func ensurePort(h string) string {
 	if _, _, err := net.SplitHostPort(h); err == nil {
 		return h // already host:port (handles bracketed IPv6 too)
 	}
-	host := h
-	if strings.Contains(h, ":") && !strings.HasPrefix(h, "[") {
-		host = "[" + h + "]" // bare IPv6 literal
+	// SplitHostPort failed → no usable port present. Only bracket a genuine bare
+	// IPv6 literal (parses as an IP and contains ':'); bracketing on a bare
+	// strings.Contains(":") test would mangle malformed host:port values like
+	// "host:abc" into "[host:abc]:9339". Everything else (hostname, IPv4, or an
+	// already-bracketed literal) just gets the default port appended.
+	if ip := net.ParseIP(h); ip != nil && strings.Contains(h, ":") {
+		return fmt.Sprintf("[%s]:%d", h, config.DefaultGNMIPort)
 	}
-	return fmt.Sprintf("%s:%d", host, config.DefaultGNMIPort)
+	return fmt.Sprintf("%s:%d", h, config.DefaultGNMIPort)
 }
 
 func (m *Manager) resolveEnv(policy *config.Policy) error {

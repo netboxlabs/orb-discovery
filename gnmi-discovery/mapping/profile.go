@@ -251,7 +251,13 @@ func merge(parent, child *Profile) *Profile {
 	out := *parent
 	out.Name = child.Name
 	out.Extends = child.Extends
-	out.Match = child.Match
+	// Match is inherited from the parent unless the child restates it, mirroring
+	// every other field below. Clobbering it unconditionally would drop the vendor
+	// criteria of an "override only the differences" profile, so auto-detection
+	// could no longer select it (it would fall back to _base).
+	if child.Match.Vendor != "" {
+		out.Match = child.Match
+	}
 	if child.Device.Hostname != "" {
 		out.Device.Hostname = child.Device.Hostname
 	}

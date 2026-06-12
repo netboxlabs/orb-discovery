@@ -162,6 +162,20 @@ func TestMergeChildOverridesParentFields(t *testing.T) {
 	require.Equal(t, "state/mtu", out.Interfaces.Keys["mtu"])
 }
 
+// TestMergeInheritsParentMatchWhenChildOmitsIt guards the "override only the
+// differences" case: a child that does not restate match.vendor must inherit the
+// parent's match criteria (not have it cleared), so auto-detection still selects it.
+func TestMergeInheritsParentMatchWhenChildOmitsIt(t *testing.T) {
+	parent := &Profile{Name: "parent", Match: Match{Vendor: "Arista"}}
+	child := &Profile{Name: "child", Extends: "parent"} // no Match restated
+	out := merge(parent, child)
+	require.Equal(t, "Arista", out.Match.Vendor, "child must inherit parent's match.vendor")
+
+	// A child that DOES restate match still overrides.
+	child2 := &Profile{Name: "child2", Extends: "parent", Match: Match{Vendor: "Cisco"}}
+	require.Equal(t, "Cisco", merge(parent, child2).Match.Vendor)
+}
+
 func TestMergeListBothEmpty(t *testing.T) {
 	out := mergeList(ListMap{}, ListMap{})
 	require.Equal(t, "", out.ListPath)
