@@ -800,6 +800,25 @@ func TestTranslateAsStack_JunosQFX_4MemberVC(t *testing.T) {
 	assert.Equal(t, "vc-edge-01-2", *fpc2Iface.Device.Name)
 }
 
+func TestAssetTagWalkGating(t *testing.T) {
+	mappings := []config.MappingEntry{
+		{OID: "1.3.6.1.2.1.47.1.1.1.1.15", Entity: "chassis_asset", Field: "assetID"},
+		{OID: "1.3.6.1.2.1.2.2.1.2", Entity: "interface", Field: "name"},
+	}
+	logger := slog.Default()
+
+	off, err := NewConfig(mappings, logger, nil, nil, nil, config.Options{})
+	require.NoError(t, err)
+	_, walked := off.GenericObjectIDs()["1.3.6.1.2.1.47.1.1.1.1.15"]
+	assert.False(t, walked, "asset tag column must not be walked with discover_asset_tags off")
+
+	enabled := true
+	on, err := NewConfig(mappings, logger, nil, nil, nil, config.Options{DiscoverAssetTags: &enabled})
+	require.NoError(t, err)
+	_, walked = on.GenericObjectIDs()["1.3.6.1.2.1.47.1.1.1.1.15"]
+	assert.True(t, walked, "asset tag column must be walked with discover_asset_tags on")
+}
+
 // stubManufacturers and stubDeviceLookup satisfy the data.ManufacturerRetriever
 // and data.DeviceRetriever interfaces with harmless no-op implementations so
 // that chassis tests can run through the full DeviceMapper code path without

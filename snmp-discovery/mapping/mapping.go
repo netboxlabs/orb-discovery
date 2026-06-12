@@ -256,7 +256,7 @@ func createEntity(entityType EntityType) (diode.Entity, error) {
 		return &diode.VLAN{}, nil
 	case "interface_vlan":
 		return nil, fmt.Errorf("entity type %q is post-pass only and has no row entity", entityType)
-	case "chassis_inventory":
+	case "chassis_inventory", "chassis_asset":
 		return nil, fmt.Errorf("entity type %q is post-pass only and has no row entity", entityType)
 	}
 	return nil, fmt.Errorf("unimplemented entity type: %s", entityType)
@@ -304,6 +304,12 @@ const (
 	// associated mapper is a no-op; data flows via the raw oids map.
 	// The columns are only walked when options.discover_vrfs is true.
 	VrfEntityType EntityType = "vrf"
+	// ChassisAssetEntityType is a pseudo-entity that flags the
+	// ENTITY-MIB entPhysicalAssetID column for consumption by
+	// TranslateAsStack as a post-pass. Map() on its associated mapper
+	// is a no-op; data flows via the raw oids map. The column is only
+	// walked when options.discover_asset_tags is true.
+	ChassisAssetEntityType EntityType = "chassis_asset"
 )
 
 // ObjectIDMapper is a struct that maps ObjectIDs to entities
@@ -444,6 +450,7 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 		string(ChassisInventoryEntityType): &ChassisInventoryMapper{logger: logger},
 		string(ChassisModuleEntityType):    &ChassisModuleMapper{logger: logger},
 		string(VrfEntityType):              &VrfMapper{logger: logger},
+		string(ChassisAssetEntityType):     &ChassisInventoryMapper{logger: logger},
 	}
 	postPassMappers := []postPassMapper{vlanMapper}
 	// Validate index_kind on every entry (top-level and nested). A typo
@@ -481,6 +488,7 @@ func NewConfig(mappings []config.MappingEntry, logger *slog.Logger, manufacturer
 		if Entry.Entity == string(VLANEntityType) ||
 			Entry.Entity == string(InterfaceVLANEntityType) ||
 			Entry.Entity == string(ChassisInventoryEntityType) ||
+			Entry.Entity == string(ChassisAssetEntityType) ||
 			Entry.Entity == string(VrfEntityType) {
 			postPassPrefixes = append(postPassPrefixes, m.OID+".")
 		}
@@ -1520,6 +1528,10 @@ func (m *Config) objectIDsForVendor(vendor string, generic bool) map[string]int 
 	// TranslateVrfs pass; walking them with discover_vrfs off would be
 	// wasted SNMP work, so they are excluded from the walk set entirely.
 	skipVrf := !m.options.VrfDiscoveryEnabled()
+	// entPhysicalAssetID is consumed exclusively by the TranslateAsStack
+	// post-pass; walking it with discover_asset_tags off would be wasted
+	// SNMP work, so it is excluded from the walk set entirely.
+	skipAssetTag := !m.options.AssetTagDiscoveryEnabled()
 	out := make(map[string]int)
 	for _, entry := range m.mapping {
 		if generic {
@@ -1539,6 +1551,9 @@ func (m *Config) objectIDsForVendor(vendor string, generic bool) map[string]int 
 				if skipVrf && childEntry.Entity == string(VrfEntityType) {
 					continue
 				}
+				if skipAssetTag && childEntry.Entity == string(ChassisAssetEntityType) {
+					continue
+				}
 				if childEntry.IdentifierSize == 0 {
 					out[childEntry.OID] = 1
 				} else {
@@ -1550,6 +1565,9 @@ func (m *Config) objectIDsForVendor(vendor string, generic bool) map[string]int 
 				continue
 			}
 			if skipVrf && entry.Entity == string(VrfEntityType) {
+				continue
+			}
+			if skipAssetTag && entry.Entity == string(ChassisAssetEntityType) {
 				continue
 			}
 			if entry.IdentifierSize == 0 {
