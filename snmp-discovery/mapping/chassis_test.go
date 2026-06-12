@@ -1201,3 +1201,22 @@ func TestTranslateAsStack_StackDuplicateAssetTagsSuppressed(t *testing.T) {
 		}
 	}
 }
+
+func TestTranslateAsStack_StackMemberTagCollidingWithDefaultsSuppressed(t *testing.T) {
+	logger := slog.Default()
+	master := &diode.Device{Name: strPtr("3850-stack.example"), AssetTag: strPtr("OPERATOR-TAG")}
+	entities := []diode.Entity{master}
+	oids := fixtureCisco3850TwoMemberStack()
+	// Member 2's wire tag equals the operator-supplied defaults tag on
+	// the master -> must be suppressed to avoid matcher collision.
+	oids[".1.3.6.1.2.1.47.1.1.1.1.15.1000"] = Value{Value: "OPERATOR-TAG"}
+
+	out := TranslateAsStack(entities, oids, map[*diode.Interface]int{}, logger)
+
+	assert.Equal(t, "OPERATOR-TAG", *master.AssetTag, "defaults tag preserved on master")
+	for _, e := range out {
+		if d, ok := e.(*diode.Device); ok && d != master {
+			assert.Nil(t, d.AssetTag, "member tag equal to defaults tag must be suppressed")
+		}
+	}
+}

@@ -399,10 +399,11 @@ func resolveAssetTags(members []ChassisMember, masterTag string, logger *slog.Lo
 		if tag == "" {
 			continue
 		}
-		if utf8.RuneCountInString(tag) > assetTagMaxLen {
+		runeLen := utf8.RuneCountInString(tag)
+		if runeLen > assetTagMaxLen {
 			logger.Warn("asset tag skipped: exceeds NetBox max length",
-				"max_length", assetTagMaxLen, "member_id", m.ID,
-				"entPhysicalIndex", m.EntPhysicalIndex)
+				"max_length", assetTagMaxLen, "value_length", runeLen,
+				"member_id", m.ID, "entPhysicalIndex", m.EntPhysicalIndex)
 			continue
 		}
 		if counts[tag] > 1 {
@@ -489,6 +490,7 @@ func TranslateAsStack(
 		}
 	}
 
+	// Must precede buildMasterRef so the matcher stub carries the same asset_tag as the rich master.
 	if tag, ok := assetTags[lowest.ID]; ok && master.AssetTag == nil {
 		master.AssetTag = strPtrCopy(tag)
 	}
