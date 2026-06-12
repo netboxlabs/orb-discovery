@@ -104,6 +104,21 @@ policies:
 `,
 		},
 		{
+			name: "empty interface_patterns type (policy defaults)",
+			yaml: `
+policies:
+  p1:
+    config:
+      defaults:
+        interface_patterns:
+          - match: "^Gi"
+            type: ""
+    scope:
+      targets:
+        - host: 10.0.0.1
+`,
+		},
+		{
 			name: "bad interface_exclude_patterns (policy defaults)",
 			yaml: `
 policies:

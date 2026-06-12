@@ -90,6 +90,12 @@ func TestResolveInterfaceTypeVendorNames(t *testing.T) {
 	// Ladder precedence intact: an OC state/type lag still beats a name guess.
 	require.Equal(t, "lag",
 		resolveInterfaceType("10GE1/0/1", "IEEE8023ADLAG", "", "other", nil))
+
+	// An empty-typed user pattern is skipped (must not set Type to "" or
+	// short-circuit the fallback chain) — falls through to the OC state/type.
+	emptyTyped := []compiledIfacePattern{{re: regexp.MustCompile(`^mgmt`), typ: ""}}
+	require.Equal(t, "lag",
+		resolveInterfaceType("mgmt0", "IEEE8023ADLAG", "", "other", emptyTyped))
 }
 
 func TestOCDuplex(t *testing.T) {

@@ -121,7 +121,10 @@ func normalizeMAC(s string) string {
 // is the per-call compiled policy interface_patterns.
 func resolveInterfaceType(name, ocTypeBase, speedEnum, defaultType string, userPatterns []compiledIfacePattern) string {
 	for _, p := range userPatterns {
-		if p.re.MatchString(name) {
+		// Defensive: skip an empty pattern type so it can never set Interface.Type
+		// to "" (policy validation already rejects these) and never short-circuit
+		// the fallback chain on an empty result.
+		if p.typ != "" && p.re.MatchString(name) {
 			return p.typ
 		}
 	}

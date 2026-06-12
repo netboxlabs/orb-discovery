@@ -132,6 +132,11 @@ func validateInterfaceRegexes(d *config.Defaults) error {
 		return nil
 	}
 	for _, p := range d.InterfacePatterns {
+		// An empty type would set Interface.Type to "" (unresolvable by NetBox/Diode)
+		// and short-circuit the OC/name/speed/default fallback — reject it up front.
+		if strings.TrimSpace(p.Type) == "" {
+			return fmt.Errorf("invalid interface_patterns entry %q: empty type", p.Match)
+		}
 		if _, err := regexp.Compile(p.Match); err != nil {
 			return fmt.Errorf("invalid interface_patterns match %q: %w", p.Match, err)
 		}
