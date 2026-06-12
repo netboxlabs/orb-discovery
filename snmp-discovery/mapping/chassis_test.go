@@ -819,6 +819,54 @@ func TestAssetTagWalkGating(t *testing.T) {
 	assert.True(t, walked, "asset tag column must be walked with discover_asset_tags on")
 }
 
+// TestAssetTagWalkGating_ChildEntry mirrors TestAssetTagWalkGating but uses the
+// production child-entry shape: the chassis_asset column (.15) is a child of
+// a chassis_inventory parent block (parent OID 1.3.6.1.2.1.47.1.1.1), which
+// is the path exercised by objectIDsForVendor when MappingEntries are present.
+//
+// Assertions:
+//   - with Options{} (off): .15 is ABSENT, sibling .11 (serial) IS present
+//   - with DiscoverAssetTags: &true: .15 IS present
+func TestAssetTagWalkGating_ChildEntry(t *testing.T) {
+	const (
+		parentOID   = "1.3.6.1.2.1.47.1.1.1"
+		serialOID   = ".1.3.6.1.2.1.47.1.1.1.1.11"
+		assetTagOID = ".1.3.6.1.2.1.47.1.1.1.1.15"
+	)
+
+	// Mirror the chassis_inventory parent + child block from policy/mapping.yaml.
+	mappings := []config.MappingEntry{
+		{
+			OID: parentOID, Entity: "chassis_inventory", Field: "_id", IdentifierSize: 2,
+			MappingEntries: []config.MappingEntry{
+				{OID: serialOID, Entity: "chassis_inventory", Field: "serialNumber"},
+				{OID: assetTagOID, Entity: "chassis_asset", Field: "assetID"},
+			},
+		},
+	}
+	logger := slog.Default()
+
+	// Case 1: discover_asset_tags off (default Options{}).
+	off, err := NewConfig(mappings, logger, nil, nil, nil, config.Options{})
+	require.NoError(t, err)
+	gen := off.GenericObjectIDs()
+	_, hasAsset := gen[assetTagOID]
+	assert.False(t, hasAsset,
+		"asset tag child column must not be walked with discover_asset_tags off")
+	_, hasSerial := gen[serialOID]
+	assert.True(t, hasSerial,
+		"sibling chassis_inventory serial column must remain present when asset tag is off")
+
+	// Case 2: discover_asset_tags on.
+	enabled := true
+	on, err := NewConfig(mappings, logger, nil, nil, nil, config.Options{DiscoverAssetTags: &enabled})
+	require.NoError(t, err)
+	gen = on.GenericObjectIDs()
+	_, hasAsset = gen[assetTagOID]
+	assert.True(t, hasAsset,
+		"asset tag child column must be walked with discover_asset_tags on")
+}
+
 // stubManufacturers and stubDeviceLookup satisfy the data.ManufacturerRetriever
 // and data.DeviceRetriever interfaces with harmless no-op implementations so
 // that chassis tests can run through the full DeviceMapper code path without
