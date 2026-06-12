@@ -166,7 +166,7 @@ func TestTranslateIPsEmptyListPath(t *testing.T) {
 	// Profile with no interfaces list_path → translateIPs returns nil immediately.
 	p := &Profile{} // Interfaces.ListPath is ""
 	dev := &diode.Device{Name: strptr("r1")}
-	require.Nil(t, translateIPs(p, map[string]any{}, dev))
+	require.Nil(t, translateIPs(p, map[string]any{}, dev, nil))
 }
 
 func TestTranslateIPsDuplicateAddrKey(t *testing.T) {
@@ -177,7 +177,7 @@ func TestTranslateIPsDuplicateAddrKey(t *testing.T) {
 	dev := &diode.Device{Name: strptr("r1")}
 	pfx := "/interfaces/interface[name=Ethernet1]/subinterfaces/subinterface[index=0]/ipv4/addresses/address[ip=10.0.0.1]/state/prefix-length"
 	snap := map[string]any{pfx: 24}
-	ents := translateIPs(base, snap, dev)
+	ents := translateIPs(base, snap, dev, nil)
 	var ips []*diode.IPAddress
 	for _, e := range ents {
 		if ip, ok := e.(*diode.IPAddress); ok {
@@ -197,7 +197,7 @@ func TestTranslateIPsEmptyPrefixLengthSkipped(t *testing.T) {
 	snap := map[string]any{
 		"/interfaces/interface[name=Ethernet1]/subinterfaces/subinterface[index=0]/ipv4/addresses/address[ip=10.0.0.1]/state/prefix-length": "",
 	}
-	ents := translateIPs(base, snap, dev)
+	ents := translateIPs(base, snap, dev, nil)
 	for _, e := range ents {
 		_, isIP := e.(*diode.IPAddress)
 		require.False(t, isIP, "empty prefix-length must not emit an IPAddress")

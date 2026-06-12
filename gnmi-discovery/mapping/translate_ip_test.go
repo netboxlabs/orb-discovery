@@ -1,6 +1,7 @@
 package mapping
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
@@ -43,6 +44,28 @@ func TestParseIPAddressPathNonMatch(t *testing.T) {
 	}
 }
 
+// TestTranslateIPsHonorsExcludes verifies that addresses on an interface matched
+// by interface_exclude_patterns are dropped (so they aren't ingested via a stub
+// interface, and translatePrefixes never derives prefixes from them).
+func TestTranslateIPsHonorsExcludes(t *testing.T) {
+	store, _ := LoadProfiles("")
+	base, _ := store.Get("_base")
+	dev := &diode.Device{Name: strptr("r1")}
+	snap := map[string]any{
+		"/interfaces/interface[name=Ethernet1]/subinterfaces/subinterface[index=0]/ipv4/addresses/address[ip=10.0.0.1]/state/prefix-length":    31,
+		"/interfaces/interface[name=Management1]/subinterfaces/subinterface[index=0]/ipv4/addresses/address[ip=192.0.2.1]/state/prefix-length": 24,
+	}
+	ents := translateIPs(base, snap, dev, []*regexp.Regexp{regexp.MustCompile("^Management")})
+
+	var addrs []string
+	for _, e := range ents {
+		if ip, ok := e.(*diode.IPAddress); ok {
+			addrs = append(addrs, *ip.Address)
+		}
+	}
+	require.Equal(t, []string{"10.0.0.1/31"}, addrs, "excluded Management1's IP must be dropped")
+}
+
 func TestTranslateIPsParentAndSubinterface(t *testing.T) {
 	store, _ := LoadProfiles("")
 	base, _ := store.Get("_base")
@@ -57,7 +80,7 @@ func TestTranslateIPsParentAndSubinterface(t *testing.T) {
 		// missing prefix-length -> skipped (no prefix leaf for this ip)
 		"/interfaces/interface[name=Ethernet2]/subinterfaces/subinterface[index=0]/ipv4/addresses/address[ip=10.9.9.9]/state/ip": "10.9.9.9",
 	}
-	ents := translateIPs(base, snap, dev)
+	ents := translateIPs(base, snap, dev, nil)
 
 	var ips []*diode.IPAddress
 	var subifs []*diode.Interface

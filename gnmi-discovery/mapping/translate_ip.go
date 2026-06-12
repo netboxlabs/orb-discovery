@@ -1,6 +1,7 @@
 package mapping
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 
@@ -72,7 +73,7 @@ func parseIPAddressPath(path, ifaceListPath string) (iface, index, family, ip, l
 // translateIPs emits an IPAddress per (interface, subinterface index, family, ip)
 // that reports a prefix-length. index 0 assigns to the parent interface; index>0
 // emits a child virtual subinterface "<iface>.<index>" (once) and assigns there.
-func translateIPs(profile *Profile, snap map[string]any, dev *diode.Device) []diode.Entity {
+func translateIPs(profile *Profile, snap map[string]any, dev *diode.Device, excludes []*regexp.Regexp) []diode.Entity {
 	listPath := profile.Interfaces.ListPath
 	if listPath == "" {
 		return nil
@@ -83,6 +84,12 @@ func translateIPs(profile *Profile, snap map[string]any, dev *diode.Device) []di
 	for path, val := range snap {
 		iface, index, family, ip, leaf, ok := parseIPAddressPath(path, listPath)
 		if !ok || leaf != "state/prefix-length" {
+			continue
+		}
+		// An interface excluded via interface_exclude_patterns is skipped entirely:
+		// drop its addresses here too so they (and their derived prefixes) are not
+		// ingested via a stub interface.
+		if nameExcluded(iface, excludes) {
 			continue
 		}
 		k := addrKey{iface, index, family, ip}

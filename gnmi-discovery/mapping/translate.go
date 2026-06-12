@@ -205,7 +205,7 @@ func Translate(profile *Profile, snap map[string]any, defaults *config.Defaults,
 	ifaceEntities := translateInterfaces(profile, snap, dev, defaults)
 	entities = append(entities, ifaceEntities...)
 	entities = append(entities, translateComponents(profile, snap, dev, deviceMfg)...)
-	entities = append(entities, translateIPs(profile, snap, dev)...) // Device -> Interfaces -> Modules -> subifs+IPs
+	entities = append(entities, translateIPs(profile, snap, dev, compileInterfaceExcludes(defaults))...) // Device -> Interfaces -> Modules -> subifs+IPs
 	// VLANs: build definitions (real names/status) + the shared builder, attach
 	// switchport membership, then force-emit every defined VLAN (even unreferenced).
 	vlanDefs := translateVlanDefinitions(snap)
@@ -372,6 +372,33 @@ func chassisSerial(profile *Profile, snap map[string]any) string {
 	return ""
 }
 
+// compileInterfaceExcludes compiles defaults.InterfaceExcludePatterns into regexps
+// (validated at policy parse; an unexpected compile error here skips the offending
+// pattern). Shared by translateInterfaces and translateIPs so an excluded interface
+// is suppressed for BOTH its own entity AND its addresses/derived prefixes.
+func compileInterfaceExcludes(defaults *config.Defaults) []*regexp.Regexp {
+	if defaults == nil {
+		return nil
+	}
+	out := make([]*regexp.Regexp, 0, len(defaults.InterfaceExcludePatterns))
+	for _, m := range defaults.InterfaceExcludePatterns {
+		if re, err := regexp.Compile(m); err == nil {
+			out = append(out, re)
+		}
+	}
+	return out
+}
+
+// nameExcluded reports whether name matches any compiled exclude pattern.
+func nameExcluded(name string, excludes []*regexp.Regexp) bool {
+	for _, re := range excludes {
+		if re.MatchString(name) {
+			return true
+		}
+	}
+	return false
+}
+
 func translateInterfaces(profile *Profile, snap map[string]any, dev *diode.Device, defaults *config.Defaults) []diode.Entity {
 	listPath := profile.Interfaces.ListPath
 	if listPath == "" {
@@ -397,7 +424,6 @@ func translateInterfaces(profile *Profile, snap map[string]any, dev *diode.Devic
 	var ifDefaultDesc string
 	var ifTags []*diode.Tag
 	var userPatterns []config.InterfacePattern
-	var excludePatterns []string
 	if defaults != nil {
 		if defaults.Interface.Type != "" {
 			defaultType = defaults.Interface.Type
@@ -407,19 +433,13 @@ func translateInterfaces(profile *Profile, snap map[string]any, dev *diode.Devic
 		// applies to all entities, mirroring the Device path).
 		ifTags = toTags(append(append([]string{}, defaults.Tags...), defaults.Interface.Tags...))
 		userPatterns = defaults.InterfacePatterns
-		excludePatterns = defaults.InterfaceExcludePatterns
 	}
 	// Compile the name patterns once per call. They were validated at policy
 	// parse (manager.validatePolicy), so any compile error here is unexpected;
 	// defensively skip the offending pattern rather than panicking. Per-flush
 	// compilation is acceptable at inventory cadence (sample/get intervals are
 	// minutes, on_change is debounced).
-	compiledExcludes := make([]*regexp.Regexp, 0, len(excludePatterns))
-	for _, m := range excludePatterns {
-		if re, err := regexp.Compile(m); err == nil {
-			compiledExcludes = append(compiledExcludes, re)
-		}
-	}
+	compiledExcludes := compileInterfaceExcludes(defaults)
 	compiledPatterns := make([]compiledIfacePattern, 0, len(userPatterns))
 	for _, p := range userPatterns {
 		if re, err := regexp.Compile(p.Match); err == nil {
@@ -436,14 +456,7 @@ func translateInterfaces(profile *Profile, snap map[string]any, dev *diode.Devic
 	for _, key := range order {
 		leaves := byKey[key]
 		// 1) exclude patterns (regex on name) -> skip the interface entirely.
-		excluded := false
-		for _, re := range compiledExcludes {
-			if re.MatchString(key) {
-				excluded = true
-				break
-			}
-		}
-		if excluded {
+		if nameExcluded(key, compiledExcludes) {
 			continue
 		}
 		// Resolve the interface type by precedence: user pattern (first match) ->
