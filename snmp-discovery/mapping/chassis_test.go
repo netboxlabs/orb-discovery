@@ -1105,6 +1105,32 @@ func TestResolveAssetTags_GarbageValuesSuppressed(t *testing.T) {
 		"control bytes and invalid UTF-8 must be suppressed")
 }
 
+func TestResolveAssetTags_PlaceholderValuesSuppressed(t *testing.T) {
+	logger := slog.Default()
+	members := []ChassisMember{
+		{ID: 1, AssetTag: "UNKNOWN"},
+		{ID: 2, AssetTag: "n/a"},
+		{ID: 3, AssetTag: "None"},
+		{ID: 4, AssetTag: "0"},
+		{ID: 5, AssetTag: "Not Specified"},
+		{ID: 6, AssetTag: "ASSET-REAL"},
+	}
+	tags := resolveAssetTags(members, "", logger)
+	assert.Equal(t, map[int]string{6: "ASSET-REAL"}, tags,
+		"well-known placeholder values must never become asset tags")
+}
+
+func TestResolveAssetTags_PlaceholderPrefixNotSuppressed(t *testing.T) {
+	logger := slog.Default()
+	members := []ChassisMember{
+		{ID: 1, AssetTag: "NA1234"},      // starts like a placeholder but isn't one
+		{ID: 2, AssetTag: "UNKNOWN-007"}, // exact match only
+	}
+	tags := resolveAssetTags(members, "", logger)
+	assert.Equal(t, map[int]string{1: "NA1234", 2: "UNKNOWN-007"}, tags,
+		"placeholder matching must be exact, not prefix-based")
+}
+
 func TestTranslateAsStack_StandaloneSetsAssetTag(t *testing.T) {
 	logger := slog.Default()
 	master := &diode.Device{Name: strPtr("standalone")}

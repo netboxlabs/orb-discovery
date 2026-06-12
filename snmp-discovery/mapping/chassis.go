@@ -375,6 +375,29 @@ func deriveMemberID(m ChassisMember, ordinalFallback int) int {
 	return ordinalFallback
 }
 
+// assetTagPlaceholders enumerates well-known not-really-an-asset-tag
+// values agents report when no tag was provisioned (vendor defaults,
+// lazy golden-config stamps). Matched exactly, case-insensitively,
+// after trimming — never by prefix/substring, so real tags like
+// "NA1234" pass. The list is deliberately conservative: a false
+// positive here silently drops a legitimate tag.
+var assetTagPlaceholders = map[string]struct{}{
+	"unknown":       {},
+	"n/a":           {},
+	"na":            {},
+	"none":          {},
+	"null":          {},
+	"nil":           {},
+	"default":       {},
+	"unspecified":   {},
+	"unassigned":    {},
+	"not specified": {},
+	"not available": {},
+	"no asset tag":  {},
+	"tbd":           {},
+	"0":             {},
+}
+
 // validAssetTagText reports whether tag is well-formed UTF-8 with no
 // control characters. SNMP OctetStrings are raw bytes; a garbage value
 // must not become Device.asset_tag, NetBox's unique, highest-precedence
@@ -394,6 +417,7 @@ func validAssetTagText(tag string) bool {
 // resolveAssetTags maps member ID -> the entPhysicalAssetID value that
 // is safe to emit for that chassis row. Drops, with a warn log:
 //   - values exceeding NetBox's 50-char asset_tag column (assetTagMaxLen);
+//   - well-known placeholder values (assetTagPlaceholders);
 //   - non-empty values shared by two or more rows of this target;
 //   - values colliding with masterTag (the operator-supplied
 //     defaults asset_tag already on the target device).
@@ -419,6 +443,11 @@ func resolveAssetTags(members []ChassisMember, masterTag string, logger *slog.Lo
 		if !validAssetTagText(tag) {
 			logger.Warn("asset tag skipped: non-printable or invalid UTF-8 value",
 				"member_id", m.ID, "entPhysicalIndex", m.EntPhysicalIndex)
+			continue
+		}
+		if _, placeholder := assetTagPlaceholders[strings.ToLower(tag)]; placeholder {
+			logger.Warn("asset tag skipped: placeholder value",
+				"asset_tag", tag, "member_id", m.ID)
 			continue
 		}
 		runeLen := utf8.RuneCountInString(tag)
