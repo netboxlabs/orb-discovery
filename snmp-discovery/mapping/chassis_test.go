@@ -1432,3 +1432,59 @@ func TestTranslateAsStack_ClaimRejectionSuppressesTag(t *testing.T) {
 		assert.Nil(t, member2.AssetTag, "member 2 tag must be suppressed by claimer")
 	})
 }
+
+// TestTranslateAsStack_DefaultsTagRegisteredWithClaimer: an
+// operator-supplied defaults tag on the master must be REGISTERED with
+// the claimer even though it is never applied through the discovered
+// path — otherwise a different target of the same policy whose wire
+// entPhysicalAssetID equals the defaults value could claim it as a
+// discovered tag and merge onto this device's NetBox record.
+func TestTranslateAsStack_DefaultsTagRegisteredWithClaimer(t *testing.T) {
+	logger := slog.Default()
+
+	t.Run("registered_with_chassis_rows", func(t *testing.T) {
+		master := &diode.Device{Name: strPtr("standalone"), AssetTag: strPtr("OPERATOR-TAG")}
+		entities := []diode.Entity{master}
+		oids := ObjectIDValueMap{
+			".1.3.6.1.2.1.47.1.1.1.1.4.1":  {Value: "0"},
+			".1.3.6.1.2.1.47.1.1.1.1.5.1":  {Value: "3"},
+			".1.3.6.1.2.1.47.1.1.1.1.11.1": {Value: "FOC-STANDALONE"},
+		}
+		var claimed []string
+		recorder := func(tag string) bool {
+			claimed = append(claimed, tag)
+			return true
+		}
+
+		TranslateAsStack(entities, oids, nil, recorder, logger)
+
+		assert.Contains(t, claimed, "OPERATOR-TAG", "defaults tag must be registered with the claimer")
+		assert.Equal(t, "OPERATOR-TAG", *master.AssetTag, "defaults tag stays on the device")
+	})
+
+	t.Run("registered_without_chassis_rows", func(t *testing.T) {
+		master := &diode.Device{Name: strPtr("no-entity-mib"), AssetTag: strPtr("OPERATOR-TAG")}
+		entities := []diode.Entity{master}
+		var claimed []string
+		recorder := func(tag string) bool {
+			claimed = append(claimed, tag)
+			return true
+		}
+
+		TranslateAsStack(entities, ObjectIDValueMap{}, nil, recorder, logger)
+
+		assert.Contains(t, claimed, "OPERATOR-TAG",
+			"defaults tag must be registered even when the device exposes no chassis rows")
+	})
+
+	t.Run("defaults_tag_sticks_when_claim_rejected", func(t *testing.T) {
+		master := &diode.Device{Name: strPtr("standalone"), AssetTag: strPtr("OPERATOR-TAG")}
+		entities := []diode.Entity{master}
+		alwaysReject := func(_ string) bool { return false }
+
+		TranslateAsStack(entities, ObjectIDValueMap{}, nil, alwaysReject, logger)
+
+		assert.Equal(t, "OPERATOR-TAG", *master.AssetTag,
+			"operator-supplied defaults tag is never stripped; the claimer's warn covers the conflict")
+	})
+}

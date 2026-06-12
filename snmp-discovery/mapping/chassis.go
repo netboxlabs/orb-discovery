@@ -477,6 +477,19 @@ func TranslateAsStack(
 	if master == nil {
 		return entities
 	}
+
+	// Register the operator-supplied defaults tag (if any) with the
+	// claimer before any discovered-tag processing — including for
+	// devices with no chassis rows at all. A defaults-owned value must
+	// not be claimable as a DISCOVERED tag by another target of this
+	// policy: cloned EEPROM data reporting the same string would emit
+	// and merge onto this device's NetBox record via the asset_tag
+	// matcher. The result is deliberately ignored — defaults always
+	// stick to this device; the claimer warns on conflicting ownership.
+	if dt := strDeref(master.AssetTag); dt != "" && claimAssetTag != nil {
+		claimAssetTag(dt)
+	}
+
 	inv := extractInventory(oids, logger)
 	if len(inv.Members) == 0 {
 		return entities
