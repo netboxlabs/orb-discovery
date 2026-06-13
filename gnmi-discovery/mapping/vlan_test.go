@@ -118,6 +118,15 @@ func TestVlanBuilderGroupNilSiteScope(t *testing.T) {
 	require.NotNil(t, v.ConvertToProtoMessage()) // serializes cleanly
 }
 
+// A group name with no [a-z0-9] runes slugifies to "" — NetBox requires a
+// non-empty VLANGroup.slug, so no group must be created (VLANs stay ungrouped).
+func TestVlanBuilderGroupEmptySlugSkipped(t *testing.T) {
+	dev := &diode.Device{Name: strptr("r1"), Site: &diode.Site{Name: strptr("lab")}}
+	b := newVlanBuilder(dev, &config.Defaults{Vlan: config.VlanDefaults{Group: "!!!"}}, nil)
+	v := b.get(10)
+	require.Nil(t, v.Group, "group with empty slug must not be created")
+}
+
 func TestVlanGroupNoReferenceCycle(t *testing.T) {
 	dev := &diode.Device{Name: strptr("r1"), Site: &diode.Site{Name: strptr("lab")}}
 	b := newVlanBuilder(dev, &config.Defaults{Vlan: config.VlanDefaults{Group: "g"}}, nil)

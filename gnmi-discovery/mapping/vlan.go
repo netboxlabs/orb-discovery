@@ -127,8 +127,12 @@ func newVlanBuilder(dev *diode.Device, defaults *config.Defaults, defs map[int64
 	}
 	if defaults != nil {
 		v := defaults.Vlan
-		if v.Group != "" {
-			g := &diode.VLANGroup{Name: strptr(v.Group), Slug: strptr(slugify(v.Group))}
+		// Only create the group when the name yields a non-empty slug — NetBox
+		// requires VLANGroup.slug to be non-empty, so a name with no [a-z0-9] runes
+		// (slug == "") would make ingestion fail. Skip the group in that case (the
+		// VLANs are still emitted, just ungrouped).
+		if slug := slugify(v.Group); v.Group != "" && slug != "" {
+			g := &diode.VLANGroup{Name: strptr(v.Group), Slug: strptr(slug)}
 			// Only set Scope when we have a real site. Assigning a typed-nil
 			// *diode.Site to the Scope interface would make it non-nil, causing the
 			// SDK to emit a bogus empty-site scope.
