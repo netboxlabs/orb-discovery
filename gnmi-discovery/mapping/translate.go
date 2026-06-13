@@ -46,6 +46,9 @@ func toInt64Ptr(v any) *int64 {
 	case int64:
 		return &n
 	case uint:
+		if uint64(n) > math.MaxInt64 { // uint is 64-bit on 64-bit platforms
+			return nil
+		}
 		x := int64(n)
 		return &x
 	case uint8:
@@ -58,6 +61,9 @@ func toInt64Ptr(v any) *int64 {
 		x := int64(n)
 		return &x
 	case uint64:
+		if n > math.MaxInt64 {
+			return nil
+		}
 		x := int64(n)
 		return &x
 	case float64:

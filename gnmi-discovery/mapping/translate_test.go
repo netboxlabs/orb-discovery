@@ -143,6 +143,10 @@ func TestToInt64PtrFloatGuard(t *testing.T) {
 	for _, bad := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), 1e300, -1e300} {
 		require.Nil(t, toInt64Ptr(bad), "toInt64Ptr(%v) must be nil", bad)
 	}
+	// uint/uint64 > MaxInt64 would wrap to a negative int64 — must return nil.
+	require.Nil(t, toInt64Ptr(uint64(math.MaxInt64)+1))
+	require.Nil(t, toInt64Ptr(uint(math.MaxInt64)+1))
+	require.Equal(t, int64(math.MaxInt64), *toInt64Ptr(uint64(math.MaxInt64)))
 }
 
 // TestTranslateUint64Mtu verifies that a uint64 mtu value from gNMI (the type
