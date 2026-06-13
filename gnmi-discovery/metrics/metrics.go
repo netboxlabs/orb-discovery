@@ -14,6 +14,10 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
 
+// defaultExportPeriodSeconds is the fallback metrics export interval used when an
+// invalid (<= 0) period is supplied; mirrors the --otel-export-period flag default.
+const defaultExportPeriodSeconds = 10
+
 // Global variables for meter and cache
 var (
 	meterProvider      *sdkmetric.MeterProvider
@@ -32,6 +36,14 @@ func SetupMetricsExport(ctx context.Context, logg *slog.Logger, endpoint string,
 	if endpoint == "" {
 		logg.Info("No metrics endpoint provided, metrics collection is disabled")
 		return nil
+	}
+
+	// A zero/negative interval would make the periodic reader misbehave; clamp to
+	// the default rather than failing startup over a bad flag.
+	if exportPeriodSeconds <= 0 {
+		logg.Warn("invalid otel export period; using default",
+			"given_seconds", exportPeriodSeconds, "default_seconds", defaultExportPeriodSeconds)
+		exportPeriodSeconds = defaultExportPeriodSeconds
 	}
 
 	var endpointOpt otlpmetric.Option

@@ -61,11 +61,19 @@ func metricsMiddleware() gin.HandlerFunc {
 		// Process request
 		c.Next()
 
+		// FullPath() is the bounded route pattern (e.g. /api/v1/policies/:policy),
+		// but it is empty for unmatched routes (404s); label those "unmatched" so
+		// they don't collapse into an empty endpoint value. Reused by both metrics.
+		endpoint := c.FullPath()
+		if endpoint == "" {
+			endpoint = "unmatched"
+		}
+
 		// Record API request counter and response latency with correct status
 		if apiMetric := metrics.GetAPIRequests(); apiMetric != nil {
 			apiMetric.Add(c.Request.Context(), 1,
 				metric.WithAttributes(
-					attribute.String("endpoint", c.FullPath()),
+					attribute.String("endpoint", endpoint),
 					attribute.String("method", c.Request.Method),
 					attribute.Int("status", c.Writer.Status()),
 				),
@@ -77,7 +85,7 @@ func metricsMiddleware() gin.HandlerFunc {
 			duration := float64(time.Since(startTime).Milliseconds())
 			apiMetric.Record(c.Request.Context(), duration,
 				metric.WithAttributes(
-					attribute.String("endpoint", c.FullPath()),
+					attribute.String("endpoint", endpoint),
 					attribute.String("method", c.Request.Method),
 					attribute.Int("status", c.Writer.Status()),
 				),
