@@ -281,7 +281,7 @@ func (r *Runner) runOnce(t config.Target, model *mapping.DeviceModel, deb *Debou
 	switch mode {
 	case config.ModeGet:
 		r.setState(t.Host, func(s *targetState) { s.ActiveMode = "get" })
-		return r.deliverGet(t.Host, sess, profile, model, flush)
+		return r.deliverGet(t.Host, sess, profile, model, deb, flush)
 	case config.ModeSample:
 		notes, errs, serr := sess.Subscribe(r.ctx, gnmi.Sample, profile.SubscribePaths(), r.policy.Config.SampleIntervalMs)
 		if serr != nil {
@@ -342,7 +342,7 @@ func (r *Runner) runOnce(t config.Target, model *mapping.DeviceModel, deb *Debou
 		r.logger.Info("sample unsupported, falling back to get", "policy", r.name, "host", t.Host, "reason", s2)
 		metrics.GetModeFallbacks().Add(r.ctx, 1)
 		r.setState(t.Host, func(s *targetState) { s.ActiveMode = "get"; s.FallbackReason = s2.Error() })
-		return r.deliverGet(t.Host, sess, profile, model, flush)
+		return r.deliverGet(t.Host, sess, profile, model, deb, flush)
 	}
 }
 
@@ -531,7 +531,7 @@ func (r *Runner) filterNotification(n gnmi.Notification, profile *mapping.Profil
 // shared model so a departed path drops out of the ingested snapshot — subject
 // to the same empty-view guard as streaming (a Get that returns no device
 // anchor must not wipe the model).
-func (r *Runner) deliverGet(host string, sess gnmi.Session, profile *mapping.Profile, model *mapping.DeviceModel, flush func()) error {
+func (r *Runner) deliverGet(host string, sess gnmi.Session, profile *mapping.Profile, model *mapping.DeviceModel, deb *Debouncer, flush func()) error {
 	paths := profile.SubscribePaths()
 	anchor := profile.Device.Hostname
 	ticker := time.NewTicker(time.Duration(r.policy.Config.GetIntervalMs) * time.Millisecond)
@@ -565,6 +565,13 @@ func (r *Runner) deliverGet(host string, sess gnmi.Session, profile *mapping.Pro
 			if err := do(); err != nil {
 				return err
 			}
+		case <-deb.C():
+			// The single-flight ingest-retry timer triggers the debouncer on a
+			// transient Diode transport failure; in GET mode we consume it here and
+			// re-flush the current model snapshot (streamLoop consumes it the same
+			// way). Without this the 5s retry was a no-op and a transient Diode
+			// outage waited for the next get_interval_ms poll to recover.
+			flush()
 		}
 	}
 }

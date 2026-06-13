@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -842,4 +843,52 @@ func newManagerWithFake(t *testing.T, fake *gnmi.FakeSession) (*Manager, *record
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = m.Stop() })
 	return m, client
+}
+
+// TestDeliverGetReflushesOnDebounce verifies the GET-mode ingest-retry path: the
+// single-flight retry timer fires deb.Trigger() on a transient Diode transport
+// failure, and deliverGet must consume deb.C() and re-flush (previously it only
+// watched the ticker, so the 5s retry was a no-op until the next get poll).
+func TestDeliverGetReflushesOnDebounce(t *testing.T) {
+	store, err := mapping.LoadProfiles("")
+	require.NoError(t, err)
+	base, ok := store.Get("_base")
+	require.True(t, ok)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := &Runner{
+		ctx:    ctx,
+		name:   "get-retry",
+		states: map[string]*targetState{"h:1": {}},
+		logger: slog.Default(),
+		// Huge interval so the ticker never fires during the test — the only extra
+		// flush must come from the debouncer (the retry path under test).
+		policy: config.Policy{Config: config.PolicyConfig{GetIntervalMs: 600000}},
+	}
+	fake := &gnmi.FakeSession{GetResult: gnmi.Notification{
+		Updates: []gnmi.Update{{Path: "/system/state/hostname", Value: "gw1"}},
+	}}
+	deb := NewDebouncer(5 * time.Millisecond)
+	defer deb.Stop()
+
+	var flushes int32
+	flush := func() { atomic.AddInt32(&flushes, 1) }
+
+	done := make(chan struct{})
+	go func() {
+		_ = r.deliverGet("h:1", fake, base, mapping.NewDeviceModel(), deb, flush)
+		close(done)
+	}()
+
+	// Initial do() flushes once.
+	require.Eventually(t, func() bool { return atomic.LoadInt32(&flushes) >= 1 }, 2*time.Second, 10*time.Millisecond,
+		"deliverGet must flush on the initial poll")
+	// Simulate the retry timer firing: deb.Trigger -> deliverGet consumes deb.C() -> re-flush.
+	deb.Trigger()
+	require.Eventually(t, func() bool { return atomic.LoadInt32(&flushes) >= 2 }, 2*time.Second, 10*time.Millisecond,
+		"deliverGet must re-flush when the debouncer fires (GET-mode ingest retry)")
+
+	cancel()
+	<-done
 }
