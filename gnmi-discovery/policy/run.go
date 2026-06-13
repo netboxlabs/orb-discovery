@@ -67,7 +67,7 @@ func (rs *RunStore) CreateRun(policy, host string) *Run {
 	return copyRun(run)
 }
 
-// UpdateRun sets the terminal status of a run.
+// UpdateRun updates the status and metadata of a run.
 func (rs *RunStore) UpdateRun(policy, host, runID string, status RunStatus, err error, entityCount int) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
