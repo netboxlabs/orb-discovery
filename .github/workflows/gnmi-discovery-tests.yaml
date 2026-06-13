@@ -17,6 +17,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: write # peter-evans/create-or-update-comment posts an issue comment on the PR
   pull-requests: write
 
 jobs:
