@@ -374,6 +374,18 @@ func pathToString(p *gnmiproto.Path) string {
 			}
 		}
 	}
+	// Fall back to the deprecated repeated Path.element ([]string) when Path.elem
+	// is absent — older targets/proxies still populate it, and rendering empty
+	// here would make AllowsPath drop every update. Mirrors OpenConfig's own
+	// path.ToStrings. Each entry is already a rendered element (e.g.
+	// "interface[name=eth0]").
+	if len(p.GetElem()) == 0 {
+		//nolint:staticcheck // SA1019: reading the deprecated Path.element is the whole point here.
+		for _, e := range p.GetElement() {
+			b.WriteByte('/')
+			b.WriteString(e)
+		}
+	}
 	return b.String()
 }
 

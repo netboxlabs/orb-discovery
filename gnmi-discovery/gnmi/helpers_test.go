@@ -42,6 +42,23 @@ func TestPathToString_MultipleElemsNoKeys(t *testing.T) {
 	assert.Equal(t, "/interfaces/interface/state", pathToString(p))
 }
 
+// Older targets/proxies may populate the deprecated repeated Path.element
+// instead of Path.elem; pathToString must fall back to it (each entry is an
+// already-rendered element) rather than returning an empty path.
+func TestPathToString_DeprecatedElementFallback(t *testing.T) {
+	p := &gnmiproto.Path{
+		Element: []string{"interfaces", "interface[name=eth0]", "state"},
+	}
+	assert.Equal(t, "/interfaces/interface[name=eth0]/state", pathToString(p))
+
+	// When both are present, the modern Elem wins (no double-render).
+	p2 := &gnmiproto.Path{
+		Elem:    []*gnmiproto.PathElem{{Name: "system"}},
+		Element: []string{"ignored"},
+	}
+	assert.Equal(t, "/system", pathToString(p2))
+}
+
 func TestPathToString_ElemWithSingleKey(t *testing.T) {
 	p := &gnmiproto.Path{
 		Elem: []*gnmiproto.PathElem{
