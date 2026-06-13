@@ -123,16 +123,23 @@ Each interface's NetBox type is resolved per-interface by this precedence:
    identityref is mapped to a NetBox type for the structural families: LAG
    (`ieee8023adLag`, `ifAggregate`) → `lag`; loopback / VLAN / tunnel /
    prop-virtual → `virtual`.
-4. `interface.if_type` — the policy default.
-5. `"other"` — last resort when no default is set.
+4. Built-in name patterns — a bundled cross-vendor name→type table
+   (`defaultInterfacePatterns`) covers ethernet *media* and aggregates the OC
+   type can't convey: Cisco `Gi/Te/HundredGig…`, Juniper `xe-/ge-`, Huawei
+   `10GE/25GE/40GE/100GE` + `Eth-Trunk`/`Vlanif`, and
+   `Port-channel`/`PortChannel`/`ae`/`Bundle-Ether` → `lag`.
+5. Speed-based media — the `ethernet/state/port-speed` identityref
+   (`SPEED_10GB` → `10gbase-x-sfpp`, etc.).
+6. `interface.if_type` — the policy default.
+7. `"other"` — last resort when no default is set.
 
 Both pattern lists may also appear under a target's `override_defaults` and are
 validated (regex-compiled) at `POST /policies`, so a bad regex returns 400.
 
-No default name-patterns are bundled: the OpenConfig type already covers
-lag/virtual, while ethernet *media* (e.g. `10gbase-x-sfpp` vs `1000base-t`) is
-not derivable from the OC type, so operators add `interface_patterns` to assign
-ethernet media types by name.
+The built-in name patterns and speed-based inference (steps 4–5) already type
+common vendor interfaces with no policy configuration. `interface_patterns` is
+for overriding those built-ins or typing names they don't cover — it takes
+precedence over both.
 
 ### Delivery modes
 
