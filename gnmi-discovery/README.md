@@ -200,6 +200,7 @@ docker run --net=host \
   -e DIODE_CLIENT_ID=${DIODE_CLIENT_ID} \
   -e DIODE_CLIENT_SECRET=${DIODE_CLIENT_SECRET} \
   gnmi-discovery:develop \
+  gnmi-discovery \
   --diode-target grpc://192.168.31.114:8080/diode \
   --diode-client-id '${DIODE_CLIENT_ID}' \
   --diode-client-secret '${DIODE_CLIENT_SECRET}'
@@ -211,6 +212,7 @@ To use profile overrides at runtime:
 docker run --net=host \
   -v /etc/my-gnmi-profiles:/etc/gnmi-profiles:ro \
   gnmi-discovery:develop \
+  gnmi-discovery \
   --diode-target grpc://... \
   --profiles-dir /etc/gnmi-profiles \
   ...

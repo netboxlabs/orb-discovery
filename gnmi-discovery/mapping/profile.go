@@ -201,24 +201,29 @@ func LoadProfilesWithLogger(overrideDir string, logger *slog.Logger) (*Store, er
 		}
 	}
 
+	// First pass: restore the bundled version of any profile whose (override) entry
+	// fails to resolve. Doing this BEFORE the resolve pass below — rather than
+	// inline per-name — means a bad override of a shared PARENT (e.g. a broken
+	// _base override) is restored regardless of the randomized map iteration order,
+	// so children that `extend` it resolve against the good bundled parent instead
+	// of being skipped. A typo in e.g. /profiles/arista_eos.yaml likewise falls
+	// back to the bundled Arista.
+	for name := range raw {
+		if _, err := resolve(name, raw, map[string]bool{}); err != nil {
+			if b, ok := bundled[name]; ok && raw[name] != b {
+				raw[name] = b
+				if logger != nil {
+					logger.Warn("gNMI profile override failed to resolve; falling back to bundled profile",
+						"profile", name, "error", err)
+				}
+			}
+		}
+	}
+
 	resolved := map[string]*Profile{}
 	for name := range raw {
 		p, err := resolve(name, raw, map[string]bool{})
 		if err != nil {
-			// A bad override that reuses a bundled filename must not delete the
-			// built-in: restore the bundled profile and re-resolve it so a typo in
-			// e.g. /profiles/arista_eos.yaml falls back to the bundled Arista.
-			if b, ok := bundled[name]; ok && raw[name] != b {
-				raw[name] = b
-				if bp, berr := resolve(name, raw, map[string]bool{}); berr == nil {
-					if logger != nil {
-						logger.Warn("gNMI profile override failed to resolve; falling back to bundled profile",
-							"profile", name, "error", err)
-					}
-					resolved[name] = bp
-					continue
-				}
-			}
 			// A semantically-bad profile (unresolved `extends` or an inheritance
 			// cycle) must not crash startup — skip and log it, like a bad parse.
 			// _base has no `extends` so it always resolves; the matcher still has

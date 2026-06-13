@@ -65,6 +65,25 @@ match:
 	require.Equal(t, "/system/state/hostname", p.Device.Hostname) // bundled inherits _base
 }
 
+// TestOverrideBadBaseDoesNotBreakChildren guards the order-independent fallback:
+// a broken _base override must be restored before children that extend it are
+// resolved, so a vendor overlay (arista_eos) isn't skipped because it happened to
+// resolve against the bad _base first (map iteration order is randomized).
+func TestOverrideBadBaseDoesNotBreakChildren(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "_base.yaml"), []byte(`
+extends: missing_parent
+`), 0o600))
+	store, err := LoadProfiles(dir)
+	require.NoError(t, err)
+	// _base restored from the bundle, so it loads and children resolve against it.
+	base, ok := store.Get("_base")
+	require.True(t, ok)
+	require.Equal(t, "/system/state/hostname", base.Device.Hostname)
+	p := store.Match(MatchInput{Vendor: "Arista"})
+	require.Equal(t, "arista_eos", p.Name, "vendor overlay must survive a broken _base override")
+}
+
 func TestMatchByVendor(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "acme.yaml"), []byte(`
