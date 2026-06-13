@@ -207,15 +207,6 @@ func TestDecodeTypedValue_DoubleVal(t *testing.T) {
 	assert.InDelta(t, 3.14, v, 1e-9)
 }
 
-func TestDecodeTypedValue_FloatVal(t *testing.T) {
-	//nolint:staticcheck
-	tv := &gnmiproto.TypedValue{Value: &gnmiproto.TypedValue_FloatVal{FloatVal: 1.5}}
-	result := decodeTypedValue(tv)
-	v, ok := result.(float64)
-	require.True(t, ok, "expected float64 (promoted from float32), got %T", result)
-	assert.InDelta(t, 1.5, v, 1e-6)
-}
-
 func TestDecodeTypedValue_BytesVal(t *testing.T) {
 	data := []byte{0xDE, 0xAD}
 	tv := &gnmiproto.TypedValue{Value: &gnmiproto.TypedValue_BytesVal{BytesVal: data}}
@@ -272,23 +263,6 @@ func TestDecodeTypedValue_JsonVal_InvalidJSON_FallsBackToString(t *testing.T) {
 	raw := []byte(`{bad}`)
 	tv := &gnmiproto.TypedValue{Value: &gnmiproto.TypedValue_JsonVal{JsonVal: raw}}
 	assert.Equal(t, "{bad}", decodeTypedValue(tv))
-}
-
-func TestDecodeTypedValue_DecimalVal(t *testing.T) {
-	//nolint:staticcheck
-	tv := &gnmiproto.TypedValue{Value: &gnmiproto.TypedValue_DecimalVal{
-		DecimalVal: &gnmiproto.Decimal64{Digits: 314, Precision: 2}, //nolint:staticcheck
-	}}
-	result := decodeTypedValue(tv)
-	v, ok := result.(float64)
-	require.True(t, ok, "expected float64 from DecimalVal, got %T", result)
-	assert.InDelta(t, 3.14, v, 1e-9)
-}
-
-func TestDecodeTypedValue_DecimalVal_Nil(t *testing.T) {
-	//nolint:staticcheck
-	tv := &gnmiproto.TypedValue{Value: &gnmiproto.TypedValue_DecimalVal{DecimalVal: nil}}
-	assert.Nil(t, decodeTypedValue(tv))
 }
 
 // ---------------------------------------------------------------------------

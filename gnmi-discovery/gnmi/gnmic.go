@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 	"time"
 
+	gpath "github.com/openconfig/gnmi/path"
 	gnmiproto "github.com/openconfig/gnmi/proto/gnmi"
+	"github.com/openconfig/gnmi/value"
 	gapi "github.com/openconfig/gnmic/pkg/api"
 	"github.com/openconfig/gnmic/pkg/api/target"
 )
@@ -374,14 +375,14 @@ func pathToString(p *gnmiproto.Path) string {
 			}
 		}
 	}
-	// Fall back to the deprecated repeated Path.element ([]string) when Path.elem
-	// is absent — older targets/proxies still populate it, and rendering empty
-	// here would make AllowsPath drop every update. Mirrors OpenConfig's own
-	// path.ToStrings. Each entry is already a rendered element (e.g.
-	// "interface[name=eth0]").
+	// Fall back to the deprecated repeated Path.element when Path.elem is absent —
+	// older targets/proxies still populate it, and rendering empty here would make
+	// AllowsPath drop every update. gpath.ToStrings reads the deprecated field
+	// internally (so we never reference it directly); each entry is an
+	// already-rendered element (e.g. "interface[name=eth0]"). prefix=false keeps
+	// origin/target out, consistent with the elem rendering above.
 	if len(p.GetElem()) == 0 {
-		//nolint:staticcheck // SA1019: reading the deprecated Path.element is the whole point here.
-		for _, e := range p.GetElement() {
+		for _, e := range gpath.ToStrings(p, false) {
 			b.WriteByte('/')
 			b.WriteString(e)
 		}
@@ -414,8 +415,6 @@ func decodeTypedValue(tv *gnmiproto.TypedValue) any {
 		return v.UintVal
 	case *gnmiproto.TypedValue_BoolVal:
 		return v.BoolVal
-	case *gnmiproto.TypedValue_FloatVal: //nolint:staticcheck // deprecated proto field, kept for legacy target compat
-		return float64(v.FloatVal) //nolint:staticcheck
 	case *gnmiproto.TypedValue_DoubleVal:
 		return v.DoubleVal
 	case *gnmiproto.TypedValue_BytesVal:
@@ -434,11 +433,6 @@ func decodeTypedValue(tv *gnmiproto.TypedValue) any {
 			return decoded
 		}
 		return string(v.JsonVal)
-	case *gnmiproto.TypedValue_DecimalVal: //nolint:staticcheck // deprecated proto field, kept for legacy target compat
-		if v.DecimalVal != nil { //nolint:staticcheck
-			return float64(v.DecimalVal.GetDigits()) / math.Pow10(int(v.DecimalVal.GetPrecision())) //nolint:staticcheck
-		}
-		return nil
 	case *gnmiproto.TypedValue_LeaflistVal:
 		// A native leaf-list (e.g. trunk-vlans when a target ignores the json_ietf
 		// encoding hint): decode each element to a plain Go value, yielding []any —
@@ -453,6 +447,13 @@ func decodeTypedValue(tv *gnmiproto.TypedValue) any {
 		}
 		return out
 	default:
+		// Remaining scalar types — including the deprecated FloatVal/DecimalVal that
+		// older targets may still send — are decoded via the openconfig value
+		// helper, so we never reference the deprecated proto fields directly. Falls
+		// back to the proto string repr only for a genuinely unknown type.
+		if s, err := value.ToScalar(tv); err == nil {
+			return s
+		}
 		return tv.String()
 	}
 }
