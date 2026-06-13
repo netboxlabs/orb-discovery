@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/gnmi-discovery/config"
@@ -132,10 +133,13 @@ func main() {
 			case <-sigs:
 				logger.Warn("stop signal received, stopping gnmi-discovery")
 				server.Stop()
-				// Shutdown metrics
-				if err := metrics.Shutdown(ctx); err != nil {
+				// Shutdown metrics under a bounded timeout so a slow/hung exporter
+				// can't block process termination indefinitely.
+				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				if err := metrics.Shutdown(shutdownCtx); err != nil {
 					logger.Error("failed to shutdown metrics", "error", err)
 				}
+				shutdownCancel()
 				cancelFunc()
 			case <-rootCtx.Done():
 				logger.Warn("main context cancelled")
@@ -151,9 +155,11 @@ func main() {
 		if err, ok := <-serverErrCh; ok && err != nil {
 			logger.Error("gnmi-discovery server encountered an error", "error", err)
 			server.Stop()
-			if shutdownErr := metrics.Shutdown(ctx); shutdownErr != nil {
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if shutdownErr := metrics.Shutdown(shutdownCtx); shutdownErr != nil {
 				logger.Error("failed to shutdown metrics", "error", shutdownErr)
 			}
+			shutdownCancel()
 			cancelFunc()
 		}
 	}()

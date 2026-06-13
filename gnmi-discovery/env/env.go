@@ -8,7 +8,8 @@ import (
 
 // ResolveEnv resolves environment variables in a string value.
 // If the value starts with ${ and ends with }, it extracts the environment variable name
-// and returns its value. If the environment variable is not set, it returns an error.
+// and returns its value. If the environment variable is not set OR is set to an empty
+// string (os.Getenv cannot distinguish the two), it returns an error.
 // Otherwise, it returns the original value.
 func ResolveEnv(value string) (string, error) {
 	// Check if the value starts with ${ and ends with }
@@ -24,7 +25,7 @@ func ResolveEnv(value string) (string, error) {
 		if envValue != "" {
 			return envValue, nil
 		}
-		return "", fmt.Errorf("environment variable %s is not set", envVar)
+		return "", fmt.Errorf("environment variable %s is not set or is empty", envVar)
 	}
 	// Return the original value if no substitution occurs
 	return value, nil
@@ -32,8 +33,8 @@ func ResolveEnv(value string) (string, error) {
 
 // ResolveEnvOrExit resolves environment variables in a string value.
 // If the value starts with ${ and ends with }, it extracts the environment variable name
-// and returns its value. If the environment variable is not set, it prints an error
-// and exits with code 1. Otherwise, it returns the original value.
+// and returns its value. If the environment variable is not set OR is set to an empty
+// string, it prints an error and exits with code 1. Otherwise, it returns the original value.
 func ResolveEnvOrExit(value string) string {
 	resolved, err := ResolveEnv(value)
 	if err != nil {
