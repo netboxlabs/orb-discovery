@@ -7,7 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -99,7 +101,7 @@ func NewServer(host string, port int, logger *slog.Logger, manager *policy.Manag
 	}
 	// Fix #5: add sensible timeouts to prevent slow-client and slowloris attacks.
 	server.httpServer = &http.Server{
-		Addr:              fmt.Sprintf("%s:%d", host, port),
+		Addr:              net.JoinHostPort(host, strconv.Itoa(port)),
 		Handler:           server.router,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
