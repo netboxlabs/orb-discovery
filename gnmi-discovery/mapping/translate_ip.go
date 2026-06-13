@@ -1,6 +1,7 @@
 package mapping
 
 import (
+	"net"
 	"regexp"
 	"sort"
 	"strings"
@@ -165,6 +166,10 @@ func AssignPrimaryIP(entities []diode.Entity, hostIP string) {
 	if hostIP == "" || len(entities) == 0 {
 		return
 	}
+	// Canonicalize the target so differing IPv6 spellings still match (e.g. a
+	// policy host 2001:0db8::1 vs a discovered 2001:db8::1). targetIP is nil when
+	// hostIP is not an IP literal, in which case we fall back to string equality.
+	targetIP := net.ParseIP(hostIP)
 	dev, _ := entities[0].(*diode.Device)
 	if dev == nil {
 		return
@@ -178,7 +183,11 @@ func AssignPrimaryIP(entities []diode.Entity, hostIP string) {
 		if i := strings.IndexByte(bare, '/'); i >= 0 {
 			bare = bare[:i]
 		}
-		if bare != hostIP {
+		matched := bare == hostIP
+		if bareIP := net.ParseIP(bare); bareIP != nil && targetIP != nil {
+			matched = targetIP.Equal(bareIP) // canonical comparison
+		}
+		if !matched {
 			continue
 		}
 		// Matcher-only stub — Address only, no AssignedObject (breaks the

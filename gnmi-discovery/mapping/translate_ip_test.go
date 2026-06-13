@@ -158,6 +158,21 @@ func TestAssignPrimaryIP(t *testing.T) {
 // recursing forever. ConvertToProtoMessage is what the real gRPC client and
 // the dry-run protojson marshal call; a cycle stack-overflows here, NOT in the
 // recordingClient-based runner test (which never serializes).
+// TestAssignPrimaryIPCanonicalIPv6 verifies the primary IP is matched by
+// canonical address, not textual spelling: a non-canonical host literal
+// (2001:0db8::1) must match a discovered 2001:db8::1/64.
+func TestAssignPrimaryIPCanonicalIPv6(t *testing.T) {
+	dev := &diode.Device{Name: strptr("r1")}
+	e := []diode.Entity{
+		dev,
+		&diode.IPAddress{Address: strptr("2001:db8::1/64"), AssignedObject: &diode.Interface{Device: dev, Name: strptr("Ethernet1")}},
+	}
+	AssignPrimaryIP(e, "2001:0db8::1") // non-canonical spelling of the same address
+	require.NotNil(t, dev.PrimaryIp6, "non-canonical IPv6 host must still match")
+	require.Equal(t, "2001:db8::1/64", *dev.PrimaryIp6.Address)
+	require.Nil(t, dev.PrimaryIp4)
+}
+
 func TestAssignPrimaryIPNoReferenceCycle(t *testing.T) {
 	dev := &diode.Device{Name: strptr("r1")}
 	rich := &diode.IPAddress{
