@@ -71,7 +71,7 @@ func main() {
 			producerName,
 			env.ResolveEnvOrExit(*dryRunOutputDir),
 		)
-	} else if *diodeClientID != "" || *diodeClientSecret != "" {
+	} else if *diodeClientID != "" && *diodeClientSecret != "" {
 		client, err = diode.NewClient(
 			env.ResolveEnvOrExit(*diodeTarget),
 			producerName,
@@ -79,6 +79,12 @@ func main() {
 			diode.WithClientID(env.ResolveEnvOrExit(*diodeClientID)),
 			diode.WithClientSecret(env.ResolveEnvOrExit(*diodeClientSecret)),
 		)
+	} else if *diodeClientID != "" || *diodeClientSecret != "" {
+		// Exactly one credential flag set → partial config would silently produce
+		// confusing auth failures. Fail fast: require both together (or neither, to
+		// use the unauthenticated OTLP path).
+		fmt.Fprintln(os.Stderr, "error: --diode-client-id and --diode-client-secret must be set together")
+		os.Exit(1)
 	} else {
 		logger.Debug("initializing OTLP client")
 		client, err = diode.NewOTLPClient(

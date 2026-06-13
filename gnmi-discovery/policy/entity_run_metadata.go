@@ -2,11 +2,12 @@ package policy
 
 import "github.com/netboxlabs/diode-sdk-go/diode"
 
-// annotateEntitiesWithRunID stamps run_id on each entity's Diode metadata and on
-// the nested Device shared by Interface/Module. gNMI emits only Device,
-// Interface, Module, and ModuleBay, all sharing the same *Device pointer, so a
-// shallow walk covers the batch. Existing metadata keys (e.g. source_match) are
-// preserved — only run_id is set.
+// annotateEntitiesWithRunID stamps run_id on every emitted entity's Diode
+// metadata, plus the nested refs that are themselves emitted as NetBox objects:
+// the shared *Device; an Interface's Lag, untagged/tagged VLANs, and VRF; and an
+// IPAddress's assigned Interface and VRF. It covers all the entity types gNMI
+// emits — Device, Interface, Module, ModuleBay, IPAddress, VLAN, VRF, Prefix.
+// Existing metadata keys (e.g. source_match) are preserved — only run_id is set.
 func annotateEntitiesWithRunID(entities []diode.Entity, runID string) {
 	set := func(md *diode.Metadata) {
 		if *md == nil {
