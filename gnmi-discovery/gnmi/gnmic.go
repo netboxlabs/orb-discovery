@@ -75,6 +75,40 @@ type gnmicSession struct {
 	// always observes cancellation, even while it is blocked in gnmic's
 	// internal retry-timer wait (which only selects on this context).
 	subCancel context.CancelFunc
+	// encoding is the request encoding negotiated from the target's advertised
+	// Capabilities (set by Capabilities()); empty until then, defaulting to
+	// json_ietf via enc().
+	encoding string
+}
+
+// enc returns the negotiated request encoding, defaulting to json_ietf when
+// Capabilities has not run or advertised nothing usable.
+func (s *gnmicSession) enc() string {
+	if s.encoding != "" {
+		return s.encoding
+	}
+	return "json_ietf"
+}
+
+// negotiateEncoding picks the request encoding from the target's advertised
+// Capabilities encodings: prefer JSON_IETF (OpenConfig's canonical encoding),
+// fall back to JSON (e.g. NX-OS advertises JSON only), else default to json_ietf
+// as a best effort. decodeTypedValue handles both JSON_IETF and JSON responses,
+// so either negotiated value yields the same decoded shape downstream.
+func negotiateEncoding(advertised []string) string {
+	hasJSON := false
+	for _, e := range advertised {
+		switch strings.ToUpper(strings.TrimSpace(e)) {
+		case "JSON_IETF":
+			return "json_ietf"
+		case "JSON":
+			hasJSON = true
+		}
+	}
+	if hasJSON {
+		return "json"
+	}
+	return "json_ietf"
 }
 
 // Capabilities runs the gNMI Capabilities RPC and returns a normalized result.
@@ -83,7 +117,11 @@ func (s *gnmicSession) Capabilities(ctx context.Context) (*CapabilitiesResult, e
 	if err != nil {
 		return nil, fmt.Errorf("gnmi capabilities: %w", err)
 	}
-	return mapCapabilities(resp), nil
+	result := mapCapabilities(resp)
+	// Negotiate the request encoding from what the target advertises so a
+	// JSON-only target (e.g. NX-OS) isn't sent a JSON_IETF request it rejects.
+	s.encoding = negotiateEncoding(result.Encodings)
+	return result, nil
 }
 
 // Subscribe opens a gNMI STREAM subscription.
@@ -116,7 +154,7 @@ func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string,
 
 	subOpts := []gapi.GNMIOption{
 		gapi.SubscriptionListModeSTREAM(),
-		gapi.Encoding("json_ietf"),
+		gapi.Encoding(s.enc()),
 	}
 
 	for _, p := range paths {
@@ -203,7 +241,7 @@ func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string,
 // GetOnce performs a single gNMI Get over the given paths.
 func (s *gnmicSession) GetOnce(ctx context.Context, paths []string) (Notification, error) {
 	getOpts := []gapi.GNMIOption{
-		gapi.Encoding("json_ietf"),
+		gapi.Encoding(s.enc()),
 		gapi.DataTypeALL(),
 	}
 	for _, p := range paths {

@@ -629,3 +629,14 @@ func TestMapCapabilities_DellSonicSeparateSignals(t *testing.T) {
 	assert.Equal(t, "Dell", result.Vendor)
 	assert.Equal(t, "SONiC", result.NOS)
 }
+
+func TestNegotiateEncoding(t *testing.T) {
+	// JSON_IETF preferred when advertised.
+	assert.Equal(t, "json_ietf", negotiateEncoding([]string{"JSON", "JSON_IETF", "PROTO"}))
+	assert.Equal(t, "json_ietf", negotiateEncoding([]string{"JSON_IETF"}))
+	// JSON-only target (e.g. NX-OS) -> json.
+	assert.Equal(t, "json", negotiateEncoding([]string{"JSON", "PROTO"}))
+	// Nothing usable advertised (or empty) -> best-effort json_ietf default.
+	assert.Equal(t, "json_ietf", negotiateEncoding([]string{"PROTO", "BYTES"}))
+	assert.Equal(t, "json_ietf", negotiateEncoding(nil))
+}
