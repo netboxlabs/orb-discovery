@@ -19,6 +19,7 @@ type FakeSession struct {
 	GetResult       Notification
 	GetErr          error
 	Closed          bool
+	StopSubscribes  int // count of StopSubscribe calls (test assertion)
 }
 
 // Capabilities returns the scripted capabilities.
@@ -83,6 +84,9 @@ func (f *FakeSession) Subscribe(ctx context.Context, mode Mode, _ []string, _ in
 func (f *FakeSession) GetOnce(_ context.Context, _ []string) (Notification, error) {
 	return f.GetResult, f.GetErr
 }
+
+// StopSubscribe records the call; the fake has no real subscription to tear down.
+func (f *FakeSession) StopSubscribe() { f.StopSubscribes++ }
 
 // Close marks the session closed.
 func (f *FakeSession) Close() error { f.Closed = true; return nil }

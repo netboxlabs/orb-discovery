@@ -58,6 +58,11 @@ type Session interface {
 	Subscribe(ctx context.Context, mode Mode, paths []string, sampleIntervalMs int) (<-chan Notification, <-chan error, error)
 	// GetOnce performs a single gNMI Get over paths.
 	GetOnce(ctx context.Context, paths []string) (Notification, error)
+	// StopSubscribe tears down the active subscription (producer goroutine + gRPC
+	// stream) without closing the session, so the caller can switch to a Get poll
+	// on the same connection without leaking the prior subscription. No-op if
+	// there is no active subscription; idempotent.
+	StopSubscribe()
 	// Close releases the connection.
 	Close() error
 }

@@ -341,6 +341,12 @@ func (r *Runner) runOnce(t config.Target, model *mapping.DeviceModel, deb *Debou
 		}
 		r.logger.Info("sample unsupported, falling back to get", "policy", r.name, "host", t.Host, "reason", s2)
 		metrics.GetModeFallbacks().Add(r.ctx, 1)
+		// Tear down the SAMPLE subscription before switching to Get on the same
+		// session — Subscribe/Close are the only other teardown points and Close is
+		// deferred until deliverGet exits, so without this an async-rejected SAMPLE
+		// producer/gRPC stream would keep retrying in the background for the entire
+		// GET fallback.
+		sess.StopSubscribe()
 		r.setState(t.Host, func(s *targetState) { s.ActiveMode = "get"; s.FallbackReason = s2.Error() })
 		return r.deliverGet(t.Host, sess, profile, model, deb, flush)
 	}

@@ -124,6 +124,20 @@ func (s *gnmicSession) Capabilities(ctx context.Context) (*CapabilitiesResult, e
 	return result, nil
 }
 
+// StopSubscribe tears down the active subscription (cancels the producer
+// goroutine + its gRPC stream and clears the gnmic-side subscription) without
+// closing the session. Subscribe calls it before opening a new stream, and the
+// runner calls it when switching from a SAMPLE/ON_CHANGE stream to a Get poll on
+// the same connection so the prior subscription doesn't keep retrying in the
+// background. Idempotent; a no-op when no subscription is active.
+func (s *gnmicSession) StopSubscribe() {
+	if s.subCancel != nil {
+		s.subCancel()
+		s.subCancel = nil
+	}
+	s.tg.StopSubscription(subscriptionName)
+}
+
 // Subscribe opens a gNMI STREAM subscription.
 //
 // We use tg.SubscribeChan (not SubscribeStreamChan): it returns buffered
@@ -147,10 +161,7 @@ func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string,
 	// parked in gnmic's retry-timer wait. Cancel funcs are idempotent, so a later
 	// Close() calling subCancel again is harmless. StopSubscription is a no-op for
 	// an unknown name, so it is safe before any prior subscribe.
-	if s.subCancel != nil {
-		s.subCancel()
-	}
-	s.tg.StopSubscription(subscriptionName)
+	s.StopSubscribe()
 
 	subOpts := []gapi.GNMIOption{
 		gapi.SubscriptionListModeSTREAM(),

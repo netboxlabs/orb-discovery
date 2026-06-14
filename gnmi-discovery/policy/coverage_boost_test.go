@@ -636,6 +636,7 @@ func TestRunnerGetModeGetError(t *testing.T) {
 type allRejectSession struct {
 	caps      *gnmi.CapabilitiesResult
 	getResult gnmi.Notification
+	stopSubs  int32 // count of StopSubscribe calls (race-safe via atomic)
 }
 
 func (s *allRejectSession) Capabilities(_ context.Context) (*gnmi.CapabilitiesResult, error) {
@@ -649,7 +650,8 @@ func (s *allRejectSession) Subscribe(_ context.Context, _ gnmi.Mode, _ []string,
 func (s *allRejectSession) GetOnce(_ context.Context, _ []string) (gnmi.Notification, error) {
 	return s.getResult, nil
 }
-func (s *allRejectSession) Close() error { return nil }
+func (s *allRejectSession) StopSubscribe() { atomic.AddInt32(&s.stopSubs, 1) }
+func (s *allRejectSession) Close() error   { return nil }
 
 type allRejectDialer struct{ sess *allRejectSession }
 
@@ -698,6 +700,8 @@ func TestRunnerAutoFallsBackToGet(t *testing.T) {
 		}
 		return false
 	}, 2*time.Second, 20*time.Millisecond, "active_mode must become get after full fallback")
+	require.GreaterOrEqual(t, atomic.LoadInt32(&sess.stopSubs), int32(1),
+		"StopSubscribe must be called to tear down the prior subscription before GET fallback")
 }
 
 // TestRunnerCapabilitiesError covers the Capabilities-failure path in runOnce:
