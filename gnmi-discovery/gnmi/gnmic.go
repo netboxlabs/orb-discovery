@@ -196,6 +196,22 @@ func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string,
 				return
 			case wrapped, ok := <-rawResp:
 				if !ok {
+					// rawResp closed — but SubscribeChan may have already queued an
+					// error on rawErr that this select didn't pick (the async
+					// ON_CHANGE-rejection path auto mode depends on). Drain it
+					// non-blocking and forward it; otherwise streamLoop sees a clean
+					// notes close, returns nil, and the target reconnects at on_change
+					// forever instead of downgrading to SAMPLE/GET.
+					select {
+					case terr, ok := <-rawErr:
+						if ok && terr != nil && terr.Err != nil {
+							select {
+							case errs <- terr.Err:
+							case <-subCtx.Done():
+							}
+						}
+					default:
+					}
 					return
 				}
 				// SubscribeChan wraps the proto response in .Response.
