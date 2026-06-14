@@ -231,8 +231,47 @@ func TestGnmicSession_GetOnce_ServerError(t *testing.T) {
 	defer cancel()
 
 	_, err := sess.GetOnce(ctx, []string{"/system/state/hostname"})
-	require.Error(t, err, "GetOnce must propagate server-side errors")
+	require.Error(t, err, "GetOnce must propagate server-side errors when every path fails")
 	assert.Contains(t, err.Error(), "gnmi get")
+}
+
+// TestGnmicSession_GetOnce_ToleratesPerPathFailure verifies that one unsupported
+// optional path does not abort the whole pass: the multi-path Get fails atomically
+// (fast path), so GetOnce retries per path and returns the supported path's data
+// while tolerating the NotFound on the optional one.
+func TestGnmicSession_GetOnce_ToleratesPerPathFailure(t *testing.T) {
+	hostnameVal, _ := hostnameJSONVal("spine1")
+	const badPath = "/network-instances/network-instance[name=*]/state/type"
+
+	srv := &testGNMIServer{
+		getHandler: func(_ context.Context, req *gnmiproto.GetRequest) (*gnmiproto.GetResponse, error) {
+			// The multi-path (fast-path) request and the unsupported path both fail —
+			// simulating a target that rejects the whole Get over one optional subtree.
+			if len(req.GetPath()) != 1 || pathToString(req.GetPath()[0]) == badPath {
+				return nil, status.Error(codes.NotFound, "unsupported path")
+			}
+			// Single supported path -> return the hostname update.
+			return &gnmiproto.GetResponse{Notification: []*gnmiproto.Notification{{
+				Update: []*gnmiproto.Update{{
+					Path: &gnmiproto.Path{Elem: []*gnmiproto.PathElem{
+						{Name: "system"}, {Name: "state"}, {Name: "hostname"},
+					}},
+					Val: hostnameVal,
+				}},
+			}}}, nil
+		},
+	}
+	addr := startTestGNMIServer(t, srv)
+	sess := dialPlaintext(t, addr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	n, err := sess.GetOnce(ctx, []string{"/system/state/hostname", badPath})
+	require.NoError(t, err, "one unsupported path must not fail the whole GetOnce")
+	require.Len(t, n.Updates, 1)
+	assert.Equal(t, "/system/state/hostname", n.Updates[0].Path)
+	assert.Equal(t, "spine1", n.Updates[0].Value)
 }
 
 // ---------------------------------------------------------------------------

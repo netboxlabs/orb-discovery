@@ -256,6 +256,40 @@ func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string,
 
 // GetOnce performs a single gNMI Get over the given paths.
 func (s *gnmicSession) GetOnce(ctx context.Context, paths []string) (Notification, error) {
+	// Fast path: one Get for all paths — most targets handle a multi-path Get fine.
+	if n, err := s.getPaths(ctx, paths); err == nil {
+		return n, nil
+	}
+	// A multi-path Get can fail ATOMICALLY when the target returns
+	// NotFound/Unimplemented for one optional subtree it doesn't model (e.g.
+	// switched-vlan or network-instance VLAN/VRF leaves). Retry per path and
+	// tolerate the per-path failures so one unsupported optional path doesn't
+	// abort the whole discovery pass (dropping otherwise-available hostname/
+	// interface data and leaving the target reconnecting with no ingest). Only
+	// surface an error when EVERY path fails (a genuine transport/auth problem).
+	var result Notification
+	result.SyncDone = true
+	got := 0
+	var lastErr error
+	for _, p := range paths {
+		n, err := s.getPaths(ctx, []string{p})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		result.Updates = append(result.Updates, n.Updates...)
+		result.Deletes = append(result.Deletes, n.Deletes...)
+		got++
+	}
+	if got == 0 && lastErr != nil {
+		return Notification{}, fmt.Errorf("gnmi get: all paths failed: %w", lastErr)
+	}
+	return result, nil
+}
+
+// getPaths issues a single gNMI Get for the given paths and merges the response
+// notifications into one Notification.
+func (s *gnmicSession) getPaths(ctx context.Context, paths []string) (Notification, error) {
 	getOpts := []gapi.GNMIOption{
 		gapi.Encoding(s.enc()),
 		gapi.DataTypeALL(),
