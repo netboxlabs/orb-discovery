@@ -197,6 +197,15 @@ func LoadProfilesWithLogger(overrideDir string, logger *slog.Logger) (*Store, er
 					}
 					continue
 				}
+				// A same-name override that doesn't restate `match` (the common
+				// "tweak only the leaf paths" case, typically `extends: _base`)
+				// inherits the bundled profile's vendor criteria — otherwise it
+				// becomes unmatchable and auto-detection silently falls back to
+				// _base, ignoring the override.
+				name := strings.TrimSuffix(e.Name(), ".yaml")
+				if base, ok := bundled[name]; ok && raw[name].Match.Vendor == "" {
+					raw[name].Match = base.Match
+				}
 			}
 		}
 	}

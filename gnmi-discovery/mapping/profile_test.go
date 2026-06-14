@@ -65,6 +65,25 @@ match:
 	require.Equal(t, "/system/state/hostname", p.Device.Hostname) // bundled inherits _base
 }
 
+// TestOverrideLeafOnlyKeepsBundledMatch verifies that a same-name override that
+// changes only leaf paths (extends _base, omits match) keeps the bundled vendor
+// criteria, so auto-detection still selects it instead of falling back to _base.
+func TestOverrideLeafOnlyKeepsBundledMatch(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "arista_eos.yaml"), []byte(`
+extends: _base
+interfaces:
+  keys:
+    description: state/description
+`), 0o600))
+	store, err := LoadProfiles(dir)
+	require.NoError(t, err)
+	p := store.Match(MatchInput{Vendor: "Arista"})
+	require.Equal(t, "arista_eos", p.Name, "leaf-only override must keep the bundled Arista match")
+	require.Equal(t, "state/description", p.Interfaces.Keys["description"], "override leaf applied")
+	require.Equal(t, "/system/state/hostname", p.Device.Hostname) // _base still inherited
+}
+
 // TestOverrideBadBaseDoesNotBreakChildren guards the order-independent fallback:
 // a broken _base override must be restored before children that extend it are
 // resolved, so a vendor overlay (arista_eos) isn't skipped because it happened to
