@@ -312,6 +312,13 @@ func (r *Runner) runOnce(t config.Target, model *mapping.DeviceModel, deb *Debou
 		// run_id/policy in Diode metadata, then close the run completed/failed.
 		run := r.runStore.CreateRun(r.name, t.Host)
 		annotateEntitiesWithRunID(entities, run.ID)
+		// Shrink the wire payload: replace nested Device/Interface references with
+		// matcher-only stubs (after annotation, before Ingest). Critically, the
+		// stub omits the Device's captured config.running, so the heavy blob rides
+		// only on the single top-level Device instead of being duplicated onto
+		// every interface/IP/module reference. Mirrors snmp-discovery (#392) and
+		// device-discovery (#394).
+		mapping.PruneNestedRefs(entities, dev)
 		resp, ierr := r.client.Ingest(r.ctx, entities, diode.WithIngestMetadata(diode.Metadata{
 			"policy_name": r.name, "run_id": run.ID, // keys match snmp/network backends
 		}))
