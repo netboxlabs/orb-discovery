@@ -62,9 +62,7 @@ class _PolicyRunnerIngestSink:
     def ingest(self, entities, **kwargs) -> None:
         runner = self._runner
         try:
-            runner._execute_run(
-                runner._diode_client, lambda: entities, source="ingest_callback"
-            )
+            runner._execute_run(runner._diode_client, lambda: entities)
         except IngestError:
             raise
         except Exception as exc:
@@ -74,12 +72,7 @@ class _PolicyRunnerIngestSink:
         runner = self._runner
         run = runner.run_store.create_run(
             policy_name=runner.name,
-            metadata={
-                "name": runner.metadata.name,
-                "app_name": runner.metadata.app_name,
-                "app_version": runner.metadata.app_version,
-                "source": "ingest_callback",
-            },
+            metadata=runner._run_metadata(),
         )
         runner.run_store.update_run(
             policy_name=runner.name,
@@ -219,9 +212,21 @@ class PolicyRunner:
         if active_policies:
             active_policies.add(1, {"policy": self.name})
 
-    def _execute_run(
-        self, client, produce_entities, *, source: str | None = None
-    ) -> _RunOutcome:
+    def _run_metadata(self) -> dict:
+        """
+        Build the metadata stored on a run record.
+
+        TODO: consider recording the run's origin (scheduled vs ingest-sink)
+        here once a consumer exists for it (e.g. the planned runs API over
+        RunStore); a `source` key was carried earlier but nothing read it.
+        """
+        return {
+            "name": self.metadata.name,
+            "app_name": self.metadata.app_name,
+            "app_version": self.metadata.app_version,
+        }
+
+    def _execute_run(self, client, produce_entities) -> _RunOutcome:
         """
         Create a run, produce + ingest entities through it, record COMPLETED/FAILED.
 
@@ -235,14 +240,9 @@ class PolicyRunner:
         only — not chunking, ingest, or run-store writes — so callers can
         report truthful production timing.
         """
-        run_metadata = {
-            "name": self.metadata.name,
-            "app_name": self.metadata.app_name,
-            "app_version": self.metadata.app_version,
-        }
-        if source is not None:
-            run_metadata["source"] = source
-        run = self.run_store.create_run(policy_name=self.name, metadata=run_metadata)
+        run = self.run_store.create_run(
+            policy_name=self.name, metadata=self._run_metadata()
+        )
         entity_count = 0
         try:
             produce_start = time.perf_counter()
@@ -274,24 +274,22 @@ class PolicyRunner:
             )
             raise
 
-    def _send_entities(self, client, entities_list: list, metadata: dict) -> int:
+    def _send_entities(self, client, entities_list: list, metadata: dict) -> None:
         """
         Send entities to the Diode client.
 
         An empty entity list is a valid no-op (e.g. an incremental run that
         found no changes since its watermark) — Diode's ingester rejects an
-        empty batch with ``entities is empty`` — so nothing is sent and the
-        run completes with ``entity_count=0``.
+        empty batch with ``entities is empty`` — so nothing is sent.
 
         Delegates chunking to the SDK's ``create_message_chunks``, which owns
         the gRPC message-size threshold (3 MB default, a safe margin below the
         4 MB ceiling) and returns a single chunk when the payload already fits.
-
-        Returns the number of chunks actually sent (0 for an empty list, 1 if
-        not chunked).
+        Transient gRPC failures are raised as ``IngestUnavailable``, other gRPC
+        errors as ``IngestError``, and Diode-reported errors as ``IngestRejected``.
         """
         if not entities_list:
-            return 0
+            return
         chunks = create_message_chunks(entities_list)
         for chunk in chunks:
             try:
@@ -305,7 +303,6 @@ class PolicyRunner:
                 raise IngestError(f"Ingest transport error: {exc}") from exc
             if response.errors:
                 raise IngestRejected(f"Chunk ingestion failed: {response.errors}")
-        return len(chunks)
 
     def run(
         self,
@@ -331,7 +328,7 @@ class PolicyRunner:
         try:
             logger.debug(f"Policy {self.name}: Starting backend execution")
             outcome = self._execute_run(
-                client, lambda: backend.run(self.name, policy), source=None
+                client, lambda: backend.run(self.name, policy)
             )
             logger.debug(
                 f"Policy {self.name}: Backend execution completed in {outcome.produce_seconds:.3f} seconds"
