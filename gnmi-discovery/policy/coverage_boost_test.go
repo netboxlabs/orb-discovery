@@ -652,7 +652,7 @@ func (s *allRejectSession) GetOnce(_ context.Context, _ []string) (gnmi.Notifica
 }
 func (s *allRejectSession) GetConfig(_ context.Context) ([]byte, error) { return nil, nil }
 func (s *allRejectSession) StopSubscribe()                              { atomic.AddInt32(&s.stopSubs, 1) }
-func (s *allRejectSession) Close() error   { return nil }
+func (s *allRejectSession) Close() error                                { return nil }
 
 type allRejectDialer struct{ sess *allRejectSession }
 

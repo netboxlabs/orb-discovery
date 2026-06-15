@@ -182,16 +182,14 @@ func translateIPs(profile *Profile, snap map[string]any, dev *diode.Device, defa
 // primary management IP (mirrors device-discovery). Exact match only; never
 // guesses. hostIP must already be stripped of any :port (the runner does this).
 //
-// CRITICAL: PrimaryIp4/6 is set to a matcher-only IPAddress stub (Address only,
-// AssignedObject left nil), NOT the rich emitted IPAddress. The rich one has
-// AssignedObject -> *Interface -> Device, so embedding it back into Device would
-// form a Device -> IPAddress -> Interface -> Device reference cycle that the
-// Diode SDK's recursive proto conversion (ConvertToProtoMessage, used by the
-// gRPC client AND the dry-run protojson marshal) walks until it stack-overflows.
-// snmp-discovery breaks the same cycle via mapping.newIPMatchStub (see
-// snmp-discovery/mapping/stubs.go and chassis.go's primary_ip4/6 handling).
-// The rich IPAddress still rides as a top-level entity; the stub only carries
-// the matcher field so Diode resolves it to the same NetBox row.
+// The primary IP RETAINS its assigned interface (via detachForPrimaryIP) because
+// NetBox rejects a device primary IP that is not assigned to an interface on the
+// device ("The specified IP address … is not assigned to this device"). The
+// Device -> IPAddress -> Interface -> Device reference cycle is broken inside
+// detachForPrimaryIP by pointing the assigned interface at a Device copy with
+// PrimaryIp4/6 cleared and its relationship pointers stripped — matching
+// snmp-discovery's detachForPrimaryIP. The rich IPAddress and Interface still
+// ride as top-level entities; only this embedded snapshot is pruned.
 func AssignPrimaryIP(entities []diode.Entity, hostIP string) {
 	if hostIP == "" || len(entities) == 0 {
 		return
@@ -220,17 +218,47 @@ func AssignPrimaryIP(entities []diode.Entity, hostIP string) {
 		if !matched {
 			continue
 		}
-		// Matcher-only stub — Address only, no AssignedObject (breaks the
-		// IP -> Interface -> Device cycle). Vrf is carried so per-VRF matching works.
-		stub := &diode.IPAddress{Address: ip.Address}
-		if ip.Vrf != nil {
-			stub.Vrf = ip.Vrf
-		}
 		if strings.Contains(bare, ":") {
-			dev.PrimaryIp6 = stub
+			dev.PrimaryIp6 = detachForPrimaryIP(ip, dev)
 		} else {
-			dev.PrimaryIp4 = stub
+			dev.PrimaryIp4 = detachForPrimaryIP(ip, dev)
 		}
 		return
 	}
+}
+
+// detachForPrimaryIP returns a copy of the matched IPAddress suitable to attach
+// as Device.PrimaryIp4/6 without a reference cycle, while preserving the
+// assigned-interface link NetBox requires. The assigned Interface is copied with
+// its Device replaced by a copy of the owning Device that has PrimaryIp4/6
+// cleared, and its relationship pointers (Parent/Bridge/Lag/Module) stripped, so
+// nothing transitively reaches a Device that still carries a primary IP. Mirrors
+// snmp-discovery's detachForPrimaryIP. The standalone emitted IPAddress and
+// Interface entities keep their full graph; only this snapshot is pruned.
+func detachForPrimaryIP(ip *diode.IPAddress, owner *diode.Device) *diode.IPAddress {
+	if ip == nil {
+		return nil
+	}
+	snapshot := *ip
+	if iface, ok := snapshot.AssignedObject.(*diode.Interface); ok && iface != nil {
+		ifaceCopy := *iface
+		if owner != nil {
+			deviceCopy := *owner
+			// Clear BOTH primary-IP fields on the embedded device copy so the
+			// snapshot is independent of evaluation order between the v4 and v6
+			// passes and carries no nested primary-IP sub-graph.
+			deviceCopy.PrimaryIp4 = nil
+			deviceCopy.PrimaryIp6 = nil
+			deviceCopy.Config = nil // never embed the captured config in a nested ref
+			ifaceCopy.Device = &deviceCopy
+		}
+		// Strip relationship pointers that can transitively reach a Device with a
+		// primary IP set.
+		ifaceCopy.Parent = nil
+		ifaceCopy.Bridge = nil
+		ifaceCopy.Lag = nil
+		ifaceCopy.Module = nil
+		snapshot.AssignedObject = &ifaceCopy
+	}
+	return &snapshot
 }

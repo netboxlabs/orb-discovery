@@ -136,9 +136,9 @@ type InterfacePattern struct {
 
 // Defaults holds NetBox defaults applied to discovered entities.
 type Defaults struct {
-	Site     string `yaml:"site,omitempty"`
-	Location string `yaml:"location,omitempty"`
-	Role     string `yaml:"role,omitempty"`
+	Site     string   `yaml:"site,omitempty"`
+	Location string   `yaml:"location,omitempty"`
+	Role     string   `yaml:"role,omitempty"`
 	Tags     []string `yaml:"tags,omitempty"`
 	// AssetTag is the device asset tag: either a literal string, or a gNMI path
 	// reference (a value beginning with "/", e.g.

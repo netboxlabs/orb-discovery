@@ -70,11 +70,11 @@ func TestMergeDefaults_NewFieldsOverride(t *testing.T) {
 	}
 	m := MergeDefaults(base, over)
 	assert.Equal(t, "over-tag", m.AssetTag)
-	assert.Equal(t, "over-role", m.IPAddress.Role)        // overridden
-	assert.Equal(t, "base-tenant", m.IPAddress.Tenant)    // not overridden → base kept
-	assert.Equal(t, []string{"b"}, m.IPAddress.Tags)      // override slice wins
-	assert.Equal(t, "base-vt", m.Vrf.Tenant)              // not overridden
-	assert.Equal(t, "over-desc", m.Vrf.Description)       // overridden
+	assert.Equal(t, "over-role", m.IPAddress.Role)     // overridden
+	assert.Equal(t, "base-tenant", m.IPAddress.Tenant) // not overridden → base kept
+	assert.Equal(t, []string{"b"}, m.IPAddress.Tags)   // override slice wins
+	assert.Equal(t, "base-vt", m.Vrf.Tenant)           // not overridden
+	assert.Equal(t, "over-desc", m.Vrf.Description)    // overridden
 	assert.Equal(t, []string{"y"}, m.Vrf.Tags)
 
 	// Slices must not alias the inputs.

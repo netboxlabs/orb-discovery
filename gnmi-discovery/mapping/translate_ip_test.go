@@ -125,19 +125,30 @@ func TestAssignPrimaryIP(t *testing.T) {
 		}
 	}
 
-	// v4 match -> PrimaryIp4 (matcher-only stub: Address set, AssignedObject nil)
+	// v4 match -> PrimaryIp4 retains the assigned interface (NetBox requires the
+	// IP to be assigned to the device), with the cycle broken via a device copy
+	// that has its primary IPs cleared.
 	e := mk()
 	AssignPrimaryIP(e, "10.0.0.1")
-	require.NotNil(t, e[0].(*diode.Device).PrimaryIp4)
-	require.Equal(t, "10.0.0.1/31", *e[0].(*diode.Device).PrimaryIp4.Address)
-	require.Nil(t, e[0].(*diode.Device).PrimaryIp4.AssignedObject) // cycle-break: no back-ref
+	p4 := e[0].(*diode.Device).PrimaryIp4
+	require.NotNil(t, p4)
+	require.Equal(t, "10.0.0.1/31", *p4.Address)
+	pifc, ok := p4.AssignedObject.(*diode.Interface)
+	require.True(t, ok, "primary IP must retain its assigned interface")
+	require.Equal(t, "Ethernet1", *pifc.Name)
+	require.NotNil(t, pifc.Device)
+	require.Nil(t, pifc.Device.PrimaryIp4, "cycle break: embedded device copy has no primary IP")
+	require.Nil(t, pifc.Device.PrimaryIp6)
 	require.Nil(t, e[0].(*diode.Device).PrimaryIp6)
 
 	// v6 match -> PrimaryIp6
 	e = mk()
 	AssignPrimaryIP(e, "2001:db8::1")
-	require.NotNil(t, e[0].(*diode.Device).PrimaryIp6)
-	require.Nil(t, e[0].(*diode.Device).PrimaryIp6.AssignedObject)
+	p6 := e[0].(*diode.Device).PrimaryIp6
+	require.NotNil(t, p6)
+	p6ifc, ok := p6.AssignedObject.(*diode.Interface)
+	require.True(t, ok)
+	require.Nil(t, p6ifc.Device.PrimaryIp6, "cycle break")
 	require.Nil(t, e[0].(*diode.Device).PrimaryIp4)
 
 	// no match -> unset
@@ -199,7 +210,7 @@ func TestAssignPrimaryIPCarriesVrf(t *testing.T) {
 	AssignPrimaryIP(entities, "10.7.7.7")
 	require.NotNil(t, dev.PrimaryIp4)
 	require.Equal(t, "10.7.7.7/32", *dev.PrimaryIp4.Address)
-	require.Nil(t, dev.PrimaryIp4.AssignedObject) // still matcher-only stub
-	require.NotNil(t, dev.PrimaryIp4.Vrf)         // but VRF carried for per-VRF matching
+	require.NotNil(t, dev.PrimaryIp4.AssignedObject) // assigned interface retained
+	require.NotNil(t, dev.PrimaryIp4.Vrf)            // VRF carried for per-VRF matching
 	require.Equal(t, "blue", *dev.PrimaryIp4.Vrf.Name)
 }
