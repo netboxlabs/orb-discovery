@@ -55,7 +55,7 @@ func TestTranslateIPsHonorsExcludes(t *testing.T) {
 		"/interfaces/interface[name=Ethernet1]/subinterfaces/subinterface[index=0]/ipv4/addresses/address[ip=10.0.0.1]/state/prefix-length":    31,
 		"/interfaces/interface[name=Management1]/subinterfaces/subinterface[index=0]/ipv4/addresses/address[ip=192.0.2.1]/state/prefix-length": 24,
 	}
-	ents := translateIPs(base, snap, dev, []*regexp.Regexp{regexp.MustCompile("^Management")})
+	ents := translateIPs(base, snap, dev, nil, []*regexp.Regexp{regexp.MustCompile("^Management")})
 
 	var addrs []string
 	for _, e := range ents {
@@ -80,7 +80,7 @@ func TestTranslateIPsParentAndSubinterface(t *testing.T) {
 		// missing prefix-length -> skipped (no prefix leaf for this ip)
 		"/interfaces/interface[name=Ethernet2]/subinterfaces/subinterface[index=0]/ipv4/addresses/address[ip=10.9.9.9]/state/ip": "10.9.9.9",
 	}
-	ents := translateIPs(base, snap, dev, nil)
+	ents := translateIPs(base, snap, dev, nil, nil)
 
 	var ips []*diode.IPAddress
 	var subifs []*diode.Interface

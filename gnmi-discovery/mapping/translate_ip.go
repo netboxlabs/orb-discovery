@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
+	"github.com/netboxlabs/orb-discovery/gnmi-discovery/config"
 )
 
 // firstKeyVal expects s to start with "[<key>=<val>]" and returns val plus the
@@ -74,10 +75,31 @@ func parseIPAddressPath(path, ifaceListPath string) (iface, index, family, ip, l
 // translateIPs emits an IPAddress per (interface, subinterface index, family, ip)
 // that reports a prefix-length. index 0 assigns to the parent interface; index>0
 // emits a child virtual subinterface "<iface>.<index>" (once) and assigns there.
-func translateIPs(profile *Profile, snap map[string]any, dev *diode.Device, excludes []*regexp.Regexp) []diode.Entity {
+func translateIPs(profile *Profile, snap map[string]any, dev *diode.Device, defaults *config.Defaults, excludes []*regexp.Regexp) []diode.Entity {
 	listPath := profile.Interfaces.ListPath
 	if listPath == "" {
 		return nil
+	}
+	// Per-policy IPAddress defaults, computed once (identical for every address).
+	var ipRole, ipDesc, ipComments *string
+	var ipTenant *diode.Tenant
+	var ipTags []*diode.Tag
+	if defaults != nil {
+		d := defaults.IPAddress
+		if d.Role != "" {
+			ipRole = strptr(d.Role)
+		}
+		if d.Tenant != "" {
+			ipTenant = &diode.Tenant{Name: strptr(d.Tenant)}
+		}
+		if d.Description != "" {
+			ipDesc = strptr(d.Description)
+		}
+		if d.Comments != "" {
+			ipComments = strptr(d.Comments)
+		}
+		// IP tags = policy-level tags + ip_address-level tags, de-duped clone.
+		ipTags = toTags(append(append([]string{}, defaults.Tags...), d.Tags...))
 	}
 	type addrKey struct{ iface, index, family, ip string }
 	prefixLen := map[addrKey]string{}
@@ -138,11 +160,19 @@ func translateIPs(profile *Profile, snap map[string]any, dev *diode.Device, excl
 			}
 			assigned = ch
 		}
-		out = append(out, &diode.IPAddress{
+		ip := &diode.IPAddress{
 			Address:        strptr(k.ip + "/" + pl),
 			Status:         strptr("active"),
 			AssignedObject: assigned,
-		})
+			Role:           ipRole,
+			Tenant:         ipTenant,
+			Description:    ipDesc,
+			Comments:       ipComments,
+		}
+		if len(ipTags) > 0 {
+			ip.Tags = ipTags
+		}
+		out = append(out, ip)
 	}
 	return out
 }

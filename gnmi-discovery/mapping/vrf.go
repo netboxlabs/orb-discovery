@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
+	"github.com/netboxlabs/orb-discovery/gnmi-discovery/config"
 )
 
 // parseNetworkInstanceStatePath extracts (niName, leaf) for the NI state leaves we
@@ -71,7 +72,26 @@ func parseNetworkInstanceIfacePath(path string) (niName, id, leaf string, ok boo
 // member interface-entity name (base "Eth2" or child subif "Eth2.100") to its VRF,
 // for the binding post-pass in Translate. DEFAULT_INSTANCE / L2 instances are not
 // VRFs; their members stay global.
-func translateVrfs(snap map[string]any) ([]diode.Entity, map[string]*diode.VRF) {
+func translateVrfs(snap map[string]any, defaults *config.Defaults) ([]diode.Entity, map[string]*diode.VRF) {
+	// Per-policy VRF defaults, computed once (identical for every VRF).
+	var vrfTenant *diode.Tenant
+	var vrfDesc, vrfComments *string
+	var vrfTags []*diode.Tag
+	if defaults != nil {
+		d := defaults.Vrf
+		if d.Tenant != "" {
+			vrfTenant = &diode.Tenant{Name: strptr(d.Tenant)}
+		}
+		if d.Description != "" {
+			vrfDesc = strptr(d.Description)
+		}
+		if d.Comments != "" {
+			vrfComments = strptr(d.Comments)
+		}
+		// VRF tags = policy-level tags + vrf-level tags, de-duped clone.
+		vrfTags = toTags(append(append([]string{}, defaults.Tags...), d.Tags...))
+	}
+
 	type niState struct{ typ, rd string }
 	type member struct{ baseIface, subif string }
 	states := map[string]*niState{}
@@ -129,9 +149,17 @@ func translateVrfs(snap map[string]any) ([]diode.Entity, map[string]*diode.VRF) 
 		if states[ni].typ != "L3VRF" {
 			continue
 		}
-		v := &diode.VRF{Name: strptr(ni)}
+		v := &diode.VRF{
+			Name:        strptr(ni),
+			Tenant:      vrfTenant,
+			Description: vrfDesc,
+			Comments:    vrfComments,
+		}
 		if rd := states[ni].rd; rd != "" {
 			v.Rd = strptr(rd)
+		}
+		if len(vrfTags) > 0 {
+			v.Tags = vrfTags
 		}
 		out = append(out, v)
 		for _, e := range members[ni] {

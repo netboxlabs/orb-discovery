@@ -67,11 +67,14 @@ policies:
       debounce_ms: 2000    # flush delay after last notification (default 2000)
       sample_interval_ms: 300000   # SAMPLE subscription interval (default 300000 = 5m)
       get_interval_ms: 900000      # GET poll interval (default 900000 = 15m)
+      options:                     # per-policy behavior toggles (peer to defaults)
+        capture_config: false      # capture the CONFIG datastore into Device.config.running (default off)
       defaults:
         site: New York NY          # NetBox site (default "undefined")
         role: Router               # NetBox device role (default "undefined")
         location: ""               # NetBox location (optional)
         tags: []                   # NetBox tags applied to all entities
+        asset_tag: ""              # literal, or a "/"-prefixed gNMI path reference (see below)
         device:
           manufacturer: ""         # override manufacturer (optional)
           model: ""                # override model (optional)
@@ -81,6 +84,17 @@ policies:
         interface:
           if_type: other           # fallback interface type (default "other")
           description: ""
+          tags: []
+        ip_address:                # NetBox defaults applied to discovered IP addresses
+          role: ""
+          tenant: ""
+          description: ""
+          comments: ""
+          tags: []
+        vrf:                       # NetBox defaults applied to discovered VRFs (name/RD come from discovery)
+          tenant: ""
+          description: ""
+          comments: ""
           tags: []
         # Name-regex -> NetBox type, highest precedence (first match wins):
         interface_patterns:
@@ -141,6 +155,37 @@ The built-in name patterns and speed-based inference (steps 4–5) already type
 common vendor interfaces with no policy configuration. `interface_patterns` is
 for overriding those built-ins or typing names they don't cover — it takes
 precedence over both.
+
+### Asset tag
+
+OpenConfig defines no standard asset-tag leaf (unlike SNMP's ENTITY-MIB
+`entPhysicalAssetID`), so there is no zero-config auto-discovery. `defaults.asset_tag`
+accepts either:
+
+- a **literal** string (e.g. `asset_tag: DC1-RACK7`), or
+- a **gNMI path reference** — any value beginning with `/` (e.g.
+  `asset_tag: /components/component[name=Chassis]/state/id`). The leaf is read
+  from the discovered snapshot when it is one of the subscribed paths, otherwise
+  via a targeted Get, so you can point at whatever leaf your platform carries the
+  tag in.
+
+Either form is vetted before it becomes `Device.asset_tag`: well-known
+placeholders (`unknown`, `n/a`, `no asset tag`, …) are rejected, the value must
+be printable UTF-8, and it must fit NetBox's 50-character column. A value that
+fails vetting (or a path that does not resolve) leaves the asset tag unset.
+Mirrors snmp-discovery's "OID reference or literal" mechanism.
+
+### Config capture
+
+With `options.capture_config: true`, each discovery cycle fetches the target's
+**CONFIG datastore** once (a single gNMI `Get` of type `CONFIG` over `/`,
+JSON_IETF) and stores it as `Device.config.running`. gNMI has no `startup` or
+`candidate` datastore, so only `running` is populated, and the artifact is the
+serialized OpenConfig CONFIG tree (JSON), not a CLI config. Secrets are redacted
+best-effort: values under auth-oriented leaf names (`password`, `secret`,
+`private-key`, `pre-shared-key`, `auth-password`, …) are replaced with `***`
+(most devices already return hashed values). A capture failure logs a warning and
+the inventory flush proceeds without config.
 
 ### Delivery modes
 

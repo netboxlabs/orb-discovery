@@ -211,7 +211,7 @@ func Translate(profile *Profile, snap map[string]any, defaults *config.Defaults,
 	ifaceEntities := translateInterfaces(profile, snap, dev, defaults)
 	entities = append(entities, ifaceEntities...)
 	entities = append(entities, translateComponents(profile, snap, dev, deviceMfg)...)
-	entities = append(entities, translateIPs(profile, snap, dev, compileInterfaceExcludes(defaults))...) // Device -> Interfaces -> Modules -> subifs+IPs
+	entities = append(entities, translateIPs(profile, snap, dev, defaults, compileInterfaceExcludes(defaults))...) // Device -> Interfaces -> Modules -> subifs+IPs
 	// VLANs: build definitions (real names/status) + the shared builder, attach
 	// switchport membership, then force-emit every defined VLAN (even unreferenced).
 	vlanDefs := translateVlanDefinitions(snap)
@@ -229,7 +229,7 @@ func Translate(profile *Profile, snap map[string]any, defaults *config.Defaults,
 	entities = append(entities, vb.emitted()...)
 	// VRFs: emit L3VRF network-instances and bind Vrf on member interfaces (and
 	// their IPs), subinterface-precise via the interface-entity name.
-	vrfEntities, vrfByIface := translateVrfs(snap)
+	vrfEntities, vrfByIface := translateVrfs(snap, defaults)
 	if len(vrfByIface) > 0 {
 		for _, e := range entities {
 			switch v := e.(type) {
@@ -346,11 +346,17 @@ func translateDevice(profile *Profile, snap map[string]any, defaults *config.Def
 		if defaults.Device.Comments != "" {
 			dev.Comments = strptr(defaults.Device.Comments)
 		}
+		// asset_tag is resolved by the runner post-Translate (it may require a
+		// targeted Get for a path reference, which needs the session) — see
+		// mapping.ResolveAssetTag and runner.flush.
 		// Device tags = policy-level tags + device-level tags, de-duped clone.
 		if tags := toTags(append(append([]string{}, defaults.Tags...), defaults.Device.Tags...)); len(tags) > 0 {
 			dev.Tags = tags
 		}
 	}
+	// Status mirrors device-discovery's unconditional "active": gNMI reached the
+	// device, so it is operationally present.
+	dev.Status = strptr("active")
 	// Device.Serial is taken from the CHASSIS component (the device's own
 	// serial). CHASSIS is not an emittable component type, so translateComponents
 	// skips it and there is no Module/Device serial conflict.

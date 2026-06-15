@@ -218,6 +218,39 @@ func TestGnmicSession_GetOnce_Success(t *testing.T) {
 	require.NotEmpty(t, capturedReq.GetPath(), "GetRequest must include at least one path")
 }
 
+// TestGnmicSession_GetConfig verifies GetConfig issues a CONFIG-type Get over
+// the root path and returns the raw JSON_IETF payload.
+func TestGnmicSession_GetConfig(t *testing.T) {
+	const configJSON = `{"openconfig-system:system":{"config":{"hostname":"spine1"}}}`
+	srv := &testGNMIServer{
+		getHandler: func(_ context.Context, _ *gnmiproto.GetRequest) (*gnmiproto.GetResponse, error) {
+			return &gnmiproto.GetResponse{
+				Notification: []*gnmiproto.Notification{{
+					Update: []*gnmiproto.Update{{
+						Path: &gnmiproto.Path{},
+						Val:  &gnmiproto.TypedValue{Value: &gnmiproto.TypedValue_JsonIetfVal{JsonIetfVal: []byte(configJSON)}},
+					}},
+				}},
+			}, nil
+		},
+	}
+	addr := startTestGNMIServer(t, srv)
+	sess := dialPlaintext(t, addr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	raw, err := sess.GetConfig(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, configJSON, string(raw))
+
+	srv.mu.Lock()
+	capturedReq := srv.lastGetReq
+	srv.mu.Unlock()
+	require.NotNil(t, capturedReq)
+	assert.Equal(t, gnmiproto.GetRequest_CONFIG, capturedReq.GetType(), "GetConfig must request the CONFIG datastore")
+}
+
 func TestGnmicSession_GetOnce_ServerError(t *testing.T) {
 	srv := &testGNMIServer{
 		getHandler: func(_ context.Context, _ *gnmiproto.GetRequest) (*gnmiproto.GetResponse, error) {

@@ -61,7 +61,7 @@ func TestTranslateVrfs(t *testing.T) {
 		"/network-instances/network-instance[name=default]/state/type":                                             "openconfig-network-instance-types:DEFAULT_INSTANCE",
 		"/network-instances/network-instance[name=default]/interfaces/interface[id=Ethernet1]/state/interface":     "Ethernet1",
 	}
-	ents, byIface := translateVrfs(snap)
+	ents, byIface := translateVrfs(snap, nil)
 
 	require.Len(t, ents, 2)
 	blue := ents[0].(*diode.VRF)

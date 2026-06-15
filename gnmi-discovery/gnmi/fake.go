@@ -18,6 +18,9 @@ type FakeSession struct {
 	StreamErr       error          // if set, sent on the error channel after replay (simulates a mid-stream drop)
 	GetResult       Notification
 	GetErr          error
+	ConfigBytes     []byte // returned by GetConfig
+	ConfigErr       error  // if set, GetConfig returns this error
+	ConfigGets      int    // count of GetConfig calls (test assertion)
 	Closed          bool
 	StopSubscribes  int // count of StopSubscribe calls (test assertion)
 }
@@ -83,6 +86,12 @@ func (f *FakeSession) Subscribe(ctx context.Context, mode Mode, _ []string, _ in
 // GetOnce returns the scripted Get result.
 func (f *FakeSession) GetOnce(_ context.Context, _ []string) (Notification, error) {
 	return f.GetResult, f.GetErr
+}
+
+// GetConfig records the call and returns the scripted config bytes/error.
+func (f *FakeSession) GetConfig(_ context.Context) ([]byte, error) {
+	f.ConfigGets++
+	return f.ConfigBytes, f.ConfigErr
 }
 
 // StopSubscribe records the call; the fake has no real subscription to tear down.

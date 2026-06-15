@@ -418,6 +418,38 @@ func (s *gnmicSession) getPaths(ctx context.Context, paths []string) (Notificati
 	return result, nil
 }
 
+// GetConfig fetches the CONFIG datastore as serialized JSON_IETF: one Get with
+// DataType=CONFIG over the origin-prefixed root path "/". Returns the raw JSON
+// payload of the first update carrying one. JSON_IETF (not PROTO) is requested
+// because the artifact is stored as a config document, not consumed as flat
+// leaves.
+func (s *gnmicSession) GetConfig(ctx context.Context) ([]byte, error) {
+	req, err := gapi.NewGetRequest(
+		gapi.Path(withOrigin(s.origin, "/")),
+		gapi.DataTypeCONFIG(),
+		gapi.Encoding("json_ietf"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gnmi get config: build request: %w", err)
+	}
+	resp, err := s.tg.Get(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("gnmi get config: %w", err)
+	}
+	for _, notif := range resp.GetNotification() {
+		for _, upd := range notif.GetUpdate() {
+			tv := upd.GetVal()
+			if b := tv.GetJsonIetfVal(); len(b) > 0 {
+				return b, nil
+			}
+			if b := tv.GetJsonVal(); len(b) > 0 {
+				return b, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("gnmi get config: response carried no JSON config payload")
+}
+
 // Close releases the underlying gNMI connection. It first cancels the
 // subscribe context so the gnmic producer goroutine exits (even if blocked in
 // its internal retry-timer wait), then closes the target's gRPC connection.

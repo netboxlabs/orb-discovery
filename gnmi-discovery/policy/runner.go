@@ -209,10 +209,81 @@ func (r *Runner) runOnce(t config.Target, model *mapping.DeviceModel, deb *Debou
 	}
 
 	warnedNoIdentity := false // rate-limit the no-identity warning to once per connection
+
+	// Config capture (options.capture_config): fetch the CONFIG datastore once per
+	// connection — on the first flush, which fires right after the initial sync —
+	// redact it, and cache it for subsequent flushes. A fresh runOnce on reconnect
+	// resets these, so config is re-fetched after a re-sync. A fetch failure logs
+	// WARN and leaves configRaw empty: the inventory flush proceeds without config.
+	var configRaw []byte
+	configFetched := false
+	maybeCaptureConfig := func() {
+		if !r.policy.Config.Options.ConfigCaptureEnabled() || configFetched {
+			return
+		}
+		configFetched = true // attempt once per connection, regardless of outcome
+		raw, cerr := sess.GetConfig(r.ctx)
+		if cerr != nil {
+			r.logger.Warn("config capture failed", "policy", r.name, "host", t.Host, "error", cerr)
+			return
+		}
+		configRaw = mapping.RedactConfig(raw)
+	}
+
+	// asset_tag resolution (defaults.asset_tag): literal or a "/"-prefixed gNMI
+	// path reference, resolved once per connection and cached. A path reference is
+	// looked up in the snapshot first, then via a targeted Get (the curated
+	// subscription does not collect arbitrary leaves), so an operator can point at
+	// whatever leaf carries the asset tag — mirroring snmp-discovery's OID-or-literal
+	// mechanism. Vetted (placeholder / 50-rune cap / non-printable); unresolved →
+	// left unset.
+	var assetTag string
+	assetResolved := false
+	resolveAssetTag := func(snap map[string]any) {
+		if assetResolved {
+			return
+		}
+		assetResolved = true
+		raw := defaults.AssetTag
+		if raw == "" {
+			return
+		}
+		fetch := func(path string) (string, bool) {
+			n, gerr := sess.GetOnce(r.ctx, []string{path})
+			if gerr != nil {
+				r.logger.Warn("asset_tag reference fetch failed", "policy", r.name, "host", t.Host, "path", path, "error", gerr)
+				return "", false
+			}
+			for _, u := range n.Updates {
+				if u.Path == path {
+					return fmt.Sprintf("%v", u.Value), true
+				}
+			}
+			return "", false
+		}
+		if at, ok := mapping.ResolveAssetTag(raw, snap, fetch); ok {
+			assetTag = at
+		}
+	}
+
 	flush := func() {
-		entities := mapping.Translate(profile, model.Snapshot(), defaults, discoveredVendor)
+		maybeCaptureConfig()
+		snap := model.Snapshot()
+		resolveAssetTag(snap)
+		entities := mapping.Translate(profile, snap, defaults, discoveredVendor)
 		mapping.AssignPrimaryIP(entities, targetHostIP(t.Host))
 		dev, _ := entities[0].(*diode.Device) // Translate always emits the Device first
+		// Attach the captured CONFIG datastore (already redacted) to the Device,
+		// when capture_config is on and the fetch succeeded. Same post-Translate
+		// decoration pattern as AssignPrimaryIP; no-op when configRaw is empty.
+		if dev != nil {
+			if dc := mapping.NewDeviceConfig(configRaw); dc != nil {
+				dev.Config = dc
+			}
+			if assetTag != "" {
+				dev.AssetTag = &assetTag
+			}
+		}
 		// Q2: thread target netbox_id onto the Device for explicit NetBox matching.
 		if t.NetboxID != nil && dev != nil {
 			if dev.Metadata == nil {
