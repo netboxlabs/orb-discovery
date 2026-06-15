@@ -6,11 +6,44 @@ import importlib
 import inspect
 import warnings
 from collections.abc import Iterable
+from typing import Protocol, runtime_checkable
 
 from netboxlabs.diode.sdk.ingester import Entity
 from typing_extensions import deprecated
 
 from worker.models import Metadata, Policy
+
+
+@runtime_checkable
+class IngestSink(Protocol):
+    """
+    How a backend hands run outcomes to the worker outside the scheduled run() cycle.
+
+    The worker passes an implementation to ``Backend.__init__``; an integration
+    that ships entities outside ``run()`` (e.g. an HTTP-triggered sync) calls
+    these methods. See ``worker.exceptions`` for the failure hierarchy.
+    """
+
+    def ingest(self, entities: Iterable[Entity], **kwargs) -> None:
+        """
+        Ingest ``entities`` as one worker-tracked run.
+
+        Creates a run, chunks and sends the entities to Diode, and records the
+        run COMPLETED. An empty iterable is a valid no-op (recorded COMPLETED,
+        nothing sent). Raises ``IngestRejected`` (permanent) or ``IngestError``
+        (other failures); the run is recorded FAILED before the exception
+        propagates. ``**kwargs`` is a forward-compat door (e.g. a future
+        ``run_id``).
+        """
+        ...
+
+    def record_failure(self, error: Exception, **kwargs) -> None:
+        """
+        Record a FAILED run for a collection that produced no entities.
+
+        Never raises. ``**kwargs`` is a forward-compat door.
+        """
+        ...
 
 
 class Backend:
@@ -19,39 +52,48 @@ class Backend:
     def __init__(
         self,
         *,
-        ingest_callback=None,
+        ingest_sink: "IngestSink | None" = None,
         **kwargs,
     ) -> None:
         """
         Construct the Backend.
 
-        The worker reads the backend's metadata first (via the ``describe()``
-        classmethod, or a throwaway legacy ``setup()`` instance that receives
-        no callback), then constructs the instance it will run with
-        ``ingest_callback`` passed here. Every dependency the callback uses
-        is ready by that point, so the callback is usable as soon as the
-        instance exists — just do not invoke it from ``__init__`` itself.
-
         Args:
         ----
-            ingest_callback: Optional callable that ingests entities or
-                reports errors outside of the ``run()`` cycle. See
-                ``worker.exceptions`` for the exception hierarchy it may
-                raise.
-            **kwargs: Forward-compat door for additional resources worker
-                may pass in future versions; silently ignored by default.
+            ingest_sink: Optional :class:`IngestSink` the worker supplies so the
+                backend can ingest entities or record failures outside the
+                scheduled ``run()`` cycle. ``None`` when the worker predates
+                this contract. Usable once policy setup completes — do not call
+                it from ``__init__``.
+            **kwargs: Forward-compat door for resources future worker versions
+                may pass; ignored by default.
 
         """
-        self.ingest_callback = ingest_callback
+        self.ingest_sink = ingest_sink
 
     def __init_subclass__(cls, **kwargs) -> None:
-        """Warn once, at class-definition time, when a subclass still relies on setup()."""
+        """At class-definition time, flag deprecated setup() use and a non-classmethod describe()."""
         super().__init_subclass__(**kwargs)
+        describe_member = next(
+            (
+                klass.__dict__["describe"]
+                for klass in cls.__mro__[:-1]
+                if klass is not Backend and "describe" in klass.__dict__
+            ),
+            None,
+        )
+        if describe_member is not None and not isinstance(describe_member, classmethod):
+            warnings.warn(
+                f"{cls.__module__}.{cls.__qualname__} defines describe() but not as a "
+                "@classmethod; the worker reads metadata via the describe() classmethod, "
+                "so add @classmethod.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         overrides_setup = any(
             "setup" in klass.__dict__ for klass in cls.__mro__[:-1] if klass is not Backend
         )
-        has_describe = cls.describe.__func__ is not Backend.describe.__func__
-        if overrides_setup and not has_describe:
+        if overrides_setup and not _implements_describe(cls):
             warnings.warn(
                 f"{cls.__module__}.{cls.__qualname__} overrides Backend.setup(), which is "
                 "deprecated — implement the describe() classmethod instead "
@@ -120,6 +162,25 @@ class Backend:
 
         """
         raise NotImplementedError("The 'run' method must be implemented.")
+
+
+def _implements_describe(cls: type) -> bool:
+    """
+    Return True if ``cls`` overrides ``Backend.describe`` with a classmethod.
+
+    Walks the MRO statically — it never *calls* describe(), so a describe() that
+    raises ``NotImplementedError`` internally is not misread as "not
+    implemented", and a describe() defined without ``@classmethod`` is reported
+    as not-implemented (and separately warned about) rather than crashing
+    attribute access.
+    """
+    for klass in cls.__mro__:
+        if klass is Backend:
+            return False
+        member = klass.__dict__.get("describe")
+        if member is not None:
+            return isinstance(member, classmethod)
+    return False
 
 
 def load_class(module_name: str) -> type[Backend]:

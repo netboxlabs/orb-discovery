@@ -102,17 +102,22 @@ def test_load_class_attribute_error(mock_import_module):
 def test_backend_init_default_no_args():
     """Zero-arg construction still works (back-compat with older worker)."""
     b = Backend()
-    assert b.ingest_callback is None
+    assert b.ingest_sink is None
 
 
-def test_backend_init_stores_ingest_callback():
-    """ingest_callback is stored on the instance."""
+def test_backend_init_stores_ingest_sink():
+    """ingest_sink is stored on the instance."""
 
-    def cb(**_):
-        return None
+    class _Sink:
+        def ingest(self, entities, **kwargs):
+            return None
 
-    b = Backend(ingest_callback=cb)
-    assert b.ingest_callback is cb
+        def record_failure(self, error, **kwargs):
+            return None
+
+    sink = _Sink()
+    b = Backend(ingest_sink=sink)
+    assert b.ingest_sink is sink
 
 
 def test_backend_init_absorbs_unknown_kwargs():
@@ -158,3 +163,12 @@ def test_base_setup_call_emits_runtime_deprecation():
     """Calling the base setup() directly warns (PEP 702 runtime) and still raises."""
     with pytest.warns(DeprecationWarning), pytest.raises(NotImplementedError):
         Backend().setup()
+
+
+def test_subclass_with_describe_missing_classmethod_warns():
+    """A describe() defined without @classmethod is flagged at class creation (does not crash)."""
+    with pytest.warns(RuntimeWarning, match="not as a @classmethod"):
+
+        class BadDescribeBackend(Backend):
+            def describe(self) -> Metadata:  # forgot @classmethod
+                return Metadata(name="bad", app_name="bad", app_version="0.0.0")

@@ -17,11 +17,11 @@ from netboxlabs.diode.sdk import (
     create_message_chunks,
 )
 
-from worker.backend import Backend, load_class
+from worker.backend import Backend, _implements_describe, load_class
 from worker.entity_metadata import apply_run_id_to_entities
 from worker.exceptions import IngestError, IngestRejected
 from worker.metrics import get_metric
-from worker.models import DiodeConfig, Metadata, Policy, Status
+from worker.models import DiodeConfig, Policy, Status
 from worker.package_finder import maybe_evict
 from worker.policy.run import RunStatus, RunStore
 
@@ -34,6 +34,50 @@ class _RunOutcome:
 
     entity_count: int
     produce_seconds: float
+
+
+class _PolicyRunnerIngestSink:
+    """
+    IngestSink bound to a PolicyRunner; reads runner state at call time.
+
+    The binding is lazy: ``ingest`` / ``record_failure`` resolve ``run_store``,
+    ``metadata`` and ``_diode_client`` off the runner when called, so the sink
+    is valid the moment it is constructed even though the runner may finish
+    wiring those fields afterwards. It must not be invoked before setup() ends.
+    """
+
+    def __init__(self, runner: "PolicyRunner") -> None:
+        self._runner = runner
+
+    def ingest(self, entities, **kwargs) -> None:
+        runner = self._runner
+        try:
+            runner._execute_run(
+                runner._diode_client, lambda: entities, source="ingest_callback"
+            )
+        except IngestError:
+            raise
+        except Exception as exc:
+            raise IngestError(str(exc)) from exc
+
+    def record_failure(self, error: Exception, **kwargs) -> None:
+        runner = self._runner
+        run = runner.run_store.create_run(
+            policy_name=runner.name,
+            metadata={
+                "name": runner.metadata.name,
+                "app_name": runner.metadata.app_name,
+                "app_version": runner.metadata.app_version,
+                "source": "ingest_callback",
+            },
+        )
+        runner.run_store.update_run(
+            policy_name=runner.name,
+            run_id=run.id,
+            status=RunStatus.FAILED,
+            error=error,
+            entity_count=0,
+        )
 
 
 class PolicyRunner:
@@ -77,9 +121,24 @@ class PolicyRunner:
         backend_class = load_class(policy.config.package)
         logger.debug(f"Backend class loaded successfully: {backend_class.__name__}")
 
-        # Read the backend's identity WITHOUT committing to an instance, so the
-        # ingest callback can be built and passed at construction time below.
-        metadata = self._backend_metadata(backend_class)
+        # Read the backend's metadata. Modern backends expose it via the
+        # describe() classmethod (no instance needed). Legacy setup()-only
+        # backends are constructed bare HERE and set up on that same instance —
+        # the one that gets scheduled — so any state setup() initialises is live
+        # when run() reads it.
+        if _implements_describe(backend_class):
+            legacy_backend = None
+            metadata = backend_class.describe()
+        else:
+            logger.warning(
+                "%s does not implement describe(); reading metadata via the "
+                "deprecated setup() fallback (scheduled for removal in worker "
+                "v2.0) — implement the describe() classmethod.",
+                backend_class.__name__,
+            )
+            legacy_backend = backend_class()
+            metadata = legacy_backend.setup()
+
         app_name = (
             f"{diode_config.prefix}/{metadata.app_name}"
             if diode_config.prefix
@@ -114,10 +173,16 @@ class PolicyRunner:
         self.run_store = run_store
         self._diode_client = client
 
-        # Every dependency the closure reads (run_store, metadata, _diode_client)
-        # is now assigned, so the callback is built first and the backend is
-        # constructed ONCE with it — no post-construction attach step.
-        backend = backend_class(ingest_callback=self._build_ingest_callback())
+        # The sink reads runner state lazily, so it is valid as soon as it
+        # exists. Modern backends are constructed once with it; legacy backends
+        # were already constructed (above, to read setup() metadata), so the
+        # sink is attached to that instance rather than re-constructing.
+        sink = _PolicyRunnerIngestSink(self)
+        if legacy_backend is None:
+            backend = backend_class(ingest_sink=sink)
+        else:
+            backend = legacy_backend
+            backend.ingest_sink = sink
 
         self.scheduler.start()
 
@@ -143,81 +208,6 @@ class PolicyRunner:
         active_policies = get_metric("active_policies")
         if active_policies:
             active_policies.add(1, {"policy": self.name})
-
-    def _backend_metadata(self, backend_class) -> Metadata:
-        """
-        Read the backend's metadata without committing to an instance.
-
-        Prefer the class-level describe(); fall back to a throwaway instance's
-        setup() for integrations that only implement the legacy instance method.
-        """
-        try:
-            return backend_class.describe()
-        except NotImplementedError:
-            # Legacy backend: construct a throwaway just to read its metadata. The
-            # real, callback-bearing instance is constructed below.
-            logger.warning(
-                "%s does not implement describe(); reading metadata via the "
-                "deprecated setup() fallback (scheduled for removal in worker "
-                "v2.0) — implement the describe() classmethod.",
-                backend_class.__name__,
-            )
-            return backend_class().setup()
-
-    def _build_ingest_callback(self):
-        """
-        Build a closure used to ingest entities outside the scheduled run() cycle.
-
-        The returned callable signature:
-            cb(entities=None, *, error=None, **kwargs) -> None
-
-        Exactly one of ``entities`` / ``error`` must be supplied.
-        On the ``entities`` path: a pseudo-run is created in the RunStore,
-        entities are chunked and ingested via the same path run() uses, and
-        response/transport errors are translated into IngestRejected /
-        IngestError. On the ``error`` path: a failed pseudo-run is
-        recorded; no client.ingest call is made; returns None.
-        """
-
-        def ingest_callback(
-            entities=None,
-            *,
-            error: Exception | None = None,
-            **kwargs,
-        ) -> None:
-            # kwargs is reserved for forward-compat (run_id, source, etc.); currently ignored.
-            if (entities is None) == (error is None):
-                raise TypeError(
-                    "ingest_callback requires exactly one of 'entities' or 'error'"
-                )
-            if error is not None:
-                run = self.run_store.create_run(
-                    policy_name=self.name,
-                    metadata={
-                        "name": self.metadata.name,
-                        "app_name": self.metadata.app_name,
-                        "app_version": self.metadata.app_version,
-                        "source": "ingest_callback",
-                    },
-                )
-                self.run_store.update_run(
-                    policy_name=self.name,
-                    run_id=run.id,
-                    status=RunStatus.FAILED,
-                    error=error,
-                    entity_count=0,
-                )
-                return
-            try:
-                self._execute_run(
-                    self._diode_client, lambda: entities, source="ingest_callback"
-                )
-            except IngestError:
-                raise
-            except Exception as exc:
-                raise IngestError(str(exc)) from exc
-
-        return ingest_callback
 
     def _execute_run(
         self, client, produce_entities, *, source: str | None = None
