@@ -481,6 +481,13 @@ func (r *Runner) streamLoop(host string, profile *mapping.Profile, pruneEvery ti
 	anchor := profile.Device.Hostname
 	notif := metrics.GetNotifications() // LOW-1: resolve the hot-path counter once
 
+	// Start this (re)connection's initial dump in a fresh model generation so the
+	// post-sync rotate() can prune paths absent from the new full view. On a
+	// reconnect the dump would otherwise share the cycle that prior steady-state
+	// ON_CHANGE updates already stamped, and an object deleted while the stream was
+	// down would survive EndCycle(keep=1) forever. See DeviceModel.BeginSync.
+	model.BeginSync()
+
 	// productive tracks whether the stream ever yielded a notification. A stream
 	// error after ≥1 notification is a transient flap of a working mode (return it
 	// raw → targetLoop reconnects at the preferred mode, no demote). A stream error

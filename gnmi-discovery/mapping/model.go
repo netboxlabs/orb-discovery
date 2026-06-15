@@ -128,6 +128,19 @@ func (m *DeviceModel) EndCycle(keep int64, prune bool) []string {
 	return pruned
 }
 
+// BeginSync advances to a new cycle WITHOUT pruning, so the initial full dump of
+// a fresh subscription (first connect OR a reconnect) is stamped in its own
+// generation, distinct from any steady-state ON_CHANGE updates applied under the
+// previous connection. Without this, a reconnect's dump shares the prior cycle:
+// an object deleted while the stream was down keeps lastSeen == that shared
+// cycle, so the post-sync EndCycle(keep=1) sees it as "still current" and never
+// prunes it — leaving departed interfaces/IPs/modules ingested until a later
+// reconnect happens to advance the generation. Pruning of the now-stale paths
+// happens at the matching EndCycle once the new dump has re-stamped survivors.
+func (m *DeviceModel) BeginSync() {
+	m.cycle++
+}
+
 // Snapshot returns a copy of the current path→value map.
 func (m *DeviceModel) Snapshot() map[string]any {
 	out := make(map[string]any, len(m.values))

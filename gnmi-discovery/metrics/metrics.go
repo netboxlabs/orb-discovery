@@ -89,7 +89,7 @@ func GetCounter(name string, description string) metric.Int64Counter {
 		return c
 	}
 
-	// Create the counter (error handling omitted for brevity)
+	// Create the counter; on error log and return nil so callers no-op safely.
 	c, err := meter.Int64Counter(name, metric.WithDescription(description))
 	if err != nil {
 		logger.Error("error creating counter", "name", name, "error", err)

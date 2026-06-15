@@ -105,3 +105,37 @@ func TestSeenInCycle(t *testing.T) {
 	m.EndCycle(1, false) // advance; nothing applied in the new cycle yet
 	require.False(t, m.SeenInCycle("/sys/host"))
 }
+
+// TestBeginSyncPrunesPathDeletedDuringReconnect reproduces the ON_CHANGE
+// reconnect scenario: a path updated during steady-state and then deleted on the
+// device while the stream was down must be pruned at the next sync. BeginSync
+// puts the reconnect's initial dump in a fresh generation so EndCycle(keep=1) can
+// see the stale path as absent. Without BeginSync the dump shares the
+// steady-state cycle and the deleted path survives forever.
+func TestBeginSyncPrunesPathDeletedDuringReconnect(t *testing.T) {
+	up := func(p string, v any) gnmi.Notification {
+		return gnmi.Notification{Updates: []gnmi.Update{{Path: p, Value: v}}}
+	}
+	m := NewDeviceModel()
+
+	// Connection 1: initial dump of /a and /b, then sync+rotate(keep=1).
+	m.BeginSync()
+	m.Apply(up("/a", 1))
+	m.Apply(up("/b", 1))
+	require.Empty(t, m.EndCycle(1, true), "first sync prunes nothing")
+
+	// Steady-state ON_CHANGE updates re-stamp BOTH /a and /b in the post-sync cycle.
+	m.Apply(up("/a", 2))
+	m.Apply(up("/b", 2))
+
+	// Stream drops; /b is deleted on the device. Reconnect: the initial dump
+	// carries only /a (the new full view).
+	m.BeginSync()
+	m.Apply(up("/a", 3))
+	pruned := m.EndCycle(1, true)
+
+	require.Equal(t, []string{"/b"}, pruned, "/b (absent from the reconnect dump) must be pruned")
+	snap := m.Snapshot()
+	require.NotContains(t, snap, "/b", "deleted path must not survive the reconnect")
+	require.Contains(t, snap, "/a")
+}
