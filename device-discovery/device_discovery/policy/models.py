@@ -110,6 +110,27 @@ class IpamParameters(ObjectParameters):
         default=None, description="IPAM tenant, optional"
     )
     vrf: str | VrfParameters | None = Field(default=None, description="IPAM VRF, optional")
+    vrf_ipv4: str | VrfParameters | None = Field(
+        default=None,
+        description=(
+            "IPv4-specific VRF override. When set, IPv4 IP addresses / "
+            "prefixes use this VRF; falls back to ``vrf`` when unset."
+        ),
+    )
+    vrf_ipv6: str | VrfParameters | None = Field(
+        default=None,
+        description=(
+            "IPv6-specific VRF override. When set, IPv6 IP addresses / "
+            "prefixes use this VRF; falls back to ``vrf`` when unset."
+        ),
+    )
+
+
+class PrefixParameters(IpamParameters):
+    """Model for prefix-specific parameters."""
+
+    scope_site: str | None = Field(default=None, description="Prefix scope site, optional")
+    scope_location: str | None = Field(default=None, description="Prefix scope location, optional")
 
 
 class Defaults(BaseModel):
@@ -151,12 +172,29 @@ class Defaults(BaseModel):
     ipaddress: IpamParameters | None = Field(
         default=None, description="IP Address parameters, optional"
     )
-    prefix: IpamParameters | None = Field(
+    prefix: PrefixParameters | None = Field(
         default=None, description="Prefix parameters, optional"
     )
     vlan: VlanParameters | None = Field(
         default=None, description="VLAN parameters, optional"
     )
+
+    @field_validator("prefix", mode="before")
+    @classmethod
+    def coerce_ipam_to_prefix_parameters(cls, v: object) -> object:
+        """
+        Coerce a bare IpamParameters to PrefixParameters for back-compat.
+
+        Legacy in-process callers used to build ``Defaults(prefix=
+        IpamParameters(role="x"))`` before PrefixParameters existed.
+        Without this coercion Pydantic raises ValidationError because
+        IpamParameters isn't a PrefixParameters subclass. Round-trip
+        through model_dump → dict so the matching fields land on the
+        new model.
+        """
+        if isinstance(v, IpamParameters) and not isinstance(v, PrefixParameters):
+            return v.model_dump()
+        return v
 
 
 class Options(BaseModel):
@@ -205,6 +243,28 @@ class Options(BaseModel):
             "and any psu/fan a driver classifies explicitly); transceiver "
             "sub-bays are dropped. 'full' adds the per-port transceiver "
             "sub-bays."
+        ),
+    )
+    propagate_defaults_to_prefix_scope: bool = Field(
+        default=False,
+        description=(
+            "When True AND no explicit defaults.prefix.scope_* is set, "
+            "defaults.site cascades to Prefix.scope_site (unless it's "
+            "the literal placeholder 'undefined') and defaults.location "
+            "cascades to Prefix.scope_location. Any explicit "
+            "defaults.prefix.scope_* skips the cascade wholesale. "
+            "Default False preserves the no-cascade behavior."
+        ),
+    )
+    discover_vrfs: bool = Field(
+        default=False,
+        description=(
+            "Discover VRFs from the device via the driver's "
+            "get_network_instances() and attach them to the IP addresses "
+            "and prefixes of interfaces inside each VRF. A discovered VRF "
+            "takes precedence over defaults vrf / vrf_ipv4 / vrf_ipv6 for "
+            "those interfaces; interfaces in the default routing table "
+            "keep the configured defaults. Default False."
         ),
     )
 

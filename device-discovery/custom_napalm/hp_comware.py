@@ -22,6 +22,18 @@ from napalm.base.netmiko_helpers import netmiko_args
 from ntc_templates.parse import parse_output
 
 from custom_napalm._chassis import ChassisMember, normalize_role, to_payload
+from custom_napalm._modules import (
+    MemberModules as _MemberModules,
+)
+from custom_napalm._modules import (
+    ModuleBay as _ModuleBay,
+)
+from custom_napalm._modules import (
+    ModuleEntry as _ModuleEntry,
+)
+from custom_napalm._modules import (
+    to_payload as _modules_to_payload,
+)
 from custom_napalm._vlan import (
     SwitchportInfo,
     classify_switchport,
@@ -561,6 +573,237 @@ def _comware_get_chassis_members_impl(driver) -> dict | None:
     return to_payload(members, domain=domain)
 
 
+# --- module / module bay discovery ------------------------------------------
+#
+# Comware modular chassis families (S7500E, S10500, S12500, S12900) print one
+# row per slot in `display device manuinfo` with a full vendor SKU in
+# `DEVICE_NAME`. The classifier identifies supervisors by SKU substring
+# (``MPU`` / ``SUP``) rather than by family prefix, because H3C reuses the
+# same family prefix for both MPU and interface cards on the same chassis.
+# Anything else matching a known modular family prefix is a linecard.
+
+# Family-token substrings. Real model strings reported by ``display version``
+# vary by branding:
+#   - H3C uses ``S7503E`` / ``S10510`` / ``S12508X-AF`` / ``S12916-AF`` —
+#     family-prefix substrings ``S75`` / ``S105`` / ``S125`` / ``S129``
+#     match each chassis-size variant.
+#   - HPE FlexFabric rebrands strip the leading ``S`` (``HPE FlexFabric
+#     12500``) and Comware-5 HP-branded variants use the ``A`` prefix
+#     (``HP A10500``) — substrings ``7500`` / ``10500`` / ``12500`` /
+#     ``12900`` match the full chassis number without the ``S``.
+# Fixed pizza-box families (``S5500`` / ``S5800`` / ``S6800``) contain none of
+# these substrings, so the broad set still rejects them cleanly.
+_MODULAR_COMWARE_TOKENS: tuple[str, ...] = (
+    "S75", "S105", "S125", "S129",
+    "7500", "10500", "12500", "12900",
+)
+
+# Supervisor identification is by SKU substring, not family prefix: H3C reuses
+# the same family prefix (``LSQM`` / ``LSUM`` / ``LSXM``) for BOTH the MPU
+# (Main Processing Unit, supervisor) and interface cards on the same chassis.
+# The MPU's role is encoded in the SKU body — e.g. ``LSQM1MPUC0`` (supervisor)
+# vs ``LSQM1FH48EA`` (interface). ``MPU`` is the canonical supervisor token;
+# ``SUP`` covers the rarer ``LSUM1SUPXD0`` SUP-prefixed variant.
+_COMWARE_SUPERVISOR_TOKENS: tuple[str, ...] = ("MPU", "SUP")
+
+# Family prefixes that mark the SKU as a Comware modular-chassis card. Any SKU
+# matching one of these prefixes that does NOT contain a supervisor token is
+# treated as a linecard (this covers MPU sibling cards: SFU/fabric ``LSXM2SF``,
+# LPU ``LSXM2QGS`` / ``LSXM2FX`` / ``LSQM1FH``, etc.). Order doesn't matter
+# here — we only need a non-empty match. The 4-character prefixes are listed
+# first defensively; ``LSU`` follows ``LSUM`` for the same reason.
+_COMWARE_FAMILY_PREFIXES: tuple[str, ...] = (
+    "LSUM",  # S10500 family (MPU + interface cards)
+    "LSQM",  # S7500E family (MPU + interface cards)
+    "LSXM",  # S10500 / S12500X-AF / S12900 family (MPU + SFU + interface cards)
+    "LSQS",  # S7500E SFU (fabric)
+    "LSXS",  # S10500 / S12900 SFU (fabric)
+    "LSQ1",  # S7500E LPU
+    "LSQ2",  # S7500E LPU variant
+    "LSQK",  # S7500E LPU variant
+    "LSX1",  # S10500 / S12900 LPU
+    "LSX2",  # S10500 / S12900 LPU variant
+    "LSR",   # S12500 LPU SKU family
+    "LSU",   # S12500 LSU — must follow LSUM (the 4-char prefix wins first)
+)
+
+
+def _comware_is_modular(model: str) -> bool:
+    """
+    True when ``model`` belongs to a Comware modular family.
+
+    Matches by uppercased substring so vendor-prefixed model strings
+    (``H3C S12500-AF``, ``HPE FlexFabric S12500``, ``HP A12500``) and
+    bare model names (``S12500``) both succeed. Non-modular families
+    (S5500 / S5800 / S6800) reject.
+    """
+    if not model:
+        return False
+    upper = model.upper()
+    return any(token in upper for token in _MODULAR_COMWARE_TOKENS)
+
+
+def _comware_classify_module(device_name: str) -> str:
+    """
+    Classify a Comware SKU into a module type.
+
+    Returns ``"supervisor"`` when the SKU contains an MPU / SUP token
+    (``LSQM1MPUC0``, ``LSXM2MPUD0``, ``LSUM1SUPXD0``); otherwise returns
+    ``"linecard"`` when the SKU starts with a documented Comware modular
+    family prefix (``LSUM`` / ``LSQM`` / ``LSXM`` / ``LSQS`` / ``LSXS`` /
+    ``LSQ1`` / ``LSQ2`` / ``LSQK`` / ``LSX1`` / ``LSX2`` / ``LSR`` /
+    ``LSU``). Anything else — including empty / whitespace input —
+    returns ``"other"`` and is dropped by the impl.
+
+    Why two passes? H3C reuses the same family prefix for MPU and
+    interface cards on the same chassis. A pure prefix classifier
+    would mis-emit every interface card as a supervisor.
+    """
+    sku = (device_name or "").strip().upper()
+    if not sku:
+        return "other"
+    if any(token in sku for token in _COMWARE_SUPERVISOR_TOKENS):
+        return "supervisor"
+    if sku.startswith(_COMWARE_FAMILY_PREFIXES):
+        return "linecard"
+    return "other"
+
+
+def _comware_modules_rows_from_manuinfo(
+    rows: list[dict],
+) -> dict[int | None, _MemberModules]:
+    """
+    Walk parsed manuinfo rows and partition Slot entries by chassis id.
+
+    Drops Chassis / Subslot / Fan / Power rows, drops rows with empty
+    slot id / SKU / serial, drops SKUs that don't classify as
+    supervisor / linecard, and groups surviving bays by ``chassis_id``
+    (defaulting to 1 for non-IRF output).
+    """
+    members: dict[int | None, _MemberModules] = {}
+    for row in rows:
+        slot_type = (row.get("slot_type") or "").strip().lower()
+        if slot_type != "slot":
+            continue
+        slot_id = (row.get("slot_id") or "").strip()
+        sku = (row.get("device_name") or "").strip()
+        serial = (row.get("device_serial_number") or "").strip()
+        if not slot_id or not sku or not serial:
+            continue
+        try:
+            chassis_id = int((row.get("chassis_id") or "1").strip())
+        except ValueError:
+            continue
+        mtype = _comware_classify_module(sku)
+        if mtype not in ("supervisor", "linecard"):
+            continue
+        bay = _ModuleBay(
+            name=slot_id,
+            position=slot_id,
+            module=_ModuleEntry(model=sku, serial=serial, type=mtype, description=""),
+        )
+        member = members.setdefault(
+            chassis_id, _MemberModules(bays=[], interfaces_by_bay={})
+        )
+        member.bays.append(bay)
+    return members
+
+
+def _comware_get_modules_impl(driver) -> dict | None:
+    """
+    Per-chassis module / module bay discovery for HP/H3C Comware modular families.
+
+    Reads ``display version`` for family detection; non-modular families
+    short-circuit to ``None`` without touching ``display device manuinfo``.
+    For modular families, reads ``display device manuinfo``, partitions
+    Slot-type rows by ``chassis_id``, classifies each row's SKU, and emits
+    one ``MemberModules`` envelope per surviving chassis id.
+
+    Standalone modular chassis produce a single ``members[None]`` envelope
+    (matching the single-device translate path's ``{None: device}`` map);
+    IRF-of-modular emits one envelope per IRF member chassis (members[1],
+    members[2], ...) for the multi-member ``translate_as_stack`` path.
+    Subslot / Fan / Power rows are dropped — sub-bay discovery is a
+    follow-up.
+    """
+    try:
+        raw_version = driver.device.send_command("display version")
+    except Exception:
+        logger.warning("hp_comware.get_modules: display version failed", exc_info=True)
+        return None
+
+    model, _os_version, _uptime = _parse_version_output(raw_version or "")
+    if not _comware_is_modular(model):
+        return None
+
+    try:
+        manuinfo_out = driver.device.send_command("display device manuinfo")
+        manuinfo_rows = parse_output(
+            platform="hp_comware",
+            command="display device manuinfo",
+            data=manuinfo_out or "",
+        )
+    except Exception:
+        logger.warning(
+            "hp_comware.get_modules: display device manuinfo failed", exc_info=True
+        )
+        return None
+
+    if not manuinfo_rows:
+        return None
+
+    members = _comware_modules_rows_from_manuinfo(manuinfo_rows)
+    if not members:
+        return None
+    # Standalone modular (one chassis) MUST key by ``None`` so the
+    # single-device translate path (which builds ``{None: device}``) attaches
+    # the bays correctly. IRF-of-modular keeps integer keys per member chassis
+    # — translate.translate_as_stack passes the multi-member device map.
+    if len(members) == 1:
+        only_member = next(iter(members.values()))
+        return _modules_to_payload({None: only_member})
+    return _modules_to_payload(members)
+
+
+# "display ip vpn-instance instance-name <name>" detail fields. Parsed
+# driver-locally — the ntc-template for this command error-exits on routine
+# output lines it doesn't enumerate (e.g. "Route & Tunnel selection time").
+_COMWARE_VPN_RD_RE = re.compile(r"^\s*Route Distinguisher\s*:\s*(\S+)\s*$")
+_COMWARE_VPN_IFACES_RE = re.compile(r"^\s*Interfaces\s*:\s*(.*)$")
+
+
+def _comware_parse_vpn_instance_detail(raw: str) -> tuple[str, list[str]]:
+    """
+    Return (rd, member interfaces) from a VPN-instance detail block.
+
+    Interface collection starts at the "Interfaces :" line (members are
+    comma-separated, possibly wrapping onto indented continuation lines)
+    and stops at the first line carrying a "key : value" colon — every
+    other detail field uses that layout, while wrapped interface names
+    never contain a colon.
+    """
+    rd = ""
+    interfaces: list[str] = []
+    in_ifaces = False
+    for line in raw.splitlines():
+        m = _COMWARE_VPN_RD_RE.match(line)
+        if m:
+            rd = m.group(1)
+            in_ifaces = False
+            continue
+        m = _COMWARE_VPN_IFACES_RE.match(line)
+        if m:
+            in_ifaces = True
+            interfaces.extend(p.strip() for p in m.group(1).split(",") if p.strip())
+            continue
+        if in_ifaces:
+            if line.strip() and ":" not in line:
+                interfaces.extend(p.strip() for p in line.split(",") if p.strip())
+            else:
+                in_ifaces = False
+    return rd, interfaces
+
+
 class ComwareDriver(_napalm_base.NetworkDriver):
     """HP Comware NAPALM driver (read-only subset for device-discovery)."""
 
@@ -779,6 +1022,74 @@ class ComwareDriver(_napalm_base.NetworkDriver):
         a NetBox VirtualChassis.
         """
         return _comware_get_chassis_members_impl(self)
+
+    def get_modules(self) -> dict | None:
+        """
+        Return module / module bay inventory for Comware modular chassis.
+
+        Standalone modular families (S7500E, S10500, S12500, S12900) emit a
+        single per-chassis envelope; IRF-of-modular emits one envelope per
+        IRF member chassis. Non-modular families (S5500 / S5800 / S6800) and
+        unparseable output return ``None``.
+        """
+        return _comware_get_modules_impl(self)
+
+    def get_network_instances(self, name: str = "") -> dict:
+        """
+        Return network instances (VPN instances as VRFs), NAPALM OC shape.
+
+        ``display ip vpn-instance`` (ntc-template, tolerates RD-less rows)
+        enumerates the instances; one ``display ip vpn-instance
+        instance-name <name>`` per instance supplies the RD and the
+        member interface list, parsed driver-locally — the ntc-template
+        for the detail command error-exits on routine output lines it
+        doesn't enumerate (e.g. "Route & Tunnel selection time"). The
+        public network (global routing table) is not a VPN instance and
+        is represented by the seeded DEFAULT_INSTANCE with empty
+        membership.
+        """
+        instances: dict = {
+            "default": {
+                "name": "default",
+                "type": "DEFAULT_INSTANCE",
+                "state": {"route_distinguisher": ""},
+                "interfaces": {"interface": {}},
+            },
+        }
+        sum_raw = self.device.send_command("display ip vpn-instance")
+        sum_rows: list[dict] = []
+        if sum_raw and sum_raw.strip():
+            try:
+                sum_rows = parse_output(
+                    platform="hp_comware",
+                    command="display ip vpn-instance",
+                    data=sum_raw,
+                )
+            except Exception:
+                logger.warning(
+                    "Comware display ip vpn-instance parse failed", exc_info=True
+                )
+        for row in sum_rows:
+            vpn_name = (row.get("name") or "").strip()
+            # Never let a row overwrite the seeded DEFAULT_INSTANCE.
+            if not vpn_name or vpn_name == "default":
+                continue
+            rd = (row.get("rd") or "").strip()
+            det_raw = self.device.send_command(
+                f"display ip vpn-instance instance-name {vpn_name}"
+            )
+            det_rd, det_ifaces = _comware_parse_vpn_instance_detail(det_raw or "")
+            rd = det_rd or rd
+            interfaces = {ifname: {} for ifname in det_ifaces}
+            instances[vpn_name] = {
+                "name": vpn_name,
+                "type": "L3VRF",
+                "state": {"route_distinguisher": rd},
+                "interfaces": {"interface": interfaces},
+            }
+        if name:
+            return {name: instances[name]} if name in instances else {}
+        return instances
 
     def get_interfaces_vlans(self) -> dict[str, dict]:
         """Return per-interface VLAN config from `display interface brief` + `display vlan all`."""

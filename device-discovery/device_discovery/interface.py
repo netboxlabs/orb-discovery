@@ -8,10 +8,10 @@ import re
 from collections.abc import Iterable
 
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2 as pb
-from netboxlabs.diode.sdk.ingester import Device, Entity, Interface, IPAddress, Prefix
+from netboxlabs.diode.sdk.ingester import Device, Entity, Interface, IPAddress, Location, Prefix
 
 from device_discovery.defaults import DEFAULT_INTERFACE_PATTERNS
-from device_discovery.policy.models import Defaults
+from device_discovery.policy.models import Defaults, Options
 
 logger = logging.getLogger(__name__)
 
@@ -270,8 +270,79 @@ def translate_interface(
     return interface
 
 
+def _resolve_prefix_scope_kwargs(
+    defaults: Defaults,
+    options: "Options | None",
+) -> dict[str, str]:
+    """
+    Pick a single Prefix scope_* kwarg honoring the protobuf oneof.
+
+    Reads the two explicit scope fields off ``defaults.prefix`` and, when
+    ``options.propagate_defaults_to_prefix_scope`` is True, falls back to
+    ``defaults.site`` (skipping the "undefined" placeholder) and
+    ``defaults.location``. Explicit per-prefix scope always wins over the
+    cascade.
+
+    ``Prefix.scope_{site,location}`` is a protobuf oneof, so only one value
+    travels on the wire — picks the most-specific non-empty candidate
+    (location > site) so callers don't accidentally clobber a granular
+    scope with a broader one.
+    """
+    prefix_scope_site: str | None = None
+    prefix_scope_location: str | None = None
+
+    if defaults.prefix:
+        # getattr fallback so a caller that bypasses Pydantic and assigns
+        # a bare IpamParameters (missing scope_*) to defaults.prefix
+        # post-construction doesn't crash with AttributeError mid-discovery.
+        # Normal YAML / Pydantic-validation paths get PrefixParameters with
+        # the attributes already present — getattr is the no-op fast path.
+        prefix_scope_site = getattr(defaults.prefix, "scope_site", None) or None
+        prefix_scope_location = getattr(defaults.prefix, "scope_location", None) or None
+
+    # Opt-in cascade: defaults.site / defaults.location → Prefix scope.
+    # Any explicit defaults.prefix.scope_* puts the operator in "explicit
+    # mode" and the cascade is skipped wholesale — otherwise a cascaded
+    # more-specific scope (e.g. cascaded scope_location) could win the
+    # oneof precedence over an operator's explicit less-specific choice
+    # (e.g. explicit scope_site). The literal "undefined" placeholder for
+    # defaults.site is treated as no-value (see Defaults model).
+    any_explicit_prefix_scope = bool(prefix_scope_site or prefix_scope_location)
+    if (
+        options
+        and options.propagate_defaults_to_prefix_scope
+        and not any_explicit_prefix_scope
+    ):
+        if defaults.site and defaults.site != "undefined":
+            prefix_scope_site = defaults.site
+        if defaults.location:
+            prefix_scope_location = defaults.location
+
+    # NetBox Locations are unique within their parent site, not globally —
+    # emit Location(name=..., site=...) when a site is available so the
+    # Diode plugin can disambiguate "Floor-1 in DC-East" from "Floor-1 in
+    # DC-West". Mirrors translate_device's Location(name=..., site=...).
+    scope_kwargs: dict[str, str | Location] = {}
+    for scope_name, scope_val in (
+        ("scope_location", prefix_scope_location),
+        ("scope_site", prefix_scope_site),
+    ):
+        if not scope_val:
+            continue
+        if scope_name == "scope_location" and prefix_scope_site:
+            scope_kwargs[scope_name] = Location(name=scope_val, site=prefix_scope_site)
+        else:
+            scope_kwargs[scope_name] = scope_val
+        break
+    return scope_kwargs
+
+
 def translate_interface_ips(
-    interface: Interface, interfaces_ip: dict, defaults: Defaults
+    interface: Interface,
+    interfaces_ip: dict,
+    defaults: Defaults,
+    options: "Options | None" = None,
+    iface_vrf_map: dict[str, pb.VRF] | None = None,
 ) -> Iterable[Entity]:
     """
     Translate IP address and Prefixes information for an interface.
@@ -279,9 +350,16 @@ def translate_interface_ips(
     Args:
     ----
         interface (Interface): The interface entity.
-        if_name (str): The name of the interface.
         interfaces_ip (dict): Dictionary containing interface IP information.
         defaults (Defaults): Default configuration.
+        options (Options | None): Policy options; when
+            ``propagate_defaults_to_prefix_scope`` is True the top-level
+            ``defaults.site`` / ``defaults.location`` cascade onto the
+            emitted Prefix scope.
+        iface_vrf_map (dict[str, pb.VRF] | None): Interface name → discovered
+            VRF map built from get_network_instances(). When the interface
+            appears in the map, the discovered VRF wins over the defaults
+            vrf / vrf_ipv4 / vrf_ipv6 for both IPAddress and Prefix.
 
     Returns:
     -------
@@ -305,6 +383,17 @@ def translate_interface_ips(
     prefix_tenant = None
     prefix_vrf = None
 
+    # Per-address-family VRF overrides: when `defaults.ipaddress.vrf_ipv4`
+    # / `vrf_ipv6` (or the prefix equivalents) are set, the family-specific
+    # value wins for that AF; otherwise we fall back to the AF-agnostic
+    # `defaults.ipaddress.vrf` / `defaults.prefix.vrf`. Computed once here
+    # and picked inside the per-IP loop below by the existing `ip_version`
+    # discriminator.
+    ip_vrf_ipv4 = None
+    ip_vrf_ipv6 = None
+    prefix_vrf_ipv4 = None
+    prefix_vrf_ipv6 = None
+
     if defaults.ipaddress:
         ip_tags.extend(defaults.ipaddress.tags or [])
         ip_comments = defaults.ipaddress.comments
@@ -312,6 +401,8 @@ def translate_interface_ips(
         ip_role = defaults.ipaddress.role
         ip_tenant = translate_tenant(defaults.ipaddress.tenant)
         ip_vrf = translate_vrf(defaults.ipaddress.vrf)
+        ip_vrf_ipv4 = translate_vrf(defaults.ipaddress.vrf_ipv4)
+        ip_vrf_ipv6 = translate_vrf(defaults.ipaddress.vrf_ipv6)
 
     if defaults.prefix:
         prefix_tags.extend(defaults.prefix.tags or [])
@@ -320,12 +411,29 @@ def translate_interface_ips(
         prefix_role = defaults.prefix.role
         prefix_tenant = translate_tenant(defaults.prefix.tenant)
         prefix_vrf = translate_vrf(defaults.prefix.vrf)
+        prefix_vrf_ipv4 = translate_vrf(defaults.prefix.vrf_ipv4)
+        prefix_vrf_ipv6 = translate_vrf(defaults.prefix.vrf_ipv6)
+
+    scope_kwargs = _resolve_prefix_scope_kwargs(defaults, options)
+
+    # Device state beats policy defaults: a VRF discovered for this
+    # interface overrides every configured vrf default for its IPs and
+    # prefixes. Interfaces outside the map keep the defaults fallback.
+    discovered_vrf = (iface_vrf_map or {}).get(interface.name)
 
     ip_entities = []
 
     for if_ip_name, ip_info in interfaces_ip.items():
         if interface.name == if_ip_name:
             for ip_version, default_prefix in (("ipv4", 32), ("ipv6", 128)):
+                # Resolve the per-AF VRF: discovered VRF wins, then the
+                # AF-specific override, then the AF-agnostic default.
+                af_ip_vrf = discovered_vrf or (
+                    ip_vrf_ipv4 if ip_version == "ipv4" else ip_vrf_ipv6
+                ) or ip_vrf
+                af_prefix_vrf = discovered_vrf or (
+                    prefix_vrf_ipv4 if ip_version == "ipv4" else prefix_vrf_ipv6
+                ) or prefix_vrf
                 for ip, details in ip_info.get(ip_version, {}).items():
                     ip_address = f"{ip}/{details.get('prefix_length', default_prefix)}"
                     network = ipaddress.ip_network(ip_address, strict=False)
@@ -333,12 +441,13 @@ def translate_interface_ips(
                         Entity(
                             prefix=Prefix(
                                 prefix=str(network),
-                                vrf=prefix_vrf,
+                                vrf=af_prefix_vrf,
                                 role=prefix_role,
                                 tenant=prefix_tenant,
                                 tags=prefix_tags,
                                 comments=prefix_comments,
                                 description=prefix_description,
+                                **scope_kwargs,
                             )
                         )
                     )
@@ -353,7 +462,7 @@ def translate_interface_ips(
                                 ),
                                 role=ip_role,
                                 tenant=ip_tenant,
-                                vrf=ip_vrf,
+                                vrf=af_ip_vrf,
                                 tags=ip_tags,
                                 comments=ip_comments,
                                 description=ip_description,
@@ -411,6 +520,8 @@ def build_interface_entities(
     interfaces_ip: dict,
     defaults: Defaults,
     iface_module_map: dict[str, pb.Module] | None = None,
+    options: "Options | None" = None,
+    iface_vrf_map: dict[str, pb.VRF] | None = None,
 ) -> list[Entity]:
     """
     Create interface entities from interface definitions and IP data.
@@ -420,6 +531,10 @@ def build_interface_entities(
     interface entity carries a ``module=`` reference alongside its
     ``device=`` reference, so NetBox knows which line card / sub-module
     physically owns the port.
+
+    When ``iface_vrf_map`` is provided (populated by
+    ``vrf.build_discovered_vrfs``), IP addresses and prefixes on a mapped
+    interface carry that discovered VRF instead of the configured defaults.
     """
     exclude_patterns = _compile_exclude_patterns(defaults.interface_exclude_patterns or [])
     iface_module_map = iface_module_map or {}
@@ -455,7 +570,15 @@ def build_interface_entities(
         _attach_module_ref(interface, if_name, iface_module_map)
         interface_entities[if_name] = interface
         entities.append(Entity(interface=interface))
-        entities.extend(translate_interface_ips(interface, interfaces_ip, defaults))
+        entities.extend(
+            translate_interface_ips(
+                interface,
+                interfaces_ip,
+                defaults,
+                options=options,
+                iface_vrf_map=iface_vrf_map,
+            )
+        )
 
     for if_name in sorted(interfaces_ip.keys(), key=interface_sort_key):
         if if_name in interface_entities:
@@ -467,6 +590,14 @@ def build_interface_entities(
         _attach_module_ref(interface, if_name, iface_module_map)
         interface_entities[if_name] = interface
         entities.append(Entity(interface=interface))
-        entities.extend(translate_interface_ips(interface, interfaces_ip, defaults))
+        entities.extend(
+            translate_interface_ips(
+                interface,
+                interfaces_ip,
+                defaults,
+                options=options,
+                iface_vrf_map=iface_vrf_map,
+            )
+        )
 
     return entities

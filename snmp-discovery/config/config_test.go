@@ -103,7 +103,7 @@ func TestMergeDefaults(t *testing.T) {
 			IPAddress: IPAddressDefaults{
 				Role:        "anycast",
 				Tenant:      "default-tenant",
-				Vrf:         "default-vrf",
+				Vrf:         VrfParameters{Name: "default-vrf"},
 				Description: "Policy IP",
 				Tags:        []string{"policy"},
 				Comments:    "Policy Comments",
@@ -122,9 +122,82 @@ func TestMergeDefaults(t *testing.T) {
 		assert.Equal(t, "loopback", result.IPAddress.Role)
 		assert.Equal(t, "override-tenant", result.IPAddress.Tenant)
 		assert.Equal(t, []string{"override"}, result.IPAddress.Tags)
-		assert.Equal(t, "default-vrf", result.IPAddress.Vrf)          // Not overridden
+		assert.Equal(t, "default-vrf", result.IPAddress.Vrf.Name)     // Not overridden
 		assert.Equal(t, "Policy IP", result.IPAddress.Description)    // Not overridden
 		assert.Equal(t, "Policy Comments", result.IPAddress.Comments) // Not overridden
+	})
+
+	t.Run("Override IPAddress VRF field-by-field", func(t *testing.T) {
+		// Per-target override should be able to refine a single VrfParameters
+		// field (e.g. rd) without having to restate the rest of the policy's
+		// VRF config. Matches the Device/VLAN/Interface override pattern.
+		policyDefaults := &Defaults{
+			IPAddress: IPAddressDefaults{
+				Vrf: VrfParameters{
+					Name:        "prod",
+					Rd:          "65000:100",
+					Description: "Prod VRF",
+					Comments:    "policy comments",
+					Tags:        []string{"policy"},
+				},
+			},
+		}
+
+		t.Run("override only Rd", func(t *testing.T) {
+			overrideDefaults := &Defaults{
+				IPAddress: IPAddressDefaults{
+					Vrf: VrfParameters{Rd: "65000:200"},
+				},
+			}
+			result := MergeDefaults(policyDefaults, overrideDefaults)
+			assert.Equal(t, "prod", result.IPAddress.Vrf.Name)
+			assert.Equal(t, "65000:200", result.IPAddress.Vrf.Rd) // override won
+			assert.Equal(t, "Prod VRF", result.IPAddress.Vrf.Description)
+			assert.Equal(t, "policy comments", result.IPAddress.Vrf.Comments)
+			assert.Equal(t, []string{"policy"}, result.IPAddress.Vrf.Tags)
+		})
+
+		t.Run("override only Name", func(t *testing.T) {
+			overrideDefaults := &Defaults{
+				IPAddress: IPAddressDefaults{
+					Vrf: VrfParameters{Name: "edge-vrf"},
+				},
+			}
+			result := MergeDefaults(policyDefaults, overrideDefaults)
+			assert.Equal(t, "edge-vrf", result.IPAddress.Vrf.Name) // override won
+			assert.Equal(t, "65000:100", result.IPAddress.Vrf.Rd)  // inherited
+			assert.Equal(t, "Prod VRF", result.IPAddress.Vrf.Description)
+		})
+
+		t.Run("override all VRF fields", func(t *testing.T) {
+			overrideDefaults := &Defaults{
+				IPAddress: IPAddressDefaults{
+					Vrf: VrfParameters{
+						Name:        "edge-vrf",
+						Rd:          "65000:200",
+						Description: "Edge VRF",
+						Comments:    "override comments",
+						Tags:        []string{"override"},
+					},
+				},
+			}
+			result := MergeDefaults(policyDefaults, overrideDefaults)
+			assert.Equal(t, "edge-vrf", result.IPAddress.Vrf.Name)
+			assert.Equal(t, "65000:200", result.IPAddress.Vrf.Rd)
+			assert.Equal(t, "Edge VRF", result.IPAddress.Vrf.Description)
+			assert.Equal(t, "override comments", result.IPAddress.Vrf.Comments)
+			assert.Equal(t, []string{"override"}, result.IPAddress.Vrf.Tags)
+		})
+
+		t.Run("empty override leaves VRF untouched", func(t *testing.T) {
+			overrideDefaults := &Defaults{}
+			result := MergeDefaults(policyDefaults, overrideDefaults)
+			assert.Equal(t, "prod", result.IPAddress.Vrf.Name)
+			assert.Equal(t, "65000:100", result.IPAddress.Vrf.Rd)
+			assert.Equal(t, "Prod VRF", result.IPAddress.Vrf.Description)
+			assert.Equal(t, "policy comments", result.IPAddress.Vrf.Comments)
+			assert.Equal(t, []string{"policy"}, result.IPAddress.Vrf.Tags)
+		})
 	})
 
 	t.Run("Override InterfacePatterns replaces entire array", func(t *testing.T) {
@@ -529,6 +602,75 @@ func TestMergeDefaults_AssetTag_NoOverride(t *testing.T) {
 	assert.Equal(t, "POLICY-TAG", merged.AssetTag)
 }
 
+func TestMergeDefaults_PerAfVrf_FieldLevelNoBleed(t *testing.T) {
+	policy := &Defaults{IPAddress: IPAddressDefaults{
+		Vrf:     VrfParameters{Name: "any", Rd: "65000:1"},
+		VrfIpv4: VrfParameters{Name: "four", Description: "v4 desc"},
+	}}
+	override := &Defaults{IPAddress: IPAddressDefaults{
+		VrfIpv4: VrfParameters{Rd: "65000:44"},
+		VrfIpv6: VrfParameters{Name: "six"},
+	}}
+	merged := MergeDefaults(policy, override)
+
+	// Field-level refinement: override rd lands without clearing the
+	// policy-level name/description of the SAME knob.
+	assert.Equal(t, "four", merged.IPAddress.VrfIpv4.Name)
+	assert.Equal(t, "65000:44", merged.IPAddress.VrfIpv4.Rd)
+	assert.Equal(t, "v4 desc", merged.IPAddress.VrfIpv4.Description)
+	// New knob introduced by override only.
+	assert.Equal(t, "six", merged.IPAddress.VrfIpv6.Name)
+	// No bleed between knobs: the AF-agnostic vrf is untouched.
+	assert.Equal(t, "any", merged.IPAddress.Vrf.Name)
+	assert.Equal(t, "65000:1", merged.IPAddress.Vrf.Rd)
+}
+
+func TestMergeDefaults_PrefixBlock(t *testing.T) {
+	policy := &Defaults{Prefix: PrefixDefaults{
+		Description: "policy-desc",
+		Role:        "policy-role",
+		ScopeSite:   "policy-site",
+		Vrf:         VrfParameters{Name: "policy-vrf", Rd: "65000:1"},
+	}}
+	override := &Defaults{Prefix: PrefixDefaults{
+		Tenant:        "override-tenant",
+		ScopeLocation: "override-loc",
+		Comments:      "override-comments",
+		Tags:          []string{"o"},
+		Vrf:           VrfParameters{Rd: "65000:9"},
+		VrfIpv6:       VrfParameters{Name: "six"},
+	}}
+	merged := MergeDefaults(policy, override)
+	assert.Equal(t, "policy-desc", merged.Prefix.Description)
+	assert.Equal(t, "policy-role", merged.Prefix.Role)
+	assert.Equal(t, "policy-site", merged.Prefix.ScopeSite)
+	assert.Equal(t, "override-tenant", merged.Prefix.Tenant)
+	assert.Equal(t, "override-loc", merged.Prefix.ScopeLocation)
+	assert.Equal(t, "override-comments", merged.Prefix.Comments)
+	assert.Equal(t, []string{"o"}, merged.Prefix.Tags)
+	// Field-level vrf refinement: rd overridden, name preserved.
+	assert.Equal(t, "policy-vrf", merged.Prefix.Vrf.Name)
+	assert.Equal(t, "65000:9", merged.Prefix.Vrf.Rd)
+	assert.Equal(t, "six", merged.Prefix.VrfIpv6.Name)
+}
+
+func TestIPAddressDefaults_PerAfVrf_YAMLPolymorphic(t *testing.T) {
+	raw := []byte(`
+defaults:
+  ip_address:
+    vrf: anycast
+    vrf_ipv4: { name: four, rd: "65000:4" }
+    vrf_ipv6: six
+`)
+	var pc PolicyConfig
+	require.NoError(t, yaml.Unmarshal(raw, &pc))
+	assert.Equal(t, "anycast", pc.Defaults.IPAddress.Vrf.Name)
+	assert.Equal(t, "four", pc.Defaults.IPAddress.VrfIpv4.Name)
+	assert.Equal(t, "65000:4", pc.Defaults.IPAddress.VrfIpv4.Rd)
+	assert.Equal(t, "six", pc.Defaults.IPAddress.VrfIpv6.Name)
+	assert.Equal(t, "", pc.Defaults.IPAddress.VrfIpv6.Rd)
+}
+
 func TestPolicyOptions_DiscoverModulesDefaultsToOff(t *testing.T) {
 	raw := []byte(`
 options:
@@ -560,4 +702,120 @@ func TestPolicyOptions_DiscoverModulesParsed(t *testing.T) {
 			assert.Equal(t, c.out, pc.Options.ModuleDiscoveryMode())
 		})
 	}
+}
+
+func TestAssetTagDiscoveryEnabled(t *testing.T) {
+	var nilOpts *Options
+	assert.False(t, nilOpts.AssetTagDiscoveryEnabled(), "nil Options must be off")
+	assert.False(t, (&Options{}).AssetTagDiscoveryEnabled(), "unset must default off")
+
+	off := false
+	assert.False(t, (&Options{DiscoverAssetTags: &off}).AssetTagDiscoveryEnabled())
+
+	on := true
+	assert.True(t, (&Options{DiscoverAssetTags: &on}).AssetTagDiscoveryEnabled())
+}
+
+// TestVrfParameters_UnmarshalYAML locks in the dual-shape contract:
+// defaults.ip_address.vrf accepts either a scalar string (interpreted as
+// VRF Name; Rd left empty so NetBox can match an existing VRF whose rd
+// column is null) OR a map with name / rd / description / comments /
+// tags (the rich form, matching device-discovery's VrfParameters).
+func TestVrfParameters_UnmarshalYAML(t *testing.T) {
+	t.Run("scalar string populates Name only", func(t *testing.T) {
+		raw := []byte("defaults:\n  ip_address:\n    vrf: production\n")
+		var pc PolicyConfig
+		require.NoError(t, yaml.Unmarshal(raw, &pc))
+		assert.Equal(t, "production", pc.Defaults.IPAddress.Vrf.Name)
+		assert.Empty(t, pc.Defaults.IPAddress.Vrf.Rd,
+			"scalar form MUST leave Rd empty (no rd=name fallback)")
+		assert.Empty(t, pc.Defaults.IPAddress.Vrf.Description)
+		assert.Empty(t, pc.Defaults.IPAddress.Vrf.Comments)
+		assert.Empty(t, pc.Defaults.IPAddress.Vrf.Tags)
+	})
+
+	t.Run("map form populates all fields", func(t *testing.T) {
+		raw := []byte(`defaults:
+  ip_address:
+    vrf:
+      name: production
+      rd: "65000:100"
+      description: Prod VRF
+      comments: Imported from SNMP
+      tags: [auto, vrf]
+`)
+		var pc PolicyConfig
+		require.NoError(t, yaml.Unmarshal(raw, &pc))
+		assert.Equal(t, "production", pc.Defaults.IPAddress.Vrf.Name)
+		assert.Equal(t, "65000:100", pc.Defaults.IPAddress.Vrf.Rd)
+		assert.Equal(t, "Prod VRF", pc.Defaults.IPAddress.Vrf.Description)
+		assert.Equal(t, "Imported from SNMP", pc.Defaults.IPAddress.Vrf.Comments)
+		assert.Equal(t, []string{"auto", "vrf"}, pc.Defaults.IPAddress.Vrf.Tags)
+	})
+
+	t.Run("map form with only name + rd", func(t *testing.T) {
+		raw := []byte("defaults:\n  ip_address:\n    vrf:\n      name: production\n      rd: \"65000:100\"\n")
+		var pc PolicyConfig
+		require.NoError(t, yaml.Unmarshal(raw, &pc))
+		assert.Equal(t, "production", pc.Defaults.IPAddress.Vrf.Name)
+		assert.Equal(t, "65000:100", pc.Defaults.IPAddress.Vrf.Rd)
+	})
+
+	t.Run("absent vrf leaves zero value", func(t *testing.T) {
+		raw := []byte("defaults:\n  ip_address:\n    role: anycast\n")
+		var pc PolicyConfig
+		require.NoError(t, yaml.Unmarshal(raw, &pc))
+		assert.Empty(t, pc.Defaults.IPAddress.Vrf.Name)
+	})
+
+	t.Run("invalid node kind returns error", func(t *testing.T) {
+		raw := []byte("defaults:\n  ip_address:\n    vrf: [unexpected, sequence]\n")
+		var pc PolicyConfig
+		err := yaml.Unmarshal(raw, &pc)
+		require.Error(t, err)
+	})
+
+	t.Run("explicit null decodes to zero value", func(t *testing.T) {
+		// Decode-safety contract: `vrf: null` / `vrf: ~` MUST NOT
+		// produce a VRF named "null". Whether the resulting zero value
+		// actually clears an inherited VRF at MergeDefaults time is a
+		// separate concern — MergeDefaults follows the same
+		// non-empty-wins pattern as every other override field, so
+		// `vrf: null` and an absent `vrf` key are indistinguishable
+		// during merge. This test only asserts the decode boundary.
+		for _, raw := range [][]byte{
+			[]byte("defaults:\n  ip_address:\n    vrf: null\n"),
+			[]byte("defaults:\n  ip_address:\n    vrf: ~\n"),
+		} {
+			var pc PolicyConfig
+			require.NoError(t, yaml.Unmarshal(raw, &pc))
+			assert.Empty(t, pc.Defaults.IPAddress.Vrf.Name,
+				"vrf: null / vrf: ~ MUST decode to zero value, not Name=\"null\"")
+			assert.Empty(t, pc.Defaults.IPAddress.Vrf.Rd)
+		}
+	})
+
+	t.Run("re-decode into populated receiver clears stale fields", func(t *testing.T) {
+		// If the same VrfParameters value is re-used across decodes
+		// (e.g. tests, layered configs), the scalar form must NOT
+		// leave stale Rd / Description / Comments / Tags behind. Drive
+		// the receiver through the full ScalarNode path by unmarshaling
+		// a wrapper map and pulling out the resolved Vrf field.
+		v := VrfParameters{
+			Name:        "stale",
+			Rd:          "65000:999",
+			Description: "stale-desc",
+			Comments:    "stale-comments",
+			Tags:        []string{"stale"},
+		}
+		wrapper := struct {
+			Vrf VrfParameters `yaml:"vrf"`
+		}{Vrf: v}
+		require.NoError(t, yaml.Unmarshal([]byte("vrf: production\n"), &wrapper))
+		assert.Equal(t, "production", wrapper.Vrf.Name)
+		assert.Empty(t, wrapper.Vrf.Rd, "stale Rd must be cleared by scalar re-decode")
+		assert.Empty(t, wrapper.Vrf.Description)
+		assert.Empty(t, wrapper.Vrf.Comments)
+		assert.Empty(t, wrapper.Vrf.Tags)
+	})
 }

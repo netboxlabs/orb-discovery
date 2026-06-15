@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
+	"sync"
 
 	"github.com/netboxlabs/diode-sdk-go/diode"
 	"github.com/netboxlabs/orb-discovery/snmp-discovery/config"
@@ -35,6 +35,11 @@ const (
 // IPAddressMapper is a struct that maps IP addresses to entities
 type IPAddressMapper struct {
 	logger *slog.Logger
+	// vrfMisconfigWarnOnce fires the "VRF fields set but no Name"
+	// warning at most once per mapper lifetime. applyDefaults runs per
+	// discovered IP address, so without rate-limiting a misconfigured
+	// policy would flood the logs with one identical line per row.
+	vrfMisconfigWarnOnce sync.Once
 }
 
 // NewIPAddressMapper creates a new IPAddressMapper
@@ -92,10 +97,69 @@ func (m *IPAddressMapper) applyDefaults(entity *diode.IPAddress, defaults *confi
 	if entity.Role == nil && entityDefaults.Role != "" {
 		entity.Role = &entityDefaults.Role
 	}
-	if entity.Vrf == nil && entityDefaults.Vrf != "" {
-		entity.Vrf = &diode.VRF{
-			Name: &entityDefaults.Vrf,
-			Rd:   &entityDefaults.Vrf,
+	if entity.Vrf == nil {
+		// Resolve the per-address-family VRF: vrf_ipv4 / vrf_ipv6 win for
+		// their family, falling back to the AF-agnostic vrf. The entity's
+		// address is always set before applyDefaults runs (the caller
+		// returns early on empty addresses), so the family discriminator
+		// is the address literal itself.
+		family := "ipv4"
+		if entity.Address != nil && strings.Contains(*entity.Address, ":") {
+			family = "ipv6"
+		}
+		vrfDefaults, vrfKnob := entityDefaults.VrfForFamily(family)
+		switch {
+		case vrfDefaults.Name != "":
+			vrf := &diode.VRF{Name: &vrfDefaults.Name}
+			if vrfDefaults.Rd != "" {
+				vrf.Rd = &vrfDefaults.Rd
+			}
+			if vrfDefaults.Description != "" {
+				vrf.Description = &vrfDefaults.Description
+			}
+			if vrfDefaults.Comments != "" {
+				vrf.Comments = &vrfDefaults.Comments
+			}
+			if len(vrfDefaults.Tags) > 0 {
+				tags := make([]*diode.Tag, 0, len(vrfDefaults.Tags))
+				for _, t := range vrfDefaults.Tags {
+					tagName := t
+					tags = append(tags, &diode.Tag{Name: &tagName})
+				}
+				vrf.Tags = tags
+			}
+			entity.Vrf = vrf
+		case vrfDefaults.Rd != "", vrfDefaults.Description != "",
+			vrfDefaults.Comments != "", len(vrfDefaults.Tags) > 0:
+			// One or more VRF sub-fields were configured but Name is empty,
+			// either via a policy default like `vrf: {rd: "65000:100"}` with
+			// no name OR a per-target override that refines fields without
+			// inheriting a policy-level Name. NetBox VRFs match on (name, rd)
+			// — there is nothing to attach without Name, so the row is
+			// dropped silently in the proto. Surface a warning so the
+			// operator sees the misconfiguration in the logs instead of
+			// wondering why the IPs have no VRF. Rate-limit to once per
+			// mapper lifetime since applyDefaults runs per IP — without
+			// this guard a misconfigured policy would emit one identical
+			// warning per discovered address.
+			m.vrfMisconfigWarnOnce.Do(func() {
+				m.logger.Warn(
+					fmt.Sprintf(
+						"VRF defaults dropped: name is empty but other VRF fields are set; "+
+							"set defaults.ip_address.%[1]s.name in the policy (or "+
+							"targets[].override_defaults.ip_address.%[1]s.name) to enable VRF emission. "+
+							"Note: a per-AF override (vrf_ipv4 / vrf_ipv6) replaces the AF-agnostic "+
+							"vrf wholesale for its family — it does not inherit vrf.name. "+
+							"This warning is logged once per discovery run; subsequent IPs with the same misconfig will be silently skipped.",
+						vrfKnob,
+					),
+					"knob", vrfKnob,
+					"rd", vrfDefaults.Rd,
+					"description", vrfDefaults.Description,
+					"comments", vrfDefaults.Comments,
+					"tags", vrfDefaults.Tags,
+				)
+			})
 		}
 	}
 }
@@ -951,12 +1015,6 @@ func (m *InterfaceMapper) FormatMACAddress(input string) (string, error) {
 	return output, nil
 }
 
-// assetTagMaxLen mirrors NetBox's dcim.Device.asset_tag column
-// (CharField(max_length=50)). Resolved AssetTag values that exceed
-// this length are warn-skipped rather than truncated so we don't
-// introduce silent uniqueness collisions.
-const assetTagMaxLen = 50
-
 // DeviceMapper is a struct that maps devices to entities
 type DeviceMapper struct {
 	manufacturers data.ManufacturerRetriever
@@ -1027,16 +1085,9 @@ func (m *DeviceMapper) applyDefaults(entity *diode.Device, defaults *config.Defa
 
 	if defaults.AssetTag != "" {
 		if resolved, ok := data.ResolveDefault(defaults.AssetTag, walked); ok {
-			// NetBox CharField(max_length=N) counts characters, not bytes;
-			// use rune count so non-ASCII tags at exactly 50 chars are
-			// accepted instead of being skipped on byte count alone.
-			runeCount := utf8.RuneCountInString(resolved)
-			if runeCount > assetTagMaxLen {
-				m.logger.Warn(
-					"defaults.asset_tag resolved value exceeds NetBox max length; skipping",
-					"max_length", assetTagMaxLen,
-					"value_length", runeCount,
-				)
+			if reason, ok := vetAssetTag(resolved); !ok {
+				m.logger.Warn("defaults.asset_tag resolved value skipped: "+reason,
+					"default", defaults.AssetTag)
 			} else {
 				entity.AssetTag = &resolved
 			}

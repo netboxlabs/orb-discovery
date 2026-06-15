@@ -1,4 +1,4 @@
-ARG GO_VERSION=1.26.3
+ARG GO_VERSION=1.26.4
 
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS builder
 
@@ -17,7 +17,7 @@ RUN --mount=target=. \
 
 FROM alpine:3.23
 
-RUN apk update && apk add --no-cache nmap
+RUN apk update && apk --no-cache upgrade && apk add --no-cache nmap
 
 COPY --from=builder /build/network-discovery /usr/local/bin/network-discovery
 

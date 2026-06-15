@@ -16,6 +16,7 @@ from device_discovery.policy.models import (
     Napalm,
     ObjectParameters,
     Options,
+    PrefixParameters,
     TenantParameters,
     VlanParameters,
     VrfParameters,
@@ -114,7 +115,7 @@ def sample_defaults():
         device=DeviceParameters(comments="testing", tags=["devtag"]),
         interface=ObjectParameters(description="testing", tags=["inttag"]),
         ipaddress=IpamParameters(description="ip test", tags=["iptag"]),
-        prefix=IpamParameters(description="prefix test", tags=["prefixtag"]),
+        prefix=PrefixParameters(description="prefix test", tags=["prefixtag"]),
         vlan=VlanParameters(comments="test"),
     )
 
@@ -200,7 +201,7 @@ def test_translate_interface_ips_with_vrf_parameters(
 ):
     """Ensure VRF parameters translate into VRF entities with route distinguisher."""
     sample_defaults.ipaddress = IpamParameters(vrf=sample_vrf_parameters)
-    sample_defaults.prefix = IpamParameters(vrf=VrfParameters(name="Prefix-VRF", rd="65000:200"))
+    sample_defaults.prefix = PrefixParameters(vrf=VrfParameters(name="Prefix-VRF", rd="65000:200"))
     device = translate_device(sample_device_info, sample_defaults)
     interface = translate_interface(
         device,
@@ -227,7 +228,7 @@ def test_translate_interface_ips_with_vrf_string(
 ):
     """Ensure plain string VRF still works (backwards compatibility)."""
     sample_defaults.ipaddress = IpamParameters(vrf="plain-vrf")
-    sample_defaults.prefix = IpamParameters(vrf="plain-prefix-vrf")
+    sample_defaults.prefix = PrefixParameters(vrf="plain-prefix-vrf")
     device = translate_device(sample_device_info, sample_defaults)
     interface = translate_interface(
         device,
@@ -242,6 +243,178 @@ def test_translate_interface_ips_with_vrf_string(
     assert len(ip_entities) == 2
     assert ip_entities[0].prefix.vrf.name == "plain-prefix-vrf"
     assert ip_entities[1].ip_address.vrf.name == "plain-vrf"
+
+
+# --- per-address-family VRF (orb-agent#392) ---------------------------------
+
+
+@pytest.fixture
+def sample_interfaces_ip_dual_stack():
+    """Dual-stack IPs on the same interface — IPv4 + IPv6."""
+    return {
+        "GigabitEthernet0/0/1": {
+            "ipv4": {"192.0.2.1": {"prefix_length": 24}},
+            "ipv6": {"2001:db8::1": {"prefix_length": 64}},
+        }
+    }
+
+
+def _emit_dual_stack(
+    sample_device_info,
+    sample_interface_info,
+    sample_interfaces_ip_dual_stack,
+    sample_defaults,
+):
+    """Translate a dual-stack interface and bucket the emitted entities by IP version."""
+    device = translate_device(sample_device_info, sample_defaults)
+    interface = translate_interface(
+        device,
+        "GigabitEthernet0/0/1",
+        sample_interface_info["GigabitEthernet0/0/1"],
+        sample_defaults,
+    )
+    entities = list(
+        translate_interface_ips(
+            interface, sample_interfaces_ip_dual_stack, sample_defaults
+        )
+    )
+    ip4 = {"prefix": None, "ip": None}
+    ip6 = {"prefix": None, "ip": None}
+    for e in entities:
+        if e.HasField("prefix"):
+            bucket = ip4 if "." in e.prefix.prefix else ip6
+            bucket["prefix"] = e.prefix
+        elif e.HasField("ip_address"):
+            bucket = ip4 if "." in e.ip_address.address else ip6
+            bucket["ip"] = e.ip_address
+    return ip4, ip6
+
+
+def test_per_af_vrf_picks_ipv4_and_ipv6_overrides(
+    sample_device_info,
+    sample_interface_info,
+    sample_interfaces_ip_dual_stack,
+    sample_defaults,
+):
+    """vrf_ipv4 / vrf_ipv6 land on the right AF independently."""
+    sample_defaults.ipaddress = IpamParameters(
+        vrf="fallback-vrf",
+        vrf_ipv4=VrfParameters(name="customer-v4", rd="65000:10"),
+        vrf_ipv6=VrfParameters(name="global-v6", rd="65000:20"),
+    )
+    sample_defaults.prefix = PrefixParameters(
+        vrf="fallback-prefix-vrf",
+        vrf_ipv4=VrfParameters(name="customer-v4-prefix", rd="65000:10"),
+        vrf_ipv6=VrfParameters(name="global-v6-prefix", rd="65000:20"),
+    )
+    ip4, ip6 = _emit_dual_stack(
+        sample_device_info,
+        sample_interface_info,
+        sample_interfaces_ip_dual_stack,
+        sample_defaults,
+    )
+    assert ip4["ip"].vrf.name == "customer-v4"
+    assert ip4["ip"].vrf.rd == "65000:10"
+    assert ip6["ip"].vrf.name == "global-v6"
+    assert ip6["ip"].vrf.rd == "65000:20"
+    assert ip4["prefix"].vrf.name == "customer-v4-prefix"
+    assert ip6["prefix"].vrf.name == "global-v6-prefix"
+
+
+def test_per_af_vrf_falls_back_to_top_level_when_unset(
+    sample_device_info,
+    sample_interface_info,
+    sample_interfaces_ip_dual_stack,
+    sample_defaults,
+):
+    """If vrf_ipv4 / vrf_ipv6 are unset, both AFs use the top-level `vrf`."""
+    sample_defaults.ipaddress = IpamParameters(vrf="shared-vrf")
+    sample_defaults.prefix = PrefixParameters(vrf="shared-prefix-vrf")
+    ip4, ip6 = _emit_dual_stack(
+        sample_device_info,
+        sample_interface_info,
+        sample_interfaces_ip_dual_stack,
+        sample_defaults,
+    )
+    assert ip4["ip"].vrf.name == "shared-vrf"
+    assert ip6["ip"].vrf.name == "shared-vrf"
+    assert ip4["prefix"].vrf.name == "shared-prefix-vrf"
+    assert ip6["prefix"].vrf.name == "shared-prefix-vrf"
+
+
+def test_per_af_vrf_only_one_family_overridden(
+    sample_device_info,
+    sample_interface_info,
+    sample_interfaces_ip_dual_stack,
+    sample_defaults,
+):
+    """vrf_ipv4 set but not vrf_ipv6 → IPv4 picks the override, IPv6 uses the fallback."""
+    sample_defaults.ipaddress = IpamParameters(
+        vrf="fallback-vrf",
+        vrf_ipv4=VrfParameters(name="customer-v4", rd="65000:10"),
+    )
+    sample_defaults.prefix = PrefixParameters(
+        vrf="fallback-prefix-vrf",
+        vrf_ipv6=VrfParameters(name="global-v6-prefix", rd="65000:20"),
+    )
+    ip4, ip6 = _emit_dual_stack(
+        sample_device_info,
+        sample_interface_info,
+        sample_interfaces_ip_dual_stack,
+        sample_defaults,
+    )
+    assert ip4["ip"].vrf.name == "customer-v4"
+    assert ip6["ip"].vrf.name == "fallback-vrf"
+    assert ip4["prefix"].vrf.name == "fallback-prefix-vrf"
+    assert ip6["prefix"].vrf.name == "global-v6-prefix"
+
+
+def test_per_af_vrf_only_ipv4_no_top_level_leaves_ipv6_without_vrf(
+    sample_device_info,
+    sample_interface_info,
+    sample_interfaces_ip_dual_stack,
+    sample_defaults,
+):
+    """No top-level vrf, only vrf_ipv4 → IPv6 emits no VRF (no override AND no fallback)."""
+    sample_defaults.ipaddress = IpamParameters(
+        vrf_ipv4=VrfParameters(name="customer-v4", rd="65000:10"),
+    )
+    sample_defaults.prefix = PrefixParameters(
+        vrf_ipv4=VrfParameters(name="customer-v4-prefix", rd="65000:10"),
+    )
+    ip4, ip6 = _emit_dual_stack(
+        sample_device_info,
+        sample_interface_info,
+        sample_interfaces_ip_dual_stack,
+        sample_defaults,
+    )
+    assert ip4["ip"].vrf.name == "customer-v4"
+    assert not ip6["ip"].HasField("vrf"), "IPv6 must NOT carry a VRF when neither vrf_ipv6 nor vrf is set"
+    assert ip4["prefix"].vrf.name == "customer-v4-prefix"
+    assert not ip6["prefix"].HasField("vrf")
+
+
+def test_per_af_vrf_accepts_scalar_string(
+    sample_device_info,
+    sample_interface_info,
+    sample_interfaces_ip_dual_stack,
+    sample_defaults,
+):
+    """vrf_ipv4 / vrf_ipv6 accept the same str | VrfParameters polymorphic shape as vrf."""
+    sample_defaults.ipaddress = IpamParameters(
+        vrf_ipv4="customer-v4",
+        vrf_ipv6="global-v6",
+    )
+    ip4, ip6 = _emit_dual_stack(
+        sample_device_info,
+        sample_interface_info,
+        sample_interfaces_ip_dual_stack,
+        sample_defaults,
+    )
+    assert ip4["ip"].vrf.name == "customer-v4"
+    assert ip4["ip"].vrf.rd == ""
+    assert ip6["ip"].vrf.name == "global-v6"
+    assert ip6["ip"].vrf.rd == ""
 
 
 def test_translate_device(sample_device_info, sample_defaults):

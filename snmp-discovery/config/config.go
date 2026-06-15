@@ -1,6 +1,66 @@
 package config
 
-import "time"
+import (
+	"fmt"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+// VrfParameters mirrors device-discovery's VrfParameters: a polymorphic
+// config primitive that accepts either a scalar string (interpreted as
+// VRF Name) or a map of {name, rd, description, comments, tags}. This
+// lets operators attach a Route Distinguisher (and richer metadata) to
+// the discovered IP addresses' VRF so NetBox can match an existing
+// (name, rd) tuple instead of being forced into the legacy rd=name
+// fallback.
+type VrfParameters struct {
+	Name        string   `yaml:"name"`
+	Rd          string   `yaml:"rd,omitempty"`
+	Description string   `yaml:"description,omitempty"`
+	Comments    string   `yaml:"comments,omitempty"`
+	Tags        []string `yaml:"tags,omitempty"`
+}
+
+// UnmarshalYAML accepts both shapes:
+//   - scalar:  vrf: production
+//   - mapping: vrf: {name: production, rd: "65000:100"}
+//
+// The scalar form populates only Name (Rd left empty), which differs
+// from the pre-fix behaviour where the agent silently set Rd=Name.
+//
+// Explicit YAML null (vrf: null, vrf: ~) decodes to the zero value
+// instead of the literal string "null" — this is decode safety to
+// avoid creating a phantom VRF named "null". It does NOT, by itself,
+// clear an inherited VRF default at override merge time: MergeDefaults
+// treats the zero value the same way as an absent override key
+// (non-empty-wins, matching every other override_defaults field).
+func (v *VrfParameters) UnmarshalYAML(node *yaml.Node) error {
+	// Reset up front so a stale receiver (re-decoded into the same
+	// struct) doesn't keep Rd / Description / Comments / Tags from a
+	// previous pass when the new YAML only sets Name via the scalar
+	// form.
+	*v = VrfParameters{}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		// YAML null tag: leave the struct as the zero value.
+		if node.Tag == "!!null" {
+			return nil
+		}
+		v.Name = node.Value
+		return nil
+	case yaml.MappingNode:
+		type alias VrfParameters
+		var a alias
+		if err := node.Decode(&a); err != nil {
+			return err
+		}
+		*v = VrfParameters(a)
+		return nil
+	default:
+		return fmt.Errorf("vrf: expected string or mapping, got node kind %d", node.Kind)
+	}
+}
 
 // TargetType selects how a target is ingested into NetBox.
 // TargetTypeDevice (default, empty/"device") emits a dcim.Device graph.
@@ -48,12 +108,71 @@ type Authentication struct {
 
 // IPAddressDefaults represents default values for a specific entity type
 type IPAddressDefaults struct {
-	Description string   `yaml:"description,omitempty"`
-	Tags        []string `yaml:"tags,omitempty"`
-	Comments    string   `yaml:"comments,omitempty"`
-	Role        string   `yaml:"role,omitempty"`
-	Tenant      string   `yaml:"tenant,omitempty"`
-	Vrf         string   `yaml:"vrf,omitempty"`
+	Description string        `yaml:"description,omitempty"`
+	Tags        []string      `yaml:"tags,omitempty"`
+	Comments    string        `yaml:"comments,omitempty"`
+	Role        string        `yaml:"role,omitempty"`
+	Tenant      string        `yaml:"tenant,omitempty"`
+	Vrf         VrfParameters `yaml:"vrf,omitempty"`
+	// Per-address-family overrides mirroring device-discovery: when set,
+	// the family-specific VRF wins for that AF's IP addresses; otherwise
+	// the AF-agnostic Vrf above applies.
+	VrfIpv4 VrfParameters `yaml:"vrf_ipv4,omitempty"`
+	VrfIpv6 VrfParameters `yaml:"vrf_ipv6,omitempty"`
+}
+
+// IsZero reports whether no VrfParameters field is set.
+func (v VrfParameters) IsZero() bool {
+	return v.Name == "" && v.Rd == "" && v.Description == "" &&
+		v.Comments == "" && len(v.Tags) == 0
+}
+
+// resolveVrfForFamily implements the shared per-AF selection rule: the
+// family-specific override wins when any of its fields is set; otherwise
+// the AF-agnostic vrf applies. The second return names the knob that
+// resolved ("vrf", "vrf_ipv4", "vrf_ipv6") for diagnostics.
+func resolveVrfForFamily(vrf, v4, v6 VrfParameters, family string) (VrfParameters, string) {
+	var af VrfParameters
+	switch family {
+	case "ipv4":
+		af = v4
+	case "ipv6":
+		af = v6
+	}
+	if !af.IsZero() {
+		return af, "vrf_" + family
+	}
+	return vrf, "vrf"
+}
+
+// VrfForFamily resolves the effective VRF defaults for an address family
+// ("ipv4" or "ipv6"). See resolveVrfForFamily.
+func (d *IPAddressDefaults) VrfForFamily(family string) (VrfParameters, string) {
+	return resolveVrfForFamily(d.Vrf, d.VrfIpv4, d.VrfIpv6, family)
+}
+
+// PrefixDefaults represents default values applied to derived Prefix
+// entities. Mirrors device-discovery's defaults.prefix block.
+type PrefixDefaults struct {
+	Description string        `yaml:"description,omitempty"`
+	Tags        []string      `yaml:"tags,omitempty"`
+	Comments    string        `yaml:"comments,omitempty"`
+	Role        string        `yaml:"role,omitempty"`
+	Tenant      string        `yaml:"tenant,omitempty"`
+	Vrf         VrfParameters `yaml:"vrf,omitempty"`
+	VrfIpv4     VrfParameters `yaml:"vrf_ipv4,omitempty"`
+	VrfIpv6     VrfParameters `yaml:"vrf_ipv6,omitempty"`
+	// Explicit prefix scope. Setting either puts the operator in
+	// "explicit mode" and the propagate_defaults_to_prefix_scope cascade
+	// is skipped wholesale.
+	ScopeSite     string `yaml:"scope_site,omitempty"`
+	ScopeLocation string `yaml:"scope_location,omitempty"`
+}
+
+// VrfForFamily resolves the effective prefix VRF defaults for an address
+// family. See resolveVrfForFamily.
+func (d *PrefixDefaults) VrfForFamily(family string) (VrfParameters, string) {
+	return resolveVrfForFamily(d.Vrf, d.VrfIpv4, d.VrfIpv6, family)
 }
 
 // InterfaceDefaults represents default values for a specific entity type
@@ -96,6 +215,7 @@ type Defaults struct {
 	Role                     string             `yaml:"role,omitempty"`
 	AssetTag                 string             `yaml:"asset_tag,omitempty"`
 	IPAddress                IPAddressDefaults  `yaml:"ip_address,omitempty"`
+	Prefix                   PrefixDefaults     `yaml:"prefix,omitempty"`
 	Interface                InterfaceDefaults  `yaml:"interface,omitempty"`
 	Device                   DeviceDefaults     `yaml:"device,omitempty"`
 	VLAN                     VLANDefaults       `yaml:"vlan,omitempty"`
@@ -104,6 +224,25 @@ type Defaults struct {
 	Type                     string             `yaml:"type,omitempty"`         // TargetTypeDevice | TargetTypeVirtualMachine; default Device
 	Cluster                  string             `yaml:"cluster,omitempty"`      // optional VM cluster name; ignored when Type == TargetTypeDevice
 	ClusterType              string             `yaml:"cluster_type,omitempty"` // optional VM cluster type (NetBox virtualization.ClusterType); required to auto-create a Cluster
+}
+
+// mergeVrfParameters overlays non-zero override fields onto dst in place.
+func mergeVrfParameters(dst, override *VrfParameters) {
+	if override.Name != "" {
+		dst.Name = override.Name
+	}
+	if override.Rd != "" {
+		dst.Rd = override.Rd
+	}
+	if override.Description != "" {
+		dst.Description = override.Description
+	}
+	if override.Comments != "" {
+		dst.Comments = override.Comments
+	}
+	if len(override.Tags) > 0 {
+		dst.Tags = override.Tags
+	}
 }
 
 // MergeDefaults merges target-level override defaults with policy-level defaults
@@ -149,9 +288,41 @@ func MergeDefaults(policyDefaults, overrideDefaults *Defaults) *Defaults {
 	if overrideDefaults.IPAddress.Tenant != "" {
 		merged.IPAddress.Tenant = overrideDefaults.IPAddress.Tenant
 	}
-	if overrideDefaults.IPAddress.Vrf != "" {
-		merged.IPAddress.Vrf = overrideDefaults.IPAddress.Vrf
+	// Merge VRF defaults field-by-field so a per-target override can refine
+	// a single VrfParameters knob (e.g. rd) without having to restate every
+	// other field already set at the policy level. Matches the
+	// Device/VLAN/Interface non-zero-value-wins pattern. The per-AF
+	// overrides merge the same way, each against its own policy-level
+	// counterpart only — an override vrf_ipv4 never bleeds into vrf.
+	mergeVrfParameters(&merged.IPAddress.Vrf, &overrideDefaults.IPAddress.Vrf)
+	mergeVrfParameters(&merged.IPAddress.VrfIpv4, &overrideDefaults.IPAddress.VrfIpv4)
+	mergeVrfParameters(&merged.IPAddress.VrfIpv6, &overrideDefaults.IPAddress.VrfIpv6)
+
+	// Merge Prefix defaults
+	if overrideDefaults.Prefix.Description != "" {
+		merged.Prefix.Description = overrideDefaults.Prefix.Description
 	}
+	if len(overrideDefaults.Prefix.Tags) > 0 {
+		merged.Prefix.Tags = overrideDefaults.Prefix.Tags
+	}
+	if overrideDefaults.Prefix.Comments != "" {
+		merged.Prefix.Comments = overrideDefaults.Prefix.Comments
+	}
+	if overrideDefaults.Prefix.Role != "" {
+		merged.Prefix.Role = overrideDefaults.Prefix.Role
+	}
+	if overrideDefaults.Prefix.Tenant != "" {
+		merged.Prefix.Tenant = overrideDefaults.Prefix.Tenant
+	}
+	if overrideDefaults.Prefix.ScopeSite != "" {
+		merged.Prefix.ScopeSite = overrideDefaults.Prefix.ScopeSite
+	}
+	if overrideDefaults.Prefix.ScopeLocation != "" {
+		merged.Prefix.ScopeLocation = overrideDefaults.Prefix.ScopeLocation
+	}
+	mergeVrfParameters(&merged.Prefix.Vrf, &overrideDefaults.Prefix.Vrf)
+	mergeVrfParameters(&merged.Prefix.VrfIpv4, &overrideDefaults.Prefix.VrfIpv4)
+	mergeVrfParameters(&merged.Prefix.VrfIpv6, &overrideDefaults.Prefix.VrfIpv6)
 
 	// Merge Interface defaults
 	if overrideDefaults.Interface.Description != "" {
@@ -247,6 +418,60 @@ type Options struct {
 	//   "full"      → linecards plus per-transceiver sub-bays; populates
 	//                 Interface.Module on physical ports
 	DiscoverModules *string `yaml:"discover_modules,omitempty"`
+
+	// Tri-state pointer so unset (default = off) is distinguishable from
+	// an explicit false. When true, the VRF MIB tables (MPLS-L3VPN-STD-MIB,
+	// the legacy MPLS-VPN-MIB, CISCO-VRF-MIB) are walked and discovered
+	// VRFs are emitted and attached to the IP addresses of their member
+	// interfaces, taking precedence over the vrf / vrf_ipv4 / vrf_ipv6
+	// defaults for those interfaces.
+	DiscoverVrfs *bool `yaml:"discover_vrfs,omitempty"`
+
+	// Tri-state pointer so unset (default = off) is distinguishable
+	// from an explicit false. When true, the ENTITY-MIB
+	// entPhysicalAssetID column is walked with the chassis inventory
+	// and discovered values populate Device.asset_tag — the standalone
+	// chassis row's tag goes on the target device; each virtual-chassis
+	// member gets its own per-row tag. defaults.asset_tag, when
+	// set, takes precedence on the target device. asset_tag is the
+	// Diode plugin's highest-precedence device matcher, so duplicate
+	// tags within one target are suppressed rather than emitted.
+	DiscoverAssetTags *bool `yaml:"discover_asset_tags,omitempty"`
+
+	// Tri-state pointer; unset defaults to TRUE — Prefix entities are
+	// derived from every discovered IP address (network of address/len),
+	// matching device-discovery's behavior. Set false to opt out.
+	EmitPrefixes *bool `yaml:"emit_prefixes,omitempty"`
+
+	// When true AND no explicit defaults.prefix.scope_* is set,
+	// defaults.site cascades to Prefix scope site and defaults.location
+	// to Prefix scope location (the more specific location wins).
+	// Defaults to false. Mirrors device-discovery.
+	PropagateDefaultsToPrefixScope *bool `yaml:"propagate_defaults_to_prefix_scope,omitempty"`
+}
+
+// PrefixEmissionEnabled returns the effective emit_prefixes toggle,
+// defaulting to TRUE.
+func (o *Options) PrefixEmissionEnabled() bool {
+	return o == nil || o.EmitPrefixes == nil || *o.EmitPrefixes
+}
+
+// PrefixScopeCascadeEnabled returns the effective
+// propagate_defaults_to_prefix_scope toggle, defaulting to false.
+func (o *Options) PrefixScopeCascadeEnabled() bool {
+	return o != nil && o.PropagateDefaultsToPrefixScope != nil && *o.PropagateDefaultsToPrefixScope
+}
+
+// VrfDiscoveryEnabled returns the effective discover_vrfs toggle,
+// defaulting to false.
+func (o *Options) VrfDiscoveryEnabled() bool {
+	return o != nil && o.DiscoverVrfs != nil && *o.DiscoverVrfs
+}
+
+// AssetTagDiscoveryEnabled returns the effective discover_asset_tags
+// toggle, defaulting to false.
+func (o *Options) AssetTagDiscoveryEnabled() bool {
+	return o != nil && o.DiscoverAssetTags != nil && *o.DiscoverAssetTags
 }
 
 // ModuleDiscoveryMode returns the effective mode, defaulting to "off".
