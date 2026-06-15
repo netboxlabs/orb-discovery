@@ -52,7 +52,7 @@ Usage of gnmi-discovery:
   -otel-export-period int
         Period in seconds between OpenTelemetry exports (default 10)
   -port int
-        server port (default 8074)
+        server port (default 8075)
   -profiles-dir string
         directory of gNMI profile overrides (empty = embedded profiles only)
 ```
@@ -232,7 +232,7 @@ build/gnmi-discovery \
 Dry-run (no Diode required):
 
 ```sh
-build/gnmi-discovery --dry-run --dry-run-output-dir /tmp/gnmi-dry --port 8074
+build/gnmi-discovery --dry-run --dry-run-output-dir /tmp/gnmi-dry --port 8075
 ```
 
 ## Docker Image
@@ -284,7 +284,7 @@ docker run --net=host \
 ##### Example cURL
 
 > ```sh
->  curl -X GET -H "Content-Type: application/json" http://localhost:8074/api/v1/status
+>  curl -X GET -H "Content-Type: application/json" http://localhost:8075/api/v1/status
 > ```
 
 </details>
@@ -305,7 +305,7 @@ docker run --net=host \
 ##### Example cURL
 
 > ```sh
->  curl -X GET -H "Content-Type: application/json" http://localhost:8074/api/v1/capabilities
+>  curl -X GET -H "Content-Type: application/json" http://localhost:8075/api/v1/capabilities
 > ```
 
 </details>
@@ -333,7 +333,7 @@ docker run --net=host \
 ##### Example cURL
 
 > ```sh
->  curl -X POST -H "Content-Type: application/x-yaml" --data-binary @policy.yaml http://localhost:8074/api/v1/policies
+>  curl -X POST -H "Content-Type: application/x-yaml" --data-binary @policy.yaml http://localhost:8075/api/v1/policies
 > ```
 
 </details>
@@ -358,7 +358,7 @@ docker run --net=host \
 ##### Example cURL
 
 > ```sh
->  curl -X DELETE http://localhost:8074/api/v1/policies/policy_name
+>  curl -X DELETE http://localhost:8075/api/v1/policies/policy_name
 > ```
 
 </details>

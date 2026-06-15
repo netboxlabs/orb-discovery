@@ -24,7 +24,7 @@ const AppName = "gnmi-discovery"
 
 func main() {
 	host := flag.String("host", "0.0.0.0", "server host")
-	port := flag.Int("port", 8074, "server port")
+	port := flag.Int("port", 8075, "server port")
 	diodeTarget := flag.String("diode-target", "", "diode target."+
 		" Environment variable can be used by wrapping it in ${} (e.g. ${DIODE_TARGET})")
 	diodeClientID := flag.String("diode-client-id", "", "diode client ID."+
