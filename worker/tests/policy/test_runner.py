@@ -4,12 +4,13 @@
 
 from unittest.mock import MagicMock, patch
 
+import grpc
 import pytest
 from apscheduler.triggers.date import DateTrigger
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2
 
 from worker.backend import Backend
-from worker.exceptions import IngestError, IngestRejected
+from worker.exceptions import IngestError, IngestRejected, IngestUnavailable
 from worker.models import Config, DiodeConfig, Metadata, Policy, Status
 from worker.policy.run import RunStatus, RunStore
 from worker.policy.runner import PolicyRunner, _PolicyRunnerIngestSink
@@ -839,6 +840,56 @@ def test_ingest_sink_translates_transport_errors_to_ingest_error(
             sink.ingest([entity])
 
     mock_run_store.update_run.assert_called_once()
+    update_kwargs = mock_run_store.update_run.call_args.kwargs
+    assert update_kwargs["status"] == RunStatus.FAILED
+
+
+class _FakeRpcError(grpc.RpcError):
+    """Minimal grpc.RpcError test double carrying a status code."""
+
+    def __init__(self, code: grpc.StatusCode) -> None:
+        self._code = code
+
+    def code(self) -> grpc.StatusCode:
+        return self._code
+
+
+@pytest.mark.parametrize(
+    "code, is_transient",
+    [
+        pytest.param(grpc.StatusCode.UNAVAILABLE, True, id="unavailable"),
+        pytest.param(grpc.StatusCode.RESOURCE_EXHAUSTED, True, id="resource-exhausted"),
+        pytest.param(grpc.StatusCode.DEADLINE_EXCEEDED, True, id="deadline-exceeded"),
+        pytest.param(grpc.StatusCode.INVALID_ARGUMENT, False, id="invalid-argument"),
+    ],
+)
+def test_ingest_sink_maps_grpc_status_codes(
+    code,
+    is_transient,
+    policy_runner,
+    sample_policy,
+    sample_diode_config,
+    mock_load_class,
+    mock_diode_client,
+    mock_run_store,
+):
+    """Transient gRPC codes raise IngestUnavailable; other gRPC errors raise the base IngestError."""
+    with patch.object(policy_runner.scheduler, "start"), patch.object(
+        policy_runner.scheduler, "add_job"
+    ):
+        policy_runner.setup("policy1", sample_diode_config, sample_policy, mock_run_store)
+
+    sink = _extract_sink(mock_load_class.return_value)
+    mock_diode_client.return_value.ingest.side_effect = _FakeRpcError(code)
+
+    entity = ingester_pb2.Entity()
+    entity.device.name = "dev1"
+
+    with patch("worker.policy.runner.apply_run_id_to_entities"):
+        with pytest.raises(IngestError) as excinfo:
+            sink.ingest([entity])
+
+    assert isinstance(excinfo.value, IngestUnavailable) is is_transient
     update_kwargs = mock_run_store.update_run.call_args.kwargs
     assert update_kwargs["status"] == RunStatus.FAILED
 

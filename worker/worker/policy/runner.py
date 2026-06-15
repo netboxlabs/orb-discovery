@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+import grpc
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
@@ -19,13 +20,22 @@ from netboxlabs.diode.sdk import (
 
 from worker.backend import Backend, _implements_describe, load_class
 from worker.entity_metadata import apply_run_id_to_entities
-from worker.exceptions import IngestError, IngestRejected
+from worker.exceptions import IngestError, IngestRejected, IngestUnavailable
 from worker.metrics import get_metric
 from worker.models import DiodeConfig, Policy, Status
 from worker.package_finder import maybe_evict
 from worker.policy.run import RunStatus, RunStore
 
 logger = logging.getLogger(__name__)
+
+# gRPC status codes that signal a transient ingest failure worth retrying.
+_TRANSIENT_GRPC_CODES = frozenset(
+    {
+        grpc.StatusCode.UNAVAILABLE,
+        grpc.StatusCode.RESOURCE_EXHAUSTED,
+        grpc.StatusCode.DEADLINE_EXCEEDED,
+    }
+)
 
 
 @dataclass
@@ -284,7 +294,15 @@ class PolicyRunner:
             return 0
         chunks = create_message_chunks(entities_list)
         for chunk in chunks:
-            response = client.ingest(entities=chunk, metadata=metadata)
+            try:
+                response = client.ingest(entities=chunk, metadata=metadata)
+            except grpc.RpcError as exc:
+                code = exc.code() if hasattr(exc, "code") else None
+                if code in _TRANSIENT_GRPC_CODES:
+                    raise IngestUnavailable(
+                        f"Transient ingest failure ({code.name}): {exc}"
+                    ) from exc
+                raise IngestError(f"Ingest transport error: {exc}") from exc
             if response.errors:
                 raise IngestRejected(f"Chunk ingestion failed: {response.errors}")
         return len(chunks)
