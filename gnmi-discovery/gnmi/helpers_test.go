@@ -640,3 +640,9 @@ func TestNegotiateEncoding(t *testing.T) {
 	assert.Equal(t, "json_ietf", negotiateEncoding([]string{"PROTO", "BYTES"}))
 	assert.Equal(t, "json_ietf", negotiateEncoding(nil))
 }
+
+func TestWithOrigin(t *testing.T) {
+	assert.Equal(t, "openconfig:/system/state/hostname", withOrigin("openconfig", "/system/state/hostname"))
+	assert.Equal(t, "/system/state/hostname", withOrigin("", "/system/state/hostname")) // origin-less
+	assert.Equal(t, "oc:/interfaces", withOrigin("oc", "/interfaces"))
+}

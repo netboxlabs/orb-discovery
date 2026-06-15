@@ -51,6 +51,21 @@ type Target struct {
 	Profile          string    `yaml:"profile,omitempty"` // pins a profile; else auto-detect
 	OverrideDefaults *Defaults `yaml:"override_defaults,omitempty"`
 	NetboxID         *int      `yaml:"netbox_id,omitempty"`
+	// Origin is the gNMI path origin sent on Subscribe/Get requests. Unset (nil)
+	// defaults to "openconfig" — the canonical OpenConfig origin, required by
+	// strict targets like Nokia SR Linux (which otherwise resolves an origin-less
+	// path against its native schema and rejects it). Set it explicitly to ""
+	// for a target that needs origin-less paths, or to a vendor-specific origin.
+	Origin *string `yaml:"origin,omitempty"`
+}
+
+// ResolvedOrigin returns the gNMI request-path origin for this target: the
+// explicit value when set (including ""), otherwise the "openconfig" default.
+func (t Target) ResolvedOrigin() string {
+	if t.Origin != nil {
+		return *t.Origin
+	}
+	return "openconfig"
 }
 
 // Scope holds the targets for a policy.

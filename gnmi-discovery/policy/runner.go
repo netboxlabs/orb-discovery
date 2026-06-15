@@ -182,7 +182,8 @@ func (r *Runner) targetLoop(t config.Target) {
 func (r *Runner) runOnce(t config.Target, model *mapping.DeviceModel, deb *Debouncer, retry *time.Timer) error {
 	sess, err := r.dialer.Dial(r.ctx, gnmi.TargetSpec{
 		Host: t.Host, Username: t.Username, Password: t.Password,
-		SkipVerify: t.TLS.SkipVerify, Insecure: t.TLS.Insecure, CAFile: t.TLS.CAFile, CertFile: t.TLS.CertFile, KeyFile: t.TLS.KeyFile,
+		SkipVerify: t.TLS.SkipVerify, Insecure: t.TLS.Insecure, Origin: t.ResolvedOrigin(),
+		CAFile: t.TLS.CAFile, CertFile: t.TLS.CertFile, KeyFile: t.TLS.KeyFile,
 	})
 	if err != nil {
 		return err

@@ -64,7 +64,20 @@ func (d *GnmicDialer) Dial(ctx context.Context, spec TargetSpec) (Session, error
 	if err := tg.CreateGNMIClient(ctx); err != nil {
 		return nil, fmt.Errorf("gnmi dial: create client: %w", err)
 	}
-	return &gnmicSession{tg: tg}, nil
+	return &gnmicSession{tg: tg, origin: spec.Origin}, nil
+}
+
+// withOrigin prefixes a gNMI request path with the session's origin
+// ("openconfig:/...") so strict OpenConfig targets (e.g. Nokia SR Linux) resolve
+// it against the OpenConfig schema rather than their native one. An empty origin
+// yields the bare path (origin-less). gapi.Path (path.ParsePath) parses the
+// "<origin>:<path>" form; request paths use [key=*] wildcards so no literal ':'
+// in a key value collides with the origin separator.
+func withOrigin(origin, path string) string {
+	if origin == "" {
+		return path
+	}
+	return origin + ":" + path
 }
 
 // gnmicSession wraps a gnmic Target and implements Session.
@@ -79,6 +92,8 @@ type gnmicSession struct {
 	// Capabilities (set by Capabilities()); empty until then, defaulting to
 	// json_ietf via enc().
 	encoding string
+	// origin is the gNMI request-path origin (e.g. "openconfig"); "" = origin-less.
+	origin string
 }
 
 // enc returns the negotiated request encoding, defaulting to json_ietf when
@@ -170,7 +185,7 @@ func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string,
 
 	for _, p := range paths {
 		var pathOpts []gapi.GNMIOption
-		pathOpts = append(pathOpts, gapi.Path(p))
+		pathOpts = append(pathOpts, gapi.Path(withOrigin(s.origin, p)))
 		switch mode {
 		case OnChange:
 			pathOpts = append(pathOpts, gapi.SubscriptionModeON_CHANGE())
@@ -306,7 +321,7 @@ func (s *gnmicSession) getPaths(ctx context.Context, paths []string) (Notificati
 		gapi.DataTypeALL(),
 	}
 	for _, p := range paths {
-		getOpts = append(getOpts, gapi.Path(p))
+		getOpts = append(getOpts, gapi.Path(withOrigin(s.origin, p)))
 	}
 	req, err := gapi.NewGetRequest(getOpts...)
 	if err != nil {

@@ -102,6 +102,7 @@ policies:
             key: /run/secrets/key.pem
           profile: arista_eos        # pin a profile (auto-detect if omitted)
           mode: on_change            # per-target mode override
+          origin: openconfig         # gNMI path origin (default); set "" for origin-less
           netbox_id: 42              # pin to an existing NetBox device ID
           override_defaults:         # per-target defaults override
             site: Chicago IL

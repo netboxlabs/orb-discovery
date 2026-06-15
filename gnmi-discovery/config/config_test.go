@@ -312,3 +312,11 @@ policies:
 	require.Equal(t, "arista_eos", pol.Scope.Targets[0].Profile)
 	require.Equal(t, "on_change", pol.Scope.Targets[1].Mode)
 }
+
+func TestResolvedOrigin(t *testing.T) {
+	require.Equal(t, "openconfig", Target{}.ResolvedOrigin(), "unset origin defaults to openconfig")
+	empty := ""
+	require.Equal(t, "", Target{Origin: &empty}.ResolvedOrigin(), "explicit empty stays origin-less")
+	oc := "oc"
+	require.Equal(t, "oc", Target{Origin: &oc}.ResolvedOrigin())
+}

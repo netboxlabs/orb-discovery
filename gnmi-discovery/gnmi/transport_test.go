@@ -274,6 +274,33 @@ func TestGnmicSession_GetOnce_ToleratesPerPathFailure(t *testing.T) {
 	assert.Equal(t, "spine1", n.Updates[0].Value)
 }
 
+// TestGnmicSession_GetOnce_OriginPrefix verifies the configured origin is sent
+// on the request path (strict OpenConfig targets like SR Linux require
+// origin=openconfig). The in-process server captures the GetRequest so we can
+// assert the path's origin field.
+func TestGnmicSession_GetOnce_OriginPrefix(t *testing.T) {
+	srv := &testGNMIServer{
+		getHandler: func(_ context.Context, _ *gnmiproto.GetRequest) (*gnmiproto.GetResponse, error) {
+			return &gnmiproto.GetResponse{}, nil
+		},
+	}
+	addr := startTestGNMIServer(t, srv)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	sess, err := (&GnmicDialer{}).Dial(ctx, TargetSpec{Host: addr, Insecure: true, Origin: "openconfig"})
+	require.NoError(t, err)
+	defer func() { _ = sess.Close() }()
+
+	_, _ = sess.GetOnce(ctx, []string{"/system/state/hostname"})
+	srv.mu.Lock()
+	req := srv.lastGetReq
+	srv.mu.Unlock()
+	require.NotNil(t, req)
+	require.NotEmpty(t, req.GetPath())
+	assert.Equal(t, "openconfig", req.GetPath()[0].GetOrigin(), "request path must carry the configured origin")
+}
+
 // ---------------------------------------------------------------------------
 // Test 3 – Subscribe (Sample and OnChange)
 // ---------------------------------------------------------------------------

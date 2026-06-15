@@ -78,7 +78,8 @@ type TargetSpec struct {
 	Username   string
 	Password   string
 	SkipVerify bool
-	Insecure   bool // explicit opt-in to plaintext (no TLS); default is TLS
+	Insecure   bool   // explicit opt-in to plaintext (no TLS); default is TLS
+	Origin     string // gNMI request-path origin (e.g. "openconfig"); "" = origin-less
 	CAFile     string
 	CertFile   string
 	KeyFile    string
