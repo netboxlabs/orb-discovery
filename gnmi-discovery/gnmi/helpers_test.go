@@ -59,6 +59,29 @@ func TestPathToString_DeprecatedElementFallback(t *testing.T) {
 	assert.Equal(t, "/system", pathToString(p2))
 }
 
+func TestPathToString_StripsModulePrefix(t *testing.T) {
+	// Some targets (e.g. Nokia SR Linux on a JSON_IETF subscribe) render the
+	// first element module-qualified. We normalize "module:name" to the bare
+	// OpenConfig name so AllowsPath / profile matching works regardless.
+	p := &gnmiproto.Path{
+		Elem: []*gnmiproto.PathElem{
+			{Name: "openconfig-system:system"},
+			{Name: "state"},
+			{Name: "hostname"},
+		},
+	}
+	assert.Equal(t, "/system/state/hostname", pathToString(p))
+
+	// A module-qualified keyed element keeps its keys after the prefix strip.
+	p2 := &gnmiproto.Path{
+		Elem: []*gnmiproto.PathElem{
+			{Name: "openconfig-interfaces:interfaces"},
+			{Name: "interface", Key: map[string]string{"name": "ethernet-1/1"}},
+		},
+	}
+	assert.Equal(t, "/interfaces/interface[name=ethernet-1/1]", pathToString(p2))
+}
+
 func TestPathToString_ElemWithSingleKey(t *testing.T) {
 	p := &gnmiproto.Path{
 		Elem: []*gnmiproto.PathElem{
@@ -639,6 +662,28 @@ func TestNegotiateEncoding(t *testing.T) {
 	// Nothing usable advertised (or empty) -> best-effort json_ietf default.
 	assert.Equal(t, "json_ietf", negotiateEncoding([]string{"PROTO", "BYTES"}))
 	assert.Equal(t, "json_ietf", negotiateEncoding(nil))
+}
+
+func TestNegotiateSubEncoding(t *testing.T) {
+	// PROTO preferred for Subscribe whenever advertised — a JSON_IETF stream
+	// serializes leaves as nested container subtrees our flat-leaf model can't
+	// match, while PROTO yields one flat scalar update per leaf.
+	assert.Equal(t, "proto", negotiateSubEncoding([]string{"JSON_IETF", "PROTO"}))
+	assert.Equal(t, "proto", negotiateSubEncoding([]string{"proto"}))
+	// No PROTO advertised -> fall back to the Get encoding negotiation.
+	assert.Equal(t, "json_ietf", negotiateSubEncoding([]string{"JSON_IETF"}))
+	assert.Equal(t, "json", negotiateSubEncoding([]string{"JSON"}))
+	assert.Equal(t, "json_ietf", negotiateSubEncoding(nil))
+}
+
+func TestSubEnc_FallsBackToGetEncoding(t *testing.T) {
+	// Unset subEncoding falls back to enc() (json_ietf default), not "".
+	s := &gnmicSession{}
+	assert.Equal(t, "json_ietf", s.subEnc())
+	s.encoding = "json"
+	assert.Equal(t, "json", s.subEnc()) // still no PROTO negotiated -> Get encoding
+	s.subEncoding = "proto"
+	assert.Equal(t, "proto", s.subEnc())
 }
 
 func TestWithOrigin(t *testing.T) {

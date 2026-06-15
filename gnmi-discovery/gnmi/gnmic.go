@@ -90,10 +90,52 @@ type gnmicSession struct {
 	subCancel context.CancelFunc
 	// encoding is the request encoding negotiated from the target's advertised
 	// Capabilities (set by Capabilities()); empty until then, defaulting to
-	// json_ietf via enc().
+	// json_ietf via enc(). Used for Get, where a leaf-path request yields a flat
+	// scalar regardless of encoding.
 	encoding string
+	// subEncoding is the request encoding for Subscribe (set by Capabilities());
+	// empty until then. It prefers PROTO because targets that serialize a STREAM
+	// subscription as JSON_IETF (e.g. Nokia SR Linux) emit the subscribed leaf as
+	// a nested JSON object rooted at its parent *container* path, with a
+	// module-qualified first element (".../system/state" = {"hostname":"srl1"},
+	// elem "openconfig-system:system") — which our flat-leaf model can't match.
+	// PROTO yields one flat scalar update per leaf at its full path, exactly what
+	// the model expects. Falls back to enc() via subEnc() when PROTO is absent.
+	subEncoding string
 	// origin is the gNMI request-path origin (e.g. "openconfig"); "" = origin-less.
 	origin string
+	// accepted caches the subscribe paths the target accepts (probed once per
+	// session); nil until the first Subscribe probes them.
+	accepted []string
+}
+
+// acceptedPaths returns the subset of paths the target accepts, so one
+// unsupported path can't make a strict target reject the whole atomic
+// subscription. Fast path: a single multi-path Get — if it succeeds, every path
+// is valid. Only on failure does it Get per path to prune the unsupported ones
+// (reusing the same per-path tolerance as GetOnce). Result is cached for the
+// session (the auto ladder re-subscribes on the same session). If probing prunes
+// everything (e.g. a target that rejects Get), it falls back to the full set so
+// behavior is never worse than before.
+func (s *gnmicSession) acceptedPaths(ctx context.Context, paths []string) []string {
+	if s.accepted != nil {
+		return s.accepted
+	}
+	if _, err := s.getPaths(ctx, paths); err == nil {
+		s.accepted = paths
+		return paths
+	}
+	ok := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if _, err := s.getPaths(ctx, []string{p}); err == nil {
+			ok = append(ok, p)
+		}
+	}
+	if len(ok) == 0 {
+		ok = paths
+	}
+	s.accepted = ok
+	return ok
 }
 
 // enc returns the negotiated request encoding, defaulting to json_ietf when
@@ -126,6 +168,31 @@ func negotiateEncoding(advertised []string) string {
 	return "json_ietf"
 }
 
+// subEnc returns the negotiated Subscribe encoding, falling back to the Get
+// encoding (enc()) when Capabilities has not run or advertised no PROTO support.
+func (s *gnmicSession) subEnc() string {
+	if s.subEncoding != "" {
+		return s.subEncoding
+	}
+	return s.enc()
+}
+
+// negotiateSubEncoding picks the Subscribe encoding: prefer PROTO when the target
+// advertises it, because a STREAM subscription serialized as JSON_IETF emits each
+// leaf as a nested object at its parent container path (with a module-qualified
+// first element) rather than as a flat leaf update — see the subEncoding field
+// doc. PROTO gives one flat scalar per leaf at its full path, which our model
+// consumes directly. When PROTO is not advertised, fall back to the Get encoding
+// (JSON_IETF/JSON) negotiated for this target.
+func negotiateSubEncoding(advertised []string) string {
+	for _, e := range advertised {
+		if strings.EqualFold(strings.TrimSpace(e), "PROTO") {
+			return "proto"
+		}
+	}
+	return negotiateEncoding(advertised)
+}
+
 // Capabilities runs the gNMI Capabilities RPC and returns a normalized result.
 func (s *gnmicSession) Capabilities(ctx context.Context) (*CapabilitiesResult, error) {
 	resp, err := s.tg.Capabilities(ctx)
@@ -136,6 +203,7 @@ func (s *gnmicSession) Capabilities(ctx context.Context) (*CapabilitiesResult, e
 	// Negotiate the request encoding from what the target advertises so a
 	// JSON-only target (e.g. NX-OS) isn't sent a JSON_IETF request it rejects.
 	s.encoding = negotiateEncoding(result.Encodings)
+	s.subEncoding = negotiateSubEncoding(result.Encodings)
 	return result, nil
 }
 
@@ -178,9 +246,16 @@ func (s *gnmicSession) Subscribe(ctx context.Context, mode Mode, paths []string,
 	// an unknown name, so it is safe before any prior subscribe.
 	s.StopSubscribe()
 
+	// A gNMI SubscribeRequest is ATOMIC: a strict target (e.g. Nokia SR Linux)
+	// rejects the WHOLE multi-path subscription if any one path is unsupported
+	// (an optional subtree like switched-vlan), which would sink discovery of the
+	// supported paths too. Prune to the accepted paths first so one bad subtree
+	// can't take down the rest.
+	paths = s.acceptedPaths(ctx, paths)
+
 	subOpts := []gapi.GNMIOption{
 		gapi.SubscriptionListModeSTREAM(),
-		gapi.Encoding(s.enc()),
+		gapi.Encoding(s.subEnc()),
 	}
 
 	for _, p := range paths {
@@ -477,7 +552,15 @@ func pathToString(p *gnmiproto.Path) string {
 	var b strings.Builder
 	for _, elem := range p.GetElem() {
 		b.WriteByte('/')
-		b.WriteString(elem.GetName())
+		// Strip a YANG module prefix from the element name (e.g. some targets
+		// render the first element of a subscribe update as "openconfig-system:system").
+		// Our profile paths and AllowsPath use bare OpenConfig names, so normalize
+		// "module:name" to "name" — a no-op for the already-bare names Get returns.
+		name := elem.GetName()
+		if i := strings.IndexByte(name, ':'); i >= 0 {
+			name = name[i+1:]
+		}
+		b.WriteString(name)
 		if len(elem.GetKey()) > 0 {
 			keys := make([]string, 0, len(elem.GetKey()))
 			for k := range elem.GetKey() {
