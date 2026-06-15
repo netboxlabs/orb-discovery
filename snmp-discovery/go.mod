@@ -9,19 +9,11 @@ require (
 	github.com/gosnmp/gosnmp v1.43.2
 	github.com/netboxlabs/diode-sdk-go v1.9.0
 	github.com/stretchr/testify v1.11.1
-<<<<<<< HEAD
-	go.opentelemetry.io/otel v1.43.0
-	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.38.0
-	go.opentelemetry.io/otel/metric v1.43.0
-	go.opentelemetry.io/otel/sdk/metric v1.43.0
-	google.golang.org/protobuf v1.36.10
-=======
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.44.0
 	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/sdk/metric v1.44.0
 	google.golang.org/protobuf v1.36.11
->>>>>>> origin/develop
 	gopkg.in/yaml.v3 v3.0.1
 )
 
