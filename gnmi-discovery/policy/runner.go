@@ -496,9 +496,9 @@ func (r *Runner) streamLoop(host string, profile *mapping.Profile, pruneEvery ti
 	// downgrades. ctx-cancel always returns nil regardless.
 	productive := false
 
-	rotate := func() {
+	rotate := func(keepN int64) {
 		trustworthy := anchor == "" || model.SeenInCycle(anchor)
-		pruned := model.EndCycle(keep, trustworthy)
+		pruned := model.EndCycle(keepN, trustworthy)
 		if len(pruned) > 0 {
 			metrics.GetRemovalsBlocked().Add(r.ctx, int64(len(pruned)))
 		}
@@ -564,20 +564,20 @@ func (r *Runner) streamLoop(host string, profile *mapping.Profile, pruneEvery ti
 			}
 			if n.SyncDone {
 				if pruneEvery == 0 {
-					rotate() // ON_CHANGE: prune on the initial-sync boundary, sets synced, triggers flush
+					rotate(keep) // ON_CHANGE: prune on the initial-sync boundary (keep=1), sets synced, triggers flush
 				} else if !synced {
-					// SAMPLE: the initial full snapshot is complete — allow flushes.
-					// Pruning stays ticker-driven (rotate on the prune interval); we
-					// do NOT rotate here. Trigger the debouncer so the completed
-					// snapshot flushes promptly: a debounce signal that fired pre-sync
-					// was consumed and dropped by the synced gate, so we must not rely
-					// on it to flush the now-complete initial snapshot.
-					synced = true
-					deb.Trigger()
+					// SAMPLE: the initial sync_response is a complete, authoritative
+					// full view, so prune to it with keep=1 right here — paths absent
+					// from it (e.g. objects deleted while the stream was down) must not
+					// linger in the snapshot until the next prune tick (up to
+					// sample_interval_ms). Ongoing pruning stays ticker-driven with the
+					// keep=2 tolerance (misaligned mid-stream snapshots). rotate also
+					// sets synced and triggers the flush.
+					rotate(1)
 				}
 			}
 		case <-prune:
-			rotate() // SAMPLE: prune per interval (nil channel blocks forever for ON_CHANGE)
+			rotate(keep) // SAMPLE: prune per interval with keep=2 (nil channel blocks forever for ON_CHANGE)
 		case <-deb.C():
 			if synced {
 				flush() // MED-2: suppressed until the initial ON_CHANGE sync completes

@@ -139,3 +139,40 @@ func TestBeginSyncPrunesPathDeletedDuringReconnect(t *testing.T) {
 	require.NotContains(t, snap, "/b", "deleted path must not survive the reconnect")
 	require.Contains(t, snap, "/a")
 }
+
+// TestSampleReconnectInitialSyncNeedsKeep1 documents why the SAMPLE initial
+// sync_response prunes with keep=1 (authoritative full view) rather than the
+// keep=2 tolerance used for ongoing prune ticks: a path re-stamped during
+// steady-state and then deleted while the stream was down is still within the
+// keep=2 window at the reconnect boundary, so keep=2 would leak it (re-ingesting
+// a departed object) while keep=1 removes it immediately.
+func TestSampleReconnectInitialSyncNeedsKeep1(t *testing.T) {
+	up := func(p string, v any) gnmi.Notification {
+		return gnmi.Notification{Updates: []gnmi.Update{{Path: p, Value: v}}}
+	}
+	// Drive both models through the identical SAMPLE lifecycle up to the
+	// reconnect's initial sync, then prune with keep=1 vs keep=2.
+	build := func() *DeviceModel {
+		m := NewDeviceModel()
+		m.BeginSync() // conn1
+		m.Apply(up("/a", 1))
+		m.Apply(up("/b", 1))
+		m.EndCycle(1, true) // conn1 initial sync (authoritative)
+		m.Apply(up("/a", 1))
+		m.Apply(up("/b", 1)) // steady snapshot
+		m.EndCycle(2, true)  // a prune tick (keep=2)
+		m.Apply(up("/a", 1))
+		m.Apply(up("/b", 1)) // steady snapshot (re-stamps /b)
+		m.BeginSync()        // reconnect
+		m.Apply(up("/a", 1)) // reconnect initial snapshot — /b gone from device
+		return m
+	}
+
+	keep1 := build()
+	require.Equal(t, []string{"/b"}, keep1.EndCycle(1, true), "keep=1 prunes the departed path at the reconnect sync")
+	require.NotContains(t, keep1.Snapshot(), "/b")
+
+	keep2 := build()
+	require.Empty(t, keep2.EndCycle(2, true), "keep=2 would leak the departed path (the bug)")
+	require.Contains(t, keep2.Snapshot(), "/b")
+}
