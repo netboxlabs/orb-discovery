@@ -176,16 +176,14 @@ class PolicyRunner:
         self.run_store = run_store
         self._diode_client = client
 
-        # The sink reads runner state lazily, so it is valid as soon as it
-        # exists. Modern backends are constructed once with it; legacy backends
-        # were already constructed (above, to read setup() metadata), so the
-        # sink is attached to that instance rather than re-constructing.
-        sink = _PolicyRunnerIngestSink(self)
         if legacy_backend is None:
-            backend = backend_class(ingest_sink=sink)
+            # Modern backends opt into the ingest sink — and thus API-triggered
+            # sync — by implementing describe(); construct once with it.
+            backend = backend_class(ingest_sink=_PolicyRunnerIngestSink(self))
         else:
+            # Legacy setup()-only backends get scheduled runs only; the trigger
+            # API requires migrating to describe(). No sink is attached.
             backend = legacy_backend
-            backend.ingest_sink = sink
 
         self.scheduler.start()
 

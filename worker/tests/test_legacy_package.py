@@ -19,7 +19,7 @@ import pytest
 from worker.backend import _implements_describe, load_class
 from worker.models import Config, DiodeConfig, Policy
 from worker.policy.run import RunStore
-from worker.policy.runner import PolicyRunner, _PolicyRunnerIngestSink
+from worker.policy.runner import PolicyRunner
 
 _LEGACY_PKG_DIR = pathlib.Path(__file__).resolve().parent / "nbl-custom-legacy"
 
@@ -78,5 +78,6 @@ def test_policy_runner_sets_up_and_schedules_real_legacy_backend(
     assert scheduled_backend.__class__.__name__ == "LegacyMockBackend"
     # setup() ran on the scheduled instance (its state is live).
     assert scheduled_backend.app_started is True
-    # The sink was attached post-construction (legacy __init__ took no kwargs).
-    assert isinstance(scheduled_backend.ingest_sink, _PolicyRunnerIngestSink)
+    # No sink: API-triggered sync requires the modern describe() contract, so a
+    # legacy backend gets scheduled runs only.
+    assert getattr(scheduled_backend, "ingest_sink", None) is None

@@ -718,8 +718,9 @@ def test_setup_legacy_backend_sets_up_the_scheduled_instance(
     scheduled_backend = mock_add_job.call_args.kwargs["args"][1]
     # The scheduled instance is the one whose setup() ran (not a throwaway).
     assert scheduled_backend.connected is True
-    # The sink was attached post-construction (legacy __init__ took no kwargs).
-    assert isinstance(scheduled_backend.ingest_sink, _PolicyRunnerIngestSink)
+    # No sink: API-triggered sync requires the modern describe() contract, so a
+    # legacy backend gets scheduled runs only.
+    assert getattr(scheduled_backend, "ingest_sink", None) is None
 
 
 def test_ingest_sink_ingest_happy_path(
