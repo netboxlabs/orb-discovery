@@ -26,6 +26,10 @@ func TestResolveInterfaceName(t *testing.T) {
 		{"auto empty ifname uses ifdescr", auto, "GigabitEthernet0/1", "", "GigabitEthernet0/1"},
 		{"auto both descriptive keeps ifdescr", auto, descr, "Slot: 2 Port: 3 - foo", descr},
 		{"auto both empty", auto, "", "", ""},
+		// Sentinel ifName must not be promoted over a descriptive ifDescr:
+		// the legacy inline path treated DefaultInterfaceName ("unknown")
+		// as the not-yet-populated sentinel and let ifDescr overwrite it.
+		{"auto sentinel ifname keeps descriptive ifdescr", auto, descr, DefaultInterfaceName, descr},
 		// ifname: ifName wins; fall back to ifDescr when empty.
 		{"ifname wins", ifname, "GigabitEthernet0/1", "Gi0/1", "Gi0/1"},
 		{"ifname empty falls back to ifdescr", ifname, "GigabitEthernet0/1", "", "GigabitEthernet0/1"},

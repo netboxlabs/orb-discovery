@@ -725,11 +725,15 @@ func resolveInterfaceName(source, ifDescr, ifName string) string {
 	default: // auto (and any unrecognized value, defensively)
 		// ifDescr preferred; ifName is promoted only when ifDescr is empty,
 		// or ifDescr is a hardware description while ifName is not. This
-		// reproduces the legacy inline name/name_alternate resolution.
+		// reproduces the legacy inline name/name_alternate resolution —
+		// including its treatment of DefaultInterfaceName as the unset
+		// sentinel: a literal ifName of "unknown" is not promoted over a
+		// descriptive ifDescr (the old code's currentClean guard excluded it).
 		if ifDescr == "" {
 			return ifName
 		}
-		if looksDescriptive(ifDescr) && ifName != "" && !looksDescriptive(ifName) {
+		if looksDescriptive(ifDescr) && ifName != "" &&
+			ifName != DefaultInterfaceName && !looksDescriptive(ifName) {
 			return ifName
 		}
 		return ifDescr
