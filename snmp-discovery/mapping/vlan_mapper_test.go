@@ -356,11 +356,11 @@ func TestVlanMapper_EmitVLANs_AppliesDefaults(t *testing.T) {
 	}
 }
 
-// TestVlanMapper_EmitVLANs_StripsTrailingNullByte verifies that NUL-padded
-// dot1qVlanStaticName values (seen on FS switches and other vendor agents)
-// are sanitized before reaching the Diode payload. NetBox/PostgreSQL rejects
-// NUL bytes in text fields, so an unsanitized "Video\x00" breaks ingestion.
-func TestVlanMapper_EmitVLANs_StripsTrailingNullByte(t *testing.T) {
+// TestVlanMapper_EmitVLANs_StripsNullBytesFromName verifies that NUL-padded or
+// NUL-interrupted dot1qVlanStaticName values (seen on FS switches and other vendor
+// agents) are sanitized before reaching the Diode payload. NetBox/PostgreSQL rejects
+// NUL bytes in text fields, so an unsanitized name breaks ingestion.
+func TestVlanMapper_EmitVLANs_StripsNullBytesFromName(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	registry := NewEntityRegistry(logger)
 
