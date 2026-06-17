@@ -4780,10 +4780,14 @@ func TestInterfaceMapper_Map_NameSourceModes(t *testing.T) {
 		{"auto clean ifdescr wins", config.InterfaceNameSourceAuto, "GigabitEthernet0/1", "Gi0/1", "GigabitEthernet0/1"},
 		{"auto descriptive ifdescr yields to ifname", config.InterfaceNameSourceAuto, descr, "Gi0/1", "Gi0/1"},
 		{"auto empty ifdescr uses ifname", config.InterfaceNameSourceAuto, "", "Gi0/1", "Gi0/1"},
+		{"auto both descriptive keeps ifdescr", config.InterfaceNameSourceAuto, descr, "Slot: 2 Port: 3 - foo", descr},
+		{"auto both empty keeps unknown placeholder", config.InterfaceNameSourceAuto, "", "", mapping.DefaultInterfaceName},
 		{"ifname wins", config.InterfaceNameSourceIfName, "GigabitEthernet0/1", "Gi0/1", "Gi0/1"},
 		{"ifname empty falls back to ifdescr", config.InterfaceNameSourceIfName, "GigabitEthernet0/1", "", "GigabitEthernet0/1"},
 		{"ifname strips NUL padding then resolves", config.InterfaceNameSourceIfName, "GigabitEthernet0/1", "Gi0/1\x00", "Gi0/1"},
+		{"ifname NUL-only falls back to ifdescr", config.InterfaceNameSourceIfName, "GigabitEthernet0/1", "\x00\x00", "GigabitEthernet0/1"},
 		{"ifdescr wins", config.InterfaceNameSourceIfDescr, "GigabitEthernet0/1", "Gi0/1", "GigabitEthernet0/1"},
+		{"ifdescr empty falls back to ifname", config.InterfaceNameSourceIfDescr, "", "Gi0/1", "Gi0/1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
