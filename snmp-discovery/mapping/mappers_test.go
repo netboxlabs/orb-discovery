@@ -1884,7 +1884,7 @@ func TestInterfaceMapper_Map(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			logger := slog.Default()
 			registry := mapping.NewEntityRegistry(logger)
-			mapper, err := mapping.NewInterfaceMapper(logger, nil)
+			mapper, err := mapping.NewInterfaceMapper(logger, nil, config.InterfaceNameSourceAuto)
 			assert.NoError(t, err)
 			entity := mapper.Map(tt.values, tt.mappingEntry, registry, tt.defaults)
 
@@ -2062,7 +2062,7 @@ func TestInterfaceMapper_Map_ZeroSpeedAndMtu(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			registry := mapping.NewEntityRegistry(logger)
-			mapper, err := mapping.NewInterfaceMapper(logger, nil)
+			mapper, err := mapping.NewInterfaceMapper(logger, nil, config.InterfaceNameSourceAuto)
 			assert.NoError(t, err)
 			entity := mapper.Map(tt.values, tt.mappingEntry, registry, nil)
 			assert.NotNil(t, entity)
@@ -2141,7 +2141,7 @@ func TestInterfaceMapper_Map_HighSpeed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			registry := mapping.NewEntityRegistry(logger)
-			mapper, err := mapping.NewInterfaceMapper(logger, nil)
+			mapper, err := mapping.NewInterfaceMapper(logger, nil, config.InterfaceNameSourceAuto)
 			assert.NoError(t, err)
 			entity := mapper.Map(tt.values, tt.mappingEntry, registry, nil)
 			assert.NotNil(t, entity)
@@ -2154,7 +2154,7 @@ func TestInterfaceMapper_Map_HighSpeed(t *testing.T) {
 
 func TestInterfaceMapper_FormatMACAddress(t *testing.T) {
 	logger := slog.Default()
-	mapper, err := mapping.NewInterfaceMapper(logger, nil)
+	mapper, err := mapping.NewInterfaceMapper(logger, nil, config.InterfaceNameSourceAuto)
 	assert.NoError(t, err)
 
 	tests := []struct {

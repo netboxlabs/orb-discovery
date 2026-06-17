@@ -703,6 +703,7 @@ type InterfaceMapper struct {
 	logger           *slog.Logger
 	patternMatcher   *PatternMatcher
 	userPatternCount int
+	nameSource       string
 }
 
 // resolveInterfaceName selects Interface.Name from the two SNMP sources
@@ -735,8 +736,21 @@ func resolveInterfaceName(source, ifDescr, ifName string) string {
 	}
 }
 
-// NewInterfaceMapper creates a new InterfaceMapper
-func NewInterfaceMapper(logger *slog.Logger, patterns []config.InterfacePattern) (*InterfaceMapper, error) {
+// NewInterfaceMapper creates a new InterfaceMapper. nameSource is one of
+// config.InterfaceNameSource{Auto,IfName,IfDescr}; an empty or unrecognized
+// value is normalized to "auto". This normalization is a silent defensive
+// belt — the user-facing warning for an unknown value is emitted once at
+// policy parse (Manager.applyDefaults), because this constructor runs once
+// per target per scrape.
+func NewInterfaceMapper(logger *slog.Logger, patterns []config.InterfacePattern, nameSource string) (*InterfaceMapper, error) {
+	switch nameSource {
+	case config.InterfaceNameSourceIfName, config.InterfaceNameSourceIfDescr:
+		// recognized; keep as-is
+	default:
+		// "auto", "", and any unrecognized value all resolve to auto.
+		nameSource = config.InterfaceNameSourceAuto
+	}
+
 	var patternMatcher *PatternMatcher
 	userPatternCount := len(patterns)
 
@@ -756,6 +770,7 @@ func NewInterfaceMapper(logger *slog.Logger, patterns []config.InterfacePattern)
 		logger:           logger,
 		patternMatcher:   patternMatcher,
 		userPatternCount: userPatternCount,
+		nameSource:       nameSource,
 	}, nil
 }
 
