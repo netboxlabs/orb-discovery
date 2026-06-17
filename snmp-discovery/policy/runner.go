@@ -57,6 +57,8 @@ type Runner struct {
 	runStore         *RunStore
 	activeHostJobs   map[string]uuid.UUID
 	activeHostJobsMu sync.Mutex
+	assetTagOwners   map[string]string
+	assetTagOwnersMu sync.Mutex
 }
 
 // NewRunner returns a new policy runner
@@ -76,6 +78,7 @@ func NewRunner(ctx context.Context, logger *slog.Logger, name string, policy con
 		deviceLookup:   deviceLookup,
 		runStore:       runStore,
 		activeHostJobs: make(map[string]uuid.UUID),
+		assetTagOwners: make(map[string]string),
 	}
 
 	runner.timeout = time.Duration(policy.Config.Timeout) * time.Second
@@ -406,6 +409,45 @@ func (r *Runner) logEntitiesForIngestion(entities []diode.Entity) {
 	}
 }
 
+// assetTagClaimer returns the per-target claim callback handed to
+// mapping.TranslateAsStack. targetID must uniquely identify the target
+// within this policy — host:port, matching the runner's job identity —
+// NOT the bare host: two agents on one host behind different ports are
+// distinct devices, and keying by host alone would let them share a
+// cloned tag. First target to discover a tag owns it for the lifetime
+// of this runner (one policy); the same target may re-claim its tags
+// on every cycle. A different target reporting an already-owned tag —
+// vendor-cloned EEPROM values, mislabeled gear — is suppressed with a
+// warn, because emitting it would make Diode's highest-precedence
+// matcher merge two devices onto one NetBox record.
+//
+// The state is in-memory only: after a restart, whichever target runs
+// first claims the tag, so a pre-existing NetBox record created by the
+// other target may still be matched. This guards the steady state; it
+// cannot see NetBox's actual tag assignments.
+func (r *Runner) assetTagClaimer(targetID string) func(string) bool {
+	return func(tag string) bool {
+		r.assetTagOwnersMu.Lock()
+		defer r.assetTagOwnersMu.Unlock()
+		// Lazy init keeps the claimer safe on Runner values built as
+		// literals (tests); NewRunner pre-initializes the map.
+		if r.assetTagOwners == nil {
+			r.assetTagOwners = make(map[string]string)
+		}
+		owner, ok := r.assetTagOwners[tag]
+		if !ok {
+			r.assetTagOwners[tag] = targetID
+			return true
+		}
+		if owner == targetID {
+			return true
+		}
+		r.logger.Warn("asset tag skipped: already discovered on another target of this policy",
+			"asset_tag", tag, "target", targetID, "owner_target", owner)
+		return false
+	}
+}
+
 func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode.Entity, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -543,7 +585,8 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 	entities := make([]diode.Entity, 0)
 	entitiesForTarget := mapper.MapObjectIDsToEntity(oids)
 	ifIndexByIface := mapper.InterfacesByIfIndex()
-	entitiesForTarget = mapping.TranslateAsStack(entitiesForTarget, oids, ifIndexByIface, r.logger)
+	entitiesForTarget = mapping.TranslateAsStack(entitiesForTarget, oids, ifIndexByIface,
+		r.assetTagClaimer(fmt.Sprintf("%s:%d", targetHost, target.Port)), r.logger)
 
 	// Module / module bay emission. Opt-in via options.discover_modules
 	// (default = off -> zero behaviour change). Reuses the chassis-path
@@ -595,6 +638,35 @@ func (r *Runner) queryTarget(ctx context.Context, target config.Target) ([]diode
 		// slice by MapObjectIDsToEntity.getAssignedInterfaces) still get
 		// their module set.
 		mapping.AttachIfaceModules(entitiesForTarget, ifaceModuleMap, ifIndexByIface)
+	}
+
+	// VRF discovery: translate the walked VRF MIB rows (the columns are
+	// only in the walk set when discover_vrfs is on) and attach the
+	// discovered VRFs to the IP addresses of their member interfaces by
+	// ifIndex — overwriting the vrf / vrf_ipv4 / vrf_ipv6 defaults for
+	// those interfaces, which remain the fallback everywhere else. Runs
+	// after stack translation so both single-device and stack paths are
+	// covered; VRF entities append at the tail like VLANs (IP-attached
+	// refs reconcile against them by name+rd).
+	vrfByAddress := map[string]*diode.VRF{}
+	if r.config.Options.VrfDiscoveryEnabled() {
+		vrfEntities, vrfByIfIndex := mapping.TranslateVrfs(oids, targetDefaults, r.logger)
+		if len(vrfEntities) > 0 {
+			vrfByAddress = mapping.AttachVrfs(entitiesForTarget, vrfByIfIndex, ifIndexByIface, r.logger)
+			entitiesForTarget = append(entitiesForTarget, vrfEntities...)
+		}
+	}
+
+	// Prefix derivation (default on, opt-out via emit_prefixes: false):
+	// one Prefix per unique (network, VRF) derived from the discovered IP
+	// addresses, matching device-discovery's behavior. Runs after VRF
+	// attachment so prefixes of VRF-member addresses carry the discovered
+	// VRF; everything else follows defaults.prefix.
+	if r.config.Options.PrefixEmissionEnabled() {
+		prefixEntities := mapping.DerivePrefixes(
+			entitiesForTarget, vrfByAddress, targetDefaults, &r.config.Options, r.logger,
+		)
+		entitiesForTarget = append(entitiesForTarget, prefixEntities...)
 	}
 
 	entities = append(entities, entitiesForTarget...)
