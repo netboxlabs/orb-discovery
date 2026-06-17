@@ -17,6 +17,7 @@ from netboxlabs.diode.sdk import (
     DiodeOTLPClient,
     create_message_chunks,
 )
+from netboxlabs.diode.sdk.exceptions import OTLPClientError
 
 from worker.backend import Backend, _implements_describe, load_class
 from worker.entity_metadata import apply_run_id_to_entities
@@ -36,6 +37,27 @@ _TRANSIENT_GRPC_CODES = frozenset(
         grpc.StatusCode.DEADLINE_EXCEEDED,
     }
 )
+
+
+def _grpc_status_code(exc) -> grpc.StatusCode | None:
+    """
+    Best-effort extract of a grpc.StatusCode from a raw or SDK-wrapped ingest error.
+
+    The SDK clients do not surface raw ``grpc.RpcError`` from ``ingest()``: the
+    credentialed ``DiodeClient`` wraps it as ``DiodeClientError`` and the
+    ``DiodeOTLPClient`` as ``OTLPClientError``, both exposing the code via a
+    ``status_code`` attribute. A bare ``grpc.RpcError`` (e.g. in tests) exposes
+    it via ``code()``. Returns None when no code can be determined.
+    """
+    code = getattr(exc, "status_code", None)
+    if code is None:
+        getter = getattr(exc, "code", None)
+        if callable(getter):
+            try:
+                code = getter()
+            except Exception:
+                code = None
+    return code
 
 
 @dataclass
@@ -292,8 +314,11 @@ class PolicyRunner:
         for chunk in chunks:
             try:
                 response = client.ingest(entities=chunk, metadata=metadata)
-            except grpc.RpcError as exc:
-                code = exc.code() if hasattr(exc, "code") else None
+            except (grpc.RpcError, OTLPClientError) as exc:
+                # DiodeClient wraps as DiodeClientError (a grpc.RpcError subclass)
+                # and DiodeOTLPClient as OTLPClientError; both carry the status on
+                # .status_code. A bare grpc.RpcError exposes it via .code().
+                code = _grpc_status_code(exc)
                 if code in _TRANSIENT_GRPC_CODES:
                     raise IngestUnavailable(
                         f"Transient ingest failure ({code.name}): {exc}"

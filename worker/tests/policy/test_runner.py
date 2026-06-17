@@ -8,6 +8,7 @@ import grpc
 import pytest
 from apscheduler.triggers.date import DateTrigger
 from netboxlabs.diode.sdk.diode.v1 import ingester_pb2
+from netboxlabs.diode.sdk.exceptions import DiodeClientError, OTLPClientError
 
 from worker.backend import Backend
 from worker.exceptions import IngestError, IngestRejected, IngestUnavailable
@@ -854,7 +855,33 @@ class _FakeRpcError(grpc.RpcError):
     def code(self) -> grpc.StatusCode:
         return self._code
 
+    def details(self) -> str:
+        return "fake rpc error"
 
+
+def _raw_rpc_error(code):
+    """A bare grpc.RpcError (status via code()) — defensive / non-SDK path."""
+    return _FakeRpcError(code)
+
+
+def _diode_client_error(code):
+    """What the credentialed DiodeClient.ingest actually raises (status via .status_code)."""
+    return DiodeClientError(_FakeRpcError(code))
+
+
+def _otlp_client_error(code):
+    """What DiodeOTLPClient.ingest actually raises (not a grpc.RpcError subclass)."""
+    return OTLPClientError(_FakeRpcError(code))
+
+
+@pytest.mark.parametrize(
+    "make_error",
+    [
+        pytest.param(_raw_rpc_error, id="raw-rpc"),
+        pytest.param(_diode_client_error, id="diode-client-error"),
+        pytest.param(_otlp_client_error, id="otlp-client-error"),
+    ],
+)
 @pytest.mark.parametrize(
     "code, is_transient",
     [
@@ -865,6 +892,7 @@ class _FakeRpcError(grpc.RpcError):
     ],
 )
 def test_ingest_sink_maps_grpc_status_codes(
+    make_error,
     code,
     is_transient,
     policy_runner,
@@ -874,14 +902,20 @@ def test_ingest_sink_maps_grpc_status_codes(
     mock_diode_client,
     mock_run_store,
 ):
-    """Transient gRPC codes raise IngestUnavailable; other gRPC errors raise the base IngestError."""
+    """
+    Transient gRPC codes raise IngestUnavailable; others raise base IngestError.
+
+    Covers the real SDK wrappers (DiodeClientError / OTLPClientError) the
+    production clients raise — not just a bare grpc.RpcError — since the wrappers
+    carry the status on .status_code rather than code().
+    """
     with patch.object(policy_runner.scheduler, "start"), patch.object(
         policy_runner.scheduler, "add_job"
     ):
         policy_runner.setup("policy1", sample_diode_config, sample_policy, mock_run_store)
 
     sink = _extract_sink(mock_load_class.return_value)
-    mock_diode_client.return_value.ingest.side_effect = _FakeRpcError(code)
+    mock_diode_client.return_value.ingest.side_effect = make_error(code)
 
     entity = ingester_pb2.Entity()
     entity.device.name = "dev1"
