@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2025 NetBox Labs Inc
+# Copyright 2026 NetBox Labs Inc
 """
 End-to-end check that a real legacy (setup-only) package still works.
 
