@@ -705,6 +705,36 @@ type InterfaceMapper struct {
 	userPatternCount int
 }
 
+// resolveInterfaceName selects Interface.Name from the two SNMP sources
+// (both already trimSNMPString-sanitized) per the policy's
+// interface_name_source. It returns "" only when both inputs are empty,
+// so the caller's empty-name handling is preserved.
+func resolveInterfaceName(source, ifDescr, ifName string) string {
+	switch source {
+	case config.InterfaceNameSourceIfName:
+		if ifName != "" {
+			return ifName
+		}
+		return ifDescr
+	case config.InterfaceNameSourceIfDescr:
+		if ifDescr != "" {
+			return ifDescr
+		}
+		return ifName
+	default: // auto (and any unrecognized value, defensively)
+		// ifDescr preferred; ifName is promoted only when ifDescr is empty,
+		// or ifDescr is a hardware description while ifName is not. This
+		// reproduces the legacy inline name/name_alternate resolution.
+		if ifDescr == "" {
+			return ifName
+		}
+		if looksDescriptive(ifDescr) && ifName != "" && !looksDescriptive(ifName) {
+			return ifName
+		}
+		return ifDescr
+	}
+}
+
 // NewInterfaceMapper creates a new InterfaceMapper
 func NewInterfaceMapper(logger *slog.Logger, patterns []config.InterfacePattern) (*InterfaceMapper, error) {
 	var patternMatcher *PatternMatcher
