@@ -599,10 +599,11 @@ func TestManufacturerResolver_FallsBackToBuiltin(t *testing.T) {
 }
 
 func TestManufacturerResolver_NoUserDirFallsBackToBuiltinCatalog(t *testing.T) {
-	// With no user override directory and no shipped manufacturers:
-	// block, the resolver must still answer lookups from the base
-	// IANA catalog. This guards against the resolver wrapping the
-	// base catalog in a way that hides its entries.
+	// With no user override directory, a PEN that no override covers
+	// (PEN 14 is absent from the shipped _manufacturers_ndx.yaml block)
+	// must still resolve from the base IANA catalog. This guards against
+	// the resolver wrapping the base catalog in a way that hides its
+	// entries.
 	builtin, err := NewManufacturerLookup()
 	require.NoError(t, err)
 
