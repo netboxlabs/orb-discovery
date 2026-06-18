@@ -673,6 +673,15 @@ func TestManufacturerResolver_CanonicalNDXOverrides(t *testing.T) {
 		"1916":  "Extreme Networks", // Extreme Networks
 		"248":   "Hirschmann",       // Richard Hirschmann GmbH Co
 		"10704": "Barracuda",        // Barracuda AG (ex-phion)
+		"26866": "Gigamon",          // Gigamon Systems LLC
+		"116":   "HITACHI",          // Hitachi Ltd
+		"89":    "Radware",          // RND (Radware origin)
+		"4329":  "Siemens",          // Siemens AG
+		"15004": "RuggedCOM",        // RuggedCom Inc (Siemens-owned, distinct NDX manufacturer)
+		"7244":  "QCT",              // Quanta Computer Inc
+		"2":     "IBM",              // IBM
+		"31746": "Thales",           // Thales DIS (second PEN)
+		"3697":  "Quantum",          // Quantum Corporation (second PEN)
 	}
 	for pen, want := range cases {
 		got, err := resolver.GetManufacturer(pen)
