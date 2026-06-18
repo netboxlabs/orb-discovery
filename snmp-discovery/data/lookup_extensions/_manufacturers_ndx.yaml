@@ -3,15 +3,16 @@
 # Private Enterprise Numbers (the 7th element of sysObjectID); values are the
 # exact DTL `manufacturer:` strings, so discovered devices attach to the right
 # manufacturer and device-types. PENs absent here keep their raw IANA name.
+#
+# A vendor may own several PENs (acquisitions, sub-brands, legacy agents). Where
+# a bundled lookup_extensions device file groups multiple PENs under one vendor,
+# every one of those PENs is mapped here so all of that vendor's devices resolve
+# to the same canonical name.
 manufacturers:
-  # --- Vendors with one PEN ---
-  30065: Arista
-  664: Adtran
   6486: Alcatel-Lucent
+  664: Adtran
   207: Allied Telesis
-  318: APC
-  4923: AudioCodes
-  5003: AudioCodes
+  30065: Arista
   1588: Brocade
   6321: Calix
   2620: Check Point
@@ -19,25 +20,24 @@ manufacturers:
   5951: Citrix
   3808: CyberPower
   171: D-Link
+  534: Eaton
   52587: Edgecore
   193: Ericsson
   1916: Extreme Networks
-  534: Eaton
   3375: F5
   12356: Fortinet
   52642: FS
   248: Hirschmann
   2011: Huawei
   7779: Infoblox
-  2636: Juniper
   19046: Lenovo
   33049: Mellanox
   14988: MikroTik
+  8691: Moxa
   789: NetApp
   4526: Netgear
   6527: Nokia
   25049: Opengear
-  25461: Palo Alto
   23695: Peplink
   13742: Raritan
   2606: Rittal
@@ -49,12 +49,23 @@ manufacturers:
   48690: Teltonika
   11863: TP-Link
   41112: Ubiquiti
-  21239: Vertiv
   3097: WatchGuard
   890: Zyxel
   3902: ZTE
 
-  # --- Vendors / brands with multiple PENs ---
+  # --- Vendors that own multiple PENs ---
+  # A10 Networks
+  22610: A10
+  40842: A10
+  # APC — APC + NetBotz (APC environmental-monitoring brand)
+  318: APC
+  5528: APC
+  # AudioCodes
+  4923: AudioCodes
+  5003: AudioCodes
+  # Barracuda — phion (Barracuda AG) + Barracuda
+  10704: Barracuda
+  20632: Barracuda
   # Cisco — ciscoSystems + Meraki (NDX files Meraki device-types under Cisco)
   9: Cisco
   29671: Cisco
@@ -62,14 +73,18 @@ manufacturers:
   674: Dell
   6027: Dell
   19746: Dell
-  # HPE — HP/HPE + Aruba
+  # HPE — HP/HPE + Compaq + Aruba + Nimble + Aruba CX (all HPE-family)
   11: HPE
+  232: HPE
   14823: HPE
-  # A10 Networks
-  22610: A10
-  40842: A10
-  # Barracuda — Barracuda + phion (Barracuda AG)
-  20632: Barracuda
-  10704: Barracuda
-  # Moxa
-  8691: Moxa
+  37447: HPE
+  47196: HPE
+  # Juniper — Juniper + Unisphere/ERX (acquired by Juniper)
+  2636: Juniper
+  4874: Juniper
+  # Palo Alto — PAN-OS + CloudGenix (Prisma SD-WAN, acquired by Palo Alto)
+  25461: Palo Alto
+  50114: Palo Alto
+  # Vertiv — Emerson Computer Power (legacy agent) + Vertiv
+  476: Vertiv
+  21239: Vertiv

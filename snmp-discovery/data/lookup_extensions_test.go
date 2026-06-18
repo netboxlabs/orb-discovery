@@ -644,7 +644,8 @@ func TestManufacturerResolver_CanonicalNDXOverrides(t *testing.T) {
 	// The shipped _manufacturers_ndx.yaml extension rewrites raw IANA PEN
 	// names to canonical NetBox DeviceType-Library manufacturer names with no
 	// user override directory. Spot-check representative entries, including
-	// multi-PEN vendors (Dell via Force10/OS10, Cisco via Meraki).
+	// multi-PEN vendors (Dell via Force10/OS10, Cisco via Meraki) and the
+	// secondary PENs that bundled device files use (Aruba CX, Unisphere, etc.).
 	builtin, err := NewManufacturerLookup()
 	require.NoError(t, err)
 	resolver, err := NewManufacturerResolver(builtin, "", nil)
@@ -655,13 +656,20 @@ func TestManufacturerResolver_CanonicalNDXOverrides(t *testing.T) {
 		"29671": "Cisco",            // Meraki -> Cisco
 		"30065": "Arista",           // Arista Networks Inc
 		"2636":  "Juniper",          // Juniper Networks Inc
+		"4874":  "Juniper",          // Juniper Unisphere/ERX
 		"6027":  "Dell",             // Force10 Networks Inc
 		"19746": "Dell",             // Dell EMC OS10
 		"11":    "HPE",              // HewlettPackard
 		"14823": "HPE",              // Aruba
+		"47196": "HPE",              // Aruba CX
+		"232":   "HPE",              // Compaq
+		"37447": "HPE",              // Nimble Storage
 		"6527":  "Nokia",            // Nokia formerly AlcatelLucent
 		"2011":  "Huawei",           // HUAWEI Technology CoLtd
 		"25461": "Palo Alto",        // PALO ALTO NETWORKS
+		"50114": "Palo Alto",        // CloudGenix (Prisma SD-WAN)
+		"5528":  "APC",              // NetBotz
+		"476":   "Vertiv",           // Emerson Computer Power
 		"1916":  "Extreme Networks", // Extreme Networks
 		"248":   "Hirschmann",       // Richard Hirschmann GmbH Co
 		"10704": "Barracuda",        // Barracuda AG (ex-phion)
