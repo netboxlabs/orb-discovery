@@ -591,11 +591,11 @@ func TestManufacturerResolver_FallsBackToBuiltin(t *testing.T) {
 	resolver, err := NewManufacturerResolver(builtin, dir, nil)
 	require.NoError(t, err)
 
-	// PEN 9 is ciscoSystems in the shipped manufacturers.yaml; no user
-	// override was written, so the built-in value must flow through.
-	got, err := resolver.GetManufacturer("9")
+	// PEN 14 (BBN Technologies) has no canonical override and no user
+	// override was written, so the built-in IANA value must flow through.
+	got, err := resolver.GetManufacturer("14")
 	require.NoError(t, err)
-	assert.Equal(t, "ciscoSystems", got)
+	assert.Equal(t, "BBN Technologies", got)
 }
 
 func TestManufacturerResolver_NoUserDirFallsBackToBuiltinCatalog(t *testing.T) {
@@ -609,9 +609,9 @@ func TestManufacturerResolver_NoUserDirFallsBackToBuiltinCatalog(t *testing.T) {
 	resolver, err := NewManufacturerResolver(builtin, "", nil)
 	require.NoError(t, err)
 
-	got, err := resolver.GetManufacturer("9")
+	got, err := resolver.GetManufacturer("14")
 	require.NoError(t, err)
-	assert.Equal(t, "ciscoSystems", got)
+	assert.Equal(t, "BBN Technologies", got)
 }
 
 func TestManufacturerResolver_UnknownPENBubblesError(t *testing.T) {
@@ -635,9 +635,42 @@ func TestManufacturerResolver_MissingUserDirIsSoftError(t *testing.T) {
 	require.NotNil(t, resolver)
 
 	// Built-in catalog still works.
-	got, err := resolver.GetManufacturer("9")
+	got, err := resolver.GetManufacturer("14")
 	require.NoError(t, err)
-	assert.Equal(t, "ciscoSystems", got)
+	assert.Equal(t, "BBN Technologies", got)
+}
+
+func TestManufacturerResolver_CanonicalNDXOverrides(t *testing.T) {
+	// The shipped _manufacturers_ndx.yaml extension rewrites raw IANA PEN
+	// names to canonical NetBox DeviceType-Library manufacturer names with no
+	// user override directory. Spot-check representative entries, including
+	// multi-PEN vendors (Dell via Force10/OS10, Cisco via Meraki).
+	builtin, err := NewManufacturerLookup()
+	require.NoError(t, err)
+	resolver, err := NewManufacturerResolver(builtin, "", nil)
+	require.NoError(t, err)
+
+	cases := map[string]string{
+		"9":     "Cisco",            // ciscoSystems
+		"29671": "Cisco",            // Meraki -> Cisco
+		"30065": "Arista",           // Arista Networks Inc
+		"2636":  "Juniper",          // Juniper Networks Inc
+		"6027":  "Dell",             // Force10 Networks Inc
+		"19746": "Dell",             // Dell EMC OS10
+		"11":    "HPE",              // HewlettPackard
+		"14823": "HPE",              // Aruba
+		"6527":  "Nokia",            // Nokia formerly AlcatelLucent
+		"2011":  "Huawei",           // HUAWEI Technology CoLtd
+		"25461": "Palo Alto",        // PALO ALTO NETWORKS
+		"1916":  "Extreme Networks", // Extreme Networks
+		"248":   "Hirschmann",       // Richard Hirschmann GmbH Co
+		"10704": "Barracuda",        // Barracuda AG (ex-phion)
+	}
+	for pen, want := range cases {
+		got, err := resolver.GetManufacturer(pen)
+		require.NoErrorf(t, err, "PEN %s", pen)
+		assert.Equalf(t, want, got, "PEN %s", pen)
+	}
 }
 
 func TestDeviceLookup_GetDeviceModel_Static(t *testing.T) {

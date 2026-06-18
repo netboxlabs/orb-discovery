@@ -1,0 +1,75 @@
+# Canonical manufacturer overrides aligning SNMP-discovered vendors to the
+# NetBox DeviceType-Library (DTL) / NDX manufacturer names. Keys are IANA
+# Private Enterprise Numbers (the 7th element of sysObjectID); values are the
+# exact DTL `manufacturer:` strings, so discovered devices attach to the right
+# manufacturer and device-types. PENs absent here keep their raw IANA name.
+manufacturers:
+  # --- Vendors with one PEN ---
+  30065: Arista
+  664: Adtran
+  6486: Alcatel-Lucent
+  207: Allied Telesis
+  318: APC
+  4923: AudioCodes
+  5003: AudioCodes
+  1588: Brocade
+  6321: Calix
+  2620: Check Point
+  1271: Ciena
+  5951: Citrix
+  3808: CyberPower
+  171: D-Link
+  52587: Edgecore
+  193: Ericsson
+  1916: Extreme Networks
+  534: Eaton
+  3375: F5
+  12356: Fortinet
+  52642: FS
+  248: Hirschmann
+  2011: Huawei
+  7779: Infoblox
+  2636: Juniper
+  19046: Lenovo
+  33049: Mellanox
+  14988: MikroTik
+  789: NetApp
+  4526: Netgear
+  6527: Nokia
+  25049: Opengear
+  25461: Palo Alto
+  23695: Peplink
+  13742: Raritan
+  2606: Rittal
+  17163: Riverbed
+  25053: Ruckus
+  8741: SonicWall
+  2604: Sophos
+  11256: Stormshield
+  48690: Teltonika
+  11863: TP-Link
+  41112: Ubiquiti
+  21239: Vertiv
+  3097: WatchGuard
+  890: Zyxel
+  3902: ZTE
+
+  # --- Vendors / brands with multiple PENs ---
+  # Cisco — ciscoSystems + Meraki (NDX files Meraki device-types under Cisco)
+  9: Cisco
+  29671: Cisco
+  # Dell — Dell + Force10 + Dell EMC OS10 (SmartFabric)
+  674: Dell
+  6027: Dell
+  19746: Dell
+  # HPE — HP/HPE + Aruba
+  11: HPE
+  14823: HPE
+  # A10 Networks
+  22610: A10
+  40842: A10
+  # Barracuda — Barracuda + phion (Barracuda AG)
+  20632: Barracuda
+  10704: Barracuda
+  # Moxa
+  8691: Moxa
