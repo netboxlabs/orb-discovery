@@ -2,7 +2,9 @@
 # Manufacturer (IANA PEN 5003, also 4923) is canonicalized in _manufacturers_ndx.yaml;
 # this file maps each model's sysObjectID to its model name. Entries are the acProduct*
 # device types under .1.3.6.1.4.1.5003.8.1.1 from AUDIOCODES-TYPES-MIB (Mediant /
-# MediaPack / TrunkPack / TPM gateways and SBCs).
+# MediaPack / TrunkPack / TPM gateways and SBCs), supplemented with current Mediant
+# E-SBC sysObjectIDs (.70/.72/.73/.78/.79) that postdate the bundled MIB snapshot,
+# sourced from BMC Discovery's tested AudioCodes sysObjectID table.
 devices:
   .1.3.6.1.4.1.5003.8.1.1.1: acProductTrunkPack08
   .1.3.6.1.4.1.5003.8.1.1.2: acProductMediaPack108
@@ -54,4 +56,9 @@ devices:
   .1.3.6.1.4.1.5003.8.1.1.67: acProductMediant1000MSBG
   .1.3.6.1.4.1.5003.8.1.1.68: acProductMediant600MSBG
   .1.3.6.1.4.1.5003.8.1.1.69: acProductMediaPack500MSBG
+  .1.3.6.1.4.1.5003.8.1.1.70: Mediant 4000 E-SBC
   .1.3.6.1.4.1.5003.8.1.1.71: acProductMediant1000ESBC
+  .1.3.6.1.4.1.5003.8.1.1.72: Mediant 800 E-SBC
+  .1.3.6.1.4.1.5003.8.1.1.73: Mediant 2600 E-SBC
+  .1.3.6.1.4.1.5003.8.1.1.78: Mediant 2600 E-SBC
+  .1.3.6.1.4.1.5003.8.1.1.79: Mediant VE
