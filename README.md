@@ -1,3 +1,13 @@
+> ## ⚠️ This repository has moved
+>
+> The discovery backends (`device-discovery`, `network-discovery`, `snmp-discovery`,
+> `gnmi-discovery`) and the `worker` now live in
+> **[netboxlabs/orb-agent](https://github.com/netboxlabs/orb-agent)** under
+> `orb-discovery/`, built into the `netboxlabs/orb-agent` image. This repository is
+> archived and read-only; open issues were migrated. New work, releases, and issues
+> happen in orb-agent. The PyPI packages `netboxlabs-device-discovery` and
+> `netboxlabs-orb-worker` continue to publish (now from orb-agent).
+
 # orb-discovery
 
 Orb discovery backends collection
